@@ -45,7 +45,6 @@ static inline int32_t uterm_start_one(const char *cmdline,
     if (!input_fd || !outfile || !outfile[0])
         return -1;
     *input_fd = -1;
-#ifdef __x86_64__
     sys_unlink(outfile);
     int out = (int)sys_open(outfile, O_WRITE | O_CREATE | O_TRUNC);
     if (out < 0)
@@ -95,14 +94,6 @@ static inline int32_t uterm_start_one(const char *cmdline,
     }
     *input_fd = pin[1];
     return (int32_t)pid;
-#else
-    (void)errfile;
-    int out = (int)sys_open(outfile, O_WRITE | O_CREATE | O_TRUNC);
-    if (out < 0)
-        return -1;
-    sys_close(out);
-    return sys_spawn_talk(cmdline, outfile, input_fd);
-#endif
 }
 
 static inline int32_t uterm_write_input(int fd, const void *buf, uint32_t len)

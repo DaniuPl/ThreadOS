@@ -14,13 +14,8 @@
    and this is the only file in this module that depends on the
    processor mode, because in long mode the page tables are built by
    completely different code. */
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define IDENTITY_TOP() paging64_identity_top()
-#else
-#include "include/paging.h"
-#define IDENTITY_TOP() paging_identity_limit()
-#endif
 
 struct pird_entry {
     char name[16];

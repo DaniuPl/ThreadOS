@@ -10,8 +10,7 @@
  * framebuffer - the characters have to be drawn by hand.
  *
  * This code knows nothing about paging, PCI or tasks: it is given a
- * buffer address and draws cells in it. That is why both kernels use
- * it - the 32-bit one and the one built for long mode.
+ * buffer address and draws cells in it.
  */
 
 /* Remembers the buffer supplied by the bootloader. 0 = accepted. */

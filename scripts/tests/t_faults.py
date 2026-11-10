@@ -13,20 +13,35 @@ nothing shared between them, still went one after the other.
 
 Now the causes that reach neither the disk nor the task list - heap,
 stack, anonymous memory in the mapping area, and copy-on-write - are
-served before the lock is taken. The list is short and explicit, like
-the list of system calls that need no lock, and the default answer is
-still "with the lock".
+served before the lock is taken (kernel64/isr64.c). The list is short
+and explicit, like the list of system calls that need no lock, and the
+default answer is still "with the lock".
 
 What is asserted here is the mechanism, not a stopwatch. The kernel
 counts the faults it served each way, and that count says outright what
-a timing measurement can only suggest: with 'runw faults' the number
-served WITHOUT the lock grows by the number of pages touched, and the
-number that needed it does not move at all.
+a timing measurement can only suggest: the number served WITHOUT the
+lock grows by at least the number of pages touched, and the number that
+needed it does not move at all. Two programs ask it, each of a path of
+its own:
+
+  faults     two processes (a fork, so copy-on-write as well), each in
+             its own address space, touching thousands of fresh HEAP
+             pages;
+  tlbtest64  four threads of ONE process, each asking for fresh
+             anonymous memory in the mapping area round after round.
+
+That holds with the program kept on the boot core ('run'), allowed onto
+every core ('runw'), and on a machine with a single core. On several
+cores at once the count is one locked addition per fault, and not one
+may go missing - so there the bound has no slack at all.
 
 Correctness is asserted just as hard, and it is the reason the counters
-are worth anything: every page has to come back holding what was
-written into it, and a fresh page has to be zeroed. A frame handed to
-two processes at once shows up as a wrong sum.
+are worth anything. faults sums what it wrote and the last byte of
+every fresh page, which has to be zero: the sum is worked out here as
+well, and a frame handed to two processes at once - or a page that came
+with somebody else's data - gives a different one. tlbtest64 checks
+every chunk twice, and a frame handed to two threads at once shows up as
+a wrong pattern.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -34,45 +49,66 @@ groups in parallel.
 
 import os
 import re
-import shutil
 import sys
-import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64
+from ptest import check, summary, no64, _kernel_define
+
+# What the programs are built with - read from their sources, so that a
+# changed constant cannot leave the test counting something else
+PAGES = _kernel_define("user/faults.c", "PAGES")
+THREADS = _kernel_define("user64/tlbtest64.c", "THREADS")
+ROUNDS = _kernel_define("user64/tlbtest64.c", "ROUNDS")
+
+# The line ends the 'smp' output; it counts only when it has arrived
+# whole, or a number cut in half reads as a different number
+COUNTERS = re.compile(r"Page faults: without the lock (\d+), with it (\d+)\r?\n")
 
 ROW = re.compile(r"\[faults\] (child|parent ): cores (\d+), ticks (\d+), "
-                 r"pages (\d+), sum (\d+)")
-COUNTERS = re.compile(r"Page faults: without the lock (\d+), with it (\d+)")
+                 r"pages (\d+), sum (\d+)\r?\n")
+# The parent's last line, after the child's report and its own
+FAULTS_END = re.compile(r"\[faults\] done\r?\n")
+FAULTS_RAN = re.compile(r"\[faults\] done, exit code (-?\d+) \(")
+
+REPORT = re.compile(r"\[tlbtest64\] threads (\d+), chunks (\d+) of (\d+) "
+                    r"pages, core mask (\d+)")
+PASSED = "[tlbtest64] the memory agrees on every core"
+FAILED = "[tlbtest64] WRONG"
+TLB_RAN = re.compile(r"\[tlbtest64\] done, exit code (-?\d+) \(")
+
+# hello64's last words, and after them the shell's line about its end
+HELLO_END = re.compile(r"\[hello64\] ending politely\r?\n[\s\S]*?"
+                       r"\[hello64\] done, exit code (-?\d+) \(")
+
+
+def faults_sum(pages):
+    """What faults has to count: per page, the two bytes it wrote and the
+    last byte, which nobody wrote and so has to be a zero."""
+    return sum((i & 0xFF) + ((i * 7 + 3) & 0xFF)
+               for i in range(pages)) & 0xFFFFFFFF
+
+
+def answer(q, cmd, until, timeout):
+    """Types a command and reads what arrived after it until until(text)
+    says the answer is all there, or the time runs out."""
+    start = len(q.serial())
+    q.type_line(cmd)
+    deadline = time.time() + timeout
+    out = ""
+    while time.time() < deadline:
+        out = q.serial()[start:]
+        if until(out):
+            break
+        time.sleep(0.3)
+    return out
 
 
 def faults(q, timeout=60):
     """(served without the big lock, served with it)."""
-    m = COUNTERS.search(q.command("smp", "Page faults:", timeout=timeout))
+    m = COUNTERS.search(answer(q, "smp", COUNTERS.search, timeout))
     return tuple(int(x) for x in m.groups()) if m else None
-
-
-def run_case(q, cmd, label, timeout=240):
-    """(mask of both processes, slowest one's ticks, pages, sums)."""
-    rows = ROW.findall(q.command(cmd, "done", timeout=timeout))
-    check("both processes reported back%s (%d of 2)" % (label, len(rows)),
-          len(rows) == 2)
-    if len(rows) != 2:
-        return None
-    mask = 0
-    for r in rows:
-        mask |= int(r[1])
-    ticks = max(int(r[2]) for r in rows)
-    pages = int(rows[0][3])
-    sums = [int(r[4]) for r in rows]
-
-    # Two processes doing the same work have to get the same answer -
-    # and a frame handed to both would not give one
-    check("both counted the same (%d)%s" % (sums[0], label),
-          sums[0] == sums[1] and sums[0] > 0)
-    return mask, ticks, pages, sums[0]
 
 
 def settled(q, read):
@@ -94,121 +130,186 @@ def settled(q, read):
     return previous
 
 
+def ran(out, done, label):
+    """'run' waits for its program and reports the end - with that
+    program's code, after the program has said everything it had to."""
+    m = done.search(out)
+    check("'run' waited for the program and got its exit code (%s)%s"
+          % (m.group(1) if m else "none", label),
+          m is not None and m.group(1) == "0")
+
+
+def faults_case(q, cmd, label, timeout=300):
+    """Runs faults and waits for its end: with 'run' the shell's word
+    about it, with 'runw' - which waits for nothing and so says nothing -
+    the program's own last line. Returns (core mask of both processes,
+    fresh pages touched by both, pages copied after the fork) or None."""
+    until = FAULTS_END.search if cmd.startswith("runw ") else FAULTS_RAN.search
+    out = answer(q, cmd, until, timeout)
+    rows = ROW.findall(out)
+    check("both processes reported back%s (%d of 2)" % (label, len(rows)),
+          len(rows) == 2 and {r[0] for r in rows} == {"child", "parent "})
+    if not cmd.startswith("runw "):
+        ran(out, FAULTS_RAN, label)
+    if len(rows) != 2:
+        return None
+    mask = 0
+    for r in rows:
+        mask |= int(r[1])
+    sums = [int(r[4]) for r in rows]
+    # Two processes doing the same work have to get the same answer, and
+    # it is known in advance - a frame handed to both, or one that came
+    # with somebody else's bytes in it, would not give it. The sum is
+    # also what says that all PAGES pages were touched: the page count
+    # in the row is the program's constant, printed as it stands, and
+    # comparing with it would prove nothing.
+    want = faults_sum(PAGES)
+    check("both counted exactly what was written over fresh pages "
+          "(%s, wanted %d)%s" % (", ".join(map(str, sums)), want, label),
+          sums == [want, want])
+    # Besides its fresh heap pages each process writes to the stack it
+    # had at the fork - the call into touch() alone does that - and that
+    # page is shared until then: one copy-on-write fault each, served
+    # without the lock as well.
+    return mask, 2 * PAGES, 2
+
+
+def tlb_case(q, cmd, label, timeout=240):
+    """Runs tlbtest64 and waits for its verdict, the good one or the bad
+    one (and with 'run' for the shell's word about its end too).
+    Returns (core mask, pages touched) or None."""
+    if cmd.startswith("runw "):
+        until = lambda o: PASSED in o or FAILED in o
+    else:
+        until = TLB_RAN.search
+    out = answer(q, cmd, until, timeout)
+    check("the program passed%s" % label,
+          PASSED in out and FAILED not in out)
+    if not cmd.startswith("runw "):
+        ran(out, TLB_RAN, label)
+    m = REPORT.search(out)
+    check("the program reported what it touched%s" % label, m is not None)
+    if not m:
+        return None
+    _, chunks, per_chunk, mask = (int(x) for x in m.groups())
+    # The count wanted comes from the program's source: the thread count
+    # it prints is a constant, and comparing with it proves nothing
+    check("every thread got all its chunks (%d of %d)%s"
+          % (chunks, THREADS * ROUNDS, label), chunks == THREADS * ROUNDS)
+    return mask, chunks * per_chunk
+
+
+def lockless(before, after, pages, label, copied=0):
+    """Every fresh page went the fast way, and nothing took the lock.
+
+    'copied' is how many copy-on-write faults the run is known to make
+    on top of its fresh pages. Without them the bound would forgive as
+    many lost counts as there are such faults - and a count lost by two
+    cores adding at once is exactly what it is there to catch."""
+    if before is None or after is None:
+        check("the fault counters could be read%s" % label, False)
+        return
+    # At least one fault per fresh page: each of them is new in a space
+    # nobody had touched. More is fine - stacks fault the same way - but
+    # fewer would mean some went elsewhere, or that two cores counting
+    # at once lost one.
+    grew = after[0] - before[0]
+    check("faults served without the lock (%d, pages %d%s)%s"
+          % (grew, pages, " and %d copied" % copied if copied else "",
+             label), grew >= pages + copied)
+    check("and not one had to take it (%d)%s"
+          % (after[1] - before[1], label), after[1] == before[1])
+
+
 def main():
-    print("--- page faults without the big lock (the 32-bit kernel) ---")
-    slog = tempfile.mktemp(suffix=".log")
-    try:
-        q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, cpus=4)
-        try:
-            q.wait_for("ThreadOS shell", timeout=40)
-
-            before = faults(q)
-            check("the kernel counts page faults", before is not None)
-
-            # --- Both processes held on the boot core -----------------
-            res = run_case(q, "run faults", " ('run')")
-            mid = settled(q, faults)
-            if res:
-                mask, ticks, pages, _ = res
-                check("without 'runw' both stay on the boot core "
-                      "(mask %d)" % mask, mask == 1)
-                # 2 processes x 'pages' first touches, and not one of
-                # them was allowed to close the kernel for the other.
-                # 'Essentially all' rather than 'exactly all': a page
-                # can turn out to be there already - mapped when the
-                # heap was moved, or touched before the loop began -
-                # and a fault that never happens counts nowhere. The
-                # assertion that has to stay exact is the next one.
-                grew = mid[0] - before[0]
-                check("faults served without the lock (%d, pages 2 x %d)"
-                      % (grew, pages), grew >= 2 * pages - 16)
-                check("and not one had to take it (%d)"
-                      % (mid[1] - before[1]), mid[1] == before[1])
-
-            # --- Allowed anywhere -------------------------------------
-            res = run_case(q, "runw faults", " ('runw')")
-            after = settled(q, faults)
-            if res:
-                mask, ticks, pages, _ = res
-                check("with 'runw' they would run off the boot core too "
-                      "(mask %d)" % mask, (mask & ~1) != 0)
-                grew = after[0] - mid[0]
-                # Here the two count on two cores at once, and the
-                # count is one locked addition each: not one may go
-                # missing. (A plain ++ lost a few dozen of 18000 now and
-                # then - which the tolerance above used to hide.)
-                check("and again without the lock (%d, pages 2 x %d)"
-                      % (grew, pages), grew >= 2 * pages)
-                check("still not one with the lock (%d)"
-                      % (after[1] - mid[1]), after[1] == mid[1])
-
-            check("the system still runs after the attempt",
-                  "has ended (code 0)" in
-                  q.command("run hello", "has ended", timeout=60))
-        finally:
-            q.close()
-    finally:
-        if os.path.exists(slog):
-            os.unlink(slog)
-
-    print("--- the same attempt on one core ---")
-    slog1 = tempfile.mktemp(suffix=".log")
-    try:
-        q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
-        try:
-            q1.wait_for("ThreadOS shell", timeout=40)
-            before = faults(q1)
-            res = run_case(q1, "runw faults", " (one core)")
-            after = faults(q1)
-            if res:
-                mask, ticks, pages, _ = res
-                check("on one core the mask is 1 (%d)" % mask, mask == 1)
-                check("and the faults still go without the lock (%d, pages 2 x %d)"
-                      % (after[0] - before[0], pages),
-                      after[0] - before[0] >= 2 * pages - 16)
-        finally:
-            q1.close()
-    finally:
-        if os.path.exists(slog1):
-            os.unlink(slog1)
-
-    # The same split in long mode. There is no 'faults' program there,
-    # but tlbtest64 touches four hundred fresh pages in four threads -
-    # which is the same path and asks the same question of it.
-    print("--- the same in the 64-bit kernel ---")
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
         return summary()
 
-    d = tempfile.mkdtemp()
-    iso = tempfile.mktemp(suffix=".iso")
-    slog64 = tempfile.mktemp(suffix=".log")
+    print("--- page faults without the big lock (four cores) ---")
+    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, cpus=4)
     try:
-        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-        if not os.path.exists(iso):
-            return summary()
-        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, cpus=4,
-                 qemu="qemu-system-x86_64")
-        try:
-            q.wait_serial("thread64>", timeout=90)
-            before = faults(q)
-            check("the 64-bit kernel counts page faults too", before is not None)
-            out = q.command("runw tlbtest64", "exit code", timeout=180)
-            check("the program passed (64-bit)",
-                  "the memory agrees on every core" in out)
-            after = faults(q)
-            check("faults served without the lock (64-bit, %d)"
-                  % (after[0] - before[0]), after[0] - before[0] >= 160)
-            check("and not one had to take it (64-bit, %d)"
-                  % (after[1] - before[1]), after[1] == before[1])
-        finally:
-            q.close()
+        q.wait_serial("thread64>", timeout=90)
+        before = faults(q)
+        check("the kernel counts page faults", before is not None)
+
+        # --- Two processes, held on the boot core -----------------
+        res = faults_case(q, "run faults", " (faults, 'run')")
+        mid = settled(q, faults)
+        if res:
+            mask, pages, copied = res
+            check("without 'runw' both stay on the boot core "
+                  "(mask %d)" % mask, mask == 1)
+            lockless(before, mid, pages, " (faults, 'run')", copied)
+
+        # --- Allowed anywhere -------------------------------------
+        # Here the two fault on several cores at once, and the count
+        # is one locked addition each: a plain ++ lost a few dozen of
+        # eighteen thousand now and then, which a bound with any slack
+        # would hide.
+        res = faults_case(q, "runw faults", " (faults, 'runw')")
+        mid2 = settled(q, faults)
+        if res:
+            mask, pages, copied = res
+            check("with 'runw' they ran off the boot core too "
+                  "(mask %d)" % mask, (mask & ~1) != 0)
+            lockless(mid, mid2, pages, " (faults, 'runw')", copied)
+
+        # --- Threads of one process, in the mapping area ----------
+        res = tlb_case(q, "run tlbtest64", " (tlbtest64, 'run')")
+        mid3 = settled(q, faults)
+        if res:
+            mask, pages = res
+            check("without 'runw' the threads stay on the boot core "
+                  "(mask %d)" % mask, mask == 1)
+            lockless(mid2, mid3, pages, " (tlbtest64, 'run')")
+
+        res = tlb_case(q, "runw tlbtest64", " (tlbtest64, 'runw')")
+        after = settled(q, faults)
+        if res:
+            mask, pages = res
+            check("with 'runw' the threads ran off the boot core too "
+                  "(mask %d)" % mask, (mask & ~1) != 0)
+            lockless(mid3, after, pages, " (tlbtest64, 'runw')")
+
+        # The shell's verdict on a program comes after the program's
+        # own last line, and carries that program's own code: hello64
+        # ends with 7. The 'runw' programs before it have ended too, and
+        # their codes are not this one's.
+        out = answer(q, "run hello64", HELLO_END.search, timeout=60)
+        check("the system still runs programs after the attempt",
+              "[hello64] ending politely" in out)
+        done = HELLO_END.search(out)
+        early = re.search(r"\[hello64\] done, exit code (-?\d+) \(", out)
+        check("and 'run' reports that program's own exit code (%s)"
+              % (done.group(1) if done else
+                 "%s, before the program had ended" % early.group(1)
+                 if early else "none"),
+              done is not None and done.group(1) == "7")
     finally:
-        shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, slog64):
-            if os.path.exists(f):
-                os.unlink(f)
+        q.close()
+
+    print("--- the same attempt on one core ---")
+    q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
+    try:
+        q1.wait_serial("thread64>", timeout=90)
+        before = faults(q1)
+        res = faults_case(q1, "runw faults", " (faults, one core)")
+        mid = settled(q1, faults)
+        if res:
+            mask, pages, copied = res
+            check("on one core the mask is 1 (%d)" % mask, mask == 1)
+            lockless(before, mid, pages, " (faults, one core)", copied)
+        res = tlb_case(q1, "runw tlbtest64", " (tlbtest64, one core)")
+        after = settled(q1, faults)
+        if res:
+            mask, pages = res
+            check("on one core the threads' mask is 1 (%d)" % mask,
+                  mask == 1)
+            lockless(mid, after, pages, " (tlbtest64, one core)")
+    finally:
+        q1.close()
 
     return summary()
 

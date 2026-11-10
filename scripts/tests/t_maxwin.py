@@ -10,7 +10,8 @@ the difference is the part worth testing:
 
   It fills the room between the menu bar and the dock and no more. They
   are how everything else is reached, so a window drawn over them would
-  be a window there is no way out of.
+  be a window there is no way out of. (The bar hides itself until the
+  pointer reaches the top edge; it is called up there and read.)
 
   It REMEMBERS. The same light puts the window back exactly where it
   was - not somewhere reasonable, exactly there.
@@ -53,6 +54,25 @@ ZY = BAR_H
 IN_X, IN_Y = WX + WW - 20, WY + 200
 OUT_X = 600
 DARK = theme("dark")
+# A pixel of the menu bar that nothing is ever drawn on, so that it is
+# the bare glass: the middle of the gap the name of the window with the
+# focus has to leave before the Bluetooth icon (fit_text() in
+# draw_bar(), kernel/desktop.c), ten pixels clear of the icon's rune.
+# Further left a long window name could reach it, and in the gaps
+# between two icons it would be as little as two pixels from one.
+GLASS_X = bar_show_x() - 2 * (BAR_ITEM_GAP + STAT_W) - BAR_ITEM_GAP // 2
+GLASS_Y = BAR_H // 2
+
+
+def screen_when(q, ok, timeout=8):
+    """The screen once ok(at) holds of it - or the last one read when the
+    time is up, so that the checks fail on what was really there"""
+    end = time.time() + timeout
+    while True:
+        w, h, at = q.screen_raw()
+        if ok(at) or time.time() >= end:
+            return w, h, at
+        time.sleep(0.3)
 
 
 def title(px):
@@ -72,8 +92,10 @@ def grey(px):
 
 
 def dock_shows(at):
-    """The dock's first tile, with its white window in the middle"""
-    return min(at(*dock_tile(0, n_w=3))) > 200
+    """The dock's first tile, by the white of its folder in the middle. The
+    terminal is the only window, so the dock holds one window's tile
+    after the programs'."""
+    return min(at(*dock_tile(0, n_w=1))) > 200
 
 
 def main():
@@ -89,11 +111,12 @@ def main():
             q.mouse_home()
 
             q.launch_dock("gterm")                # the "Term" tile
-            time.sleep(3)
             q.mouse_goto(600, 300)
-            time.sleep(1.5)
 
-            w, h, at = q.screen_raw()
+            # The window grows out of nothing and the program then fills
+            # it, so its ground is waited for, at its full size
+            w, h, at = screen_when(
+                q, lambda at: ground(at(IN_X, IN_Y)) and dock_shows(at), 20)
             check("the application window opened", ground(at(IN_X, IN_Y)))
             # The ground stops at the small window's edge - so its
             # reaching further later means something
@@ -105,11 +128,13 @@ def main():
 
             # --- zoom ---------------------------------------------------
             q.click(*light_xy(WX, WY, 2))
-            time.sleep(2.5)
             q.mouse_goto(600, work_bottom() - 30)
-            time.sleep(1.5)
 
-            w, h, at = q.screen_raw()
+            def zoomed(at):
+                return (title(at(600, ZY + 4)) and title(at(30, ZY + 4)) and
+                        ground(at(300, work_bottom() - 3)) and
+                        ground(at(OUT_X, ZY + 200)))
+            w, h, at = screen_when(q, zoomed)
             check("the title bar runs across the whole screen, under the "
                   "menu bar", title(at(600, ZY + 4)) and title(at(30, ZY + 4)))
             check("the window reaches down to the dock",
@@ -117,8 +142,6 @@ def main():
             # The dock is how every other window is reached
             check("the dock still shows (the window did not cover it)",
                   dock_shows(at))
-            check("and so does the menu bar",
-                  near(at(300, 12), bar_glass()[12][300], 1))
 
             # The ruler: the ground now reaches the right side of the
             # screen, which it can only do if the program was told the
@@ -126,13 +149,27 @@ def main():
             check("the program got the new size (its ground reaches "
                   "the right edge)", ground(at(OUT_X, ZY + 200)))
 
+            # The menu bar hides itself while the pointer is away from
+            # it (bar_visible() in kernel/desktop.c) and comes back when
+            # the pointer reaches the top edge - and then the bar's own
+            # glass has to be there, not the zoomed window. The pointer
+            # stays well left of the pixel that is read.
+            q.mouse_goto(200, 1)
+            w, h, at = screen_when(
+                q, lambda at: near(at(GLASS_X, GLASS_Y),
+                                   bar_glass()[GLASS_Y][GLASS_X], 1), 4)
+            check("and so does the menu bar, called up at the top edge "
+                  "(%s)" % (at(GLASS_X, GLASS_Y),),
+                  near(at(GLASS_X, GLASS_Y), bar_glass()[GLASS_Y][GLASS_X], 1))
+
             # --- restore ----------------------------------------------
             q.click(*light_xy(0, ZY, 2))
-            time.sleep(2.5)
             q.mouse_goto(600, 300)
-            time.sleep(1.5)
 
-            w, h, at = q.screen_raw()
+            def back(at):
+                return (ground(at(IN_X, IN_Y)) and not grey(at(OUT_X, IN_Y))
+                        and not ground(at(OUT_X, IN_Y)))
+            w, h, at = screen_when(q, back)
             check("the window came back exactly where it was",
                   ground(at(IN_X, IN_Y)) and not grey(at(OUT_X, IN_Y)))
             check("the program narrowed back (the ground ends inside the "
@@ -140,26 +177,32 @@ def main():
 
             # --- dragging a zoomed window puts it back ----------------
             q.click(*light_xy(WX, WY, 2))
-            time.sleep(2)
             q.mouse_goto(600, 300)
-            time.sleep(1)
-            w, h, at = q.screen_raw()
+            w, h, at = screen_when(q, lambda at: title(at(600, ZY + 4)))
             check("the window is full screen again", title(at(600, ZY + 4)))
 
+            # (as far down as the screen lets a window that tall go)
+            ty = min(200 - 3, h - WH)
+            # A pause between the steps of the drag, so that the desktop
+            # sees each on a frame of its own: a press that came in the
+            # same frame as a move would land where the move ended
             q.mouse_goto(300, ZY + 5)       # grab the title bar
+            time.sleep(0.4)
             q.mouse_button(True)
+            time.sleep(0.4)
             q.mouse_goto(320, 200)          # and pull it down
             time.sleep(0.5)
             q.mouse_button(False)
-            time.sleep(1.5)
+            time.sleep(0.4)
             q.mouse_goto(600, 440)
-            time.sleep(1.5)
 
-            w, h, at = q.screen_raw()
+            def dropped(at):
+                return (not title(at(600, ZY + 4)) and
+                        title(at(320, ty + 4)) and
+                        not ground(at(600, 100)) and not grey(at(600, 100)))
+            w, h, at = screen_when(q, dropped)
             check("once grabbed by the bar the window stopped being full screen",
                   not title(at(600, ZY + 4)))
-            # (as far down as the screen lets a window that tall go)
-            ty = min(200 - 3, h - WH)
             check("and it followed the pointer (its title bar is where it "
                   "was dropped)", title(at(320, ty + 4)))
             check("and the desktop is where the window no longer is",

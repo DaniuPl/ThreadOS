@@ -12,17 +12,25 @@ holds), and the figures it shows are held to independent sources:
 
   the memory to the shell's 'mem', a different path out of the kernel
 
-Changing anything needs admin. The first change asks for the password
-in a panel over the window; a wrong one changes nothing and says so,
-and the right is given back after every change, so the next one asks
-again. The theme goes last: once it is light, the window is drawn in
-the other colours, which is the check that it took.
+  the version under About to the 'version' file packed into the initrd
+  the machine booted with
+
+Changing anything needs admin. The desktop signs in as the
+administrator, and a program started from that session is the admin
+too - it is not asked (t_usersgui.py holds it to that). So the kernel's
+shell steps down to a plain user first ('logout'), and the window is
+started from that session: the first change asks for the password in a
+panel over the window; a wrong one changes nothing and says so, and the
+right is given back after every change, so the next one asks again.
+The theme goes last: once it is light, the window is drawn in the other
+colours, which is the check that it took.
 
 Run on its own or through scripts/run_tests.py.
 """
 
 import os
 import re
+import struct
 import sys
 import tempfile
 import time
@@ -34,6 +42,22 @@ from ptest import check, summary
 WX, WY = cascade(2, GSET_W + 2, GSET_H + TITLE_H + 2)
 CX, CY = WX + 1, WY + CONTENT_DY
 AWAY = (600, 440)
+
+
+def initrd_version():
+    """The release named in the initrd the machine boots with, read
+    straight from the image (the TIRD format, scripts/mkinitrd.py) -
+    not through the kernel the window asks"""
+    with open(INITRD, "rb") as fh:
+        img = fh.read()
+    if img[:4] != b"TIRD":
+        return None
+    count = struct.unpack_from("<I", img, 4)[0]
+    for k in range(count):
+        name, off, size = struct.unpack_from("<16sII", img, 8 + 24 * k)
+        if name.rstrip(b"\0") == b"version":
+            return img[off:off + size].decode().split("\n")[0]
+    return None
 
 
 def section(q, name):
@@ -88,6 +112,11 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
+            # A plain user's session, for the programs started from now on
+            q.click_desktop()
+            out = q.command("logout", "an ordinary user again", timeout=15)
+            check("the shell steps down to a plain user",
+                  "an ordinary user again" in out)
             q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(*AWAY)
@@ -98,11 +127,11 @@ def main():
                   got == "Settings")
             shot = q.screen_raw()
             sides = [q.gset_side(CX, CY, i,
-                                 chosen=(GSET_SECTIONS[i] == GSET_OPENS_ON),
+                                 chosen=(GSET_SECTIONS64[i] == GSET_OPENS_ON),
                                  screen=shot)
-                     for i in range(len(GSET_SECTIONS))]
+                     for i in range(len(GSET_SECTIONS64))]
             check("the sections are listed down the left (%s)"
-                  % ", ".join(sides), sides == GSET_SECTIONS)
+                  % ", ".join(sides), sides == GSET_SECTIONS64)
             head = q.gset_heading(CX, CY, screen=shot)
             name = q.gset_field_text(CX, CY, 0, screen=shot)
             check("it opens on General, with the machine's name in its "
@@ -174,20 +203,26 @@ def main():
 
             # --- About, against the shell's 'mem' -------------------------
             q.click_desktop()
-            out = q.command("mem", "RAM detected", timeout=15)
-            m = re.search(r"RAM detected: (\d+) KiB", out)
+            out = q.command("mem", "KiB RAM", timeout=15)
+            m = re.search(r"Memory: (\d+) KiB RAM", out)
             head = section(q, "About")
             shot = q.screen_raw()
-            about = [q.gset_info(CX, CY, i, screen=shot) for i in range(6)]
+            # System, Kernel, Version, Memory, In use, Running for,
+            # Signed in as
+            about = [q.gset_info(CX, CY, i, screen=shot) for i in range(7)]
             check("About names the system and its kernel (%s)"
                   % ", ".join(about[:2]),
                   head == "About" and about[0] == "ThreadOS" and
-                  about[1].startswith("32-bit"))
+                  about[1] == "64-bit, long mode")
+            version = initrd_version()
+            check("its version is the one in the initrd (%s, %s)"
+                  % (about[2], version),
+                  version is not None and about[2] == version)
             check("its memory is what the shell's 'mem' says (%s, %s KiB)"
-                  % (about[2], m.group(1) if m else "?"),
-                  m is not None and about[2] == m.group(1) + " KiB")
-            check("and the session is a plain user's ('%s')" % about[5],
-                  about[5] == "user")
+                  % (about[3], m.group(1) if m else "?"),
+                  m is not None and about[3] == m.group(1) + " KiB")
+            check("and the session is a plain user's ('%s')" % about[6],
+                  about[6] == "user")
 
             # --- regional date, time and number formats ------------------
             head = section(q, "Region")
@@ -220,6 +255,7 @@ def main():
             shot = q.screen_raw()
             label = q.read_ui(CX + GSET_PANE_X, label_baseline, 160,
                              px=UD_PX, fg=theme("dark")["app_text"],
+                             charset=UiFont.CHARSET + "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ",
                              screen=shot)
             win_title = q.window_title(WX, WY)
             check("the language control saves Polish and translates settings "

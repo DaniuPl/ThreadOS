@@ -13,9 +13,8 @@
  * nudged to the pixel grid, which is what FreeType does with hinting
  * off and is what the test compares against.
  *
- * Everything is integer arithmetic. The 64-bit kernel is built without
- * SSE and the 32-bit one without libgcc, so neither floating point nor
- * a 64-bit division is to be had here.
+ * Everything is integer arithmetic: the kernel is built without SSE,
+ * so there is no floating point to be had here.
  */
 
 struct ttf_font {

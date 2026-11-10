@@ -13,9 +13,8 @@ body:
     attributes:
       label: Which kernel
       options:
-        - 64-bit (long mode)
-        - 32-bit (protected mode)
-        - both
+        - x86-64 (PC)
+        - ARM64 (QEMU virt)
     validations:
       required: true
 

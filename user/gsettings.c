@@ -20,8 +20,6 @@
  * shown is what the kernel has. Changing a setting needs admin: the
  * first change asks for the password, in the window, and the right is
  * given back as soon as that one change is written.
- *
- * One program for both kernels (uapi.h).
  */
 
 #include "udraw.h"
@@ -82,12 +80,8 @@
 #define SEC_FILES   9
 #define SEC_REGION  10
 #define SEC_ABOUT   11
-#ifdef __x86_64__
 #define SEC_UPDATES 12
 #define SEC_N       13
-#else
-#define SEC_N       12
-#endif
 
 static const char *const sections[] = {
     "Wi-Fi", "Bluetooth", "Network", "Sound", "General", "Appearance",
@@ -210,7 +204,6 @@ static char want_name[CFG_NAME_MAX], want_value[CFG_VAL_MAX];
    (a wrong password), -2 refused (not a value it takes), 0 nothing */
 static int said;
 
-#ifdef __x86_64__
 #define UPDATE_OUTPUT_MAX 2048
 #define UPDATE_CHECK 0
 #define UPDATE_INSTALL 1
@@ -391,7 +384,6 @@ static int update_poll(void)
     update_operation = UPDATE_CHECK;
     return 1;
 }
-#endif
 
 static int outcome(int32_t rc, const char *name, const char *value)
 {
@@ -420,27 +412,20 @@ static void apply(const char *name, const char *value)
 
 static void try_password(void)
 {
-#ifdef __x86_64__
     int for_update = update_auth_pending;
     update_auth_pending = 0;
-#endif
     pass[plen] = 0;
     asking = 0;
     if (!plen || sys_auth(pass) != 0) {
         said = plen ? -1 : 0;
     } else {
-#ifdef __x86_64__
         if (for_update) {
             update_start(for_update);
-            sys_drop();
         } else {
-#endif
-        said = outcome(sys_cfg_set(want_name, want_value), want_name,
-                       want_value);
-        sys_drop();
-#ifdef __x86_64__
+            said = outcome(sys_cfg_set(want_name, want_value), want_name,
+                           want_value);
         }
-#endif
+        sys_drop();
     }
     for (int i = 0; i < plen; i++)
         pass[i] = 0;
@@ -480,11 +465,9 @@ static void fields_from_settings(void)
 #define A_BEEP    7
 #define A_TOGGLE  8               /* name flips between 0 and 1 */
 #define A_BT_SEARCH 12
-#ifdef __x86_64__
 #define A_UPDATE_CHECK   9
 #define A_UPDATE_INSTALL 10
 #define A_UPDATE_ROLLBACK 11
-#endif
 
 struct hot {
     int x, y, w, h;
@@ -795,18 +778,13 @@ static void draw_about(void)
 {
     char t[48];
     int i = 0;
-#ifdef __x86_64__
     struct sysinfo64 si;
-#else
-    struct sysinfo si;
-#endif
     sys_sysinfo(&si);
 
     info(i++, "System", "ThreadOS");
-#ifdef __x86_64__
     info(i++, "Kernel", "64-bit, long mode");
     /* The release number travels in the initrd (the update program
-       reads it from there too); the 32-bit system is not released */
+       reads it from there too) */
     char v[16];
     int64_t n = sys_initrd_read("version", v, sizeof(v) - 1);
     if (n > 0) {
@@ -816,9 +794,6 @@ static void draw_about(void)
                 v[k] = 0;
         info(i++, "Version", v);
     }
-#else
-    info(i++, "Kernel", "32-bit, protected mode");
-#endif
     put_str(t, put_num(t, 0, si.ram_kib), " KiB");
     info(i++, "Memory", t);
     put_str(t, put_num(t, 0, si.used_kib), " KiB");
@@ -1017,7 +992,6 @@ static void draw_mouse(void)
     note(y + CHIP_H + 40, "A touchpad moves the same pointer as a mouse.");
 }
 
-#ifdef __x86_64__
 static void draw_updates(void)
 {
     char version[32] = "unknown";
@@ -1054,7 +1028,6 @@ static void draw_updates(void)
              "Install only after booting the installed system.");
     }
 }
-#endif
 
 /* --- the window -------------------------------------------------------- */
 
@@ -1103,9 +1076,7 @@ static void draw(void)
     case SEC_MOUSE:   draw_mouse(); break;
     case SEC_FILES:   draw_files(); break;
     case SEC_REGION:  draw_region(); break;
-#ifdef __x86_64__
     case SEC_UPDATES: draw_updates(); break;
-#endif
     default:          draw_about(); break;
     }
 
@@ -1134,12 +1105,10 @@ static void draw(void)
         ud_round(win, px, py, PASS_W, PASS_H, 10, l.field);
         ud_ring(win, px, py, PASS_W, PASS_H, 10, l.line);
         const char *password_message = "Changing settings needs admin";
-#ifdef __x86_64__
         if (update_auth_pending == UPDATE_ROLLBACK)
             password_message = "Restoring the previous system needs admin";
         else if (update_auth_pending == UPDATE_INSTALL)
             password_message = "Installing an update needs admin";
-#endif
         ud_text_l(win, px + 14, py + 24, password_message,
                   l.text, UD_BOLD, UD_PX);
         ud_round(win, px + 14, py + 36, PASS_W - 28, CHIP_H, 6, l.bg);
@@ -1194,7 +1163,6 @@ static void click(int x, int y)
         case A_BT_SEARCH:
             sys_bt(BT_SEARCH, (struct bt_info *)0);
             break;
-#ifdef __x86_64__
         case A_UPDATE_CHECK:
             update_start(UPDATE_CHECK);
             break;
@@ -1222,7 +1190,6 @@ static void click(int x, int y)
                 }
             }
             break;
-#endif
         }
         return;
     }
@@ -1238,9 +1205,7 @@ static void key(char c)
         } else if (c == KEY_PASTE) {       /* Escape, the same code */
             asking = 0;
             plen = 0;
-#ifdef __x86_64__
             update_auth_pending = 0;
-#endif
         } else if (c == '\b') {
             if (plen > 0)
                 pass[--plen] = 0;
@@ -1287,9 +1252,7 @@ static void key(char c)
 
 void _start(void)
 {
-#ifdef __x86_64__
     update_allowed = sys_update_allowed() == 1;
-#endif
     win = (int)win_create(W0, H0, ulocale_language_polish() ? "Ustawienia"
                                                            : "Settings");
     if (win < 0)
@@ -1315,10 +1278,8 @@ void _start(void)
                 key((char)ev.val);
             }
         }
-#ifdef __x86_64__
         if (update_poll())
             again = 1;
-#endif
         /* The figures move by themselves (the uptime, the memory, the
            address once DHCP answers) and a setting may be changed from
            the shell: a redraw a second keeps them true */

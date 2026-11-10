@@ -26,7 +26,9 @@ from ptest import check, summary
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
+# The loader of the build under test (ptest.uefi_loader), found when
+# main() starts
+LOADER = None
 
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
@@ -59,13 +61,11 @@ def main():
     if INITRD64 is None or not os.path.exists(INITRD64):
         print("SKIPPED: no 64-bit initrd")
         return summary()
-    if not os.path.exists(LOADER):
-        # Nobody has built it yet - so we build it, and if there is
-        # nothing to build it with, we say so instead of failing
-        subprocess.run(["make", "efi"], cwd=ROOT,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    if not os.path.exists(LOADER):
-        print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
+    global LOADER
+    LOADER = uefi_loader()
+    if not LOADER:
+        print("SKIPPED: no BOOTX64.EFI next to the kernel, and nothing to "
+              "build one with (apt install clang lld)")
         return summary()
     if not os.path.exists(OVMF_CODE) or not os.path.exists(OVMF_VARS):
         print("SKIPPED: no OVMF firmware (apt install ovmf)")

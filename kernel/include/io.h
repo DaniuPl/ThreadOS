@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__x86_64__)
 
 /* Access to x86 I/O ports */
 
@@ -51,21 +51,11 @@ static inline void io_wait(void)
 }
 
 /* Turns interrupts off and returns the previous flag state -
-   for critical sections shared with IRQ handlers.
-
-   In long mode the flags register is 64 bits wide and the instructions
-   taking it off the stack have a different suffix; otherwise the
-   sequence is the same, so one conditional closes the difference
-   instead of a separate version of the file. */
-#ifdef __x86_64__
+   for critical sections shared with IRQ handlers. In long mode the
+   flags register is 64 bits wide. */
 typedef unsigned long irqflags_t;
 #define IRQ_PUSHF "pushfq; popq %0; cli"
 #define IRQ_POPF  "pushq %0; popfq"
-#else
-typedef uint32_t irqflags_t;
-#define IRQ_PUSHF "pushfl; popl %0; cli"
-#define IRQ_POPF  "pushl %0; popfl"
-#endif
 
 static inline irqflags_t irq_save(void)
 {

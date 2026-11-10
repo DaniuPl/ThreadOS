@@ -22,7 +22,7 @@ the STRUCTURE of it, which is what the eye actually reads:
   application windows have round corners and a shadow
   which window has the focus can be SEEN: its lights are coloured, its
   title bar a shade apart and its dot in the dock the accent - nobody
-  else's - and clicking another window moves all three
+  else's - and bringing another window forward moves all three
   a tile in the dock is a picture with round corners, and two tiles
   have different pictures
   the theme is a setting, and switching it repaints the bar, the
@@ -33,6 +33,7 @@ groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -50,6 +51,69 @@ def dot_of(at, j, n_w=2):
     g = dock_geom(n_w=n_w)
     tx, ty = g["tiles"][DOCK_N + j]
     return at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
+
+
+def wait_dots(q, front, timeout=10):
+    """The screen once the dock says window 'front' (0 the terminal, 1
+    the clock) has the focus and the other has not - the accent dot
+    under the one, the plain dot under the other - or as it is when the
+    time is up"""
+    t = theme("dark")
+    end = time.time() + timeout
+    while True:
+        _, _, at = q.screen_raw()
+        if (near(dot_of(at, front), t["accent"], 50) and
+                near(dot_of(at, 1 - front), t["dot"], 50)) or \
+                time.time() > end:
+            return at
+        time.sleep(0.3)
+
+
+def shell_set(q, name, value, timeout=30):
+    """'sudo set' in the kernel's shell, the password given if it is
+    asked for (a shell in a signed-in admin's session is not asked).
+    This machine has no disk, so the setting is changed but not
+    remembered (kernel/config.c) - what the kernel then holds is asked
+    with 'set <name>', and handed back."""
+    start = len(q.serial())
+    q.type_line("sudo set %s %s" % (name, value))
+    asked = False
+    end = time.time() + timeout
+    while time.time() < end:
+        fresh = q.serial()[start:]
+        if "%s = " % name in fresh or "set: " in fresh:
+            break
+        if "password:" in fresh and not asked:
+            q.type_line("thread")
+            asked = True
+        time.sleep(0.3)
+    out = q.command("set " + name, "%s = " % name, timeout=15)
+    m = re.search(r"%s = (\S+)" % re.escape(name), out)
+    return m.group(1) if m else None
+
+
+# A place on the bar with nothing under it: the pointer rests here
+# while the bar is read, so that the bar (which hides when it is not
+# used) stays - and the pointer is not over what is read
+REST = (220, BAR_H // 2)
+
+
+def bar_at(q, want, timeout=10):
+    """The bar's glass at (300, 12), once the pointer has called the bar
+    out - at the very top edge, and kept on the bar after that - looked
+    at until it is 'want' (it slides in) or the time is up"""
+    q.mouse_goto(REST[0], 1)
+    time.sleep(0.3)
+    q.mouse_goto(*REST)
+    got = None
+    end = time.time() + timeout
+    while time.time() < end:
+        _, _, at = q.screen_raw()
+        got = at(300, 12)
+        if near(got, want, 1):
+            break
+        time.sleep(0.3)
+    return got
 
 
 def main():
@@ -75,13 +139,33 @@ def main():
 
             check("the desktop starts without placeholder windows",
                   q.dock_windows() == 0)
+            # One window at a time: which of them is the first, and so
+            # where each stands, is decided by the order they come up in
+            def wait_windows(n, timeout=20):
+                end = time.time() + timeout
+                while time.time() < end:
+                    if q.dock_windows() == n:
+                        return True
+                    time.sleep(0.3)
+                return False
             q.launch_dock("gterm")
-            time.sleep(3)
+            check("the terminal's window comes up, the first in the dock",
+                  wait_windows(1))
             q.launch_menu("gclock")
-            time.sleep(3)
+            q.mouse_goto(600, 300)       # off both windows and their lights
+            check("and the clock's after it", wait_windows(2))
+            # A new window is the one listening. That is waited for - by
+            # then both windows are drawn - and asserted: it is what the
+            # click on the terminal below has to take away.
+            lit = q.wait_focus(106, 66, timeout=10)
+            at = wait_dots(q, 1)
+            check("the clock, opened last, has the focus: its lights are "
+                  "lit and its dot in the dock is the accent (%s), the "
+                  "terminal's is not (%s)" % (dot_of(at, 1), dot_of(at, 0)),
+                  lit and near(dot_of(at, 1), dark["accent"], 50) and
+                  near(dot_of(at, 0), dark["dot"], 50))
 
             # --- application windows and their shadows -----------------
-            w, h, at = q.screen_raw()
             check("the first application's corners are rounded",
                   at(94, 54) != at(98, 58))
             near_, far_ = at(124, 54 + TERM_H + TITLE_H + 2), \
@@ -93,18 +177,29 @@ def main():
             # --- which application is listening can be seen ------------
             q.click(150, 58)             # first window's visible title strip
             q.mouse_goto(600, 300)
-            time.sleep(1)
-            w, h, at = q.screen_raw()
             check("after the click the first application has focus",
-                  q.has_focus(94, 54))
+                  q.wait_focus(94, 54, timeout=10))
+            at = wait_dots(q, 0)
             check("its title bar is the focused colour",
                   near(at(150, 58), dark["title_bg"], 3))
+            # The clock's lights are under the terminal now, so the dock
+            # is where its losing the focus shows: its dot is no longer
+            # the accent, and the terminal's is
+            check("and the clock lost it - its dot in the dock is not the "
+                  "accent (%s), the terminal's is (%s)"
+                  % (dot_of(at, 1), dot_of(at, 0)),
+                  near(dot_of(at, 1), dark["dot"], 50) and
+                  near(dot_of(at, 0), dark["accent"], 50))
 
-            q.click(280, 70)             # second window's title bar
+            # The clock opened second, a step down and right of the
+            # terminal - and smaller than it: with the terminal in front
+            # nothing of it shows. A person brings it back from the dock.
+            q.click(*dock_window(1, 2))
             q.mouse_goto(600, 300)
-            time.sleep(1)
-            w, h, at = q.screen_raw()
-            check("a click on the second application moves the focus",
+            q.wait_focus(106, 66, timeout=10)
+            at = wait_dots(q, 1)
+            check("a click on the clock's tile in the dock brings it forward "
+                  "with the focus",
                   q.has_focus(106, 66) and not q.has_focus(94, 54))
             # --- the dock says the same thing --------------------------
             check("its dot in the dock is the accent (%s)" % (dot_of(at, 1),),
@@ -113,7 +208,7 @@ def main():
                   near(dot_of(at, 0), dark["dot"], 50))
 
             # --- a tile in the dock has a picture on it ----------------
-            g = dock_geom()
+            g = dock_geom(n_w=2)         # (the two windows are in it too)
 
             def tile(k):
                 tx, ty = g["tiles"][k]
@@ -128,18 +223,34 @@ def main():
             check("a tile's corners are round", at(tx, ty) != at(tx + 4, ty + 4))
 
             # --- the theme is a setting, and it is followed live --------
-            bar_before = at(300, 12)
-            q.type_line("sudo set theme light")
-            time.sleep(1)
-            q.type_line("thread")
-            time.sleep(3)
+            # (set from the kernel's shell, which has the keys once no
+            # window has the focus; the clock - in front now - gets it
+            # back afterwards, by a click on its title bar, so that both
+            # kinds of title bar are there to be repainted)
+            bar_before = bar_at(q, bar_glass(True)[12][300])
+            q.click_desktop()
+            held = shell_set(q, "theme", "light")
+            check("the kernel holds theme = light (%s)" % held,
+                  held == "light")
+            q.click(106 + (GCLOCK_W + 2) * 3 // 4, 70)
             q.mouse_goto(600, 300)
-            time.sleep(1)
-            w, h, at = q.screen_raw()
+            # Until the repaint is seen whole - the background and both
+            # title bars, the clock's with the focus the click gave it -
+            # which need not all be in the first frame that has any of it
+            end = time.time() + 15
+            while True:
+                w, h, at = q.screen_raw()
+                if (at(550, 250) == aurora_px(550, 250, dark=False) and
+                        near(at(150, 58), light["title_off"], 3) and
+                        near(at(150, 70), light["title_bg"], 3)) or \
+                        time.time() > end:
+                    break
+                time.sleep(0.5)
+            bar = bar_at(q, bar_glass(False)[12][300])
             check("the light theme repaints the bar - the light glass, worked "
                   "out from the light aurora (%s, was %s)"
-                  % (at(300, 12), bar_before),
-                  near(at(300, 12), bar_glass(False)[12][300], 1))
+                  % (bar, bar_before),
+                  near(bar, bar_glass(False)[12][300], 1))
             check("and the background", at(550, 250) ==
                   aurora_px(550, 250, dark=False))
             check("and the windows (%s)" % (at(150, 63),),

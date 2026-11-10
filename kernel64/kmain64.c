@@ -4,11 +4,11 @@
  * boot64/boot64.S: long mode is on, it has its own descriptor table
  * and the first four gigabytes mapped one to one with 2 MiB pages.
  *
- * This file is still a skeleton. What matters is what is NOT here:
- * not a single copy of code from the 32-bit kernel. Printing, the
- * framebuffer console, reading Multiboot 2 tags and string handling
- * are the same files, compiled a second time - the differences
- * between the modes fit inside the io.h header and a few casts.
+ * What matters is what is NOT here: anything that does not depend on
+ * the processor. Printing, the framebuffer console, reading Multiboot 2
+ * tags and string handling live in kernel/, where the ARM64 kernel
+ * picks them up too - the differences between the processors fit
+ * inside the io.h header and a few casts.
  */
 
 #include "../kernel/include/fonts.h"
@@ -313,8 +313,7 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     heap_init();
     /* A quick heap check: allocate, write, free and see whether the
-       memory returns to the pool - the same test as in the 32-bit
-       kernel */
+       memory returns to the pool, before anything relies on it */
     char *a = kmalloc(1024);
     char *b = kmalloc(4096);
     int heap_ok = a && b && a != b;
@@ -373,11 +372,13 @@ void kmain64(uint32_t magic, uint32_t info_addr)
 
     /* The main thread goes to sleep; the processor has to move on to the
        others meanwhile. If context switching were broken, the counters
-       would stay at zero or the system would hang. */
+       would stay at zero or the system would hang - and a zero has to
+       say "!!", or a log read by eye passes a scheduler that never ran. */
     task64_sleep(600);
-    printk("[ OK ] Threads counting side by side: A=%u, B=%u\n",
-           counter_a, counter_b);
-    printk("[ OK ] A thread that ends: %s, tasks on the list: %d\n",
+    printk("[ %s ] Threads counting side by side: A=%u, B=%u\n",
+           counter_a && counter_b ? "OK" : "!!", counter_a, counter_b);
+    printk("[ %s ] A thread that ends: %s, tasks on the list: %d\n",
+           mortal_done ? "OK" : "!!",
            mortal_done ? "did its work" : "did not make it", task64_count());
 
     /* --- Ring 3 -------------------------------------------------- */
@@ -568,15 +569,12 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("[ !! ] ACPI: no tables - we cannot switch the machine off\n");
 
     /* --- Disk --------------------------------------------------- */
-    /* PCI, ATA, AHCI and the block layer are the same files as in the
-       32-bit kernel. The drivers know nothing about the processor
-       mode: they talk to the device through ports and memory, and both
-       look the same on either side. */
+    /* PCI, ATA, AHCI and the block layer live in kernel/. The drivers
+       know nothing about the processor: they talk to the device
+       through ports and memory. */
     if (blk_init()) {
-        /* The file system is the same file as in the 32-bit kernel too -
-           and here not a single character had to change in it. The disk
-           seen through the block layer looks the same regardless of the
-           processor mode. */
+        /* The file system needs nothing from the processor either: the
+           disk seen through the block layer is only sectors. */
         int fs = fs_init();
         printk("[ OK ] Disk %s + TFS %s (%u sectors)\n",
                blk_name(), fs ? "ready" : "OUT OF REACH", blk_sectors());
@@ -599,11 +597,9 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     boot_splash_update(65, "Checking storage");
 
     /* --- Network ------------------------------------------------ */
-    /* The card, the IP layer, DHCP and TCP are again the same files as
-       in the 32-bit kernel. Three of the four came across without a
-       single change - the card driver only needed explicit casts of
-       addresses, because the card addresses memory with 32 bits while
-       a pointer here is eight bytes wide. */
+    /* The card, the IP layer, DHCP and TCP live in kernel/. The card
+       driver casts addresses explicitly, because the card addresses
+       memory with 32 bits while a pointer here is eight bytes wide. */
     int net = net_init();
     if (net) {
         const uint8_t *m = netdev_mac();
@@ -638,10 +634,9 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         printk("[ OK ] PS/2 keyboard (IRQ 1); no PS/2 mouse\n");
 
     /* Machines newer than roughly 2010 no longer have a PS/2 connector.
-       The USB driver and the HID class are again the same files as in
-       the 32-bit kernel: the controller structures have to lie at an
-       address the controller itself understands, and in both modes
-       that means an identity mapping. */
+       The USB driver and the HID class live in kernel/: the controller
+       structures have to lie at an address the controller itself
+       understands, which here means an identity mapping. */
     usbkbd_init();          /* it reports in by itself when it finds something */
     usbmouse_init();
     /* And the adapter on the same bus. It reports in by itself when it

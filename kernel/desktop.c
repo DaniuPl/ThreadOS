@@ -46,14 +46,9 @@
 #include "include/bt.h"
 #include "include/net.h"
 #include "include/netdev.h"
-#ifdef __x86_64__
 #include "../kernel64/task64.h"
 #define desktop_uid task64_uid
 #define desktop_kill_uid task64_kill_uid
-#else
-#define desktop_uid task_uid
-#define desktop_kill_uid task_kill_uid
-#endif
 
 /* Palette indices.
  *
@@ -106,13 +101,9 @@ struct icon {
                                   the disk - the built-in ones point at
                                   their own literals */
 };
-/* The 64-bit system has the litehtml browser (apps/browser); the 32-bit
-   one keeps gweb, because there is no C++ runtime built for it */
-#ifdef __x86_64__
+/* The browser is the litehtml one (apps/browser), in the initrd as
+   "web"; gweb, the older one in C, is still there to be run by name */
 #define WEB_APP "web"
-#else
-#define WEB_APP "gweb"
-#endif
 #define ART_N      16
 #define ART_LETTER 14
 #define ART_TRASH  15
@@ -263,18 +254,28 @@ static const struct { const char *app, *label; } known_apps[] = {
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
-static int art_of_app(const char *app)
+/* Where the program is in known_apps[], or -1 */
+static int known_of_app(const char *app)
 {
     for (int k = 0; k < KNOWN_N; k++)
         if (!strcmp(app, known_apps[k].app))
             return k;
-    return ART_LETTER;
+    return -1;
 }
 
+static int art_of_app(const char *app)
+{
+    int k = known_of_app(app);
+    return k >= 0 ? k : ART_LETTER;
+}
+
+/* By the name, not by the picture: the letter is a picture of its own
+   and the last known program wears it, so an unknown program's
+   ART_LETTER would name it after that one */
 static const char *label_of_app(const char *app)
 {
-    int k = art_of_app(app);
-    return k < KNOWN_N ? known_apps[k].label : app;
+    int k = known_of_app(app);
+    return k >= 0 ? known_apps[k].label : app;
 }
 
 #define ICON_N icon_n
@@ -348,24 +349,60 @@ static int art_of_pid(int pid)
  *     program  label  picture-number
  *
  * and nothing else. Lines that do not parse are passed over, an empty
- * or missing file leaves the built-in nine - a dock with nothing in it
- * would be a machine with nothing to click, and that is not something
- * a broken line should be able to do.
+ * or missing file leaves the built-in dock (icons[] above) - a dock
+ * with nothing in it would be a machine with nothing to click, and that
+ * is not something a broken line should be able to do.
  *
  * It is plain text on purpose, like everything else the system keeps:
- * it can be read with 'cat' and built with 'echo ... >> desktop.icons'
- * from the shell in the terminal.
+ * it can be read with 'cat' and written in the text editor, or with the
+ * kernel shell's 'write'. It is read when the desktop starts, before
+ * anybody has signed in, so it is one of the files every account may
+ * read (can_read() in kernel/fs.c).
+ *
+ * Writing it is another matter. A tile starts its program for whoever
+ * clicks it, an administrator included, so the list is the system's
+ * own: the filesystem lets only an administrator write it
+ * (system_file() in kernel/fs.c), and a list on the disk that somebody
+ * else owns - from before that rule, or put there by another machine -
+ * is not believed. For the same reason a line names a program and not
+ * a path: a path could lead into the root, where any account may leave
+ * a file.
  */
 #define ICON_LIST_FILE "desktop.icons"
 #define ICON_LIST_MAX 512
+
+/* UID 0 owns the machine's own files and is the first administrator,
+   who cannot be removed or made a plain user */
+static int uid_is_admin(int uid)
+{
+    char name[USER_NAME_MAX + 1];
+    int id, level;
+    if (uid == 0)
+        return 1;
+    for (int i = 0;
+         user_account_info(i, name, sizeof(name), &id, &level) == 0; i++)
+        if (id == uid)
+            return level == USER_ADMIN;
+    return 0;
+}
 
 static int icons_read_list(void)
 {
     if (!fs_ready())
         return 0;
 
+    int slot = fs_open(FS_ROOT, ICON_LIST_FILE, 0);
+    if (slot < 0)
+        return 0;
+    int owner = fs_owner(slot);
+    if (!uid_is_admin(owner)) {
+        printk("[desktop] '%s' belongs to uid %d, not to an "
+               "administrator: passed over\n", ICON_LIST_FILE, owner);
+        return 0;
+    }
+
     char buf[ICON_LIST_MAX];
-    int n = fs_read(ICON_LIST_FILE, buf, sizeof(buf) - 1);
+    int n = fs_read_at(slot, 0, buf, sizeof(buf) - 1);
     if (n <= 0)
         return 0;
     buf[n] = 0;
@@ -400,6 +437,11 @@ static int icons_read_list(void)
         buf[end] = 0;
         if (nw < 3 || word[0][0] == '#')
             continue;                  /* a comment, or not three words */
+        int path = 0;
+        for (const char *p = word[0]; *p; p++)
+            path |= *p == '/';
+        if (path)
+            continue;                  /* a program, not a way to one */
 
         int art = 0;
         for (const char *p = word[2]; *p >= '0' && *p <= '9'; p++)
@@ -423,8 +465,13 @@ static int icons_read_list(void)
         count++;
     }
 
-    if (!count)
-        return 0;                      /* nothing usable - keep the nine */
+    if (!count) {
+        /* Said, because from the outside a list that was read and
+           passed over looks just like one that was never read */
+        printk("[desktop] nothing usable in '%s': the built-in dock "
+               "stays\n", ICON_LIST_FILE);
+        return 0;
+    }
     icon_n = count;
     printk("[desktop] icons from the file '%s': %d\n", ICON_LIST_FILE, count);
     return 1;
@@ -432,7 +479,7 @@ static int icons_read_list(void)
 
 #define COL_RED    1      /* the close button */
 
-/* An event for an application (layout matching struct win_event in usys.h) */
+/* An event for an application (layout matching struct win_event in user64/usys64.h) */
 struct wevent {
     int32_t type;          /* 0 = none, 1 = a mouse click */
     int32_t x, y;          /* coordinates relative to the content area */
@@ -476,7 +523,11 @@ struct wevent {
 
 struct window {
     int x, y, w, h;
-    char title[24];
+    /* As long as a program may ask for (SYS64_WIN_CREATE and _TITLE
+       take 64): a title is 'Files: ' and a whole path, and what does
+       not fit the title bar or the bar is cut there, with an ellipsis -
+       not here, where nothing would show it had been */
+    char title[64];
     int used;
     int owner;             /* the owning process's pid; -1 = a kernel window */
     uint8_t *content;      /* the application's content buffer (NULL = a kernel window) */
@@ -592,6 +643,12 @@ static volatile int menu_go = -1;
 static volatile int vol_key;
 static uint32_t vol_until;
 static int menu_px, menu_py;
+/* The menu hangs from the mark on the bar: the bar stays and the mark
+   is lit while it is open, and the mark and the Windows key close it.
+   Said here and not read off menu_py == MENU_Y - a menu too long for
+   the screen is moved up to the bar (menu_at), and was then taken for
+   one opened somewhere else. */
+static int menu_bar;
 static int context_open;
 static int context_px, context_py;
 static int context_h(void) { return 2 * MENU_PAD + 3 * MENU_ROW; }
@@ -814,8 +871,11 @@ static int tmenu_y(int t);
 static void tile_action(int t, int i);
 
 /* Puts the menu somewhere it fits: never off the right-hand edge,
-   never over the dock. */
-static void menu_at(int x, int y)
+   never over the dock. Where it hangs from is written before the menu
+   is said to be open: a key opens it on whichever core took the
+   interrupt, and a frame drawn in between must not see an open menu
+   that the bar does not know to be its own. */
+static void menu_at(int x, int y, int from_bar)
 {
     int hgt = menu_h();
     if (x + MENU_W > video_w())
@@ -828,7 +888,19 @@ static void menu_at(int x, int y)
         y = BAR_H;
     menu_px = x;
     menu_py = y;
+    menu_bar = from_bar;
     menu_open = 1;
+}
+
+/* The menu hung from the mark on the bar */
+static void menu_from_bar(void)
+{
+    menu_at(6, MENU_Y, 1);
+}
+
+static int menu_on_bar(void)
+{
+    return menu_open && menu_bar;
 }
 
 static void context_at(int x, int y)
@@ -851,8 +923,7 @@ static void context_at(int x, int y)
 
 static int bar_visible(void)
 {
-    return frames <= bar_until || mouse_y < 3 ||
-           (menu_open && menu_py == MENU_Y);
+    return frames <= bar_until || mouse_y < 3 || menu_on_bar();
 }
 
 /* How much of the machine is in use.
@@ -1757,23 +1828,6 @@ static void draw_lights(const struct window *win, int focused)
     }
 }
 
-/* Draws a decimal number as text */
-static void draw_int(int x, int baseline, int v, uint32_t rgb)
-{
-    char tmp[12];
-    int n = 0;
-    do {
-        tmp[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v);
-    char s[12];
-    int j = 0;
-    while (n)
-        s[j++] = tmp[--n];
-    s[j] = '\0';
-    ui_font_text(UI_SANS, UI_PX, x, baseline, s, rgb);
-}
-
 /* Everything a window is but its shadow and its round corners, at
    win->x, win->y. 'off' says it goes into a picture of its own rather
    than onto the screen - the content then goes through gfx too. */
@@ -2618,10 +2672,10 @@ static void handle_input(int mx, int my, int buttons)
            and "show the desktop". */
         if (my < BAR_H && bar_visible()) {
             if (mx < logo_w()) {
-                if (menu_open && menu_py == MENU_Y)
+                if (menu_on_bar())
                     menu_open = 0;
                 else
-                    menu_at(6, MENU_Y);
+                    menu_from_bar();
             } else if (in_rect(mx, my, net_x(), 0, STAT_W, BAR_H)) {
                 menu_open = 0;
                 stat_open = stat_open == STAT_NET ? STAT_NONE : STAT_NET;
@@ -3183,9 +3237,9 @@ static void wallpaper_load(void)
 
     /* The picture's own colours go in above the desktop's, so the two
        never argue about an index */
-    for (int i = 0; i < WALL_COLS; i++) {
-        const uint8_t *c = head + 8 + i * 3;
-        video_set_palette((uint8_t)(WALL_COL0 + i), c[0], c[1], c[2]);
+    for (int k = 0; k < WALL_COLS; k++) {
+        const uint8_t *c = head + 8 + k * 3;
+        video_set_palette((uint8_t)(WALL_COL0 + k), c[0], c[1], c[2]);
     }
     wall = buf;
     wall_w = w;
@@ -3796,7 +3850,7 @@ static void draw_bar(void)
 
     /* The left end: the mark and the name, which open the menu - lit
        while it is open, like a button held down */
-    if (menu_open && menu_py == MENU_Y)
+    if (menu_on_bar())
         gfx_rrect(4, 3, logo_w() - 4, BAR_H - 6, 6, L.bar_text, 40);
     draw_logo(BAR_LOGO_X, (BAR_H - BAR_LOGO_D) / 2, L.bar_text);
     int x = ui_font_text(UI_BOLD, BAR_PX, BAR_NAME_X, base, "ThreadOS",
@@ -4311,7 +4365,8 @@ struct found {
     int kind;
     int index;                       /* the program, the window */
     int art;
-    char name[32];
+    /* a file is opened by this name, so all of it */
+    char name[FS_NAME_MAX + 1];
 };
 
 static char search_q[32];
@@ -4462,12 +4517,6 @@ static int search_key(char c)
     return 1;
 }
 
-static int ends_with(const char *s, const char *tail)
-{
-    int n = (int)strlen(s), t = (int)strlen(tail);
-    return n >= t && !strcmp(s + n - t, tail);
-}
-
 static int ends_with_ci(const char *s, const char *tail)
 {
     int n = (int)strlen(s), t = (int)strlen(tail);
@@ -4516,7 +4565,6 @@ static void search_go(int i)
                       ends_with_ci(f.name, ".jpeg") ||
                       ends_with_ci(f.name, ".bmp") ||
                       ends_with_ci(f.name, ".psc");
-#ifdef __x86_64__
         int media = ends_with_ci(f.name, ".mp3") ||
                     ends_with_ci(f.name, ".wav") ||
                     ends_with_ci(f.name, ".aac") ||
@@ -4529,15 +4577,16 @@ static void search_go(int i)
                     ends_with_ci(f.name, ".mkv") ||
                     ends_with_ci(f.name, ".avi") ||
                     ends_with_ci(f.name, ".webm");
-#else
-        int media = 0;
-#endif
         const char *app = picture ? "gimg" : media ? "gmedia" : "gedit";
         const char *with = picture ? "gimg " : media ? "gmedia " : "gedit ";
         char cmd[96];
         int n = 0;
         for (int k = 0; with[k]; k++)
             cmd[n++] = with[k];
+        /* By its whole path: the file is at the top of the disk, and
+           the program starts in the home of whoever is signed in, where
+           the bare name is some other file or none */
+        cmd[n++] = '/';
         for (int k = 0; f.name[k] && n < (int)sizeof(cmd) - 1; k++)
             cmd[n++] = f.name[k];
         cmd[n] = '\0';
@@ -5027,6 +5076,7 @@ static volatile int lock_field = 1;    /* username = 0, password = 1 */
 static volatile int lock_try;          /* Enter: the thread checks */
 static uint32_t lock_wrong_at;         /* when a wrong one was given */
 static int lock_wrong;
+static int lock_no_home;                /* ...and it was the home, not it */
 static int lock_out;                   /* it was a log out, not a lock */
 static char setup_login[USER_NAME_MAX + 1];
 static char setup_display[USER_DISPLAY_NAME_MAX + 1];
@@ -5242,11 +5292,7 @@ static void draw_about(void)
 
     char line[64];
     int n;
-#ifdef __x86_64__
     n = cat(line, 0, locale_text("64-bit kernel, "));
-#else
-    n = cat(line, 0, locale_text("32-bit kernel, "));
-#endif
     n = cat_num(line, n, (uint32_t)smp_cpus());
     int cpu_count = smp_cpus();
     const char *cpu_word;
@@ -5570,9 +5616,14 @@ static void draw_lock(void)
         lock_try = 0;
         lock_pass[lock_len] = 0;
         lock_pass[lock_len] = 0;
-        int ok = lock_len && (lock_out
-                    ? user_login(lock_user, lock_pass) == 0
-                    : user_password_current_ok(lock_pass));
+        int rc = !lock_len ? USER_LOGIN_DENIED
+                 : lock_out ? user_login(lock_user, lock_pass)
+                 : user_password_current_ok(lock_pass) ? 0 : USER_LOGIN_DENIED;
+        int ok = rc == 0;
+        /* A right password for an account whose home is gone is not a
+           wrong password, and saying so would only make the person
+           retype it */
+        lock_no_home = rc == USER_LOGIN_NO_HOME;
         for (int i = 0; i < (int)sizeof(lock_pass); i++)
             lock_pass[i] = 0;
         lock_len = 0;
@@ -5660,7 +5711,9 @@ static void draw_lock(void)
     }
     const char *say = locale_text(lock_wrong &&
                                   frames - lock_wrong_at < 3 * FRAME_HZ
-                                      ? "Wrong password - try again"
+                                      ? (lock_no_home
+                                             ? "Your home folder cannot be opened"
+                                             : "Wrong password - try again")
                                       : lock_out
                                             ? "Tab selects a field; Enter signs in"
                                             : "Enter your password to unlock");
@@ -5697,11 +5750,11 @@ static void desktop_on_key(char c)
     }
     if (c == KEY_MENU) {                /* the Windows key: the menu */
         context_open = 0;
-        if (menu_open && menu_py == MENU_Y) {
+        if (menu_on_bar()) {
             menu_open = 0;
         } else {
             search_close();
-            menu_at(6, MENU_Y);
+            menu_from_bar();
             menu_sel = 0;
         }
         return;
@@ -6501,9 +6554,11 @@ static void desktop_thread(void *arg)
     video_set_scale(scale_now);
 
     /* The resolution: the panel's own (its EDID says which), unless the
-       'resolution' setting names one - "1024x768". Without either,
-       640x480; without a framebuffer at all, mode 13h (320x200). Where
-       the loader set the mode, it stays what the loader set. */
+       'resolution' setting names one - "1024x768". Without either, the
+       mode the loader left (640x480 when it left none); without a
+       framebuffer at all, mode 13h (320x200). On QEMU's standard VGA
+       the loader's mode is taken over (kernel/video.c); on any other
+       card it stays what the loader set. */
     int rw, rh;
     resolution_wanted(&rw, &rh);
     if (video_init_vesa(rw, rh) < 0)

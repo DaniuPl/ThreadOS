@@ -2,13 +2,13 @@
  *
  * The network stack, and everything that comes after it, talks to the
  * kernel through a handful of functions: put me to sleep, am I to die,
- * is that task still alive, make a new thread. The names of these
- * functions are the same in both kernels, because it is they that are
- * the contract - what stands behind them is the kernel's business.
+ * is that task still alive, make a new thread (kernel/include/task.h).
+ * Those names are the contract - what stands behind them is the
+ * scheduler's business.
  *
- * Thanks to that net.c, dhcp.c and tcp.c cross over to long mode
- * without a single change: they do not have to know that the scheduler
- * is called something else here. This file is the whole difference.
+ * Thanks to that net.c, dhcp.c and tcp.c do not have to know that the
+ * scheduler calls things something else. This file is the whole
+ * translation.
  */
 
 #include <stddef.h>
@@ -33,8 +33,7 @@ void task_sleep(uint32_t ms)
    there. */
 /* Killing a process by number. The desktop reaches for this when an
    application does not answer a request to close its window - a window
-   nobody can close must not exist. In the 32-bit kernel the name is
-   task_kill; here the same thing is an uncatchable signal. */
+   nobody can close must not exist. It is an uncatchable signal. */
 int task_kill(int id)
 {
     return task64_signal(id, SIGKILL);
@@ -66,16 +65,7 @@ struct task *task_create_anycore(const char *name, void (*entry)(void *),
     return (struct task *)task64_create_anycore(name, entry, arg);
 }
 
-/* The 64-bit kernel's shell does not redraw the prompt after somebody
-   else's print - the line stays where it was and a new prompt appears
-   by itself with the next command */
-void shell_refresh(void)
-{
-}
-
-/* The virtual consoles ask a task which one it is to write on - just
-   as in the 32-bit kernel. The name is the contract, the rest is the
-   kernel's business. */
+/* The virtual consoles ask a task which one it is to write on */
 int task_vc(void)
 {
     return task64_vc();
@@ -158,7 +148,7 @@ void keyboard_inject_switch(int vc)
 }
 
 /* The desktop asks how many tasks are running - it puts the number on
-   the bar. One word, the same question on both sides. */
+   the bar */
 int task_count(void)
 {
     return task64_count();
@@ -174,16 +164,13 @@ void keyboard_set_override(keyboard_char_handler_t handler)
     keyboard64_set_override(handler);
 }
 
-/* The 64-bit kernel's shell reads characters from a queue rather than
-   through a callback - so there is nothing to hand the desktop for
-   safekeeping. When the desktop finishes, the keys return to the queue
-   by themselves. */
-/* What the desktop is to do with a key that no window wants. In
-   protected mode this is the handler of the visible console - its
-   shell; here the same thing means putting the character into that
-   console's queue, which is where its shell reads from. Without it a
-   64-bit desktop was a screen one could not type at unless a window
-   was listening. */
+/* What the desktop is to do with a key that no window wants: put it
+   into the visible console's queue, which is where that console's
+   shell reads from. Without it the desktop was a screen one could not
+   type at unless a window was listening. The shell reads from a queue
+   rather than through a callback, so there is nothing else to hand the
+   desktop for safekeeping: when it finishes, the keys go back to the
+   queue by themselves. */
 keyboard_char_handler_t keyboard_console_handler(void)
 {
     return keyboard64_to_console;

@@ -19,6 +19,7 @@
 
 #define CR4_PAE   (1 << 5)
 #define CR0_PG    (1 << 31)
+#define CR0_WP    (1 << 16)
 #define CR0_PE    (1 << 0)
 #define MSR_EFER  0xC0000080
 #define EFER_LME  (1 << 8)
@@ -87,9 +88,12 @@ ap_protected:
 
     /* Turning paging on switches the processor into long mode - but
        only a far jump to a 64-bit descriptor makes it start executing
-       code as 64-bit */
+       code as 64-bit. Write protection comes on with it, as on the boot
+       core (boot64.S): without it this core's kernel would write
+       straight through a read-only or copy-on-write page of a program,
+       into the frame another process still shares. */
     movl %cr0, %eax
-    orl $CR0_PG, %eax
+    orl $(CR0_PG | CR0_WP), %eax
     movl %eax, %cr0
 
     ljmpl $0x18, $OFF(ap_long)

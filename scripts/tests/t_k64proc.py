@@ -8,9 +8,10 @@ the kernel with a syscall instruction.
 After that comes everything a process gets and everything it must not
 do: a program read from a file (the kernel did not see it at build
 time), the NX bit checked by executing its own data, a refusal for
-pointers into kernel memory, two processes at the same virtual address
-in separate spaces, and a fork with copy on write - with a page bill
-that shows only what somebody wrote gets copied.
+pointers into kernel memory in every system call that takes one, two
+processes at the same virtual address in separate spaces, and a fork
+with copy on write - with a page bill that shows only what somebody
+wrote gets copied, the kernel's own writes included.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -19,6 +20,7 @@ groups in parallel.
 import os
 import re
 import shutil
+import struct
 import sys
 import tempfile
 import time
@@ -26,6 +28,90 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
+
+# What wild64 hands the kernel a kernel pointer in, by the names it
+# prints. The first buffers need nothing but the program, so it tries
+# them at boot too. The rest come only with 'wild64 all <address>': the
+# boot gives the program four seconds, and some of them need the disk,
+# a child, a second thread or an address on the network.
+WILD_BUFFERS = [
+    "write(stdout, kernel memory)",
+    "pipe(-> kernel memory)",
+    "read(pipe -> kernel memory)",
+    "time(-> kernel memory)",
+    "sysinfo(-> kernel memory)",
+    "getcwd(-> kernel memory)",
+    "getcwd(-> NULL)",
+    "netinfo(-> kernel memory)",
+    "initrd_read(-> kernel memory)",
+]
+WILD_ALL = WILD_BUFFERS + [
+    "ps(-> kernel memory)",
+    "palette(-> kernel memory)",
+    "ui_look(-> kernel memory)",
+    "cfg_get(-> kernel memory)",
+    "pci_info(-> kernel memory)",
+    "clip_set(kernel memory)",
+    "clip_get(-> kernel memory)",
+    "trywait(code -> kernel memory)",
+    "initrd_read(kernel name)",
+    "mkdir(kernel name)",
+    "chdir(kernel name)",
+    "unlink(kernel name)",
+    "open(kernel name)",
+    "fdinfo(-> kernel memory)",
+    "readdir(-> kernel memory)",
+    "mmap_file(kernel name)",
+    "mmap_file(size -> kernel memory)",
+    "rename(kernel name)",
+    "rename(-> kernel name)",
+    "thread(kernel entry)",
+    "udp_send(kernel memory)",
+    "udp_recv(-> kernel memory)",
+]
+
+
+def wild_proven(text, name):
+    return ("[wild64] %s: refused, and with an honest pointer it works"
+            % name) in text
+
+
+def kernel_address_of(path, text):
+    """Where the running kernel holds 'text': read from the ELF file the
+    loader is given, in the segments it loads. The kernel runs at the
+    address it was linked for, so the file's address is the live one."""
+    with open(path, "rb") as fh:
+        img = fh.read()
+    if img[:4] != b"\x7fELF" or img[4] != 2:
+        return None
+    phoff, = struct.unpack_from("<Q", img, 0x20)
+    phentsize, phnum = struct.unpack_from("<HH", img, 0x36)
+    loaded = []
+    for i in range(phnum):
+        kind, _, offset, vaddr, _, filesz = struct.unpack_from(
+            "<IIQQQQ", img, phoff + i * phentsize)
+        if kind == 1:                       # PT_LOAD
+            loaded.append((offset, vaddr, filesz))
+    at = img.find(text)
+    while at >= 0:
+        for offset, vaddr, filesz in loaded:
+            if offset <= at and at + len(text) <= offset + filesz:
+                return vaddr + at - offset
+        at = img.find(text, at + 1)
+    return None
+
+
+def wait_fresh_re(q, start, pattern, timeout):
+    """What arrived on the serial port since 'start', once 'pattern'
+    matches in it (or when the time is up) - a pattern that ends in the
+    line's end waits for the whole line, not for its first half."""
+    end = time.time() + timeout
+    while time.time() < end:
+        fresh = q.serial()[start:]
+        if re.search(pattern, fresh):
+            return fresh
+        time.sleep(0.3)
+    return q.serial()[start:]
 
 
 def main():
@@ -127,9 +213,19 @@ def main():
             # itself for it. It has to refuse, because it checks the
             # pointer.
             wild = q23.wait_serial("Kernel memory:", timeout=30)
+            # The kernel names the pointer it turned away, so this is
+            # the kernel image's address and not just any bad one
             check("the kernel refuses a pointer from outside the program",
-                  "does not belong to the program" in wild
-                  and "[wild64] the kernel refused" in wild)
+                  "write: the pointer 100000 does not belong to the "
+                  "program" in wild
+                  and wild_proven(wild, "write(stdout, kernel memory)"))
+            missing = [n for n in WILD_BUFFERS if not wild_proven(wild, n)]
+            check("at boot every call with a buffer refuses a kernel "
+                  "pointer and takes an honest one (%d of %d%s)"
+                  % (len(WILD_BUFFERS) - len(missing), len(WILD_BUFFERS),
+                     ", not: " + "; ".join(missing) if missing else ""),
+                  not missing and "[wild64] the kernel refused all %d "
+                  "kernel pointers - good" % len(WILD_BUFFERS) in wild)
             check("kernel memory is out of reach from ring 3",
                   "out of reach of ring 3" in wild)
             m = re.search(r"Kernel memory: .*err=([0-9a-f]+), "
@@ -139,6 +235,14 @@ def main():
                      if m else ""),
                   m is not None and int(m.group(1), 16) == 0x05
                   and int(m.group(2), 16) == 0x100000)
+            # A refusal that killed the process would pass the checks
+            # above too, and that is not the point: the program is to
+            # survive the refused call and go on - and die only of its
+            # own reaching, with nothing after it run
+            check("the program survived the refused call and went on",
+                  "[wild64] then I will reach in myself" in wild)
+            check("the code after the attack never ran",
+                  "ERROR: I read the kernel's memory" not in wild)
 
             # And what this whole handling exists for
             surv = q23.wait_serial("The system survived", timeout=30)
@@ -161,7 +265,7 @@ def main():
                   + (f" ({addrs[0][1]})" if addrs else ""),
                   len(addrs) == 2 and addrs[0][1] == addrs[1][1])
             check("each wrote something different"
-                  + (f" ({addrs[0][2]} i {addrs[1][2]})"
+                  + (f" ({addrs[0][2]} and {addrs[1][2]})"
                      if len(addrs) == 2 else ""),
                   len(addrs) == 2 and addrs[0][2] != addrs[1][2])
             kept = re.findall(r"process \d: still (\d+) - my "
@@ -188,14 +292,40 @@ def main():
             check("the parent gets the child's number out of the fork"
                   + (f" ({m.group(1)})" if m else ""),
                   m is not None and int(m.group(1)) > 0)
+            child = m.group(1) if m else None
             check("the child gets zero out of the fork",
                   "child: the fork gave 0" in fk)
             # Both return to the same place with the same state,
             # but their memory is already separate
+            check("the child reads what the parent wrote before the fork "
+                  "(100)", "child: the fork gave 0, I inherited 100" in fk)
             check("the child writes over its own copy (200)",
                   "my value is 200" in fk)
+            # The parent looks only once the child has ended, so a
+            # write the child made late cannot slip past the look
+            m = re.search(r"parent: waited for child (\d+), which ended "
+                          r"with code 0", fk)
+            check("the parent waits for that child, and it ends with no "
+                  "error" + (f" ({m.group(1)})" if m else ""),
+                  m is not None and m.group(1) == child)
             check("the child's write does not reach the parent (still 100)",
                   "parent: still 100 - the child got a copy" in fk)
+            # A write the KERNEL makes for the child: read() fills a
+            # page the child has not touched since the fork. The page
+            # has to be split when the call checks its buffer, or on
+            # the kernel's own fault. A kernel that did neither turns
+            # the read away or stops on that fault - and where ring 0
+            # writes through a read-only page, the bytes land in the
+            # frame the parent sees.
+            check("a kernel write in the child (read from a pipe) lands "
+                  "in a private copy of a still-shared page",
+                  "child: the kernel read 'written by the kernel' into my "
+                  "copy of the shared page, and the rest of it is the "
+                  "parent's" in fk)
+            check("the kernel's write in the child does not reach the "
+                  "parent's page",
+                  "parent: my page is as I left it - the kernel wrote "
+                  "into the child's copy" in fk)
             check("both branches finished with no error",
                   "A process copied itself: 2 finished, "
                   "0 errors" in fk)
@@ -217,7 +347,7 @@ def main():
             m = re.search(r"I waited out the child (\d+), "
                           r"exit code (\d+)", sp)
             check("the parent waited out its own child"
-                  + (f" (nr {m.group(1)})" if m else ""),
+                  + (f" (number {m.group(1)})" if m else ""),
                   m is not None and int(m.group(1)) > 0)
             # hello64 ends with a seven - that seven is the proof
             # that it waited for THAT child, not for any finished task
@@ -249,6 +379,41 @@ def main():
             check("only the pages really written were split"
                   + (f" ({m.group(2)})" if m else ""),
                   m is not None and 1 <= int(m.group(2)) <= 6)
+
+            # Kernel pointers once more, now with the disk up: file
+            # names and the rest that boot could not try. A refused
+            # name proves nothing when no such file exists anyway, so
+            # the name in kernel memory has to be a real one - the text
+            # "wild64" in the kernel image names the program in the
+            # initrd, and its first four bytes the file 'wild' that
+            # wild64 makes for each attempt. The datagram it sends
+            # itself for the honest twin of the UDP calls needs the
+            # machine to have its address, so the lease comes first.
+            q23.wait_serial("TFS ready", timeout=30)
+            q23.wait_serial("[net] DHCP: granted", timeout=60)
+            kname = kernel_address_of(KERNEL, b"wild64\0")
+            check("the kernel image holds the text 'wild64'"
+                  + (" (at %x)" % kname if kname else ""),
+                  kname is not None)
+            seen = len(q23.serial())
+            q23.type_line("run wild64 all %x" % (kname or 0))
+            wa = wait_fresh_re(q23, seen,
+                               r"\[wild64\] done, exit code -?\d+ "
+                               r"\(frames [^)]*\)\r?\n", timeout=90)
+            for name in WILD_ALL:
+                check("%s: a kernel pointer is refused, an honest one "
+                      "works" % name, wild_proven(wa, name))
+            check("the program found every refusal proven (%d)"
+                  % len(WILD_ALL),
+                  "[wild64] the kernel refused all %d kernel pointers - "
+                  "good" % len(WILD_ALL) in wa)
+            # The calls the kernel refused did not stop the program,
+            # and its own reach for kernel memory still did
+            check("after all of them the program still dies of its own "
+                  "reach (code -1)",
+                  "(wild64) killed: Page Fault" in wa
+                  and "[wild64] done, exit code -1" in wa
+                  and "ERROR: I read the kernel's memory" not in wa)
         finally:
             q23.close()
     finally:

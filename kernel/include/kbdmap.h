@@ -7,9 +7,8 @@
 /* Translating PS/2 scancodes (set 1) into characters
  *
  * A pure state machine: it takes byte after byte and says what came
- * out. It knows nothing about consoles, tasks or the desktop - and
- * that is why both kernels, 32- and 64-bit, use it. The decision WHERE
- * a character goes belongs to the caller.
+ * out. It knows nothing about consoles, tasks or the desktop: the
+ * decision WHERE a character goes belongs to the caller.
  *
  * The state (Shift, Ctrl, Alt held down, the extended-key prefix) sits
  * inside, because it spreads over several consecutive bytes.

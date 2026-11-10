@@ -11,7 +11,7 @@
  * system call, and backwards would be a disaster); the comparison is a
  * plain loop over words, the bytes only for what does not fill one. */
 
-#if defined(__i386__) || defined(__x86_64__)
+#if defined(__x86_64__)
 void *memset(void *dst, int value, size_t n)
 {
     void *d = dst;

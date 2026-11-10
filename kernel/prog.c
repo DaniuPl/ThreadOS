@@ -4,8 +4,8 @@
  * long time and were never joined: 'run' looked into the initrd and
  * nowhere else. This file is that joining and nothing more - it
  * decides where to get the bytes from, and what to do with them the
- * loader already knows. That is why both kernels use it: there is not
- * one word about the processor mode here.
+ * loader already knows. There is not one word about the processor
+ * here.
  *
  * A file from disk has to be read into kernel memory in full, because
  * the loader wants to see the whole image at once (the headers lie at

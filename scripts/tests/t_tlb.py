@@ -25,13 +25,9 @@ anything:
   3. Memory is consistent. Every thread checks its own chunks, and the
      main thread checks ALL of them at the end, once the neighbours
      have had time to be handed memory somebody else was still using.
-  4. It costs nothing where there is nobody to tell. 'run tlbtest'
+  4. It costs nothing where there is nobody to tell. 'run tlbtest64'
      keeps the process on the boot core and must not send a single
      interrupt; on a single-core machine neither must 'runw'.
-
-Both kernels, and the same four checks in each: long mode had no
-threads at all until now, so the mechanism could be built into it but
-not shown working.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -46,16 +42,59 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64
+from ptest import check, summary, make_iso64, no64, _kernel_define
 
-HEAD = re.compile(r"\[tlbtest(?:64)?\] threads (\d+), chunks (\d+) of (\d+) "
+THREADS = _kernel_define("user64/tlbtest64.c", "THREADS")
+ROUNDS = _kernel_define("user64/tlbtest64.c", "ROUNDS")
+
+HEAD = re.compile(r"\[tlbtest64\] threads (\d+), chunks (\d+) of (\d+) "
                   r"pages, core mask (\d+)")
-BAD = re.compile(r"\[tlbtest(?:64)?\] errors while writing (\d+), "
+BAD = re.compile(r"\[tlbtest64\] errors while writing (\d+), "
                  r"afterwards (\d+)")
-COUNTERS = re.compile(r"TLB: local (\d+), remote (\d+), replies (\d+)")
+# The line counts only when it has arrived whole, or a number cut in half
+# reads as a different number
+COUNTERS = re.compile(r"TLB: local (\d+), remote (\d+), replies (\d+)\r?\n")
+# tlbtest64's last line, whichever way it went
+VERDICTS = ("[tlbtest64] the memory agrees on every core",
+            "[tlbtest64] WRONG",
+            "[tlbtest64] the thread could not be created")
+# The shell's line about the end of a program 'run' waited for
+DONE = re.compile(r"\[tlbtest64\] done, exit code (-?\d+) \(")
+# hello64's last words, and after them the shell's line about its end
+HELLO_END = re.compile(r"\[hello64\] ending politely\r?\n[\s\S]*?"
+                       r"\[hello64\] done, exit code (-?\d+) \(")
 
 
-def counters(q, wait, timeout=60):
+def answer(q, cmd, until, timeout):
+    """Types a command and reads what arrived after it until until(text)
+    says the answer is all there, or the time runs out."""
+    start = len(q.serial())
+    q.type_line(cmd)
+    deadline = time.time() + timeout
+    out = ""
+    while time.time() < deadline:
+        out = q.serial()[start:]
+        if until(out):
+            break
+        time.sleep(0.3)
+    return out
+
+
+def launch(q, cmd, timeout=180):
+    """Starts tlbtest64 and returns what arrived after the command, up to
+    the end of the run.
+
+    'runw' does not wait for the program, so nothing but the program
+    itself says when it is over: its verdict, the good one or the bad
+    one, is what is waited for. 'run' waits, and its shell reports the
+    end with the program's exit code - which then has to be there too."""
+    if cmd.startswith("runw "):
+        return answer(q, cmd, lambda o: any(v in o for v in VERDICTS),
+                      timeout)
+    return answer(q, cmd, DONE.search, timeout)
+
+
+def counters(q, timeout=60):
     """(local only, sent to other cores, answers collected).
 
     Asked more than once on purpose: the counters are read with an
@@ -64,39 +103,33 @@ def counters(q, wait, timeout=60):
     timeout. A test that then dies of a missing value teaches nothing
     about the kernel."""
     for _ in range(3):
-        m = COUNTERS.search(q.command("smp", wait, timeout=timeout))
+        m = COUNTERS.search(answer(q, "smp", COUNTERS.search, timeout))
         if m:
             return tuple(int(x) for x in m.groups())
         time.sleep(1.0)
     return None
 
 
-def run_case(q, out, label):
+def run_case(out, label):
     """What the program itself reports: (mask, chunks, early, late).
 
-    The screen holds twenty-five lines, and the kernel says something of
-    its own about every thread that ends - so under a loaded host the
-    report can scroll off the top before we read it. The serial log
-    keeps everything, so when the screen has lost it we read that
-    instead, taking the LAST report in it: that is the run we have just
-    made."""
+    Only what arrived after the command counts: the report of an
+    earlier run is in the log too, and would answer for this one."""
     h = HEAD.search(out)
     b = BAD.search(out)
-    if not h or not b:
-        log = q.serial()
-        hits = list(HEAD.finditer(log))
-        bits = list(BAD.finditer(log))
-        h = hits[-1] if hits else None
-        b = bits[-1] if bits else None
-    check("tlbtest reported back%s" % label, bool(h) and bool(b))
+    check("tlbtest64 reported back%s" % label, bool(h) and bool(b))
     if not h or not b:
         return None
-    threads, chunks, pages, mask = (int(x) for x in h.groups())
+    _, chunks, pages, mask = (int(x) for x in h.groups())
     early, late = (int(x) for x in b.groups())
 
-    # A run that mapped nothing would pass every other check here
+    # A run that mapped nothing would pass every other check here. The
+    # number wanted comes from the program's source, not from the
+    # thread count it prints - that one is a constant it cannot get
+    # wrong.
+    want = THREADS * ROUNDS
     check("every thread got its chunks (%d of %d)%s"
-          % (chunks, threads * 10, label), chunks == threads * 10)
+          % (chunks, want, label), chunks == want)
     check("the memory agrees while writing (%d errors)%s" % (early, label),
           early == 0)
     # The one that matters: read after every thread has finished, so
@@ -107,40 +140,57 @@ def run_case(q, out, label):
 
 
 def main():
-    print("--- changing a mapping and the other cores (the 32-bit kernel) ---")
-    slog = tempfile.mktemp(suffix=".log")
-    try:
-        q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, cpus=4)
-        try:
-            q.wait_for("ThreadOS shell", timeout=40)
+    print("--- changing a mapping and the other cores ---")
+    reason = no64()
+    if reason:
+        print("SKIPPED: " + reason)
+        return summary()
 
-            before = counters(q, "TLB:")
-            check("the kernel counts mapping changes", before is not None)
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    slog = tempfile.mktemp(suffix=".log")
+    slog1 = tempfile.mktemp(suffix=".log")
+    try:
+        check("the disc with the kernel builds", make_iso64(d, iso))
+        if not os.path.exists(iso):
+            return summary()
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4)
+        try:
+            q.wait_serial("thread64>", timeout=90)
+            before = counters(q)
+            check("the kernel counts mapping changes",
+                  before is not None and before[0] > 0)
 
             # --- On the boot core: nobody else holds the space -------
-            out = q.command("run tlbtest", "has ended", timeout=180)
-            res = run_case(q, out, " ('run')")
-            mid = counters(q, "TLB:")
+            out = launch(q, "run tlbtest64")
+            res = run_case(out, " ('run')")
+            done = DONE.search(out)
+            check("'run' waited for the program and got its exit code "
+                  "(%s)" % (done.group(1) if done else "none"),
+                  done is not None and done.group(1) == "0")
+            mid = counters(q)
             if res:
                 check("without 'runw' the process stays on the boot core "
                       "(mask %d)" % res[0], res[0] == 1)
             if before is None or mid is None:
-                check("the TLB counters could be read after the attempt", False)
+                check("the TLB counters could be read after the attempt",
+                      False)
                 return summary()
             check("and it costs not one interrupt (%d -> %d)"
-                  % (before[1], mid[1]), mid[1] == before[1])
+                  % (before[1], mid[1]), mid[1] == before[1] == 0)
             # ...though mappings did change - they were simply nobody
             # else's business
-            check("even though there were many mapping changes (%d -> %d local)"
-                  % (before[0], mid[0]), mid[0] > before[0])
+            check("even though there were many mapping changes "
+                  "(%d -> %d local)" % (before[0], mid[0]),
+                  mid[0] > before[0])
 
             # --- Allowed anywhere: threads of one process spread -----
-            out = q.command("runw tlbtest", "has ended", timeout=180)
-            res = run_case(q, out, " ('runw')")
-            after = counters(q, "TLB:")
+            out = launch(q, "runw tlbtest64")
+            res = run_case(out, " ('runw')")
+            after = counters(q)
             if after is None:
-                check("the TLB counters could be read after the second attempt",
-                      False)
+                check("the TLB counters could be read after the second "
+                      "attempt", False)
                 return summary()
             if res:
                 mask = res[0]
@@ -151,27 +201,31 @@ def main():
             check("the mapping changes had to reach the other cores "
                   "(%d -> %d)" % (mid[1], after[1]), after[1] > mid[1])
             check("and every one of them was answered (%d -> %d)"
-                  % (mid[2], after[2]), after[2] - mid[2] >= after[1] - mid[1])
+                  % (mid[2], after[2]),
+                  after[2] - mid[2] >= after[1] - mid[1])
 
-            check("the system still runs after the attempt",
-                  "has ended (code 0)" in
-                  q.command("run hello", "has ended", timeout=60))
+            # And a program after it runs to its end: hello64 ends with
+            # 7, and the shell's word about it has to come after its own
+            # last line and carry that 7 - the 'runw' program before it
+            # has ended too, and its code is not this one's
+            out = answer(q, "run hello64", HELLO_END.search, timeout=60)
+            end = HELLO_END.search(out)
+            check("the kernel still runs after the attempt (%s)"
+                  % ("exit code " + end.group(1) if end else
+                     "no end reported after the program's last line"),
+                  "[hello64] hello, I am a" in out
+                  and end is not None and end.group(1) == "7")
         finally:
             q.close()
-    finally:
-        if os.path.exists(slog):
-            os.unlink(slog)
 
-    print("--- the same attempt on one core ---")
-    slog1 = tempfile.mktemp(suffix=".log")
-    try:
-        q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
+        print("--- the same attempt on one core ---")
+        q1 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog1)
         try:
-            q1.wait_for("ThreadOS shell", timeout=40)
-            before = counters(q1, "TLB:")
-            out = q1.command("runw tlbtest", "has ended", timeout=180)
-            res = run_case(q1, out, " (one core)")
-            after = counters(q1, "TLB:")
+            q1.wait_serial("thread64>", timeout=90)
+            before = counters(q1)
+            out = launch(q1, "runw tlbtest64")
+            res = run_case(out, " (one core)")
+            after = counters(q1)
             if before is None or after is None:
                 check("the TLB counters could be read (one core)", False)
                 return summary()
@@ -185,74 +239,8 @@ def main():
         finally:
             q1.close()
     finally:
-        if os.path.exists(slog1):
-            os.unlink(slog1)
-
-    # The same thing in long mode. Until now there were no threads
-    # there at all, so two cores could not be put into one address
-    # space and the mechanism could be built in but not shown working.
-    print("--- the same in the 64-bit kernel ---")
-    reason = no64()
-    if reason:
-        print("SKIPPED: " + reason)
-        return summary()
-
-    d = tempfile.mkdtemp()
-    iso = tempfile.mktemp(suffix=".iso")
-    slog64 = tempfile.mktemp(suffix=".log")
-    try:
-        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-        if not os.path.exists(iso):
-            return summary()
-        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, cpus=4,
-                 qemu="qemu-system-x86_64")
-        try:
-            q.wait_serial("thread64>", timeout=90)
-            before = counters(q, "TLB:")
-            check("the 64-bit kernel counts mapping changes too",
-                  before is not None and before[0] > 0)
-
-            out = q.command("run tlbtest64", "exit code", timeout=180)
-            res = run_case(q, out, " (64-bit, 'run')")
-            mid = counters(q, "TLB:")
-            if res:
-                check("without 'runw' the process stays on the boot core "
-                      "(64-bit, mask %d)" % res[0], res[0] == 1)
-            if before is None or mid is None:
-                check("the TLB counters could be read (64-bit)", False)
-                return summary()
-            check("and it costs not one interrupt (64-bit, %d -> %d)"
-                  % (before[1], mid[1]), mid[1] == before[1] == 0)
-
-            out = q.command("runw tlbtest64", "exit code", timeout=180)
-            res = run_case(q, out, " (64-bit, 'runw')")
-            after = counters(q, "TLB:")
-            if after is None:
-                check("the TLB counters could be read after the second attempt "
-                      "(64-bit)", False)
-                return summary()
-            if res:
-                mask = res[0]
-                check("threads of one process would run off the "
-                      "boot core (64-bit, mask %d)" % mask,
-                      (mask & ~1) != 0)
-                check("and more than one core carried them (64-bit, %d)"
-                      % bin(mask).count("1"), bin(mask).count("1") >= 2)
-            check("the mapping changes had to reach the other cores "
-                  "(64-bit, %d -> %d)" % (mid[1], after[1]),
-                  after[1] > mid[1])
-            check("and every one of them was answered (64-bit, %d -> %d)"
-                  % (mid[2], after[2]),
-                  after[2] - mid[2] >= after[1] - mid[1])
-
-            check("the kernel still runs after the attempt (64-bit)",
-                  "hello, I am a" in
-                  q.command("run hello64", "exit code", timeout=60))
-        finally:
-            q.close()
-    finally:
         shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, slog64):
+        for f in (iso, slog, slog1):
             if os.path.exists(f):
                 os.unlink(f)
 

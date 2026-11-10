@@ -30,12 +30,15 @@ def main():
     gdisk = tempfile.mktemp(suffix=".img")
     with open(gdisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
-    q9 = Qemu(KERNEL, INITRD, gdisk)
+    # (the serial port says when the shell has written the file)
+    slog9 = tempfile.mktemp(suffix=".log")
+    q9 = Qemu(KERNEL, INITRD, gdisk, serial=slog9)
     try:
         q9.wait_desktop()
-        q9.type_line("write report abc")   # a file on the disk (before the desktop)
-        time.sleep(0.5)
-        time.sleep(1.0)
+        # A file on the disk, at its top: the folder the file manager
+        # opens in. The session's shell stands in its home folder, so
+        # the path is given.
+        q9.command("write /report abc", "'/report' written", timeout=10)
 
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
@@ -76,8 +79,9 @@ def main():
               picked)
     finally:
         q9.close()
-        if os.path.exists(gdisk):
-            os.unlink(gdisk)
+        for f in (gdisk, slog9):
+            if os.path.exists(f):
+                os.unlink(f)
 
     # --- The dock (a separate boot) ---
     print("--- the desktop: the dock ---")
@@ -153,32 +157,37 @@ def main():
         q12.wait_desktop()
         time.sleep(0.8)
         q12.type_line("run gterm")
-        time.sleep(1.0)
-
-        def near(px, want, tol=45):
-            return all(abs(px[i] - want[i]) <= tol for i in range(3))
+        # The window first: a click before it is there lands on the
+        # desktop
+        deadline = time.time() + 15
+        while time.time() < deadline and not q12.has_focus(94, 54):
+            time.sleep(0.3)
 
         # a click in the terminal's window (slot2, content 95,65) -> keyboard
-# focus
+        # focus
         q12.mouse_goto(150, 120)
         q12.mouse_click()
         q12.mouse_goto(400, 300)
-        # type 'seq 3' and Enter -> the output (1,2,3) appears in the window
-        for ch in "seq 3":
+        # 'echo' and three words, then Enter: the words come back on a
+        # row of their own under the command (the terminal runs it as
+        # 'core echo', user/core.c)
+        for ch in "echo one two three":
             q12.sendkey({" ": "spc"}.get(ch, ch))
         q12.sendkey("ret")
 
         # the output is drawn under the command, read in the terminal's
-        # own lettering
+        # own lettering; the command's own row starts with the prompt,
+        # so only the output is a row of the three words alone
         shown = False
+        rows = []
         for _ in range(20):
             rows = q12.term_rows(95, 54 + CONTENT_DY)
-            if "1" in rows and "2" in rows and "3" in rows:
+            if "one two three" in rows:
                 shown = True
                 break
             time.sleep(0.3)
-        check("the GUI terminal runs a command and shows the output in its window",
-              shown)
+        check("the GUI terminal runs a command and shows the output in its "
+              "window (%s)" % [r for r in rows if r], shown)
     finally:
         q12.close()
         if os.path.exists(tdisk):

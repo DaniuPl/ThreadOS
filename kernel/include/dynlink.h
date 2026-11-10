@@ -21,16 +21,12 @@
  * the process's address space and be called from a PLT stub - a whole
  * separate mechanism just to save microseconds at startup.
  *
- * This file knows nothing about paging. Symbol lookup and walking the
- * relocations are identical in both kernels; what differs is only WHO
- * writes the result and WHERE - and that stays with the caller.
+ * This file knows nothing about paging: it looks symbols up and walks
+ * the relocations. WHO writes the result and WHERE stays with the
+ * caller (kernel64/elf64.c).
  */
 
-#ifdef __x86_64__
 typedef uint64_t dyn_addr;
-#else
-typedef uint32_t dyn_addr;
-#endif
 
 /* Loads the library from the initrd (or from disk). Called once, at
    startup. 1 = it is there and usable. */

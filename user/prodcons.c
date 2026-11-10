@@ -12,8 +12,6 @@
  * say that nothing was lost and nothing taken twice - with twice as
  * many items as places, the producer HAS to have waited for the
  * consumer at least once, and the semaphore is what made it wait.
- *
- * Built for both kernels from this one source (uapi.h picks the side).
  */
 
 #include "uapi.h"

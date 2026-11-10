@@ -7,14 +7,12 @@ This one is shorter and lists the commands.
 
 ## What this is
 
-ThreadOS is a hobby x86 operating system written in C and assembly. One
-source tree builds **two kernels**:
+ThreadOS is a hobby operating system written in C and assembly. The
+PC system is a **64-bit long-mode kernel**: the `kernel/` files listed in
+`SHARED64` in the `Makefile`, plus `kernel64/` and `boot64/`. (There was
+a 32-bit kernel too; it was removed, and its tests moved to this one.)
 
-- a 32-bit protected-mode kernel: `kernel/` plus `boot/`
-- a 64-bit long-mode kernel: the shared `kernel/` files plus `kernel64/`
-  and `boot64/`
-
-A third kernel for ARM64 (`bootarm64/` + `kernelarm64/`, QEMU's `virt`
+A second kernel for ARM64 (`bootarm64/` + `kernelarm64/`, QEMU's `virt`
 machine, built with clang) is at its third stage: it boots, reads the
 device tree, catches exceptions, runs with the MMU on, takes timer
 interrupts through a GICv2, preempts kernel threads and runs them on
@@ -24,18 +22,16 @@ an AArch64 branch next to the x86 one; the rest follows as shared code
 stops assuming x86. Its tests are `arm64boot`, `arm64core` and
 `arm64threads`.
 
-Code that does not depend on the CPU mode lives in `kernel/` and is
-**compiled twice**. Only paging, interrupts, context switching and the
-syscall entry are separate in `kernel64/`. Ring 3 programs in `user/` are
-built for both kernels. `user/uapi.h` selects the system call layer:
-`user/usys.h` for 32-bit, or `user64/usys64.h` plus `user64/compat64.h`
-for 64-bit.
+Code that does not depend on the processor lives in `kernel/`; paging,
+interrupts, context switching and the syscall entry are in `kernel64/`.
+Ring 3 programs are in `user/` (shared sources, which reach the kernel
+through `user/uapi.h` = `user64/usys64.h` plus `user64/compat64.h`) and
+`user64/`.
 
 ## Commands
 
 ```sh
-make -j8                      # 32-bit kernel + initrd (build/threados.bin, build/initrd.img)
-make -j8 kernel64             # 64-bit kernel + initrd (build/threados64.bin, build/initrd64.img)
+make -j8                      # kernel + initrd (build/threados64.bin, build/initrd64.img)
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
 make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld)
 make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
@@ -47,10 +43,10 @@ make fuzz                     # parsers under ASan/UBSan on the host
 ```
 
 Build into another directory with `make BUILD=/some/dir ...`. Run tests
-against that build by passing the four images as arguments:
+against that build by passing the two images as arguments:
 
 ```sh
-python3 scripts/run_tests.py -tfiles $B/threados.bin $B/initrd.img $B/threados64.bin $B/initrd64.img
+python3 scripts/run_tests.py -tfiles $B/threados64.bin $B/initrd64.img
 ```
 
 **Never rebuild `build/` while a test run is using it.** The tests boot the
@@ -77,9 +73,10 @@ real. Use a separate `BUILD=` directory for experiments.
    compare (`t_polish`, `t_libc`, `scripts/tests/js/`).
 4. **Comments explain *why*,** not what. Match the comment density and the
    tone of the surrounding code.
-5. **Shared code must build and pass on both kernels.** When you change
-   something in `kernel/` or `user/`, rebuild both kernels (`make` and
-   `make kernel64`). Run the tests for both.
+5. **Shared code must build where it is shared.** `kernel/string.c`,
+   `kernel/heap.c`, `kernel/include/io.h` and `spinlock.h` are built for
+   ARM64 too: when you change them, run `make kernelarm64` and the ARM64
+   groups as well as the x86-64 build and tests.
 6. **No new dependencies.** The kernel and programs are freestanding (no
    libc, except programs built against `libc/` musl). Third-party code goes
    into `third_party/` unmodified. Changes go into `libc/overlay/`, `apps/browser/patches/` or into
@@ -92,10 +89,9 @@ real. Use a separate `BUILD=` directory for experiments.
 
 | Task | Files |
 |---|---|
-| Add a system call (32-bit) | `kernel/syscall.c`, `user/usys.h` |
-| Add a system call (64-bit) | `kernel64/syscall64.c`, `kernel64/syscall64.h`, `user64/usys64.h` (and `user64/compat64.h` if shared programs use it) |
-| Add a ring 3 program | `user/<name>.c`; add it to `USER_ELFS` / `USER64_ELFS` and to the `mkinitrd.py` lines of `$(INITRD)` / `$(INITRD64)` in the `Makefile` (initrd names are at most 15 characters) |
-| Add a driver | `kernel/<name>.c` + `kernel/include/<name>.h`; add `$(BUILD)/<name>.o` to `OBJS` (32-bit) and `<name>` to `SHARED64` (64-bit) |
+| Add a system call | `kernel64/syscall64.c`, `kernel64/syscall64.h`, `user64/usys64.h` (and `user64/compat64.h` if shared programs use it) |
+| Add a ring 3 program | `user/<name>.c` or `user64/<name>.c`; add it to `USER64_ELFS` and to the `mkinitrd.py` lines of `$(INITRD64)` in the `Makefile` (initrd names are at most 15 characters) |
+| Add a driver | `kernel/<name>.c` + `kernel/include/<name>.h`; add `<name>` to `SHARED64` |
 | Desktop / compositor | `kernel/desktop.c`, `kernel/gfx.c`, `kernel/uitext.c` |
 | GUI widget kit for programs | `user/ugui.h`, `user/udraw.h` |
 | Filesystem (TFS3) | `kernel/fs.c`; FAT in `kernel/fat.c` |
@@ -111,7 +107,7 @@ changes.
 
 ## Before you finish
 
-- Both kernels build without new warnings.
+- The kernel builds without new warnings (and ARM64 too, when its shared files changed).
 - The test groups your change touches pass, plus any group that clicks on
   or reads the screen region you changed.
 - Notable changes get an entry at the end of [docs/JOURNAL.md](docs/JOURNAL.md).

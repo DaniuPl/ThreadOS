@@ -29,7 +29,7 @@ void _start(int argc, char **argv)
 
     print("[nslookup] asking ");
     print_ip(ni.dns);
-    print(" o ");
+    print(" about ");
     print(argv[1]);
     print("\n");
 

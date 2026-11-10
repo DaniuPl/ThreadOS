@@ -10,10 +10,6 @@
  * floating point does not give. Six decimals and twelve digits before
  * the point is a desk calculator's range; past it the display says
  * "Error" rather than something wrong.
- *
- * A 32-bit program dividing 64-bit numbers would need the compiler's
- * library, which a program here does not have, so the division is done
- * here, a bit at a time. One source for both kernels (uapi.h).
  */
 
 #include "udraw.h"
@@ -58,20 +54,13 @@ static char expr[48];         /* the line above: "12 +" */
 
 /* --- arithmetic in millionths ------------------------------------------ */
 
+/* The quotient, and the remainder where it is wanted */
 static unsigned long long udiv(unsigned long long a, unsigned long long b,
                                unsigned long long *rem)
 {
-    unsigned long long q = 0, r = 0;
-    for (int i = 63; i >= 0; i--) {
-        r = (r << 1) | ((a >> i) & 1);
-        if (r >= b) {
-            r -= b;
-            q |= 1ULL << i;
-        }
-    }
     if (rem)
-        *rem = r;
-    return q;
+        *rem = a % b;
+    return a / b;
 }
 
 static int too_big(num_t v)

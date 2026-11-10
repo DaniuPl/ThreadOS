@@ -82,8 +82,8 @@ int hda_remember(void);
 /* --- Sound, as a program in ring 3 sees it ---------------------------
  *
  * The shape that goes through a syscall, so it lives with the driver
- * rather than with either kernel's list of calls. It must match
- * struct snd_info in user/usys.h and user64/compat64.h.
+ * rather than with the kernel's list of calls. It must match
+ * struct snd_info in user64/compat64.h.
  */
 struct snd_info {
     uint32_t present;

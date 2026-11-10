@@ -1,4 +1,4 @@
-/* Shared account system call contract for both kernels and user programs. */
+/* Shared account system call contract between the kernel and user programs. */
 
 #ifndef THREADOS_USERCTL_H
 #define THREADOS_USERCTL_H

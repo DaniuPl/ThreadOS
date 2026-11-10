@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: the terminal's everyday commands, on both kernels.
+"""ThreadOS smoke test: the terminal's everyday commands.
 
 'ls', 'ps', 'free', 'date', 'mv' and the rest used to be the kernel
 shell's own commands, out of reach of the terminal in a window, which
@@ -16,9 +16,8 @@ outside it:
   'ps' finds the terminal and itself; 'set' reads what the kernel holds,
   and a change from a plain user is refused in words
 
-  a pipe between two of them counts what the first wrote
-
-The same on the 32-bit and the 64-bit kernel: one program, built twice.
+  a pipe between two of them counts what the first wrote, and 'head'
+  at its end keeps the first lines of a listing and no more
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -90,7 +89,7 @@ def shell(q, cmd, want):
     return out
 
 
-def session(q, tag, bits, ram_re):
+def session(q):
     q.mouse_home()
     q.launch_dock("gterm")                   # the "Term" tile
     time.sleep(3)
@@ -101,64 +100,64 @@ def session(q, tag, bits, ram_re):
     run(q, "cd /")
 
     seen = run(q, "uname", "ThreadOS")
-    check("%s uname says which system this is (%s)"
-          % (tag, after(seen, "uname")[:1]),
-          after(seen, "uname")[:1] == ["ThreadOS " + bits])
+    check("uname says which system this is (%s)" % after(seen, "uname")[:1],
+          after(seen, "uname")[:1] == ["ThreadOS x86-64 (long mode)"])
 
     # --- files, made here and found by the kernel ---------------------
     # (the kernel's shell starts in the profile's home: into the root)
     shell(q, "cd /", None)
-    shell(q, "write /note.txt the kernel wrote this", "wrote")
+    made = shell(q, "write /note.txt the kernel wrote this", "written")
+    check("the kernel's shell wrote note.txt for the terminal to work on",
+          "'/note.txt' written (22 B)" in made)
     run(q, "cp note.txt copy.txt")
     run(q, "mkdir box")
     run(q, "mv copy.txt box/moved.txt")
     run(q, "touch made.txt")
     got = shell(q, "cat /box/moved.txt", "wrote this")
-    check("%s cp, mkdir and mv put the kernel's file in box/moved.txt - "
-          "the kernel's own 'cat' reads it there" % tag,
+    check("cp, mkdir and mv put the kernel's file in box/moved.txt - "
+          "the kernel's own 'cat' reads it there",
           "the kernel wrote this" in got)
     fls = shell(q, "fls", "made.txt")
-    check("%s touch made an empty file, and the copy left the top "
-          "('fls' lists made.txt, box/, not copy.txt)" % tag,
+    check("touch made an empty file, and the copy left the top "
+          "('fls' lists made.txt, box/, not copy.txt)",
           "made.txt" in fls and "box/" in fls and "copy.txt" not in fls)
     seen = run(q, "ls box", "moved")
-    check("%s 'ls' lists the directory (%s)"
-          % (tag, after(seen, "ls box")[:1]),
+    check("'ls' lists the directory (%s)" % after(seen, "ls box")[:1],
           after(seen, "ls box")[:1] == ["moved.txt"])
     seen = run(q, "ls -l", "box/")
     out = after(seen, "ls -l")
-    check("%s 'ls -l' gives sizes and marks a directory (%s)" % (tag, out),
+    # 'write' ends a text file with a newline: 21 characters and one more
+    check("'ls -l' gives sizes and marks a directory (%s)" % out,
           any(r.split() == ["dir", "box/"] for r in out) and
           any(r.split() == ["0", "made.txt"] for r in out) and
-          any(r.split() in (["21", "note.txt"], ["22", "note.txt"])
-              for r in out))
+          any(r.split() == ["22", "note.txt"] for r in out))
     run(q, "rm box/moved.txt")
     got = shell(q, "cat /box/moved.txt", "no file")
-    check("%s and rm removes it, as far as the kernel is concerned"
-          % tag, "there is no file" in got)
+    check("and rm removes it, as far as the kernel is concerned",
+          "there is no file" in got)
 
     # --- figures against the kernel's and QEMU's -----------------------
     mem = shell(q, "mem", "KiB")
-    m = re.search(ram_re, mem)
+    m = re.search(r"Memory: (\d+) KiB RAM", mem)
     seen = run(q, "free", "KiB free")
     got = " ".join(after(seen, "free"))
     f = re.search(r"Memory: (\d+) KiB", got)
-    check("%s free reports the memory the kernel's 'mem' does (%s, %s)"
-          % (tag, f.group(1) if f else "?", m.group(1) if m else "?"),
+    check("free reports the memory the kernel's 'mem' does (%s, %s)"
+          % (f.group(1) if f else "?", m.group(1) if m else "?"),
           f is not None and m is not None and f.group(1) == m.group(1))
     seen = run(q, "date", RTC_DATE)
-    check("%s date is the day QEMU's clock started at (%s)"
-          % (tag, after(seen, "date")[:1]),
+    check("date is the day QEMU's clock started at (%s)"
+          % after(seen, "date")[:1],
           after(seen, "date")[:1] and
           after(seen, "date")[0].startswith(RTC_DATE))
 
     # --- processes, and settings ----------------------------------------
     seen = run(q, "ps", "core")
     out = " ".join(after(seen, "ps"))
-    check("%s ps lists the terminal and itself" % tag,
+    check("ps lists the terminal and itself",
           "gterm" in out and "core" in out)
     seen = run(q, "set theme", "theme =")
-    check("%s set reads a setting (%s)" % (tag, after(seen, "set theme")[:1]),
+    check("set reads a setting (%s)" % after(seen, "set theme")[:1],
           after(seen, "set theme")[:1] == ["theme = dark"])
     # A change goes through when the person at the machine may make it
     # and is refused in words when not - and the kernel agrees either way
@@ -166,39 +165,37 @@ def session(q, tag, bits, ram_re):
     out = " ".join(after(seen, "set motion 0"))
     kernel = shell(q, "set motion", "motion =")
     if "needs admin" in out:
-        check("%s a plain user's change is refused, and the kernel keeps "
-              "motion = 1" % tag, "motion = 1" in kernel)
+        check("a plain user's change is refused, and the kernel keeps "
+              "motion = 1", "motion = 1" in kernel)
     else:
-        check("%s an admin's change is saved (%s), and the kernel holds "
-              "motion = 0" % (tag, out),
+        check("an admin's change is saved (%s), and the kernel holds "
+              "motion = 0" % out,
               "motion = 0 (saved)" in out and "motion = 0" in kernel)
 
     # --- a pipe between two of them -------------------------------------
     seen = run(q, "echo one two three | wc", "14")
     out = after(seen, "echo one two three | wc")
-    check("%s 'echo one two three | wc': 1 line, 3 words, 14 bytes (%s)"
-          % (tag, out[:1]),
+    check("'echo one two three | wc': 1 line, 3 words, 14 bytes (%s)"
+          % out[:1],
           out[:1] and out[0].split() == ["1", "3", "14"])
+    # head lets the first lines through and drops the rest. The root
+    # lists box/, made.txt and note.txt at least, so a head that passed
+    # it all on, or kept its default of ten, would show more than two.
+    # Two and no more: further down the listing is 'termout', where the
+    # terminal keeps what a command writes, and its size is not the same
+    # in both runs - 'ls' fills it in the first and 'head' in the second.
+    seen = run(q, "ls -l /", tries=60)
+    whole = after(seen, "ls -l /")
+    seen = run(q, "ls -l / | head -n 2", tries=60)
+    out = after(seen, "ls -l / | head -n 2")
+    check("'ls -l / | head -n 2' keeps the first 2 of its %d rows (%s)"
+          % (len(whole), out),
+          len(whole) > 2 and out == whole[:2])
 
 
 def main():
     print()
-    print("--- the terminal's commands (the 32-bit kernel) ---")
-    disk = tempfile.mktemp(suffix=".img")
-    with open(disk, "wb") as f:
-        f.truncate(16 * 1024 * 1024)
-    try:
-        q = Qemu(KERNEL, INITRD, disk, serial=tempfile.mktemp(suffix=".log"))
-        try:
-            check("(32) the desktop came up", q.wait_desktop(timeout=40))
-            session(q, "(32)", "i386 (protected mode)",
-                    r"RAM detected: (\d+) KiB")
-        finally:
-            q.close()
-    finally:
-        os.unlink(disk)
-
-    print("--- the terminal's commands (the 64-bit kernel) ---")
+    print("--- the terminal's commands ---")
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
@@ -209,19 +206,16 @@ def main():
     with open(disk, "wb") as fh:
         fh.truncate(DISK_SIZE)
     try:
-        check("(64) the disc builds", make_iso64(os.path.join(work, "iso"),
-                                                 iso))
+        check("the disc builds", make_iso64(os.path.join(work, "iso"), iso))
         q = Qemu(KERNEL, INITRD, cdrom=iso, disk=disk, sata=True,
-                 serial=os.path.join(work, "serial.log"),
-                 qemu="qemu-system-x86_64")
+                 serial=os.path.join(work, "serial.log"))
         try:
             q.wait_serial("thread64>", timeout=90)
             q.wait_serial("[net] DHCP", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
-            check("(64) the desktop came up", q.wait_desktop(30))
-            session(q, "(64)", "x86-64 (long mode)",
-                    r"Memory: (\d+) KiB RAM")
+            check("the desktop came up", q.wait_desktop(30))
+            session(q)
         finally:
             q.close()
     finally:

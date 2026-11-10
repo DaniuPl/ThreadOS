@@ -38,7 +38,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, no64
 
 # The viewer opens in the next free slot of the cascade; with the
 # App already open it is slot 3, at (106,66), and asks for 420x300.
@@ -52,6 +52,10 @@ def status(q, vx=VX, vy=VY):
 
 
 def main():
+    reason = no64()
+    if reason:
+        print("SKIPPED: " + reason)
+        return summary()
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
         f.truncate(16 * 1024 * 1024)
@@ -116,18 +120,40 @@ def main():
 
             q.click_desktop()             # the keys back to the shell
             time.sleep(1)
-            seen = len(q.serial())
+            # The shell waits for the program and then says how it ended -
+            # waited for up to the code and past it, so that the code is
+            # not read off half a line
+            start = len(q.serial())
             q.type_line("run httpget 10.0.2.2 %d /gradient.jpg foto.jpg"
                         % http_port)
-            time.sleep(6)
-            got = q.serial()[seen:]
+            got = ""
+            end = time.time() + 60
+            while time.time() < end and not re.search(
+                    r"\[httpget\] done, exit code -?\d+ \(", got):
+                time.sleep(0.3)
+                got = q.serial()[start:]
             check("the machine fetches a picture off the network",
-                  "HTTP 200" in got and "has ended (code 0)" in got)
+                  "HTTP 200" in got and
+                  "[httpget] done, exit code 0 " in got)
+            # ... all of it: the file on the disk is as long as the
+            # picture the server sent
+            fls = q.command("fls", "foto.jpg", timeout=20)
+            size = re.search(r"foto\.jpg\s+\((\d+) B\)", fls)
+            check("and all of it reached the disk (%s B of %d)"
+                  % (size.group(1) if size else "?", len(JPEG_GRADIENT)),
+                  size is not None and int(size.group(1)) == len(JPEG_GRADIENT))
 
+            # The viewer reads the file into a fresh megabyte it has not
+            # touched yet - the kernel has to bring those pages in for
+            # the read, or the picture stops after its first page
             q.type_line("run gimg foto.jpg")
-            time.sleep(7)
-            q.mouse_goto(600, 200)
-            time.sleep(2)
+            q.mouse_goto(600, 200)        # the pointer off the picture
+            said = ""
+            end = time.time() + 40
+            while time.time() < end and "loaded" not in said:
+                time.sleep(1)
+                said = status(q)
+            time.sleep(0.5)               # the frame after the status line
             w, h, at = q.screen_raw()
             said = status(q)
             check("the viewer loaded the picture ('%s')" % said,

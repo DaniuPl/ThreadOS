@@ -1,7 +1,7 @@
 /* PIC 8259 - the hardware interrupt controller
  *
  * After startup the BIOS maps IRQ 0-7 onto vectors 8-15, which collide
- * with CPU exceptions in protected mode. We remap them onto 32-47.
+ * with the CPU's exceptions (0-31). We remap them onto 32-47.
  */
 
 #include "include/pic.h"

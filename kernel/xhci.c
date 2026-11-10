@@ -40,13 +40,8 @@
 /* The registers sit in memory, so they have to be mapped first. The
    address comes from a BAR rather than from anything fixed - that is
    the only thing in this file that depends on the processor mode. */
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
-#else
-#include "include/paging.h"
-#define MAP_PHYS(a, n)   paging_map_phys((a), (n))
-#endif
 
 /* --- registers ------------------------------------------------------- */
 
@@ -238,8 +233,9 @@ static void wr(uintptr_t addr, uint32_t v)
     *(volatile uint32_t *)addr = v;
 }
 
-/* 64-bit registers may be written in two halves, and that is exactly
-   what we do - otherwise the same code would not work in 32-bit mode */
+/* 64-bit registers may be written in two halves, low half first
+   (xHCI 5.1), and that is what we do: it needs nothing but the 32-bit
+   access every other register gets */
 static void wr64(uintptr_t addr, uint64_t v)
 {
     wr(addr, (uint32_t)v);
@@ -694,14 +690,6 @@ int xhci_init(void)
         addr |= (uint64_t)dev.bar[1] << 32;
     if (!addr)
         return give_up("the firmware gave the controller no address");
-#ifndef __x86_64__
-    /* In 32-bit mode there is nowhere to map it to: the whole address
-       space ends where this address begins. UEFI firmware likes to put
-       64-bit windows up there, and that is why the same machine has
-       USB under the old BIOS and none under UEFI - in this kernel. */
-    if (addr > 0xFFFFFFFFull)
-        return give_up("the controller sits above 4 GiB (32-bit mode)");
-#endif
 
     if (MAP_PHYS((uintptr_t)addr, 0x10000) < 0)
         return give_up("could not map the controller's window");

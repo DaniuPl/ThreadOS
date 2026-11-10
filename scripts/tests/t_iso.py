@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 """ThreadOS smoke test: booting from a disc (Multiboot 2).
 
+A disc of the test's own making: GRUB with a menu written here - the
+kernel and the initrd as a bare module2, no gfxpayload line, so the
+loader picks the graphics mode itself. What the kernel is handed has
+to arrive through the Multiboot 2 tags: the memory map, the initrd as
+a module and the pointer to the ACPI tables.
+
+The console is then drawn on the loader's framebuffer (kernel/fbcon.c),
+and checked pixel by pixel: the text block in the middle, the text
+mode's colours given back in RGB, nothing outside the block. And the
+desktop on that same buffer: kernel text printed while it runs lands
+on the visible buffer behind the compositor's back, and the next frame
+has to cover it.
+
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
@@ -29,15 +42,15 @@ def main():
         iso = tempfile.mktemp(suffix=".iso")
         try:
             os.makedirs(isodir + "/boot/grub")
-            shutil.copy(KERNEL, isodir + "/boot/threados.bin")
-            shutil.copy(INITRD, isodir + "/boot/initrd.img")
-            # A menu of our own: with no countdown and straight into text
-            # mode, so that the screen can be read
+            shutil.copy(KERNEL, isodir + "/boot/threados64.bin")
+            shutil.copy(INITRD, isodir + "/boot/initrd64.img")
+            # A menu of our own: with no countdown and straight to the
+            # text shell, so that the screen can be read
             with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                 fh.write("set timeout=0\nset default=0\n"
                          'menuentry "ThreadOS" {\n'
-                         "    multiboot2 /boot/threados.bin nodesktop\n"
-                         "    module2 /boot/initrd.img\n}\n")
+                         "    multiboot2 /boot/threados64.bin nodesktop\n"
+                         "    module2 /boot/initrd64.img\n}\n")
             made = subprocess.run(["grub-mkrescue", "-o", iso, isodir],
                                   stdout=subprocess.DEVNULL,
                                   stderr=subprocess.DEVNULL).returncode == 0
@@ -54,16 +67,16 @@ def main():
                                     q21.wait_serial("Physical memory",
                                                     timeout=20)) is not None)
                     check("the initrd arrived as a Multiboot 2 module",
-                          re.search(r"initrd: \d+ files",
+                          re.search(r"initrd: \d+ file\(s\) from the loader",
                                     q21.wait_serial("initrd:", timeout=20))
                           is not None)
                     check("the pointer to the ACPI tables handed over by GRUB",
                           "ACPI: tables from" in q21.wait_serial("ACPI:",
                                                                 timeout=20))
-                    q21.wait_serial("ThreadOS shell", timeout=30)
+                    q21.wait_serial("thread64>", timeout=30)
                     q21.type_line("uptime")
                     check("the system from the disc answers commands",
-                          "uptime:" in q21.wait_serial("timer ticks",
+                          "Uptime:" in q21.wait_serial("ticks of 10 ms",
                                                        timeout=20))
 
                     # The console drawn on the framebuffer from GRUB: VGA
@@ -78,11 +91,15 @@ def main():
                               if at(x, y) != (0, 0, 0))
                     check(f"the console is drawn on the framebuffer "
                           f"({lit} pixels)", lit > 3000)
-                    green = sum(1 for y in range(y0, y0 + 200)
-                                for x in range(x0, x0 + 640)
-                                if at(x, y) == (85, 255, 85))
+                    # The prompt wears text colour 11, light cyan (the
+                    # 'color' setting's default, kernel/config.c), and
+                    # that has to come out as exactly 55FFFF
+                    cyan = sum(1 for y in range(y0, y0 + 200)
+                               for x in range(x0, x0 + 640)
+                               if at(x, y) == (85, 255, 255))
                     check("the text mode colours given back in RGB "
-                          f"(a light green [ OK ]: {green})", green > 100)
+                          f"(the light cyan of the prompt: {cyan})",
+                          cyan > 100)
                     outside = sum(1 for y in range(0, min(40, y0))
                                   for x in range(0, w, 4)
                                   if at(x, y) != (0, 0, 0))
@@ -98,8 +115,8 @@ def main():
                 with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                     fh.write("set timeout=0\nset default=0\n"
                              'menuentry "ThreadOS" {\n'
-                             "    multiboot2 /boot/threados.bin\n"
-                             "    module2 /boot/initrd.img\n}\n")
+                             "    multiboot2 /boot/threados64.bin desktop\n"
+                             "    module2 /boot/initrd64.img\n}\n")
                 iso2 = tempfile.mktemp(suffix=".iso")
                 try:
                     subprocess.run(["grub-mkrescue", "-o", iso2, isodir],
@@ -107,7 +124,10 @@ def main():
                                    stderr=subprocess.DEVNULL)
                     q22 = Qemu(KERNEL, INITRD, cdrom=iso2)
                     try:
-                        time.sleep(22)
+                        # Up to the bare desktop, past whatever asks for
+                        # a profile or a password on the way
+                        q22.wait_desktop(timeout=60)
+                        time.sleep(1)
                         w, h, at = q22.screen_raw()
                         teal, total = aurora_samples(at, w, h)
                         check(f"the desktop draws on the loader's buffer "

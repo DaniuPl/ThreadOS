@@ -22,11 +22,6 @@
  * the tree is read by walking: into every folder that is open in it,
  * one readdir each, and back to where the list is. That is a handful
  * of system calls twice a second, for a tree a person opened by hand.
- *
- * The one thing that depends on the processor mode is reading a
- * directory: protected mode hands back the size in the return value,
- * long mode fills in a structure. Everything else - the list, the
- * clicking, the drawing - is one piece of code compiled twice.
  */
 
 #include "uapi.h"
@@ -277,7 +272,6 @@ static int lives_in(const char *path, const char *dir)
 
 /* --- the one thing that depends on the kernel underneath ---------- */
 
-#ifdef __x86_64__
 static int read_entry(int index, struct entry *out)
 {
     struct dirent64 e;
@@ -288,19 +282,6 @@ static int read_entry(int index, struct entry *out)
     out->is_dir = e.is_dir;
     return 0;
 }
-#else
-static int read_entry(int index, struct entry *out)
-{
-    char name[FS_NAME_MAX + 1];
-    int32_t r = sys_readdir(index, name);
-    if (r == -1)
-        return -1;
-    ecopy(out->name, name, NAME_LEN);
-    out->is_dir = (r == -2);
-    out->size = out->is_dir ? 0 : (unsigned)r;
-    return 0;
-}
-#endif
 
 /* What the system keeps for itself stays out of sight unless the
    'hidden' setting asks for it: the swap file and the settings in the
@@ -420,11 +401,7 @@ static void build_tree(void)
 
 static void where_am_i(void)
 {
-#ifdef __x86_64__
     sys_getcwd(here, (uint64_t)sizeof(here));
-#else
-    sys_getcwd(here);
-#endif
     if (!here[0])
         ecopy(here, "/", sizeof(here));
 
@@ -539,7 +516,6 @@ static void open_chosen(void)
                   suffix_is(nm, ln, ".jpg") ||
                   suffix_is(nm, ln, ".jpeg");
     int media = 0;
-#ifdef __x86_64__
     media = suffix_is(nm, ln, ".mp3") || suffix_is(nm, ln, ".wav") ||
             suffix_is(nm, ln, ".aac") || suffix_is(nm, ln, ".flac") ||
             suffix_is(nm, ln, ".ogg") || suffix_is(nm, ln, ".m4a") ||
@@ -547,7 +523,6 @@ static void open_chosen(void)
             suffix_is(nm, ln, ".m4v") || suffix_is(nm, ln, ".mov") ||
             suffix_is(nm, ln, ".mkv") || suffix_is(nm, ln, ".avi") ||
             suffix_is(nm, ln, ".webm");
-#endif
     const char *prog = picture ? "gimg" : media ? "gmedia" : "gedit";
 
     char cmd[NAME_LEN + 10];
@@ -556,7 +531,6 @@ static void open_chosen(void)
     for (int i = 0; pre[i]; i++)
         cmd[n++] = pre[i];
     ecopy(cmd + n, items[chosen].name, (int)sizeof(cmd) - n);
-#ifdef __x86_64__
     int64_t pid = sys_fork();
     if (pid == 0) {
         char *args[3];
@@ -566,10 +540,6 @@ static void open_chosen(void)
         sys_exec(prog, args);
         sys_exit(127);
     }
-#else
-    (void)prog;
-    sys_spawn(cmd, 0, 0);
-#endif
     ecopy(note, media ? "opened in the media player" :
                picture ? "opened in the viewer" : "opened in the editor",
           sizeof(note));
@@ -758,7 +728,7 @@ static void delete_chosen(void)
     if (in_trash) {
         ask_line[p++] = '?';
     } else {
-        const char *end = polish ? "\" do Kosza?" : "' to Trash?";
+        const char *end = polish ? " do Kosza?" : " to Trash?";
         for (int i = 0; end[i] && p < (int)sizeof(ask_line) - 1; i++)
             ask_line[p++] = end[i];
     }

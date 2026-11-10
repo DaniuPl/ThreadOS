@@ -3,14 +3,16 @@
 
 A mouse gives relative deltas rather than a position - it is the kernel
 that has to add them up and clamp them to the screen's size. The start
-falls in the middle of 320x200, that is (160,100), and QEMU passes the
-deltas one to one, so every movement can be checked arithmetically
-rather than by eye.
+falls in the middle of 320x200, that is (160,100), whatever mode the
+console is in (kernel/mouse.c), and QEMU passes the deltas one to one,
+so every movement can be checked arithmetically rather than by eye.
+Pushed far past the top left corner the pointer has to stop at (0,0):
+that is the clamp at work.
 
 The fourth byte - the wheel, which is how a laptop's touchpad reports
 two fingers - is asked for with a knock of three sample rates, and the
 device answers with who it is. That the asking worked is asked here;
-what the wheel then DOES is the 'kolko' group.
+what the wheel then DOES is the 'wheel' group.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -27,7 +29,14 @@ from ptest import check, summary
 def main():
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
-        q.wait_for("ThreadOS shell", timeout=40)
+        q.wait_for("thread64>", timeout=40)
+
+        # Before anything moved: the start, which every sum below
+        # begins from
+        q.type_line("mouse")
+        check("the pointer starts at (160,100)",
+              "mouse: x=160 y=100 buttons=0"
+              in q.wait_for("mouse: x=160 y=100 buttons=0"))
 
         q.mouse_move(40, 30)
         q.type_line("mouse")
@@ -59,14 +68,26 @@ def main():
               "mouse: x=130 y=90 buttons=0"
               in q.wait_for("mouse: x=130 y=90 buttons=0"))
 
+        # Further than any screen is wide or tall: the sum goes below
+        # zero on both axes, and only the clamp brings it back to the
+        # corner. (It comes last: the moves above are sums from the
+        # start.)
+        q.mouse_move(-800, -600)
+        q.type_line("mouse")
+        check("pushed past the top left corner the pointer stops at (0,0)",
+              "mouse: x=0 y=0 buttons=0"
+              in q.wait_for("mouse: x=0 y=0 buttons=0"))
+
         # The wheel. A laptop's touchpad reports two fingers sliding
         # through it, and the fourth byte that carries it has to be
         # asked for - QEMU's mouse sends it only to a guest that did.
-        q.type_line("mouse")
-        said = q.wait_for("wheel=")
+        # Only what this 'mouse' said counts: the earlier answers are
+        # still on the port.
+        said = q.command("mouse", "wheel=yes", timeout=20)
+        line = next((ln.strip() for ln in said.splitlines()
+                     if ln.strip().startswith("mouse: x=")), "")
         check("the machine negotiated a fourth byte - the wheel ('%s')"
-              % said.strip().splitlines()[-1][:50],
-              "wheel=yes" in said)
+              % line[:50], line.endswith("wheel=yes"))
     finally:
         q.close()
 

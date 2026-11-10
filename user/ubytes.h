@@ -9,9 +9,7 @@ static int format_bytes(uint64_t bytes, char *out, int size)
     static const char *const units[] = {
         "B", "KiB", "MiB", "GiB", "TiB"
     };
-    /* Shifts and masks, not division: the units are powers of two, and
-       a 64-bit division in protected mode would need libgcc, which the
-       programs are not linked with */
+    /* Shifts and masks, not division: the units are powers of two */
     int shift = 0;
     int unit = 0;
 
@@ -45,10 +43,7 @@ static int format_bytes(uint64_t bytes, char *out, int size)
 
     while (n && used < size - 1)
         out[used++] = digits[--n];
-    if (unit == 0) {
-        if (used < size - 1)
-            out[used++] = ' ';
-    } else if (tenths % 10 && used < size - 1) {
+    if (unit != 0 && tenths % 10 && used < size - 1) {
         out[used++] = ulocale_decimal_comma() ? ',' : '.';
         if (used < size - 1)
             out[used++] = (char)('0' + tenths % 10);

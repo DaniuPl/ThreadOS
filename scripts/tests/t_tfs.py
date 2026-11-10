@@ -5,17 +5,30 @@ A file written by a ring 3 process and a file written from the kernel's
 shell are to be the same file seen by both - and both are to survive a
 restart of the machine. That last part matters most here: everything
 else can be faked with a cache, and a SECOND BOOT on the same disk image
-cannot.
+cannot. The disk sits on the IDE controller here; t_k64disk does the
+same through AHCI.
 
 At the end of the first boot we call 'crash', that is, a deliberate page
 fault in the kernel. The diagnostic is to give the exception number and
-the address from CR2, and the system is to stop rather than blunder on.
+the address from CR2, and the system is to stop rather than blunder on -
+the whole machine, not just the shell that ran it: a second console,
+which answered a moment before, falls silent too.
+
+On the second boot a file gets a new name through the 'core' program's
+'mv' (user/core.c), which asks the kernel for a rename - and the kernel
+refuses a name that is taken and a source that is not there.
+
+The machine stays at its text shell; what it says is read off the serial
+port, and every answer is taken from what arrived after the command, so
+the echo of an earlier line cannot pass for a result. Only the consoles
+are read off the screen: which one is shown, and which one answered.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -23,6 +36,36 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
+
+PROMPT = "thread64>"
+TEXT = "hello-from-the-tfs-disk"
+# What user64/fileio64.c writes into 'zring3'
+RING3 = "ThreadOS 64: a file written from ring 3"
+
+
+def answer(q, cmd, prefix, timeout=30):
+    """Types a command and hands back what arrived after it, once the
+    line holding 'prefix' has come in WHOLE. The serial log fills a
+    character at a time: a wait for '[core] done, exit code' alone can
+    return before the code itself - the part the check reads - is
+    there."""
+    start = len(q.serial())
+    q.type_line(cmd)
+    line = re.compile(re.escape(prefix) + r"[^\n]*\n")
+    end = time.time() + timeout
+    while time.time() < end:
+        fresh = q.serial()[start:]
+        if line.search(fresh):
+            return fresh
+        time.sleep(0.3)
+    return q.serial()[start:]
+
+
+def listing(q):
+    """The root directory as 'fls' prints it: the names, one a line"""
+    out = q.command("fls", "Used:", timeout=30)
+    return [l.split()[0] for l in out.replace("\r", "").splitlines()
+            if l.startswith("  ") and l.strip()]
 
 
 def main():
@@ -32,53 +75,92 @@ def main():
 
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        q.wait_for("ThreadOS shell", timeout=40)
+        q.wait_serial(PROMPT, timeout=40)
 
         # --- The file system on the disk (TFS) ---
         # A ring 3 process writes and reads a file with syscalls
-        q.type_line("run fileio")
-        screen = q.wait_for("[fileio] OK")
+        out = answer(q, "run fileio64", "[fileio64] done, exit code",
+                     timeout=60)
         check("a ring 3 process wrote and read a file off the disk",
-              "read off the disk: a file written by a ring 3 process" in screen)
+              "written and read back match byte for byte" in out and
+              "[fileio64] done, exit code 0" in out)
 
         # The kernel's shell: write -> cat (a write and a read within one boot)
-        q.type_line("write greeting hello-from-the-tfs-disk")
+        out = answer(q, "write greeting " + TEXT, "write:")
         check("writing a file from the kernel's shell",
-              "wrote" in q.wait_for("wrote"))
-        q.type_line("cat greeting")
+              "write: 'greeting' written" in out)
         check("reading the written file back (cat)",
-              "hello-from-the-tfs-disk" in q.wait_for("hello-from-the-tfs-disk"))
+              TEXT in q.command("cat greeting", TEXT, timeout=30))
 
         # fls shows both files
-        q.type_line("fls")
-        screen = q.wait_for("Root directory")
-        check("fls lists the files on the disk",
-              "greeting" in screen and "ring3.txt" in screen)
+        names = listing(q)
+        check("fls lists the files on the disk (%s)" % names,
+              "greeting" in names and "zring3" in names)
 
         # cat of a file that does not exist
-        q.type_line("cat nofile")
         check("cat reports that the file is missing",
-              "there is no file 'nofile'" in q.wait_for("there is no file"))
+              "cat: there is no file 'nofile'" in
+              answer(q, "cat nofile", "cat:"))
 
-        # The 'cat' program in ring 3: it reads a file through an fd and
+        # A 'cat' program in ring 3: it reads a file through an fd and
         # writes to fd 1 (a unified I/O model: read the file -> write to
-        # the console). We clear the screen so as not to catch the old
-        # echo of 'hello-from-the-tfs-disk'.
-        q.type_line("clear")
-        time.sleep(0.3)
-        q.type_line("run cat greeting")
+        # the console)
+        out = answer(q, "run ucat64 greeting", "[ucat64] done, exit code",
+                     timeout=60)
         check("the ring 3 'cat' reads a file through an fd and writes to fd 1",
-              "hello-from-the-tfs-disk" in q.wait_for("hello-from-the-tfs-disk",
-                                                timeout=20))
+              TEXT in out and "[ucat64] done, exit code 0" in out)
+
+        # The second console, while the machine still runs: it shows
+        # itself and its own shell answers. That is what makes its
+        # silence after the crash say the machine stopped, and not
+        # merely that the shell which ran 'crash' is gone. Every console
+        # writes to the serial port, so the answer there does not say
+        # which shell gave it; the screen does, because a console draws
+        # only while it is the one shown (kernel/vga.c), and the first
+        # has had no 'uptime' typed on it.
+        q.sendkey("alt-f2")
+        q.wait_fbcon("console 2", timeout=15)
+        out = q.command("uptime", "Uptime:", timeout=30)
+        shown = q.wait_fbcon("Uptime:", timeout=15)
+        check("before the crash Alt+F2 shows the second console, and its "
+              "own shell answers on it",
+              "console 2" in shown and "Uptime:" in shown and
+              "Uptime:" in out)
+        # Polled until the whole of the first console is back: a screen
+        # read in the middle of the redraw holds rows of both
+        q.sendkey("alt-f1")
+        end = time.time() + 15
+        shown = q.screen_fbcon()
+        while time.time() < end and ("console 2" in shown or
+                                     "Uptime:" in shown or
+                                     PROMPT not in shown):
+            time.sleep(0.4)
+            shown = q.screen_fbcon()
+        check("and Alt+F1 brings the first one back, where 'crash' is "
+              "typed, without the second one's answer",
+              "console 2" not in shown and "Uptime:" not in shown and
+              PROMPT in shown)
 
         # At the end: crash should cause a page fault with a diagnostic
-        q.type_line("crash")
-        screen = q.screen()
+        out = q.command("crash", "The system has stopped",
+                        timeout=30).replace("\r", "")
         check("the page fault was served (exception 14)",
-              "CPU EXCEPTION 14: Page Fault" in screen)
+              "CPU EXCEPTION 14: Page Fault" in out)
+        # 'crash' writes to 0x00007E0000000000; the report gives CR2 as
+        # its high and low 32 bits
         check("CR2 points at the faulty address",
-              "(CR2): e0000000" in screen)
-        check("the system stopped after the exception", "The system has stopped" in screen)
+              "Page fault at the address (CR2): 7e00:0\n" in out)
+        check("the system stopped after the exception",
+              "The system has stopped" in out)
+        # Stopped means stopped: the shell no longer answers
+        check("and nothing answers a command after it",
+              "Uptime:" not in q.command("uptime", "Uptime:", timeout=8))
+        # Nor does any other shell. Had the fault killed only the task
+        # that ran 'crash', the second console would answer as it did
+        # before.
+        q.sendkey("alt-f2")
+        check("not even the second console, which answered before the crash",
+              "Uptime:" not in q.command("uptime", "Uptime:", timeout=8))
     finally:
         q.close()
 
@@ -86,67 +168,60 @@ def main():
     print("--- a second boot (the same disk) ---")
     q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
     try:
-        screen = q2.wait_for("ThreadOS shell")
+        boot = q2.wait_serial(PROMPT, timeout=40)
         check("the second boot: the disk was found"
               " (already formatted, no second format)",
-              "+ TFS ready" in screen and "formatted" not in screen)
+              "+ TFS ready" in boot and "formatted" not in boot)
 
-        q2.type_line("fls")
-        screen = q2.wait_for("Root directory")
+        names = listing(q2)
         check("the files survived the restart (fls)",
-              "greeting" in screen and "ring3.txt" in screen)
+              "greeting" in names and "zring3" in names)
 
-        q2.type_line("cat greeting")
         check("the file's content survived the restart (cat)",
-              "hello-from-the-tfs-disk" in q2.wait_for("hello-from-the-tfs-disk"))
+              TEXT in q2.command("cat greeting", TEXT, timeout=30))
 
-        q2.type_line("cat ring3.txt")
         check("the file written by ring 3 survived the restart",
-              "a file written by a ring 3 process" in q2.wait_for("ring3"))
+              RING3 in q2.command("cat zring3", RING3, timeout=30))
 
         # --- a new name, without moving a single block ------------------
-        # 'mv' used to read the whole file and write it out again; the
-        # blocks of a file do not move when it is renamed, and now
-        # neither does the code pretend they do.
-        q2.type_line("mv greeting powitanie")
-        q2.wait_for("mv:", timeout=20)
-        # The screen keeps what scrolled past, and 'greeting' was
-        # printed on it a moment ago - so it is wiped before the
-        # listing is read, or the old name would be found in the old
-        # output rather than in the directory.
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("fls")
-        screen = q2.wait_for("Root directory")
-        check("mv gives a new name, and the old one goes",
-              "powitanie" in screen and "greeting" not in screen)
+        # A rename changes one entry on the disk: the blocks of a file
+        # do not move when it is renamed.
+        out = answer(q2, "run core mv greeting welcome",
+                     "[core] done, exit code", timeout=60)
+        # 'usage:', 'mv: no permission' and 'mv: cannot move' are every
+        # word c_mv (user/core.c) has to say, and all of them mean the
+        # rename did not happen
+        check("mv says nothing and ends with no error",
+              "mv:" not in out and "usage:" not in out and
+              "[core] done, exit code 0" in out)
+        names = listing(q2)
+        check("mv gives a new name, and the old one goes (%s)" % names,
+              "welcome" in names and "greeting" not in names)
 
-        q2.type_line("cat powitanie")
         check("and the content is the same - the blocks did not move",
-              "hello-from-the-tfs-disk" in q2.wait_for("hello-from-the-tfs-disk"))
+              TEXT in q2.command("cat welcome", TEXT, timeout=30))
 
         # The rules a rename has: the name must be free, and the source
         # must exist. A rename that overwrites is a delete nobody asked
         # for.
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("mv powitanie ring3.txt")
-        screen = q2.wait_for("mv:", timeout=20)
-        check("it does not allow a name that is taken", "cannot" in screen)
+        out = answer(q2, "run core mv welcome zring3",
+                     "[core] done, exit code", timeout=60)
+        check("it does not allow a name that is taken",
+              "mv: cannot move 'welcome' to 'zring3'" in out and
+              "[core] done, exit code 1" in out)
 
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("mv nosuchfile whatever")
-        screen = q2.wait_for("mv:", timeout=20)
+        out = answer(q2, "run core mv nosuchfile whatever",
+                     "[core] done, exit code", timeout=60)
         check("and it does not rename something that is not there",
-              "cannot" in screen)
+              "mv: cannot move 'nosuchfile' to 'whatever'" in out and
+              "[core] done, exit code 1" in out)
 
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("fls")
-        screen = q2.wait_for("Root directory")
-        check("after both refusals the files are as they were",
-              "powitanie" in screen and "ring3.txt" in screen)
+        names = listing(q2)
+        check("after both refusals the files are as they were (%s)" % names,
+              "welcome" in names and "zring3" in names and
+              "whatever" not in names)
+        check("and the file whose name was wanted still holds its own content",
+              RING3 in q2.command("cat zring3", RING3, timeout=30))
     finally:
         q2.close()
         if os.path.exists(disk):

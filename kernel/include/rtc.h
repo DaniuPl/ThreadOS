@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* Time read from the CMOS clock (RTC). The field layout must be
-   identical to struct utime in user/usys.h - we pass it through a
+   identical to struct utime in user64/compat64.h - we pass it through a
    syscall. */
 struct rtc_time {
     uint16_t year;

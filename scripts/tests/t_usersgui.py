@@ -45,6 +45,43 @@ def wait_row(q, want, geom, tries=15):
     return seen
 
 
+def wait_count(q, want, n, geom, tries=15):
+    """Polls until 'want' stands on at least n rows of the terminal"""
+    seen = []
+    for _ in range(tries):
+        seen = read_rows(q, **geom)
+        if "\n".join(seen).count(want) >= n:
+            return seen
+        time.sleep(0.5)
+    return seen
+
+
+def read_until(read, want, tries=10):
+    """What the account manager shows at a place, read until it is
+    'want' or the tries run out - it redraws when it gets round to it"""
+    got = ""
+    for _ in range(tries):
+        got = read()
+        if got == want:
+            break
+        time.sleep(0.5)
+    return got
+
+
+def read_steady(read, want, tries=12, runs=3):
+    """read_until for an absence: (the last reading, whether 'want' was
+    read 'runs' times in a row) - so that one reading taken while the
+    window is redrawn cannot pass for it"""
+    got, run = "", 0
+    for _ in range(tries):
+        got = read()
+        run = run + 1 if got == want else 0
+        if run >= runs:
+            return got, True
+        time.sleep(0.5)
+    return got, False
+
+
 def window_says(q, cx, cy, want, tries=8):
     """Does the line at the bottom of the settings window say that? It
     is redrawn when the program gets round to it, so we look again
@@ -102,9 +139,9 @@ def main():
                   "no permission" not in body.split("sudo cp")[-1])
 
             q.type_line("whoami")
-            time.sleep(2)
-            rows = read_rows(q, **geom)
-            check("the terminal remains in the admin session",
+            rows = wait_count(q, "admin - you can change the system", 2, geom)
+            check("the terminal remains in the admin session (%s)"
+                  % " | ".join(r.strip() for r in rows if r.strip()),
                   "\n".join(rows).count("admin - you can change the system") >= 2)
 
             # --- the settings window ------------------------------------
@@ -135,7 +172,7 @@ def main():
             check("the setting is saved in the persistent admin session",
                   window_says(q, SX, SY, "Saved"))
 
-            # Account management is a desktop app shipped in both initrds.
+            # Account management is a desktop app of its own
             q.launch_menu("gusers")
             time.sleep(2)
             ux, uy = cascade(4, USERS_W + 2,
@@ -154,19 +191,46 @@ def main():
             q.click(ucx + 72, ucy + USERS_H - 28)
             time.sleep(2)
             row_base = ucy + ui_font_baseline_in(UD_PX, 118, 18)
-            second_account = q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
-            check("the 32-bit account manager creates an account through the syscall",
+            status_base = ucy + ui_font_baseline_in(
+                UD_PX, USERS_H - 70, 20)
+
+            def name_of_second():
+                return q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
+
+            def role_of_second():
+                # Set against the right end of the list (x 215) in the
+                # quieter colour: where it begins depends on the word
+                return q.find_ui(ucx + 130, ucx + 226, row_base, px=UD_PX,
+                                 fg=theme("dark")["app_dim"])
+
+            second_account = read_until(name_of_second, "guiuser")
+            check("the account manager creates an account through the "
+                  "syscall ('%s')" % second_account,
                   second_account == "guiuser")
+            role = read_until(role_of_second, "user")
+            check("as a plain user, as it was asked ('%s')" % role,
+                  role == "user")
 
             q.click(ucx + 50, ucy + 124)
             q.click(ucx + 300, ucy + 261)
             typed(q, "thread")
             q.click(ucx + 316, ucy + USERS_H - 28)
-            time.sleep(1)
-            role = q.read_ui(ucx + 160, row_base, 55, px=UD_PX)
-            check("the account manager changes a user's role",
+            role = read_until(role_of_second, "admin")
+            check("the account manager changes a user's role ('%s', the "
+                  "window says '%s')"
+                  % (role, q.read_ui(ucx + 16, status_base, 300, px=UD_PX)),
                   role == "admin")
 
+            def status():
+                return q.read_ui(ucx + 16, status_base, 300, px=UD_PX)
+
+            # The role change has just said "Account updated", the words
+            # a reset says too - so first one that cannot be made, with
+            # no new password typed, which the window answers otherwise
+            q.click(ucx + 194, ucy + USERS_H - 28)
+            said = read_until(status, "Enter matching new passwords")
+            check("a reset with no new password is refused ('%s')" % said,
+                  said == "Enter matching new passwords")
             q.click(ucx + 300, ucy + 157)
             typed(q, "resetpass")
             q.click(ucx + 300, ucy + 209)
@@ -174,20 +238,42 @@ def main():
             q.click(ucx + 300, ucy + 261)
             typed(q, "thread")
             q.click(ucx + 194, ucy + USERS_H - 28)
-            time.sleep(1)
-            status_base = ucy + ui_font_baseline_in(
-                UD_PX, USERS_H - 70, 20)
-            status = q.read_ui(ucx + 16, status_base, 220, px=UD_PX)
-            check("the account manager resets a password after admin reauthentication",
-                  status == "Account updated")
+            said = read_until(status, "Account updated")
+            check("the account manager resets a password after admin "
+                  "reauthentication ('%s')" % said,
+                  said == "Account updated")
+            # ... and the account's password really is another one now:
+            # the kernel's shell no longer signs guiuser in with the one
+            # it was made with. (Not in with the new one either: signing
+            # in ends the programs of whoever was signed in, the
+            # account manager among them.)
+            q.click_desktop()
+            q.command("login guiuser", "password:", timeout=20)
+            start = len(q.serial())
+            q.type_line("guipass")
+            end = time.time() + 30
+            said = ""
+            while time.time() < end:
+                said = q.serial()[start:]
+                if "invalid account" in said or "logged in as" in said:
+                    break
+                time.sleep(0.3)
+            check("the password it was made with no longer opens the "
+                  "account (%s)" % [ln.strip() for ln in said.splitlines()
+                                    if "login" in ln or "logged" in ln],
+                  "invalid account or password" in said and
+                  "logged in as" not in said)
 
             q.click(ucx + 300, ucy + 261)
             typed(q, "thread")
             q.click(ucx + 438, ucy + USERS_H - 28)
+            # (what is awaited is an absence, so the window still gets
+            # its second to redraw first, as it always did - and the row
+            # has to read empty three times in a row)
             time.sleep(1)
-            second_account = q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
-            check("the account manager removes the selected account",
-                  second_account == "")
+            second_account, gone = read_steady(name_of_second, "")
+            check("the account manager removes the selected account ('%s')"
+                  % second_account, gone)
         finally:
             q.close()
     finally:

@@ -123,8 +123,8 @@ extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
 /* A task structure gets a cache line to itself: its first words - the
    stack pointer and the state - are written on every context switch,
    by whichever core is running it, and two structures sharing a line
-   means two cores writing into one line. See kernel/task.c for what
-   that cost and why it came and went with unrelated edits. */
+   means two cores writing into one line - a slowdown that came and
+   went with unrelated edits, as the structures moved about. */
 #define MSR_FS_BASE 0xC0000100
 
 static void write_fsbase(uint64_t v)
@@ -466,6 +466,12 @@ int task64_wait(int *code)
 {
     for (;;) {
         irqflags_t flags = irq_save();
+        /* Asked BEFORE the table is read: a child leaves its trace
+           before it stops being alive, so one that has ended by now
+           has its trace in the table already. Asked after, a child
+           ending on another core in between was neither. */
+        int alive = has_children(current->id);
+        int signalled = current->sig_pending != 0;
         for (int i = 0; i < EXIT_SLOTS; i++) {
             if (finished[i].used && finished[i].parent == current->id) {
                 int id = finished[i].id;
@@ -476,11 +482,51 @@ int task64_wait(int *code)
                 return id;
             }
         }
-        int alive = has_children(current->id);
-        int signalled = current->sig_pending != 0;
         irq_restore(flags);
 
         if (!alive || signalled)
+            return -1;
+        task64_sleep(10);
+    }
+}
+
+/* Waits for ONE child, the one with this number. Returns that number
+   and writes its exit code; -1 when it is neither alive nor has left a
+   trace.
+ *
+ * This is the kernel shell's wait. Its 'runw' starts children it never
+ * waits for, and the first of those to end used to be taken for the
+ * program 'run' had just started: its code reported under the wrong
+ * name, the prompt back while the program still ran. The other
+ * children's traces are cleared on the way - nobody will ever collect
+ * them, and left in the table they would push out traces somebody is
+ * waiting for.
+ *
+ * A pending signal does not end this wait as it ends task64_wait: the
+ * caller is a kernel thread, which never returns to ring 3 where a
+ * signal is delivered, so a signal sent to it would stay pending and
+ * end every wait after it at once. */
+int task64_wait_for(int id, int *code)
+{
+    for (;;) {
+        irqflags_t flags = irq_save();
+        int alive = task64_alive(id);     /* first, as in task64_wait */
+        int found = 0;
+        for (int i = 0; i < EXIT_SLOTS; i++) {
+            if (!finished[i].used || finished[i].parent != current->id)
+                continue;
+            if (finished[i].id == id) {
+                if (code)
+                    *code = finished[i].code;
+                found = 1;
+            }
+            finished[i].used = 0;
+        }
+        irq_restore(flags);
+
+        if (found)
+            return id;
+        if (!alive)
             return -1;
         task64_sleep(10);
     }
@@ -879,6 +925,12 @@ void task64_kill_current(const char *why)
            current->id, current->name, why);
     hda_stream_abort(current->id);
     task64_fd_close_all();
+    /* A killed process gets the same as one that exited: what it wrote
+       into a writable mapping goes back to its file while the space
+       still holds it, and the mappings' block tables are freed. Killing
+       it is no reason to lose its writes. */
+    proc64_msync();
+    task64_mmap_release();
     drop_space(current);
     record_exit(current, -1);          /* killed, that is not of its own death */
     switch_to(TASK_ZOMBIE);
@@ -1495,9 +1547,8 @@ int task64_count(void)
 }
 
 /* One row of the task list for a program in ring 3 - the same thing
-   the shell's 'ps' prints, only readable rather than printed. See
-   task_ps() in the 32-bit kernel: the same rows, the same rule that
-   the list a program shows is one refresh behind. */
+   the shell's 'ps' prints, only readable rather than printed. The list
+   a program shows is one refresh behind. */
 int task64_ps(int index, struct psinfo64 *out)
 {
     if (index < 0 || !out)

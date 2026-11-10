@@ -23,20 +23,13 @@
 #include "include/string.h"
 #include "include/io.h"
 
-/* The only thing in this file that depends on the processor mode: the
-   ACPI tables have to be glued onto the mapping, and the page tables
-   are built by different code in each kernel. The road to switching
-   the power off itself - RSDP, RSDT, FADT, _S5_ in bytecode - is the
-   same. */
-#ifdef __x86_64__
+/* The only thing in this file that depends on the processor: the ACPI
+   tables have to be glued onto the mapping, and the page tables are
+   kernel64's business. The road to switching the power off itself -
+   RSDP, RSDT, FADT, _S5_ in bytecode - is not. */
 #include "../kernel64/paging64.h"
 #define IDENTITY_TOP()   paging64_identity_top()
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
-#else
-#include "include/paging.h"
-#define IDENTITY_TOP()   paging_identity_limit()
-#define MAP_PHYS(a, n)   paging_map_phys((a), (n))
-#endif
 
 struct rsdp {
     char signature[8];          /* "RSD PTR " */

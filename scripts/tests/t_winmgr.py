@@ -23,15 +23,18 @@ Both now work the way they do in a system somebody uses:
   not on every frame of the pull.
 
 The assertions are about what can be seen and what the kernel says: the
-window disappears from the screen AND from the dock, the process
-ends with code 0 when it was asked and with a kill when it was not, and
-the memory comes back.
+window disappears from the screen AND from the dock, and the process
+ends with code 0 when it was asked and with a kill when it was not.
+Both programs are started with the kernel shell's 'run', which waits
+for its child and says how it ended - that line is where a program's
+exit code can be seen from outside.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -78,7 +81,11 @@ def main():
             q.mouse_home()
 
             # --- an application window opens ---------------------------
-            q.launch_dock("gterm")                # the "Term" tile
+            # Started by the kernel's shell, which in graphics mode
+            # listens as long as no window has focus: it waits for the
+            # program and reports its exit code, and nothing else on
+            # this kernel says what code a program ended with
+            q.type_line("run gterm")
             time.sleep(3)
             q.mouse_goto(600, 430)         # the cursor out of the way
             time.sleep(1)
@@ -119,9 +126,15 @@ def main():
             q.mouse_goto(600, 430)
             time.sleep(1)
 
+            # (until the shell has said how it ended, on a busy host
+            # later than here)
+            deadline = time.time() + 15
+            while time.time() < deadline and "[gterm] done" not in q.serial():
+                time.sleep(0.3)
             log = q.serial()
             check("the program ended BY ITSELF, with code zero",
-                  "process \'gterm\' has ended (code 0)" in log)
+                  "[gterm] done, exit code 0 " in log and
+                  "(gterm) killed" not in log)
 
             w, h, at = q.screen_raw()
             check("the window is gone from the screen", not app_bg(at(*P_APP)))
@@ -158,10 +171,16 @@ def main():
             q2.mouse_goto(600, 430)
             time.sleep(1)
 
+            deadline = time.time() + 15
+            while time.time() < deadline and "[gdeaf] done" not in q2.serial():
+                time.sleep(0.3)
             log = q2.serial()
+            # The kill is an uncatchable signal (kernel64/compat64.c),
+            # and the kernel reports a task that dies of one; the shell
+            # that started it then sees it did not end of its own accord
             check("the desktop stopped asking and killed the program",
-                  "killed" in log or "code -9" in log or
-                  "the 'gdeaf' process" in log)
+                  re.search(r"task \d+ \(gdeaf\) killed: a signal", log)
+                  is not None and "[gdeaf] done, exit code -1 " in log)
             w, h, at = q2.screen_raw()
             check("the window is gone even though nothing answered",
                   not grey(at(*P_DEAF)))

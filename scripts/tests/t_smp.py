@@ -5,18 +5,16 @@ After power on one core works - the one the firmware chose as the
 bootstrap. The rest stand and wait for a signal, and that is the
 hardware's decision, not the system's: a processor woken by a SIPI
 signal starts in real mode, sixteen bits wide, at the address
-(vector << 12) - exactly the way a PC started forty years ago.
+(vector << 12) - exactly the way a PC started forty years ago. It
+starts there even when the rest of the system has long been running in
+64 bits, so it has to walk the whole road itself: sixteen bits ->
+thirty-two -> sixty-four. It takes the page tables ready-made, the same
+ones the kernel uses.
 
-This is the first step, not the whole of SMP. A woken core walks its own
-road to protected mode, reports in and stands by. Giving it work needs a
-per-core scheduler and locks in every kernel structure, and those were
-written for a single core and quietly count on it.
-
-The secondary cores do not run tasks of their own - the scheduler and
-the process list were written for a single core. What they do get is
-countable work: a shared queue of items, from which each takes the next
-number under a lock. That is all the state shared between the cores -
-one number and one lock.
+The 'smp' command gives the woken cores countable work: a shared queue
+of items, from which each takes the next number under a lock. That is
+all the state the attempt shares between the cores - one number and one
+lock.
 
 The right question to ask about concurrency is not "did anything get
 computed", but "was every item computed EXACTLY ONCE". That is why we
@@ -31,66 +29,107 @@ something in the system broke along the way.
 
 import os
 import re
-import shutil
-import subprocess
 import sys
 import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64
+from ptest import check, summary, no64
 
 
 def values(text, label):
     """The numbers from ONE line of the 'smp' output.
 
-    The command now gives two lines of the same shape - the share of the
+    The command gives two lines of the same shape - the share of the
     work and the ticks of the cores' own clocks - so looking for
-    'rdzenN=' across the whole text would glue one to the other."""
+    'coreN=' across the whole text would glue one to the other."""
     for w in text.replace("\r", "").split("\n"):
         if w.startswith(label):
             return [int(x) for x in re.findall(r"core\d+=(\d+)", w)]
     return []
 
 
+def answer(q, cmd, last, timeout=30):
+    """Types a command and waits for the line starting with 'last' to
+    arrive WHOLE. The port is read while the kernel is still writing,
+    and half a line parses as a different answer."""
+    start = len(q.serial())
+    q.type_line(cmd)
+    deadline = time.time() + timeout
+    out = ""
+    while time.time() < deadline:
+        out = q.serial()[start:]
+        at = out.find(last)
+        if at >= 0 and "\n" in out[at:]:
+            break
+        time.sleep(0.3)
+    return out
+
+
+def smp(q):
+    # 'Page faults:' is the last line the command prints
+    return answer(q, "smp", "Page faults:", timeout=90)
+
+
+def ticks(q):
+    m = re.search(r"Uptime: \d+ s \((\d+) ticks of 10 ms\)",
+                  answer(q, "uptime", "Uptime:"))
+    return int(m.group(1)) if m else None
+
+
+def timer_runs(q, timeout=30):
+    """(first reading, the later one that is higher) - polled, because a
+    clock that ticks has to be seen ticking, not merely read once."""
+    first = ticks(q)
+    later = None
+    deadline = time.time() + timeout
+    while first is not None and time.time() < deadline:
+        later = ticks(q)
+        if later is not None and later > first:
+            break
+        time.sleep(0.5)
+    return first, later
+
+
 def main():
-    print("--- the other processors (INIT-SIPI) ---")
+    reason = no64()
+    if reason:
+        print("SKIPPED: " + reason)
+        return summary()
 
     # --- Four cores ---
-    slog = tempfile.mktemp(suffix=".log")
+    print("--- the other processors (INIT-SIPI) ---")
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
-        f.write(b"\0" * DISK_SIZE)
-    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog, cpus=4)
+        f.truncate(DISK_SIZE)
+    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, cpus=4)
     try:
-        start = q.wait_for("Processors:", timeout=60)
+        start = q.wait_serial("thread64>", timeout=90)
         m = re.search(r"Processors: (\d+) \(woken (\d+)", start)
         check("the system lists every processor from the ACPI table",
               m is not None and int(m.group(1)) == 4)
-        check("the other three cores answered after INIT-SIPI",
+        check("the secondary cores reach long mode by themselves",
               m is not None and int(m.group(2)) == 3)
 
-        q.wait_for("ThreadOS shell", timeout=30)
-        q.wait_for("[net] DHCP", timeout=30)
-
         # After waking the cores the system is to work as it did before
-        up1 = q.command("uptime", "timer ticks")
-        check("the timer ticks once the other cores are woken",
-              "timer ticks" in up1)
+        t1, t2 = timer_runs(q)
+        check("the timer ticks once the other cores are woken (%s -> %s)"
+              % (t1, t2), t1 is not None and t2 is not None and t2 > t1)
 
-        proc = q.command("run hello", "has ended", timeout=40)
-        check("a ring 3 process runs as before",
-              "[hello] hello, I am an ELF process" in proc)
+        prog = q.command("run hello64", "exit code", timeout=40)
+        check("a ring 3 program runs as before",
+              "[hello64] ending politely" in prog)
 
-        files = q.command("write smptest multicore", "wrote")
-        check("the disk works as before", "wrote" in files)
+        files = answer(q, "write smptest multicore", "write:")
+        check("the disk works as before",
+              "write: 'smptest' written (10 B)" in files)
         read_res = q.command("cat smptest", "multicore")
         check("and gives back what was written", "multicore" in read_res)
 
-        # The work distributed across the cores: the result is to match bit
-        # for bit the one computed on a single core
-        work = q.command("smp", "Cores that counted", timeout=90)
+        # The work distributed across the cores: the result is to match
+        # bit for bit the one computed on a single core
+        work = smp(q)
         check("the result of the divided work matches the single-core one",
               "matches" in work and "DOES NOT MATCH" not in work)
 
@@ -114,6 +153,13 @@ def main():
         # through the PIC to ONE processor. What it does have is its own
         # clock in the local APIC - and only that gives it the
         # interrupts without which it could never be preempted.
+        #
+        # It cost a separate bug, and one that cannot be seen from the
+        # side: a secondary core did not enable the no-execute bit in
+        # EFER for itself. The kernel maps hardware registers with that
+        # bit, and without NXE bit 63 of a page table entry is RESERVED
+        # - so the first reach for the local APIC ended in a page fault
+        # and the quiet death of the whole machine.
         clocks = values(work, "Core clocks:")
         check("every secondary core has a clock of its own that ticks (%s)"
               % clocks,
@@ -122,114 +168,42 @@ def main():
               len(clocks) == 4 and clocks[0] == 0)
 
         # A single reading proves nothing - the counters are to GROW
-        time.sleep(1.5)
-        again = values(q.command("smp", "Core clocks", timeout=90),
-                         "Core clocks:")
+        again = []
+        deadline = time.time() + 60
+        while len(clocks) == 4 and time.time() < deadline:
+            again = values(smp(q), "Core clocks:")
+            if len(again) == 4 and all(again[i] > clocks[i]
+                                       for i in range(1, 4)):
+                break
+            time.sleep(0.5)
         check("the secondary cores' clocks keep running (%s -> %s)"
               % (clocks, again),
               len(again) == 4 and
               all(again[i] > clocks[i] for i in range(1, 4)))
 
-        # The threads' counters keep growing - the scheduler did not stop
-        def counter():
-            m = re.findall(r"thread-A: (\d+)", q.screen())
-            return int(m[-1]) if m else None
-
-        a1 = counter()
-        time.sleep(1.5)
-        a2 = counter()
-        check("the scheduler is still running (%s -> %s)" % (a1, a2),
-              a1 is not None and a2 is not None and a2 > a1)
+        # The scheduler still runs after all this: a program is created,
+        # run and reaped again
+        prog = q.command("run hello64", "[hello64] ending", timeout=40)
+        check("a ring 3 program still runs after the divided work",
+              "[hello64] hello" in prog and "[hello64] ending" in prog)
     finally:
         q.close()
-        for f in (slog, disk):
-            if os.path.exists(f):
-                os.unlink(f)
-
-    # --- Long mode ---
-    # A secondary core starts in real mode even when the rest of the
-    # system has long been running in 64 bits: it has to walk the whole
-    # road itself, sixteen bits -> thirty-two -> sixty-four. It takes the
-    # page tables ready-made, the same ones the kernel uses.
-    print("--- the other processors in long mode ---")
-    reason = no64()
-    if reason:
-        print("SKIPPED: " + reason)
-    else:
-        d = tempfile.mkdtemp()
-        iso = tempfile.mktemp(suffix=".iso")
-        slog64 = tempfile.mktemp(suffix=".log")
-        try:
-            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-            if os.path.exists(iso):
-                q64 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog64, cpus=4,
-                           qemu="qemu-system-x86_64")
-                try:
-                    st = q64.wait_serial("Processors:", timeout=90)
-                    m = re.search(r"Processors: (\d+) \(woken (\d+)", st)
-                    check("the 64-bit kernel lists every processor",
-                          m is not None and int(m.group(1)) == 4)
-                    check("the secondary cores reach long mode by themselves",
-                          m is not None and int(m.group(2)) == 3)
-
-                    q64.wait_serial("thread64>", timeout=40)
-                    prog = q64.command("run hello64", "exit code",
-                                         timeout=40)
-                    check("a ring 3 program runs as before",
-                          "[hello64] ending politely" in prog)
-
-                    work = q64.command("smp", "Cores that counted",
-                                          timeout=90)
-                    check("the work is divided between the cores in long "
-                          "mode too", "matches" in work and
-                          "DOES NOT MATCH" not in work)
-                    m2 = re.search(r"Cores that counted: (\d+)", work)
-                    check("several cores counted the work at once (long mode)",
-                          m2 is not None and int(m2.group(1)) >= 2)
-
-                    # The core's own clock in long mode.
-                    #
-                    # It cost a separate bug, and one that cannot be seen
-                    # from the side: a secondary core did not enable the
-                    # no-execute bit in EFER for itself. The kernel maps
-                    # hardware registers with that bit, and without NXE
-                    # bit 63 of a page table entry is RESERVED - so the
-                    # first reach for the local APIC ended in a page
-                    # fault and the quiet death of the whole machine.
-                    clock = values(work, "Core clocks:")
-                    check("every secondary core has a clock of its own "
-                          "in long mode (%s)" % clock,
-                          len(clock) == 4 and all(z > 0 for z in clock[1:]))
-                    time.sleep(1.5)
-                    clock2 = values(q64.command("smp", "Core clocks",
-                                                  timeout=90),
-                                    "Core clocks:")
-                    check("and they keep ticking (%s -> %s)" % (clock, clock2),
-                          len(clock2) == 4 and
-                          all(clock2[i] > clock[i] for i in range(1, 4)))
-                finally:
-                    q64.close()
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-            for f in (iso, slog64):
-                if os.path.exists(f):
-                    os.unlink(f)
+        if os.path.exists(disk):
+            os.unlink(disk)
 
     # --- One core: nothing changes ---
     print("--- a single-core machine ---")
-    slog1 = tempfile.mktemp(suffix=".log")
-    q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
+    q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
-        start = q1.wait_for("Processors:", timeout=60)
+        start = q1.wait_serial("thread64>", timeout=90)
+        # The whole line: a machine that woke anybody says how many
         check("on one core the system says so outright and wakes nobody",
-              "Processors: 1" in start)
-        q1.wait_for("ThreadOS shell", timeout=30)
-        up = q1.command("uptime", "timer ticks")
-        check("and it works just the same", "timer ticks" in up)
+              re.search(r"Processors: 1\r?\n", start) is not None)
+        t1, t2 = timer_runs(q1)
+        check("and it works just the same (%s -> %s)" % (t1, t2),
+              t1 is not None and t2 is not None and t2 > t1)
     finally:
         q1.close()
-        if os.path.exists(slog1):
-            os.unlink(slog1)
 
     return summary()
 

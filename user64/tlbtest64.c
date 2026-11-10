@@ -1,9 +1,8 @@
 /* tlbtest64 - threads of one process on several cores (long mode)
  *
- * The same test as user/tlbtest.c and for the same reason, only on the
- * other side. Until now the long-mode kernel had no threads at all, so
- * two cores could not be put into ONE address space there - and the
- * shootdown could be built into it but not shown working.
+ * Several cores standing in ONE address space at once is the case the
+ * TLB shootdown exists for, and the only place it can be shown
+ * working.
  *
  * Every thread asks for fresh memory in every round and writes a
  * pattern into it. Fresh memory is the point: each of those pages is a

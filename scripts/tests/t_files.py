@@ -82,11 +82,42 @@ def status(q):
     return q.gfiles_status(CX, CY)
 
 
+def sudo_set(q, name, value, timeout=30):
+    """'sudo set' in the kernel's shell, the password given if it is
+    asked for - the signed-in administrator's shell does not ask.
+    True once the shell says the setting was saved."""
+    want = "%s = %s (saved)" % (name, value)
+    start = len(q.serial())
+    q.type_line("sudo set %s %s" % (name, value))
+    asked = False
+    end = time.time() + timeout
+    while time.time() < end:
+        out = q.serial()[start:]
+        if want in out:
+            return True
+        if not asked and "password:" in out:
+            q.type_line("thread")
+            asked = True
+        time.sleep(0.3)
+    return False
+
+
 def click(q, x, y, wait=1.5):
     q.mouse_goto(x, y)
     time.sleep(0.5)
     q.mouse_click()
     time.sleep(wait)
+
+
+def ask_until(q, want, timeout=10):
+    """The question the window is asking, read until it is 'want' or
+    the time is up - a panel still sliding in reads as part of a line"""
+    deadline = time.time() + timeout
+    while True:
+        asked = q.ug_question(CX, CY, CH)
+        if asked == want or time.time() > deadline:
+            return asked
+        time.sleep(0.5)
 
 
 def main():
@@ -123,16 +154,15 @@ def main():
                   "('%s')" % desk_label, "desk.txt" in desk_label)
 
             # Something to look at: a file whose length we know, and a
-            # directory to walk into
-            q.type_line("write report.txt " + TEXT)
-            time.sleep(1)
-            q.type_line("run mkdir documents")
-            time.sleep(2)
+            # directory to walk into. The kernel's shell stands in the
+            # signed-in user's home; the "Files" tile opens the root, so
+            # that is where they go.
+            q.command("cd /")
+            q.command("write report.txt " + TEXT, "written", timeout=15)
+            q.command("mkdir documents", "created", timeout=15)
             # A setting written down puts system.cfg beside swap.sys in
             # the root - two files the list should not offer
-            q.type_line("sudo set hidden 0")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
+            check("the setting 'hidden 0' is saved", sudo_set(q, "hidden", "0"))
             on_disk = q.command("fls", "swap.sys", timeout=10)
 
             q.launch_dock("gfiles")                   # the "Files" tile
@@ -202,11 +232,12 @@ def main():
             click(q, CX + GFILES_ROW_X, row_y(names, "report.txt"))
             click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
-            time.sleep(1.5)
-            w, h, at = q.screen_raw()
-            asked = q.ug_question(CX, CY, CH)
+            # The whole question, word for word: the name sits between
+            # quotes the program writes itself, and one written twice
+            # ("Move 'report.txt'' to ...") is a bug a part would hide
+            asked = ask_until(q, "Move 'report.txt' to Trash?")
             check("a click on 'Trash' asks before moving the file ('%s')"
-                  % asked, "Move" in asked and "report.txt" in asked)
+                  % asked, asked == "Move 'report.txt' to Trash?")
 
             # The question moves nothing, and "Keep" has to leave it
             # alone - a question whose answers both mean yes is not a
@@ -243,21 +274,45 @@ def main():
                   TEXT in trashed)
 
             # A second file window opens Trash; Restore returns the entry
-            # to the exact path recorded when it was moved.
+            # to the exact path recorded when it was moved. The shell
+            # waits for what it runs, so it is free again only once this
+            # window has closed.
             q.click_desktop()
+            seen = len(q.serial())
             q.type_line("run gfiles /home/admin/.Trash")
-            time.sleep(4)
             TX, TY = WX + 12, WY + 12
-            check("Trash opens at its own path",
-                  title_at(q, TX, TY) == "Files: /home/admin/.Trash")
-            trash_rows = rows_at(q, TX, TY)
-            check("the removed item is listed in Trash",
-                  "report.txt" in [name for name, _ in trash_rows])
-            click(q, TX + NAME_X + NAME_W // 2, TY + BTN_Y, wait=2)
+            end = time.time() + 20
+            while (time.time() < end and
+                   title_at(q, TX, TY) != "Files: /home/admin/.Trash"):
+                time.sleep(0.5)
+            got = title_at(q, TX, TY)
+            check("Trash opens at its own path ('%s')" % got,
+                  got == "Files: /home/admin/.Trash")
+            listed = [name for name, _ in rows_at(q, TX, TY)]
+            check("the removed item is listed in Trash (%s)"
+                  % ", ".join(listed), "report.txt" in listed)
+            # Restore acts on the item picked in the list, as every
+            # button in the heading does
+            TCX, TCY = TX + 1, TY + CONTENT_DY
+            if "report.txt" in listed:
+                click(q, TCX + GFILES_ROW_X,
+                      TCY + gfiles_row_y(listed.index("report.txt")))
+            click(q, TCX + NAME_X + NAME_W // 2, TCY + BTN_Y, wait=2)
+            q.sendkey("alt-f4")                # Trash has the focus
+            end = time.time() + 15
+            while (time.time() < end and
+                   "[gfiles] done" not in q.serial()[seen:]):
+                time.sleep(0.3)
+            check("the Trash window closes, and the shell is free again",
+                  "[gfiles] done" in q.serial()[seen:])
             q.mouse_goto(600, 380)
-            time.sleep(2)
-            check("Restore puts it back in its original folder",
-                  "report.txt" in [name for name, _ in rows(q)])
+            back = []
+            end = time.time() + 10
+            while time.time() < end and "report.txt" not in back:
+                time.sleep(0.5)
+                back = [name for name, _ in rows(q)]
+            check("Restore puts it back in its original folder (%s)"
+                  % ", ".join(back), "report.txt" in back)
 
             # --- a new name, asked for in the same status line ----------
             # The blocks do not move when a file is renamed, so this is
@@ -287,18 +342,17 @@ def main():
                   "papers" in names and "documents" not in names)
 
             # --- an empty folder can be moved to Trash too --------------
-            # (one with something in it is refused before asking -
+            # (one with something in it too; what is refused before
+            # asking is deleting such a folder from Trash for good -
             # scripts/tests/t_filetree.py)
             click(q, CX + 250, CY + 16, wait=1)
             names = [r[0] for r in rows(q)]
             click(q, CX + GFILES_ROW_X, row_y(names, "papers"))
             click(q, CX + DEL_X + DEL_W // 2, CY + BTN_Y, wait=2)
             q.mouse_goto(500, 380)
-            time.sleep(1.5)
-            w, h, at = q.screen_raw()
-            asked = q.ug_question(CX, CY, CH)
+            asked = ask_until(q, "Move the folder 'papers' to Trash?")
             check("an empty folder is asked about too ('%s')" % asked,
-                  "folder" in asked and "papers" in asked)
+                  asked == "Move the folder 'papers' to Trash?")
             click(q, CX + MODAL["yes"][0], CY + MODAL["yes"][1], wait=2.5)
             q.mouse_goto(500, 380)
             time.sleep(1.5)
@@ -310,9 +364,7 @@ def main():
             q.mouse_goto(500, 380)
             q.mouse_click()                    # the desktop takes the keys
             time.sleep(1)
-            q.type_line("sudo set hidden 1")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
+            check("the setting 'hidden 1' is saved", sudo_set(q, "hidden", "1"))
             names = []
             end = time.time() + 15
             while time.time() < end and "swap.sys" not in names:
@@ -323,22 +375,24 @@ def main():
                   "swap.sys" in names and "system.cfg" in names)
 
             q.click_desktop()
-            q.type_line("write Files keep-this-name")
-            time.sleep(1)
-            q.type_line("sudo set language pl")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
-            time.sleep(2)
+            q.command("write Files keep-this-name", "written", timeout=15)
+            check("the setting 'language pl' is saved",
+                  sudo_set(q, "language", "pl"))
+            end = time.time() + 10
+            while time.time() < end and title(q) != "Pliki: /":
+                time.sleep(0.5)
             localized_rows = [name for name, _ in rows(q)]
             check("Polish localizes the file-manager window title",
                   title(q) == "Pliki: /")
             check("localized UI does not translate a file name",
                   "Files" in localized_rows)
+            # The label is centred in its button, so it is looked for
+            # across the button rather than read from its left edge
             shot = q.screen_raw()
-            open_label = q.read_ui(
-                CX + EDIT_X,
+            open_label = q.find_ui(
+                CX + EDIT_X + 2, CX + EDIT_X + EDIT_W - 2,
                 CY + ui_font_baseline_in(UD_PX, BTN_Y - BTN_H // 2, BTN_H),
-                EDIT_W, px=UD_PX,
+                charset=UiFont.CHARSET + "ó", px=UD_PX,
                 fg=theme("dark")["accent_text"], screen=shot)
             check("the file manager localizes its Open button ('%s')"
                   % open_label, open_label == "Otwórz")

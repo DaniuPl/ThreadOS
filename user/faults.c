@@ -42,7 +42,7 @@ static uint32_t touch(uint32_t *mask_out)
         return 0;
     }
     base = (unsigned char *)
-        (((uint32_t)(uintptr_t)base + PAGE - 1) & ~(PAGE - 1));
+        (((uintptr_t)base + PAGE - 1) & ~(uintptr_t)(PAGE - 1));
 
     for (uint32_t i = 0; i < PAGES; i++) {
         unsigned char *page = base + i * PAGE;
@@ -95,7 +95,7 @@ void _start(void)
     }
 
     int code = 0;
-    sys_wait_child(&code);
+    sys_wait(&code);
     report("parent ", mask, ticks, sum);
     print("[faults] done\n");
     sys_exit(0);

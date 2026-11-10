@@ -31,10 +31,6 @@ tested here are:
   a stick plugged in and pulled out while the machine runs, twice: the
   second time proves what the first one left behind was given back
 
-  and the 64-bit kernel on the same controller, because the driver is
-  shared and long mode is where the structures could end up somewhere
-  32-bit pointers cannot reach
-
 What is NOT tested, and why: a hub on EHCI. QEMU has no high-speed hub
 to put on it, and a low-speed device behind a real one needs split
 transactions the driver does not do. The driver refuses a hub out loud
@@ -51,10 +47,22 @@ import zlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, make_mbr_fat_disk, fat_put, fat_get,
-                   fat_dir, mtools_ok, make_iso64, no64)
+                   fat_dir, mtools_ok)
 
+PROMPT = "thread64>"
+# The password of the administrator a text-mode machine with no account
+# database falls back on (kernel/config.c, the legacy 'password' entry)
+ADMIN_PASSWORD = "thread"
 STICK_MIB = 32
 FROM_HOST = b"put here by mtools, read over EHCI\n"
+
+
+def sudo(q, command, wait, timeout=30):
+    """'sudo <command>' and the admin password on the line it asks for
+    it on - writing to a FAT is the admin's business; what the command
+    printed after the password."""
+    q.command("sudo " + command, "password:", timeout=timeout)
+    return q.command(ADMIN_PASSWORD, wait, timeout=timeout)
 
 
 def usb_disk_number(listing):
@@ -92,7 +100,7 @@ def stick_with_fat(label="EHCISTICK"):
 
 
 def stick_alone():
-    print("--- EHCI alone, a stick on it (the 32-bit kernel) ---")
+    print("--- EHCI alone, a stick on it ---")
     stick, made, start = stick_with_fat()
     check("the stick was formatted by mtools (not by us)", made)
     if not made:
@@ -104,7 +112,7 @@ def stick_alone():
                       "-drive", "if=none,id=st,format=raw,file=" + stick,
                       "-device", "usb-storage,bus=ehci.0,drive=st"])
     try:
-        boot = q.wait_serial("thread>", timeout=60)
+        boot = q.wait_serial(PROMPT, timeout=60)
         m = re.search(r"USB disk: (.*), (\d+) sectors \(port (\d+), (\w+)\)",
                       boot)
         check("the system finds the stick, and says it is on EHCI"
@@ -139,11 +147,11 @@ def stick_alone():
         check("the host's file is read character for character",
               FROM_HOST.decode().strip() in out)
 
-        q.command("fatmkdir /fromehci", "fatmkdir", timeout=20)
-        out = q.command("fatput /fromehci/note.txt written-over-ehci",
-                        "fatput:", timeout=20)
-        out = q.command("fatcopy gimg /fromehci/gimg.bin", "gimg.bin, ",
-                        timeout=60)
+        sudo(q, "fatmkdir /fromehci", "fatmkdir:", timeout=20)
+        sudo(q, "fatput /fromehci/note.txt written-over-ehci", "fatput:",
+             timeout=20)
+        out = sudo(q, "fatcopy gimg /fromehci/gimg.bin", "gimg.bin, ",
+                   timeout=60)
         m = re.search(r"gimg\.bin, (\d+) B", out)
         check("a program from the initrd is copied onto it"
               + (" (%s B)" % m.group(1) if m else ""), m is not None)
@@ -158,7 +166,7 @@ def stick_alone():
     got = fat_get(stick, start, "/fromehci/note.txt")
     check("and the file holds exactly what was written",
           got is not None and b"written-over-ehci" in got)
-    want = open(os.path.join(os.path.dirname(INITRD), "user", "gimg.elf"),
+    want = open(os.path.join(os.path.dirname(INITRD), "user64", "gimg.elf"),
                 "rb").read()
     copied = fat_get(stick, start, "/fromehci/gimg.bin")
     check("the copied program is byte for byte the one in the build "
@@ -188,7 +196,7 @@ def board_layout():
                       "-drive", "if=none,id=st,format=raw,file=" + stick,
                       "-device", "usb-storage,bus=ehci.0,port=3,drive=st"])
     try:
-        boot = q.wait_serial("thread>", timeout=60)
+        boot = q.wait_serial(PROMPT, timeout=60)
         check("EHCI hands the slow keyboard to the companion",
               "socket 1: a slower device - handed to the companion" in boot)
         check("and the keyboard turns up on the companion, as UHCI",
@@ -201,9 +209,9 @@ def board_layout():
               re.search(r"USB:\s+EHCI \+ UHCI, keyboard yes", out)
               is not None)
 
-        out = q.command("uptime", "timer ticks", timeout=20)
+        out = q.command("uptime", "ticks of 10 ms", timeout=20)
         check("a command typed on the companion's keyboard runs",
-              "timer ticks" in out)
+              "Uptime:" in out and "ticks of 10 ms" in out)
 
         out = q.command("disks", "sectors", timeout=20)
         n = usb_disk_number(out)
@@ -228,15 +236,16 @@ def fast_keyboard():
              devices=["-device", "usb-ehci,id=ehci",
                       "-device", "usb-kbd,bus=ehci.0"])
     try:
-        boot = q.wait_serial("thread>", timeout=60)
+        boot = q.wait_serial(PROMPT, timeout=60)
         check("the keyboard is found on EHCI",
               re.search(r"USB keyboard \(HID, EHCI\)", boot) is not None)
-        out = q.command("uptime", "timer ticks", timeout=20)
+        out = q.command("uptime", "ticks of 10 ms", timeout=20)
         check("a command typed on it runs (interrupt transfers, the "
-              "periodic schedule)", "timer ticks" in out)
+              "periodic schedule)",
+              "Uptime:" in out and "ticks of 10 ms" in out)
         # Capitals: Shift is a bit in the report, so a lost or repeated
         # report shows up here as the wrong case
-        q.command("write caps.txt AbC-dEf", "wrote", timeout=20)
+        q.command("write caps.txt AbC-dEf", "write:", timeout=20)
         out = q.command("cat caps.txt", "dEf", timeout=20)
         check("Shift arrives in the right reports ('AbC-dEf')",
               "AbC-dEf" in out)
@@ -255,7 +264,7 @@ def hotplug():
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog,
              devices=["-device", "usb-ehci,id=ehci"])
     try:
-        q.wait_serial("thread>", timeout=60)
+        q.wait_serial(PROMPT, timeout=60)
         out = q.command("disks", "sectors", timeout=20)
         check("at the start there is no stick", "USB" not in out)
         q.hmp("drive_add 0 if=none,id=pd,format=raw,file=" + stick)
@@ -265,8 +274,10 @@ def hotplug():
             q.cmd({"execute": "device_add",
                    "arguments": {"driver": "usb-storage", "bus": "ehci.0",
                                  "drive": "pd", "id": "pendrive"}})
+            # The wait is for the last line the plug-in prints, number
+            # and all - the "USB disk" one comes before it
             for _ in range(60):
-                if "USB disk" in q.serial()[seen:]:
+                if re.search(r"it is disk \d+\s", q.serial()[seen:]):
                     break
                 time.sleep(0.5)
             check("(%d) the stick is noticed while the machine runs"
@@ -295,52 +306,12 @@ def hotplug():
             if attempt == 1:
                 q.hmp("drive_add 0 if=none,id=pd,format=raw,file=" + stick)
 
-        out = q.command("uptime", "timer ticks", timeout=20)
-        check("the machine is still alive afterwards", "timer ticks" in out)
+        out = q.command("uptime", "ticks of 10 ms", timeout=20)
+        check("the machine is still alive afterwards",
+              "Uptime:" in out and "ticks of 10 ms" in out)
     finally:
         q.close()
     for f in (stick, disk, slog):
-        if os.path.exists(f):
-            os.unlink(f)
-
-
-def long_mode():
-    print("--- the same controller under the 64-bit kernel ---")
-    reason = no64()
-    if reason:
-        print("SKIPPED: " + reason)
-        return
-    stick, made, start = stick_with_fat()
-    d = tempfile.mkdtemp()
-    iso = tempfile.mktemp(suffix=".iso")
-    disk = machine_disk()
-    slog = tempfile.mktemp(suffix=".log")
-    check("the disc with the 64-bit kernel builds",
-          make_iso64(d, iso, text=True))
-    if not os.path.exists(iso):
-        return
-    q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk, sata=True,
-             qemu="qemu-system-x86_64",
-             devices=["-device", "usb-ehci,id=ehci",
-                      "-drive", "if=none,id=st,format=raw,file=" + stick,
-                      "-device", "usb-storage,bus=ehci.0,drive=st"])
-    try:
-        boot = q.wait_serial("thread64>", timeout=120)
-        check("(64) the stick is found on EHCI",
-              re.search(r"USB disk: .*\(port \d+, EHCI\)", boot) is not None)
-        out = q.command("disks", "sectors", timeout=20)
-        n = usb_disk_number(out)
-        ok, said = crc_matches(q, stick, n, 2048, 256) if n else (False, "")
-        check("(64) 128 KiB in one command, the CRC matches (%s)" % said, ok)
-        q.command("fat 1 %d" % n, "cluster", timeout=30)
-        q.command("fatput /long.txt from-long-mode", "fatput:", timeout=20)
-        q.command("fat 1 %d" % n, "cluster", timeout=30)   # flush
-    finally:
-        q.close()
-    got = fat_get(stick, start, "/long.txt")
-    check("(64) a file written in long mode, read back by mtools",
-          got is not None and b"from-long-mode" in got)
-    for f in (stick, disk, slog, iso):
         if os.path.exists(f):
             os.unlink(f)
 
@@ -354,7 +325,6 @@ def main():
     board_layout()
     fast_keyboard()
     hotplug()
-    long_mode()
     return summary()
 
 

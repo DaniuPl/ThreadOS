@@ -121,23 +121,6 @@ def main():
                   and "devices heard" not in out)
         finally:
             q.close()
-
-        # The same code compiled for the other mode - 'hardware' says the
-        # same thing there, because it is the same file.
-        disk32 = tempfile.mktemp(suffix=".img")
-        with open(disk32, "wb") as fh:
-            fh.truncate(DISK_SIZE)
-        q = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE,
-                 serial=tempfile.mktemp(suffix=".log"))
-        try:
-            q.wait_for("ThreadOS shell")
-            q.type_line("hardware")
-            screen = q.wait_for("Bluetooth:", timeout=30)
-            check("in 32-bit mode the same line about Bluetooth",
-                  "Bluetooth: none" in screen)
-        finally:
-            q.close()
-            os.unlink(disk32)
     finally:
         for path in (iso, slog, disk):
             if os.path.exists(path):

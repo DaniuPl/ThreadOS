@@ -38,6 +38,14 @@ void swap_init(void)
     if (!fs_ready())
         return;
 
+    /* The previous boot's swap file goes first. Left in place until
+       after the measuring, it counted as used space, so the size of each
+       boot's file depended on the one before it and changed at every
+       start of the same disk. */
+    int f = fs_open(FS_ROOT, "swap.sys", 0);
+    if (f >= 0)
+        fs_truncate(f);
+
     /* We take a quarter of the free space - enough for swapping to make
        sense, too little for the disk to stop serving anything else */
     uint32_t used, total;
@@ -50,12 +58,11 @@ void swap_init(void)
         return;
     }
 
-    int f = fs_open(FS_ROOT, "swap.sys", 1);
+    f = fs_open(FS_ROOT, "swap.sys", 1);
     if (f < 0) {
         printk("[ !! ] Swap: I cannot create the swap file\n");
         return;
     }
-    fs_truncate(f);
 
     for (uint32_t s = 0; s < slots; s++) {
         for (uint32_t b = 0; b < SLOT_BLOCKS; b++) {

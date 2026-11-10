@@ -11,8 +11,6 @@
  * Both halves are printed and both are checked: a counter that came out
  * right without the mutex would mean the race was never there, and the
  * mutex then proved nothing.
- *
- * Built for both kernels from this one source (uapi.h picks the side).
  */
 
 #include "uapi.h"

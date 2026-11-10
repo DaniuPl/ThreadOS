@@ -3,9 +3,9 @@
 
 The compositor used to hold six windows. Six applications, and the
 seventh failed - with no message, no error and
-nothing on the screen to say why. There are nine programs in the dock,
-so a person could reach that wall just by clicking what is in front of
-them.
+nothing on the screen to say why. There are eight programs in the dock
+and more in the menu, so a person could reach that wall just by
+clicking what is in front of them.
 
 Now there is room for twelve, and room is not the whole of it. Two
 things had to follow, and they are what is checked here:
@@ -79,8 +79,9 @@ def main():
             check("nine windows at once have their tiles in the dock "
                   "(there are %d)" % n, n == 9)
             fits, t9 = tiles_inside(9)
-            check("sixteen tiles: they got smaller (%d px) so the dock "
-                  "still fits on the screen" % t9, fits and t9 < DOCK_TILE_M)
+            check("%d tiles: they got smaller (%d px) so the dock "
+                  "still fits on the screen" % (DOCK_N + 9, t9),
+                  fits and t9 < DOCK_TILE_M)
 
             # --- a click on the LAST tile -------------------------------
             # If the drawing and the click computed the size differently,
@@ -93,9 +94,11 @@ def main():
             # The window that tile belongs to came to the top, so its
             # title bar is on the screen with its lights on. A window
             # the cascade had pushed off the edge would have none.
-            # (the clock, the last one opened: slot 8 of the cascade,
-            # or as far back up it as a window that size needs to fit)
-            sx, sy = cascade(8, GCLOCK_W + 2, GCLOCK_H + TITLE_H + 2)
+            # (the clock, the last one opened: the ninth window, which
+            # desktop_win_create() puts at step 8 + 2 of the cascade -
+            # the first window stands at step 2 - or as far back up it
+            # as a window that size needs to fit)
+            sx, sy = cascade(10, GCLOCK_W + 2, GCLOCK_H + TITLE_H + 2)
             check("a window called up from the dock has its title bar on "
                   "the screen, with the focus", q.has_focus(sx, sy))
 

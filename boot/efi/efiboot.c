@@ -24,11 +24,9 @@
  * hands out a file protocol. A FAT of our own will be needed for
  * WRITING one, which is the installer's problem, not this one's.
  *
- * It loads the 64-bit kernel and nothing else. A machine with UEFI is
- * a 64-bit machine; the 32-bit kernel exists so that one set of
- * sources gets compiled twice and the second compilation says what the
- * first one hid, which is a good reason to keep it and not a reason to
- * boot it on a laptop.
+ * It loads the 64-bit kernel and nothing else: a PC with UEFI is a
+ * 64-bit machine, and that is the only kernel this project builds for
+ * one.
  */
 
 #include "efi.h"
@@ -912,16 +910,10 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
 
     open_volume(image);
 
-    /* The 64-bit kernel, and only that one.
-     *
-     * This machine is a UEFI machine, which means it is a 64-bit
-     * machine; the 32-bit kernel is a thing this project keeps for its
-     * own reasons - one set of sources compiled twice catches what one
-     * compilation hides - and not a thing to boot on a laptop. Loading
-     * it here would mean an ELF32 loader next to the ELF64 one for a
-     * case nobody has, and generality nobody asked for is how a loader
-     * becomes hard to trust. GRUB still boots it for anyone who wants
-     * that. */
+    /* The 64-bit kernel, and only that one: this is a UEFI machine,
+     * which means a 64-bit one, and an ELF32 loader next to the ELF64
+     * one would serve a case nobody has - generality nobody asked for
+     * is how a loader becomes hard to trust. */
     struct blob kernel, initrd;
     if (!read_file(L"\\threados64.bin", &kernel) &&
         !read_file(L"\\EFI\\BOOT\\threados64.bin", &kernel) &&

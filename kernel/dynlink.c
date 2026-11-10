@@ -7,7 +7,7 @@
  * the name of the function that belongs there. Putting one together
  * with the other is the whole of binding.
  *
- * The library is linked at a FIXED address (USER_LIB_BASE) rather than
+ * The library is linked at a FIXED address (USER64_LIB_BASE) rather than
  * an arbitrary one. That simplifies the matter by a whole layer: the
  * addresses in its symbol table are already final, so the library
  * itself has no relocations to settle. There are two prices for this
@@ -15,10 +15,6 @@
  * always visible at the same address. A real system does not do this,
  * because it wants many of them and wants to randomise the addresses -
  * but a real system has a linker in user space for that.
- *
- * ELF structures differ between processor modes in field width but not
- * in layout - hence one set of names and an #ifdef over the
- * definitions.
  */
 
 #include <stdint.h>
@@ -28,19 +24,13 @@
 #include "include/printk.h"
 #include "include/string.h"
 
-#ifdef __x86_64__
 #include "../kernel64/elf64.h"
 #define LIB_BASE   USER64_LIB_BASE
-#else
-#include "include/exec.h"
-#define LIB_BASE   USER_LIB_BASE
-#endif
 
 #define LIB_FILE   "libthread.so"
 
 /* --- ELF headers ------------------------------------------------------ */
 
-#ifdef __x86_64__
 struct ehdr {
     uint8_t  e_ident[16];
     uint16_t e_type, e_machine;
@@ -83,44 +73,6 @@ struct rel {
 #define R_DATA       6                  /* R_X86_64_GLOB_DAT */
 #define R_COPY      5                  /* R_X86_64_COPY */
 #define EM_OURS      62                 /* EM_X86_64 */
-#else
-struct ehdr {
-    uint8_t  e_ident[16];
-    uint16_t e_type, e_machine;
-    uint32_t e_version, e_entry, e_phoff, e_shoff, e_flags;
-    uint16_t e_ehsize, e_phentsize, e_phnum;
-    uint16_t e_shentsize, e_shnum, e_shstrndx;
-} __attribute__((packed));
-
-struct phdr {
-    uint32_t p_type, p_offset, p_vaddr, p_paddr;
-    uint32_t p_filesz, p_memsz, p_flags, p_align;
-} __attribute__((packed));
-
-struct shdr {
-    uint32_t sh_name, sh_type, sh_flags, sh_addr, sh_offset, sh_size;
-    uint32_t sh_link, sh_info, sh_addralign, sh_entsize;
-} __attribute__((packed));
-
-struct sym {
-    uint32_t st_name, st_value, st_size;
-    uint8_t  st_info, st_other;
-    uint16_t st_shndx;
-} __attribute__((packed));
-
-/* Relocations without addends - i386 uses only these */
-struct rel {
-    uint32_t r_offset, r_info;
-} __attribute__((packed));
-
-#define REL_SYM(i)   ((i) >> 8)
-#define REL_TYPE(i)   ((i) & 0xFFu)
-#define SHT_REL_OURS 9                  /* SHT_REL */
-#define R_JUMP       7                  /* R_386_JUMP_SLOT */
-#define R_DATA       6                  /* R_386_GLOB_DAT */
-#define R_COPY      5                  /* R_386_COPY */
-#define EM_OURS      3                  /* EM_386 */
-#endif
 
 #define ET_EXEC   2
 #define ET_DYN    3
@@ -173,13 +125,8 @@ static int elf_sane(const uint8_t *image, uint32_t size, int typ)
     if (eh->e_ident[0] != 0x7F || eh->e_ident[1] != 'E' ||
         eh->e_ident[2] != 'L' || eh->e_ident[3] != 'F')
         return 0;
-#ifdef __x86_64__
     if (eh->e_ident[4] != 2)            /* ELFCLASS64 */
         return 0;
-#else
-    if (eh->e_ident[4] != 1)            /* ELFCLASS32 */
-        return 0;
-#endif
     if (eh->e_machine != EM_OURS || eh->e_type != typ)
         return 0;
     /* The section table has to fit inside the file - without it we will

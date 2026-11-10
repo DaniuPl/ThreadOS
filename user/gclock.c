@@ -8,8 +8,7 @@
  * It reads the clock twice a second: often enough that no second is
  * skipped, and it asks the desktop for the theme's colours every time,
  * so it follows a switch between dark and light as soon as the desktop
- * does. One program for both kernels: the system calls it makes have
- * the same names on either side (uapi.h).
+ * does.
  */
 
 #include "udraw.h"

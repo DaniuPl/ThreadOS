@@ -6,7 +6,7 @@
  * address.
  */
 
-#include "usys.h"
+#include "uapi.h"
 
 #define PORT 7777
 #define MSG  "thread-udp"
@@ -49,7 +49,7 @@ void _start(int argc, char **argv)
         sys_exit(1);
     }
 
-    print("[udptest] sending '" MSG "' do ");
+    print("[udptest] sending '" MSG "' to ");
     print_ip(target);
     print(":7777\n");
 
@@ -72,7 +72,7 @@ void _start(int argc, char **argv)
 
     print("[udptest] the echo came back: ");
     print(buf);
-    print(" (od ");
+    print(" (from ");
     print_ip(from_ip);
     print(":");
     print_dec(from_port);

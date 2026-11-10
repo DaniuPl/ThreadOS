@@ -128,6 +128,22 @@ def editor(q):
           pangram in out and "ĄĆĘŁŃÓŚŹŻ" in out)
 
 
+def term_rows(q, cx, cy, ok, tries=20):
+    """The terminal's non-empty rows, polled until they pass the test
+    'ok': the terminal redraws its whole window on every pass, and a
+    picture taken halfway through can be missing what is drawn last."""
+    rows = []
+    for _ in range(tries):
+        rows = q.read_cells(cx + TERM_PAD, cy + TERM_PAD, TERM_COLS,
+                            TERM_ROWS, cell=TERM_CELL, row_h=TERM_ROW_H,
+                            base=TERM_BASE, px=TERM_PX, extra=PL)
+        rows = [r for r in rows if r]
+        if rows and ok(rows):
+            break
+        time.sleep(0.5)
+    return rows
+
+
 def terminal(q):
     q.click_desktop()
     q.type_line("run gterm")
@@ -136,11 +152,7 @@ def terminal(q):
     tx, ty = cascade(2, TERM_W + 2, TERM_H + TITLE_H + 2)
     cx, cy = tx + 1, ty + CONTENT_DY
     typed(q, "echo żółw ĄĘ\n")
-    time.sleep(2)
-    rows = q.read_cells(cx + TERM_PAD, cy + TERM_PAD, TERM_COLS, TERM_ROWS,
-                        cell=TERM_CELL, row_h=TERM_ROW_H, base=TERM_BASE,
-                        px=TERM_PX, extra=PL)
-    rows = [r for r in rows if r]
+    rows = term_rows(q, cx, cy, lambda rs: "żółw ĄĘ" in rs)
     check("the terminal takes them on its line and shows the answer "
           "(%s)" % rows[-3:], "żółw ĄĘ" in rows and
           any(r.endswith("echo żółw ĄĘ") for r in rows))
@@ -152,13 +164,11 @@ def terminal(q):
     typed(q, "ś")
     q.sendkey("backspace")
     q.sendkey("backspace")
-    time.sleep(0.8)
-    rows = q.read_cells(cx + TERM_PAD, cy + TERM_PAD, TERM_COLS, TERM_ROWS,
-                        cell=TERM_CELL, row_h=TERM_ROW_H, base=TERM_BASE,
-                        px=TERM_PX, extra=PL)
-    rows = [r for r in rows if r]
+    rows = term_rows(q, cx, cy,
+                     lambda rs: rs[-1].endswith(("> bc", "# bc")))
+    # (the prompt ends in '#' for an administrator, '>' for anybody else)
     check("and edits the line letter by letter (%s)" % rows[-1:],
-          rows[-1].endswith("> bc"))
+          rows[-1].endswith(("> bc", "# bc")))
 
 
 def usb():

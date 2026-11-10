@@ -1,18 +1,18 @@
 /* deep - a stack growing on demand
  *
- * The program gets eight pages of stack to start with. This recursion
- * reaches far deeper: every call takes four kilobytes of frame and
- * writes a pattern into it, and on the way back checks whether the
- * pattern survived. If the kernel added pages under its fingers,
- * everything matches; if not, the program dies at the first crossing of
- * the limit.
+ * The program gets four pages of stack to start with (USER64_STACK_PAGES
+ * in kernel64/elf64.h). This recursion reaches far deeper: every call
+ * takes four kilobytes of frame and writes a pattern into it, and on
+ * the way back checks whether the pattern survived. If the kernel added
+ * pages under its fingers, everything matches; if not, the program dies
+ * at the first crossing of the limit.
  *
  * Checking the pattern ON THE WAY BACK matters here: adding pages on
  * top of overwriting somebody else's frames would look the same
  * halfway.
  */
 
-#include "usys.h"
+#include "uapi.h"
 
 #define FRAME   4096
 #define DEEP 40

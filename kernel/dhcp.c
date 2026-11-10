@@ -20,7 +20,6 @@
 #include "include/pit.h"
 #include "include/printk.h"
 #include "include/string.h"
-#include "include/shell.h"
 
 #define DHCP_CLIENT_PORT 68
 #define DHCP_SERVER_PORT 67
@@ -248,8 +247,6 @@ static void dhcp_thread(void *arg)
         net_print_ip(net_ip());
         printk("\n");
     }
-    /* The message landed in the prompt's line - redraw the shell prompt */
-    shell_refresh();
 }
 
 void dhcp_start(void)

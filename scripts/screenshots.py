@@ -25,9 +25,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.argv = [sys.argv[0], os.path.join(ROOT, "build", "threados.bin"),
-            os.path.join(ROOT, "build", "initrd.img"),
-            os.path.join(ROOT, "build", "threados64.bin"),
+sys.argv = [sys.argv[0], os.path.join(ROOT, "build", "threados64.bin"),
             os.path.join(ROOT, "build", "initrd64.img")]
 sys.path.insert(0, HERE)
 from ptest import *          # noqa: F401,F403,E402
@@ -146,8 +144,8 @@ def installer():
 
 
 def sharp():
-    """The 32-bit kernel on a 1920x1080 screen that says nothing about
-    itself: the panel's height gives one and a half"""
+    """The system on a 1920x1080 screen that says nothing about itself:
+    the panel's height gives one and a half"""
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
         f.truncate(16 * 1024 * 1024)

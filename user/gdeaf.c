@@ -10,7 +10,7 @@
  * can close does not exist.
  */
 
-#include "usys.h"
+#include "uapi.h"
 
 #define C_BG   8
 #define C_RED  1

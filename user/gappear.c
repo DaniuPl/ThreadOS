@@ -14,8 +14,7 @@
  *
  * A click chooses, and the desktop follows at once. Changing a setting
  * needs admin, so the first change asks for the password - once, and
- * the right is given back as soon as that change is written. One
- * program for both kernels (uapi.h).
+ * the right is given back as soon as that change is written.
  */
 
 #include "udraw.h"

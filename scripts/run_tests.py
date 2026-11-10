@@ -10,9 +10,9 @@ Every group's output we hold whole and print only once it has finished -
 otherwise lines from several machines would mix into one unreadable
 column.
 
-  make test              all the groups
-  make test T=k64        the 64-bit kernel only
-  make test J=1          one after another (for debugging)
+  make test                    all the groups
+  make test T=files,filetree   selected groups
+  make test J=1                one after another (for debugging)
 """
 
 import os
@@ -25,15 +25,23 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 # The order matters only with J=1; in parallel the longest ones start
 # first anyway, so that they are not left alone at the end
 GROUPS = [
-    "boot", "bootsplash", "shell", "process", "fork", "lazymem", "signals", "protect",
-    "net32", "http32", "mouse", "ush", "tfs", "foreigndisk", "k64core", "k64proc",
-    "k64shell", "k64disk", "acpi", "usbkbd", "usbmouse", "ahci", "consoles", "swap",
-    "tls32", "tls64", "net", "net64", "e1000", "virtio", "nvme", "xhci", "ehci", "ttf", "shapes", "sem", "disk",
+    "bootsplash", "mouse", "tfs", "foreigndisk", "k64core", "k64proc",
+    "k64shell", "k64disk", "usbmouse", "tls64", "http", "net", "net64",
+    "e1000", "virtio", "nvme", "xhci", "ehci", "ttf", "shapes", "sem", "disk",
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
-    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "settings", "netbar", "winmgr", "manywin", "maxwin", "clock", "gterm", "terminal", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gcode", "gtasks", "sysbar", "files", "filetree", "screenshot", "colours", "wheel", "scale", "look", "bar", "udraw", "motion", "notify", "appear", "apps", "lock", "session", "polish", "wall", "icons", "users", "usersgui", "login", "multiuser", "gfx64", "desktop1",
+    "kthreads", "proccores", "lockless", "tlb", "faults", "config", "settings",
+    "netbar", "winmgr", "manywin", "maxwin", "clock", "gterm", "terminal",
+    "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap",
+    "desks", "gedit", "gcode", "gtasks", "sysbar", "files", "filetree",
+    "screenshot", "colours", "wheel", "scale", "look", "bar", "udraw",
+    "motion", "notify", "appear", "apps", "lock", "session", "polish", "wall",
+    "icons", "users", "usersgui", "login", "multiuser", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
-    "usbkbd64", "arm64boot", "arm64core", "arm64threads", "iso", "uefi", "threadboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "intelusb", "screenoff", "pointer", "usbnet", "rtl8168",
-    "libc", "browser", "web", "webform", "webtools", "webjs", "webui", "isoinstall", "wc", "update"
+    "usbkbd64", "arm64boot", "arm64core", "arm64threads", "iso", "uefi",
+    "threadboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick",
+    "sound", "aes", "wpa", "usbdisk", "bt", "intelusb", "screenoff", "pointer",
+    "usbnet", "rtl8168", "libc", "browser", "web", "webform", "webtools",
+    "webjs", "webui", "isoinstall", "wc", "update",
 ]
 
 

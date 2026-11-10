@@ -35,6 +35,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
+# The terminal's prompt: it starts in the signed-in user's home, and
+# the account the desktop set up is an administrator's ('#')
+PROMPT = "/home/admin# "
+
+
 # The cascade: slot i sits at (70+12i, 30+12i).
 def slot_xy(i):
     return 70 + 12 * i, 30 + 12 * i
@@ -113,8 +118,8 @@ def main():
             # The terminal's lines, read in the lettering they are drawn in
             text = q.term_rows(x2 + 1, y2 + CONTENT_DY, screen=(w, h, at))
             body = "\n".join(text)
-            check("what was typed after Alt+Tab reached the terminal",
-                  "/> date" in body)
+            check("what was typed after Alt+Tab reached the terminal (%s)"
+                  % text[-3:], PROMPT + "date" in body)
             check("and the terminal ran it", "2030-06-13" in body)
 
             # --- round the wheel ----------------------------------------

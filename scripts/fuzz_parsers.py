@@ -37,20 +37,15 @@ CASES = int(sys.argv[1]) if len(sys.argv) > 1 else 400
 
 
 def build(workdir):
-    """Compiles the harness. The userspace headers pull in 'uapi.h', and
-    that one picks the entry into the kernel appropriate for the
-    processor mode - on the host neither of them makes sense. So we
+    """Compiles the harness. The userspace headers pull in 'uapi.h', the
+    entry into the kernel, which makes no sense on the host. So we
     substitute a stub: a directory of symlinks to the real headers, and
     instead of the entry into the kernel a file with types and small
-    details only.
-
-    We stub 'usys.h' under its own name too - the parsers should no
-    longer call it directly, but if one of them went back to the old
-    habit, better it hit a stub than a syscall."""
+    details only."""
     inc = os.path.join(workdir, "include")
     os.makedirs(inc, exist_ok=True)
 
-    stubbed = ("usys.h", "uapi.h")
+    stubbed = ("uapi.h",)
     for name in os.listdir(os.path.join(ROOT, "user")):
         if name.endswith(".h") and name not in stubbed:
             os.symlink(os.path.join(ROOT, "user", name),

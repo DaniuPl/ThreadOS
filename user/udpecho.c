@@ -5,7 +5,7 @@
  * after its death, and the data travel through checked pointers.
  */
 
-#include "usys.h"
+#include "uapi.h"
 
 #define PORT 7777
 
@@ -31,7 +31,7 @@ void _start(void)
             break;
         buf[n] = '\0';
 
-        print("[udpecho] od ");
+        print("[udpecho] from ");
         print_ip(from_ip);
         print(":");
         print_dec(from_port);

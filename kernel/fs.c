@@ -32,14 +32,9 @@
 #include "include/io.h"
 #include "include/task.h"
 #include "include/user.h"
-#ifdef __x86_64__
 #include "../kernel64/task64.h"
 #define current_level task64_level
 #define current_uid task64_uid
-#else
-#define current_level task_level
-#define current_uid task_uid
-#endif
 
 #define MAGIC          "TFS3"
 #define SECTORS_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)
@@ -520,6 +515,17 @@ static int inode_owner(const struct inode *in)
     return in->type >> FS_OWNER_SHIFT;
 }
 
+/* The files in the root that only an administrator may create, write,
+   rename or delete. user.c keeps the list of them; the dock's list is
+   one more, because the desktop starts the programs it names for
+   whoever clicks a tile, an administrator included - a plain account
+   that could write it could have its own program run with an
+   administrator's powers. */
+static int system_file(const char *name)
+{
+    return user_is_system_file(name) || !strcmp(name, "desktop.icons");
+}
+
 static int can_access(int slot)
 {
     if (slot < 0 || current_level() == USER_ADMIN)
@@ -529,7 +535,7 @@ static int can_access(int slot)
        resolved inode name here, after path components like '..' have
        been handled by resolve(). */
     if (inodes[slot].parent == FS_ROOT &&
-        user_is_system_file(inodes[slot].name))
+        system_file(inodes[slot].name))
         return 0;
     return inode_owner(&inodes[slot]) == current_uid();
 }
@@ -539,11 +545,15 @@ static int can_read(int slot)
     if (can_access(slot))
         return 1;
     /* Machine settings and icons are public; account hashes and swap data
-       stay private even though they are also system-owned files. */
+       stay private even though they are also system-owned files. The
+       dock's list is read by the desktop as whoever is signed in - and
+       before anybody is; system_file() keeps the writing of it to
+       administrators. */
     return slot >= 0 && inode_type(&inodes[slot]) == FS_TYPE_FILE &&
            inodes[slot].parent == FS_ROOT &&
            (!strcmp(inodes[slot].name, "system.cfg") ||
-            !strcmp(inodes[slot].name, "icons.pos"));
+            !strcmp(inodes[slot].name, "icons.pos") ||
+            !strcmp(inodes[slot].name, "desktop.icons"));
 }
 
 static int parent_of(int slot)
@@ -642,7 +652,7 @@ static int create_inode(int dir, const char *base, int type)
     memcpy(inodes[idx].name, base, strlen(base));
     inodes[idx].used = 1;
     int owner = current_uid();
-    if (dir == FS_ROOT && user_is_system_file(base))
+    if (dir == FS_ROOT && system_file(base))
         owner = 0;
     inodes[idx].type = (uint8_t)((owner << FS_OWNER_SHIFT) | type);
     inodes[idx].parent = (int16_t)dir;
@@ -679,7 +689,7 @@ int fs_open(int cwd, const char *path, int create)
     char base[FS_NAME_MAX + 1];
     int dir = resolve_parent(cwd, path, base);
     if (dir == FS_NOTFOUND || !can_access(dir) ||
-        (dir == FS_ROOT && user_is_system_file(base) &&
+        (dir == FS_ROOT && system_file(base) &&
          current_level() != USER_ADMIN)) {
         irq_restore(flags);
         return -1;
@@ -701,7 +711,7 @@ int fs_mkdir(int cwd, const char *path)
     char base[FS_NAME_MAX + 1];
     int dir = resolve_parent(cwd, path, base);
     if (dir == FS_NOTFOUND || !can_access(dir) ||
-        (dir == FS_ROOT && user_is_system_file(base) &&
+        (dir == FS_ROOT && system_file(base) &&
          current_level() != USER_ADMIN)) {
         irq_restore(flags);
         return -1;
@@ -786,7 +796,7 @@ int fs_rename(int cwd, const char *from, const char *to)
     char base[FS_NAME_MAX + 1];
     int dir = resolve_parent(cwd, to, base);
     if (dir == FS_NOTFOUND || !can_access(dir) ||
-        (dir == FS_ROOT && user_is_system_file(base) &&
+        (dir == FS_ROOT && system_file(base) &&
          current_level() != USER_ADMIN)) {
         irq_restore(flags);
         return -1;

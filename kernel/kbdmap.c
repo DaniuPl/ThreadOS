@@ -2,9 +2,9 @@
  *
  * Split out of the keyboard driver, because it is the one part of it
  * that depends on nothing: neither on virtual consoles, nor on tasks,
- * nor on the processor mode. Thanks to that the same state machine
- * serves the keyboard in both kernels - and the decision where a
- * finished character goes stays with the driver.
+ * nor on the processor. Thanks to that it is a plain state machine,
+ * and the decision where a finished character goes stays with the
+ * driver (kernel64/keyboard64.c).
  *
  * State has to live here, because one key press spreads over several
  * bytes: the 0xE0 prefix for extended keys, separate press and release

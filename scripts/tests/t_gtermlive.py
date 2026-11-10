@@ -4,9 +4,9 @@
 The terminal used to start a program and WAIT for it: it drew nothing,
 answered nothing and showed nothing until the program had ended. A
 program that ends quickly made that invisible. A program that does not
-end - 'spin' is one - took the window with it: no output, no way to
-close it, no way to stop it. That is not a terminal running a program,
-that is a terminal that has stopped.
+end took the window with it: no output, no way to close it, no way to
+stop it. That is not a terminal running a program, that is a terminal
+that has stopped.
 
 Two things had to change, and they are what is checked here:
 
@@ -19,6 +19,12 @@ Two things had to change, and they are what is checked here:
   0x03 like any other, the terminal sends SIGINT to the program it
   started, and a program with no handler of its own dies on it - after
   which the terminal takes the next command.
+
+The program is uupper64: it never ends by itself - it reads its input
+until there is no more - and every line it is given comes back in
+capitals. A line in capitals on the screen can only have come from the
+program, written while it was still running, so each one is proof that
+the output was read as it arrived and not when the program was over.
 
 And through all of it the window is alive: it keeps drawing, it says
 that something is running, and it still takes what is typed.
@@ -49,8 +55,37 @@ def read_rows(q, ox, oy, cols, rows):
                         base=TERM_BASE, px=TERM_PX)
 
 
-def spins(rows):
-    return sum(1 for r in rows if "spin" in r and "/>" not in r)
+def wait_rows(q, ok, geom, tries=20):
+    """Polls the window until what it shows passes the test 'ok'"""
+    seen = []
+    for _ in range(tries):
+        seen = read_rows(q, **geom)
+        if ok(seen):
+            return seen
+        time.sleep(0.5)
+    return seen
+
+
+def settled(q, ok, geom, tries=20):
+    """Waits until what the window shows passes the test 'ok' in two
+    pictures in a row. The terminal redraws its whole window on every
+    pass and its 'running' notice last of all, so one picture taken
+    halfway through can be missing it - and a notice that is gone has to
+    be seen gone in finished pictures, not in a torn one."""
+    seen, good = [], 0
+    for _ in range(tries):
+        seen = read_rows(q, **geom)
+        good = good + 1 if ok(seen) else 0
+        if good == 2:
+            break
+        time.sleep(0.5)
+    return seen
+
+
+def command_echo(rows, command):
+    return any(row.startswith("/") and any(
+        row.split(prompt, 1)[1] == command
+        for prompt in ("> ", "# ") if prompt in row) for row in rows)
 
 
 def main():
@@ -74,63 +109,121 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1)
 
-            # 'spin' prints a line and never ends by itself
-            q.type_line("spin")
-            time.sleep(2.5)
-            rows = read_rows(q, **geom)
-            first = spins(rows)
-            check("the output shows BEFORE the program finished (%d lines)"
-                  % first, first > 0)
+            q.type_line("uupper64")
+            rows = wait_rows(q, lambda rs: "running" in "\n".join(rs), geom)
             check("the terminal says something is running and how to stop it",
-                  "running" in "\n".join(rows))
+                  "running" in "\n".join(rows) and "^C" in "\n".join(rows))
 
-            # It goes on arriving - one flush at the start would pass
-            # the check above and fail this one
-            time.sleep(3)
-            rows = read_rows(q, **geom)
-            second = spins(rows)
-            check("and more of it keeps coming (%d -> %d lines)" % (first, second),
-                  second > first)
+            # A line for it to answer: what comes back is the program's
+            # output, and it has to be on the screen while the program
+            # is still there
+            q.type_line("alpha")
+            rows = wait_rows(q, lambda rs: "ALPHA" in rs
+                             and "running" in "\n".join(rs), geom)
+            check("the output shows BEFORE the program finished (%s)"
+                  % [r for r in rows if r][-3:],
+                  "ALPHA" in rows and "running" in "\n".join(rows))
+
+            # It goes on arriving - one read at the start, or one at the
+            # end, would pass the check above and fail this one
+            q.type_line("beta")
+            rows = wait_rows(q, lambda rs: "BETA" in rs
+                             and "running" in "\n".join(rs), geom)
+            check("and more of it keeps coming (%s)"
+                  % [r for r in rows if r][-5:],
+                  "ALPHA" in rows and "BETA" in rows
+                  and rows.index("ALPHA") < rows.index("BETA")
+                  and "running" in "\n".join(rows))
 
             # The window still takes keys while the program runs: what
             # is typed lands on the line being edited
+            # (polled: the terminal redraws its whole window on every
+            # pass, and a picture taken in the middle of that can be
+            # missing the line drawn last)
             for ch in "abc":
                 q.sendkey(ch)
                 time.sleep(0.2)
-            time.sleep(0.8)
-            rows = read_rows(q, **geom)
-            last = [r for r in rows if r][-1]
+            rows = wait_rows(q, lambda rs: rs[-1].endswith("abc"), geom)
             check("the window takes keys while a program runs "
-                  "('%s')" % last, last.endswith("abc"))
+                  "('%s')" % rows[-1], rows[-1].endswith("abc"))
             for _ in range(3):
                 q.sendkey("backspace")
                 time.sleep(0.2)
 
             # --- Ctrl+C ------------------------------------------------
             q.sendkey("ctrl-c")
-            time.sleep(3)
-            rows = read_rows(q, **geom)
+            rows = settled(q, lambda rs: "^C" in "\n".join(rs)
+                           and "[code" in "\n".join(rs)
+                           and "running" not in "\n".join(rs)
+                           and rs[-1].startswith("/"), geom)
             body = "\n".join(rows)
             check("Ctrl+C was shown in the session", "^C" in body)
             check("the program stopped running (the running notice goes)",
                   "running" not in body)
             check("and the terminal gave its code", "[code" in body)
 
-            after_kill = spins(read_rows(q, **geom))
-            time.sleep(2.5)
-            check("nothing is added to the session any more",
-                  spins(read_rows(q, **geom)) == after_kill)
+            # The notice going says only that the terminal stopped
+            # watching. That the program is gone is for the system to
+            # say: core's 'kill' looks it up by name among the programs
+            # that are running, and is silent when it finds one (that it
+            # does find a live one by name is t_consoles64's to check)
+            q.type_line("kill uupper64")
+            rows = wait_rows(q, lambda rs: any("no such process" in r
+                                               for r in rs), geom)
+            check("the program is really gone - there is no process left "
+                  "to stop (%s)" % rows[-3:],
+                  any("kill: no such process 'uupper64'" in r for r in rows))
 
             # --- and the terminal takes the next command ---------------
-            q.type_line("seq 3")
-            time.sleep(3)
-            rows = read_rows(q, **geom)
+            q.type_line("echo after")
+            rows = wait_rows(q, lambda rs: "after" in rs, geom)
             check("after the program is killed the terminal takes the next command",
-                  "/> seq 3" in "\n".join(rows))
+                  command_echo(rows, "echo after"))
             check("and shows ITS output, not the leftovers of the last one",
-                  "1" in rows and "2" in rows and "3" in rows)
-            check("nothing of the old program is left in the window",
-                  spins(rows) == 0 or "/> seq 3" in "\n".join(rows[-8:]))
+                  "after" in rows)
+            echo_at = max((i for i, r in enumerate(rows)
+                           if command_echo([r], "echo after")), default=-1)
+            check("nothing of the old program is left under the new command",
+                  echo_at >= 0 and not any(r in ("ALPHA", "BETA")
+                                           for r in rows[echo_at:]))
+
+            # --- output with nothing typed -------------------------------
+            # uupper64 only writes when it is given a line, so everything
+            # above would pass a terminal that reads the program's output
+            # only when a key is pressed. spin64 writes a numbered tick
+            # every half second by itself: a later number turning up
+            # with no key pressed in between can only come from the
+            # terminal reading on its own.
+            def ticks(rs):
+                got = []
+                for r in rs:
+                    if r.startswith("[spin64] tick "):
+                        tail = r[len("[spin64] tick "):]
+                        if tail.isdigit():
+                            got.append(int(tail))
+                return got
+
+            q.type_line("spin64")
+            rows = wait_rows(q, lambda rs: ticks(rs) != [], geom, tries=40)
+            first = max(ticks(rows), default=0)
+            check("a program that writes by itself shows its first lines "
+                  "(tick %d)" % first, first > 0)
+            rows = wait_rows(q, lambda rs: max(ticks(rs), default=0)
+                             >= first + 3, geom, tries=40)
+            later = max(ticks(rows), default=0)
+            check("and more of them arrive with no key pressed "
+                  "(tick %d, then %d)" % (first, later), later >= first + 3)
+
+            q.sendkey("ctrl-c")
+            rows = settled(q, lambda rs: "running" not in "\n".join(rs)
+                           and rs[-1].startswith("/"), geom)
+            stopped = max(ticks(rows), default=0)
+            time.sleep(2)              # four ticks' time, if it still ran
+            rows = read_rows(q, **geom)
+            check("Ctrl+C stops it: no tick arrives after the prompt is "
+                  "back (%d, then %d)"
+                  % (stopped, max(ticks(rows), default=0)),
+                  stopped > 0 and max(ticks(rows), default=0) == stopped)
         finally:
             q.close()
     finally:

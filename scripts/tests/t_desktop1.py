@@ -26,30 +26,9 @@ from ptest import check, summary
 
 
 def main():
-    # --- Graphics mode (a separate boot: 'gfx' is one-way) ---
-    print("--- graphics mode (screendump) ---")
-    q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
-    try:
-        q3.wait_for("ThreadOS shell")
-        q3.type_line("gfx")
-        time.sleep(1.0)
-        sx, sy, at = q3.screen_pixels()
-        check(f"graphics mode is on (the screen scaled {sx}x{sy})",
-              sx >= 1 and sy >= 1)
-
-        def near(px, want, tol=40):
-            return all(abs(px[i] - want[i]) <= tol for i in range(3))
-
-        check("framebuffer: a blue background (fb 160,180)",
-              near(at(160, 180), (0, 0, 255)))
-        check("framebuffer: a red rectangle in the middle (fb 160,100)",
-              near(at(160, 100), (255, 0, 0)))
-        check("framebuffer: a green rectangle in the corner (fb 30,30)",
-              near(at(30, 30), (0, 255, 0)))
-        check("framebuffer: a yellow rectangle in the corner (fb 290,30)",
-              near(at(290, 30), (255, 255, 0)))
-    finally:
-        q3.close()
+    # The shell's 'gfx' picture is t_gfx64's: the 64-bit kernel draws
+    # its own (kernel64/shell64.c), corners and all, and that group
+    # reads every part of it.
 
     # --- The graphical desktop: the mouse cursor (a separate boot) ---
     print("--- the desktop: the mouse pointer, the background, the bar ---")
@@ -63,10 +42,11 @@ def main():
         check(f"the desktop in a high-resolution VESA mode ({gw}x{gh})",
               gw == 640 and gh == 480)
 
-        # the mouse starts in the middle (160,100); move it to ~(50,40)
-        q4.mouse_move(-110, -60)
-        check("the pointer is drawn where the mouse is (white ~50,41)",
-              q4.wait_pixel(50, 41, (255, 255, 255)))
+        # the mouse starts at (160,100); move it to ~(250,160) - bare
+        # desktop, clear of the shortcuts in the top left corner
+        q4.mouse_move(90, 60)
+        check("the pointer is drawn where the mouse is (white ~250,161)",
+              q4.wait_pixel(250, 161, (255, 255, 255)))
         # The background is the aurora, and it is the aurora to the
         # last bit: the test draws it again from the numbers in look.h
         # by the arithmetic kernel/aurora.c spells out
@@ -78,19 +58,31 @@ def main():
               len(exact) == len(spots))
         # move it somewhere else - the cursor follows
         q4.mouse_move(150, 80)
-        check("the pointer follows the mouse (white ~200,121)",
-              q4.wait_pixel(200, 121, (255, 255, 255)))
-        check("the pointer's old place was cleaned up (the aurora at 50,41)",
-              q4.wait_background(50, 41, tol=0))
+        check("the pointer follows the mouse (white ~400,241)",
+              q4.wait_pixel(400, 241, (255, 255, 255)))
+        check("the pointer's old place was cleaned up (the aurora at 250,161)",
+              q4.wait_background(250, 161, tol=0))
 
         # The bar: glass - the aurora under it blurred and tinted, which
         # the test works out as well. Away from what is written on it,
-        # the bar is that and nothing else.
-        _, _, at = q4.screen_raw()
+        # the bar is that and nothing else. It hides itself until the
+        # pointer reaches the top edge (bar_visible() in
+        # kernel/desktop.c), so the pointer goes there - at the right
+        # end, clear of everything read below. What is read is the bare
+        # stretch between the name and the first of the status icons
+        # (Bluetooth's, two icons left of "show the desktop").
+        q4.mouse_home()
+        q4.mouse_goto(600, 1)
         glass = bar_glass()
-        xs = [x for x in range(130, 330, 7)]
-        same = sum(1 for x in xs for y in (2, 12, 20)
-                   if near(at(x, y), glass[y][x], 1))
+        icons_x = bar_show_x() - 2 * (BAR_ITEM_GAP + STAT_W)
+        xs = [x for x in range(130, icons_x - 4, 5)]
+        same = 0
+        deadline = time.time() + 4
+        while time.time() < deadline and same != 3 * len(xs):
+            _, _, at = q4.screen_raw()
+            same = sum(1 for x in xs for y in (2, 12, 20)
+                       if near(at(x, y), glass[y][x], 1))
+            time.sleep(0.2)
         check("the bar is glass: the blurred aurora under the tint (%d of "
               "%d pixels)" % (same, 3 * len(xs)), same == 3 * len(xs))
         name = q4.read_ui(BAR_NAME_X, ui_font_baseline_in(BAR_PX, 0, BAR_H),
@@ -127,6 +119,9 @@ def main():
             time.sleep(0.4)
             q5.mouse_click()
             q5.mouse_click()
+            # The pointer off the window, whose title bar may open over
+            # the icon - a pointer in it is not part of the title
+            q5.mouse_goto(SCREEN_W - 8, 400)
             title = ""
             deadline = time.time() + 10
             while time.time() < deadline:
@@ -141,7 +136,9 @@ def main():
             while time.time() < deadline and q5.dock_windows():
                 time.sleep(0.25)
 
-        open_desktop_icon(338, 224, "Files: /home/")
+        # (Home where it was dropped: the point it was carried by lands
+        # there, on the icon itself)
+        open_desktop_icon(338, 190, "Files: /home/")
         open_desktop_icon(136, icon_y, "/Desktop")
         open_desktop_icon(224, icon_y, "/.Trash")
         check("closing each desktop shortcut returns to the bare desktop",
@@ -170,10 +167,19 @@ def main():
     q5r = Qemu(KERNEL, INITRD, q5_disk)
     try:
         q5r.wait_desktop()
-        q5r.mouse_goto(338, 224)
+        # The profile's layout is read once the session has begun: the
+        # click waits for Home to stand where it was put - and for its
+        # old place to be bare
+        deadline = time.time() + 15
+        while time.time() < deadline and not (
+                not q5r.is_background(338, 178) and
+                q5r.is_background(48, BAR_H + 30)):
+            time.sleep(0.3)
+        q5r.mouse_goto(338, 190)
         time.sleep(0.4)
         q5r.mouse_click()
         q5r.mouse_click()
+        q5r.mouse_goto(SCREEN_W - 8, 400)
         title = ""
         deadline = time.time() + 10
         while time.time() < deadline:
@@ -208,11 +214,15 @@ def main():
     # --- A ring 3 application with its own window (drawing through
     # syscalls) ---
     print("--- the desktop: a ring 3 application ---")
-    q7 = Qemu(KERNEL, INITRD)
+    # The serial port: where the kernel says it killed the program
+    slog7 = tempfile.mktemp(suffix=".log")
+    q7 = Qemu(KERNEL, INITRD, serial=slog7)
     try:
         q7.wait_desktop()
         time.sleep(0.8)
-        q7.type_line("run guiapp")
+        # 'runw': the shell does not wait for the program, so it is free
+        # for the command that kills it further down
+        q7.type_line("runw guiapp")
         time.sleep(1.2)
 
         # guiapp opens in its first cascade position, at (94,54). The RGB
@@ -268,13 +278,24 @@ def main():
 
         # Killing the application: the compositor cleans its window up. We
         # kill by name - the pid depends on how many threads started
-        # earlier
-        q7.type_line("kill guiapp")
+        # earlier. The kernel's shell has no 'kill' of its own; the one
+        # the terminal uses is a program (user/core.c), and it sends
+        # SIGTERM, which guiapp does not catch
+        q7.type_line("run core kill guiapp")
+        deadline = time.time() + 10
+        while (time.time() < deadline and
+               "(guiapp) killed: a signal" not in q7.serial()):
+            time.sleep(0.3)
+        check("the signal killed the application (the kernel says so)",
+              re.search(r"task \d+ \(guiapp\) killed: a signal", q7.serial())
+              is not None)
         # (200,75) is inside guiapp's window.
         check("once the application is killed its window is cleaned up "
               "(the aurora at 200,75)", q7.wait_background(200, 75, tol=0))
     finally:
         q7.close()
+        if os.path.exists(slog7):
+            os.unlink(slog7)
 
     # --- The dock and the launch menu (a separate boot) ---
     print("--- the desktop: the dock + the menu ---")
@@ -288,26 +309,46 @@ def main():
               not near(at(101, 71 + DOWN), (255, 0, 0)))
 
         # The menu hangs from the mark at the left end of the bar; its
-        # entries are the programs' names, in TrueType
+        # entries are the programs' names, in TrueType. It hangs at
+        # MENU_Y when it fits there, and higher - never above the bar -
+        # when it would reach into the dock (menu_at() in
+        # kernel/desktop.c), which it does on a 640x480 screen: menu_y()
+        # knows (ptest's menu_top()).
         def entry(name):
-            top = menu_y(name) - MENU_ROW // 2
+            """An entry read the way a person reads a menu - with the
+            pointer on it, so that it stands on the accent, one colour,
+            and not on glass that is whatever lies under the menu
+            (the desktop's shortcuts, blurred). '' where no menu is."""
+            y = menu_y(name)
+            q8.mouse_goto(MENU_X0 + MENU_W - 12, y)
+            time.sleep(0.6)
             return q8.read_ui(MENU_X0 + 10 + MENU_ICON + 10,
-                              ui_font_baseline_in(MENU_PX, top, MENU_ROW),
-                              width=100, px=MENU_PX)
+                              ui_font_baseline_in(MENU_PX, y - MENU_ROW // 2,
+                                                  MENU_ROW),
+                              width=100, px=MENU_PX,
+                              fg=theme("dark")["accent_text"])
         q8.open_menu()
-        q8.mouse_goto(300, 300)
-        time.sleep(0.6)
-        got = entry("guiapp"), entry("gclock"), entry("gmikser")
+        # (the last one is read here too: it is the one that must be
+        # gone once a choice has been made)
+        got = (entry("guiapp"), entry("gclock"), entry("gmikser"),
+               entry("gcal"))
         check("a click on the mark opens the menu (it reads %s)" % (got,),
-              got == ("App", "Clock", "Mixer"))
+              got == ("App", "Clock", "Mixer", "Calendar"))
+        # The accounts manager has no name in the desktop's list of the
+        # programs it knows: it goes by its own, not by another one's
+        other = entry("gusers")
+        check("a program the desktop has no name for is listed under its "
+              "own ('%s')" % other, other == "gusers")
 
         # A click on the 'guiapp' entry -> starts the application
         q8.click(MENU_X0 + 60, menu_y("guiapp"))
         q8.mouse_goto(300, 300)
         check("a choice from the menu starts the application (a red square 101,71)",
               q8.wait_pixel(101, 71 + DOWN, (255, 0, 0)))
-        check("the menu closes after a choice (its entry is gone)",
-              entry("guiapp") == "")
+        # (read low in the menu, where only the bare desktop lies once
+        # it is gone - not where the new window or the shortcuts are)
+        check("the menu closes after a choice (its entries are gone)",
+              entry("gcal") == "")
 
         # Opening a second program lets the first window's dock tile
         # bring the original application back to the top.

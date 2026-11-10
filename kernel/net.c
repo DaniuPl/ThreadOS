@@ -816,7 +816,7 @@ void net_ping(uint32_t ip, int count)
         if (ping_got) {
             uint32_t ms = (ping_reply_tick - sent_tick) * 10;
             received++;
-            printk("40 B od ");
+            printk("40 B from ");
             net_print_ip(ip);
             printk(": seq=%u ttl=%u time=%ums\n", (uint32_t)seq,
                    (uint32_t)ping_ttl, ms);

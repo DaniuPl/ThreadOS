@@ -26,13 +26,7 @@ struct bt_info {
 
 static inline int sys_bt(int op, struct bt_info *out)
 {
-#ifdef __x86_64__
     return (int)syscall64(SYS64_BT, op, (int64_t)(uintptr_t)out);
-#else
-    (void)op;
-    (void)out;
-    return -1;
-#endif
 }
 
 #endif

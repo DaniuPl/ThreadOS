@@ -23,23 +23,23 @@ and on real UEFI PCs.
 
 ## Architecture
 
-**Two kernels, one source tree.**
+**One PC kernel, and an ARM64 one on its way.**
 
-| | 32-bit kernel | 64-bit kernel |
-|---|---|---|
-| Mode | protected mode, paging | long mode, 4-level paging with NX |
-| Sources | `boot/`, `kernel/` | `boot64/`, `kernel64/` + the shared part of `kernel/` |
-| Syscalls | `int 0x80` (`kernel/syscall.c`) | `syscall`/`sysret` (`kernel64/syscall64.c`) |
-| Boots via | Multiboot 1 (QEMU `-kernel`) or Multiboot 2 (GRUB) | Multiboot 2 (GRUB) or threadboot (UEFI) |
-| Output | `build/threados.bin` + `build/initrd.img` | `build/threados64.bin` + `build/initrd64.img` |
+| | x86-64 kernel |
+|---|---|
+| Mode | long mode, 4-level paging with NX |
+| Sources | `boot64/`, `kernel64/` + the shared part of `kernel/` |
+| Syscalls | `syscall`/`sysret` (`kernel64/syscall64.c`) |
+| Boots via | Multiboot 2 (GRUB) or threadboot (UEFI) |
+| Output | `build/threados64.bin` + `build/initrd64.img` |
 
-The two columns share more than they differ. Drivers, the filesystem, the
-network stack, the window compositor and most of the kernel live in
-`kernel/` and are compiled twice. The list is `SHARED64` in the
-`Makefile`. Only the CPU-mode-specific parts have two implementations:
-paging, interrupts, context switching, the syscall entry and process
-setup. The 32-bit kernel is still built and tested, because a second
-compilation catches width and pointer-size bugs in the shared code.
+Drivers, the filesystem, the network stack, the window compositor and
+most of the kernel live in `kernel/` (the list is `SHARED64` in the
+`Makefile`); what depends on long mode - paging, interrupts, context
+switching, the syscall entry and process setup - is in `kernel64/`. A
+32-bit protected-mode kernel was built from the same files until it was
+removed; its tests now run on this one. The ARM64 kernel (`bootarm64/`,
+`kernelarm64/`) builds `string.c` and `heap.c` from `kernel/` so far.
 
 **Boot paths (64-bit).**
 
@@ -55,9 +55,8 @@ compilation catches width and pointer-size bugs in the shared code.
 
 **Userland.** Programs are freestanding ELF files packed into the initrd
 (`scripts/mkinitrd.py`). They can also be run from disk. Sources in
-`user/` build for both kernels: `user/uapi.h` includes either
-`user/usys.h` (32-bit) or `user64/usys64.h` + `user64/compat64.h`
-(64-bit). Crypto, TLS, HTTP and DNS are header-only code. The programs
+`user/` reach the kernel through `user/uapi.h` (`user64/usys64.h` +
+`user64/compat64.h`); `user64/` holds programs of its own. Crypto, TLS, HTTP and DNS are header-only code. The programs
 that use them link against `libthread.so`, which the kernel maps into
 every process once. On the 64-bit side, programs can also be built
 against musl (`libc/`, with upstream musl in `third_party/musl`). `js`
@@ -106,14 +105,14 @@ Every push to `main` produces a
 Debian/Ubuntu:
 
 ```sh
-sudo apt-get install build-essential gcc-multilib make python3 \
+sudo apt-get install build-essential make python3 \
     qemu-system-x86 grub-pc-bin grub-efi-amd64-bin xorriso mtools \
     ovmf clang lld openssl
 ```
 
 | Needed for | Packages |
 |---|---|
-| kernels and initrds | `gcc` with `-m32` support (`gcc-multilib`), `make`, `python3` |
+| the kernel and initrd | `gcc`, `make`, `python3` |
 | discs (`iso`, `iso64`) | `grub-pc-bin`, `grub-efi-amd64-bin`, `xorriso`, `mtools` |
 | threadboot (`efi`, `stick`) | `clang`, `lld`, `mtools` |
 | running and testing | `qemu-system-x86`, `ovmf`, `openssl` |
@@ -125,12 +124,10 @@ A test that is missing an optional tool prints `SKIPPED` and the reason.
 
 | Command | Produces |
 |---|---|
-| `make` | `build/threados.bin`, `build/initrd.img` (32-bit) |
-| `make kernel64` | `build/threados64.bin`, `build/initrd64.img` |
+| `make` (or `make kernel64`) | `build/threados64.bin`, `build/initrd64.img` |
 | `make efi` | `build/BOOTX64.EFI` (threadboot) |
 | `make kernelarm64` | `build/threados-arm64.elf`, the ARM64 kernel for QEMU's virt machine (first stage; clang + lld). `make run-arm64` boots it |
 | `make iso64` | `build/threados64.iso` (builds the 64-bit kernel and threadboot first) |
-| `make iso` | `build/threados.iso` (32-bit) |
 | `make stick` | `build/threados-stick.img` |
 | `make libc64` | musl for ThreadOS (built automatically when needed) |
 | `make browser` | litehtml and its layout test, for ThreadOS and for the host |
@@ -154,7 +151,6 @@ and QuickJS.
 ```sh
 make run              # 64-bit system from the hybrid disc, to the desktop
 make run KVM=1        # with hardware virtualisation
-make run32            # 32-bit kernel
 make run-iso64-uefi   # the hybrid disc under OVMF
 make run-stick        # the USB image under OVMF, exactly as a PC boots it
 ```
@@ -191,9 +187,8 @@ To run tests against a build that is not in `build/`, pass the images
 explicitly:
 
 ```sh
-make BUILD=/tmp/b -j8 all kernel64 efi
-python3 scripts/run_tests.py -tfiles /tmp/b/threados.bin /tmp/b/initrd.img \
-    /tmp/b/threados64.bin /tmp/b/initrd64.img
+make BUILD=/tmp/b -j8 all efi
+python3 scripts/run_tests.py -tfiles /tmp/b/threados64.bin /tmp/b/initrd64.img
 ```
 
 Do not rebuild `build/` while a test run is using it.
@@ -208,11 +203,11 @@ cross-section of groups. It is started by hand from the Actions tab.
 ## Repository layout
 
 ```
-boot/            32-bit entry, GRUB menus (grub.cfg, grub64.cfg)
+boot/            the GRUB menu of the disc (grub64.cfg)
 boot/efi/        threadboot, the UEFI loader
 boot64/          long-mode entry, ISR and syscall stubs, AP startup
-kernel/          shared kernel code + the 32-bit kernel; headers in kernel/include/
-kernel64/        64-bit-only kernel code, linker script
+kernel/          kernel code that does not depend on long mode; headers in kernel/include/
+kernel64/        long-mode kernel code, linker script
 bootarm64/       ARM64 entry (EL2 -> EL1, stack, .bss, further cores), exception vectors, thread switch
 kernelarm64/     ARM64-only kernel code: PL011 serial, device tree, MMU, GIC, timer, pages, threads, PSCI
 user/            ring 3 programs and the header-only libraries (crypto, TLS, HTTP, GUI kit)
@@ -233,10 +228,9 @@ docs/            screenshots and the development journal
 
 | What | Where |
 |---|---|
-| a ring 3 program | `user/<name>.c`; add it to `USER_ELFS` and/or `USER64_ELFS` and to the `mkinitrd.py` lines of `$(INITRD)` / `$(INITRD64)`. Initrd names are at most 15 characters. |
-| a 32-bit system call | `kernel/syscall.c` and a wrapper in `user/usys.h` |
-| a 64-bit system call | `kernel64/syscall64.h` (number), `kernel64/syscall64.c` (handler), `user64/usys64.h` (wrapper), plus `user64/compat64.h` if shared programs need it under the 32-bit name |
-| a driver | `kernel/<name>.c`, `kernel/include/<name>.h`; add `$(BUILD)/<name>.o` to `OBJS` and `<name>` to `SHARED64` |
+| a ring 3 program | `user/<name>.c` or `user64/<name>.c`; add it to `USER64_ELFS` and to the `mkinitrd.py` lines of `$(INITRD64)`. Initrd names are at most 15 characters. |
+| a system call | `kernel64/syscall64.h` (number), `kernel64/syscall64.c` (handler), `user64/usys64.h` (wrapper), plus `user64/compat64.h` if shared programs need it under its older name |
+| a driver | `kernel/<name>.c`, `kernel/include/<name>.h`; add `<name>` to `SHARED64` |
 | a test group | `scripts/tests/t_<name>.py`, registered in `GROUPS` in `scripts/run_tests.py` |
 
 Test helpers read layout constants directly from C sources

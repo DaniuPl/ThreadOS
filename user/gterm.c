@@ -20,13 +20,9 @@
  * the directory - and the prompt says so at once, which is the whole
  * point of a prompt.
  *
- * There is exactly one thing here that depends on the processor mode:
- * how a command is started and its output captured. In protected mode
- * the kernel has a syscall that does it (spawn with a redirect, and a
- * whole pipeline in one call); in long mode there is fork, dup2, exec
- * and pipe, and the terminal builds it out of those itself. Everything
- * else - the ring of lines, the editing, the history, the drawing - is
- * one piece of code compiled twice.
+ * A command is started and its output captured with fork, dup2, exec
+ * and pipe: the kernel has no call that does it in one go, so the
+ * terminal builds even a whole pipeline out of those itself.
  */
 
 #include "udraw.h"
@@ -276,7 +272,6 @@ static void put_num(int32_t v)
 
 /* --- the one thing that depends on the processor mode --------------- */
 
-#ifdef __x86_64__
 
 /* Long mode: fork, dup2, exec, wait - the terminal builds the
    redirection itself, because the kernel has no call that does all of
@@ -368,62 +363,6 @@ static int32_t start_pipe(char *left, char *right)
     return (int32_t)b;
 }
 
-#else
-
-/* Protected mode: the kernel starts a program (or a whole pipeline)
-   with the output redirected, in one call. */
-
-static void term_cwd(char *buf, int len)
-{
-    (void)len;
-    sys_getcwd(buf);
-}
-
-/* The output file, emptied before anything writes into it.
- *
- * Whoever reads it while it grows has to be sure that what is in it
- * came from THIS command: the terminal shows what is past the point it
- * last read, and a file still holding the last program's output would
- * be shown as this one's. */
-static void empty_out_file(void)
-{
-    int32_t fd = sys_open(OUTFILE, O_WRITE | O_CREATE | O_TRUNC);
-    if (fd >= 0)
-        sys_close((int)fd);
-}
-
-/* Starts the program with its output going to a file and comes back
-   at once: the pid, or -1 when there is no such program (which this
-   kernel knows straight away, because it is the one that looks for
-   it). */
-static int32_t start_one(char *cmd)
-{
-    int fd = -1;
-    int32_t pid = uterm_start_one(cmd, OUTFILE, (const char *)0, &fd);
-    if (pid < 0)
-        return -1;
-    in_fd = fd;                    /* the way in to what we started */
-    return pid;
-}
-
-static int32_t start_pipe(char *left, char *right)
-{
-    /* The kernel takes the pipeline as one line, so the two halves are
-       joined again round a '|' */
-    static char both[2 * LINE_MAX + 20];
-    int n = 0;
-    for (int i = 0; left[i] && n < (int)sizeof(both) - 2; i++)
-        both[n++] = left[i];
-    both[n++] = '|';
-    for (int i = 0; right[i] && n < (int)sizeof(both) - 1; i++)
-        both[n++] = right[i];
-    both[n] = 0;
-    empty_out_file();
-    int32_t pid = sys_pipeline(both, OUTFILE);
-    return pid < 0 ? -1 : pid;
-}
-
-#endif
 
 /* --- running a line ------------------------------------------------- */
 
@@ -784,11 +723,7 @@ static void take_history(int which)
  *
  * The names come from the working directory, which is where the shell
  * looks too, so what completes is what would have run. */
-#ifdef __x86_64__
 #define TERM_NAME_MAX NAME_MAX64
-#else
-#define TERM_NAME_MAX FS_NAME_MAX
-#endif
 
 static int word_start(void)
 {
@@ -810,7 +745,6 @@ static void complete_word(void)
 
     for (int idx = 0;; idx++) {
         char name[TERM_NAME_MAX + 1];
-#ifdef __x86_64__
         struct dirent64 e;
         if (sys_readdir(idx, &e) != 0)
             break;
@@ -820,10 +754,6 @@ static void complete_word(void)
             n++;
         }
         name[n] = 0;
-#else
-        if (sys_readdir(idx, name) == -1)
-            break;
-#endif
         int match = 1;
         for (int i = 0; i < len; i++)
             if (name[i] != input[start + i]) {
@@ -865,7 +795,6 @@ static void complete_word(void)
         put_char('\n');
         for (int idx = 0;; idx++) {
             char name[TERM_NAME_MAX + 1];
-#ifdef __x86_64__
             struct dirent64 e;
             if (sys_readdir(idx, &e) != 0)
                 break;
@@ -875,10 +804,6 @@ static void complete_word(void)
                 n++;
             }
             name[n] = 0;
-#else
-            if (sys_readdir(idx, name) == -1)
-                break;
-#endif
             int match = 1;
             for (int i = 0; i < len; i++)
                 if (name[i] != input[start + i]) {

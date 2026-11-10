@@ -143,11 +143,14 @@ static int map_library(void)
 }
 
 /* Writes the resolved address into the program's jump table. The
-   process's space is already active, so we write straight to it. */
+   process's space is already active, so we write straight to it - which
+   is why the page has to be writable, not merely the program's: a file
+   whose relocation points into a read-only segment would otherwise
+   make the kernel fault on its own write. */
 static int write_addr(void *ctx, uint64_t addr, uint64_t value)
 {
     (void)ctx;
-    if (!paging64_user_range(addr, sizeof(uint64_t)))
+    if (!paging64_user_writable(addr, sizeof(uint64_t)))
         return -1;
     *(uint64_t *)(uintptr_t)addr = value;
     return 0;

@@ -897,11 +897,9 @@ void usbhc_watch(void)
     if (watching || controller == NONE)
         return;
     /* A thread cannot be started before there is a scheduler to run
-       it, and the 32-bit kernel looks for its disks first - so the
-       watch asked for by the disk driver used to be created into the
-       void, and a stick pushed in later was never seen on that kernel.
-       Asked too early, this does nothing; kmain asks again once
-       threads exist. */
+       it: created any earlier it would go into the void, and a stick
+       pushed in later would never be seen. Asked too early, this does
+       nothing, and the next driver to ask starts the watch. */
     if (!task_scheduler_ready())
         return;
     if (usbhc_connected(0) < 0)

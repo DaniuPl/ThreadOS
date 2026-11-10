@@ -4,24 +4,23 @@
  * Multiboot memory map we mark the available areas as free, and then
  * reserve the first 1 MiB (BIOS, VGA) and the kernel image.
  *
- * We manage memory up to PAGING_MANAGED_MAX - that is as much as
- * paging can cover with the identity mapping without stepping into
- * user space (see paging.c). The bitmap and the owner counters are
- * static for that upper bound; how many frames really exist is stated
- * only by the memory map from the bootloader.
+ * We manage memory up to MANAGED_LIMIT, which stays below user space:
+ * the kernel identity-maps everything it manages, and programs start
+ * at 1 GiB (USER64_BASE in kernel64/elf64.h). The bitmap and the owner
+ * counters are static for that upper bound; how many frames really
+ * exist is stated only by the memory map from the bootloader.
  */
 
 #include "include/pmm.h"
-#include "include/paging.h"
 #include "include/string.h"
 #include "include/printk.h"
 #include "include/io.h"
 #include "include/spinlock.h"
 
-#define MANAGED_LIMIT PAGING_MANAGED_MAX
+#define MANAGED_LIMIT (512u * 1024 * 1024)
 #define MAX_FRAMES    (MANAGED_LIMIT / PAGE_SIZE)
 
-/* Symbols from kernel/linker.ld marking out the kernel image in memory */
+/* Symbols from kernel64/linker64.ld marking out the kernel image in memory */
 extern char _kernel_start[], _kernel_end[];
 
 static uint32_t bitmap[MAX_FRAMES / 32];

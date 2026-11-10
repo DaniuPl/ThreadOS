@@ -32,13 +32,11 @@ groups in parallel.
 
 import os
 import re
-import shutil
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64
+from ptest import check, summary, no64
 
 PATTERN = re.compile(r"\[syscalls\] (child|parent ): cores (\d+), "
                   r"ticks (\d+), calls (\d+), matching (\d+)")
@@ -112,64 +110,33 @@ def run_case(q, ncores, label):
 
 
 def main():
-    print("--- system calls without the lock (the 64-bit kernel) ---")
-
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
-    else:
-        d = tempfile.mkdtemp()
-        iso = tempfile.mktemp(suffix=".iso")
-        slog = tempfile.mktemp(suffix=".log")
-        try:
-            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-            if not os.path.exists(iso):
-                return summary()
+        return summary()
 
-            q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
-                     qemu="qemu-system-x86_64")
-            try:
-                q.wait_serial("thread64>", timeout=90)
-                run_case(q, 4, "")
-                after_run = q.command("run hello64", "exit code", timeout=60)
-                check("the kernel still runs after the attempt",
-                      "hello, I am a" in after_run)
-            finally:
-                q.close()
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-            for f in (iso, slog):
-                if os.path.exists(f):
-                    os.unlink(f)
-
-    print("--- system calls without the lock (the 32-bit kernel) ---")
-    slog32 = tempfile.mktemp(suffix=".log")
+    print("--- system calls without the lock (four cores) ---")
+    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, cpus=4)
     try:
-        q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            run_case(q3, 4, " (32-bit)")
-            after_run = q3.command("run hello", "has ended", timeout=60)
-            check("the kernel still runs after the attempt (32-bit)",
-                  "has ended (code 0)" in after_run)
-        finally:
-            q3.close()
+        q.wait_serial("thread64>", timeout=90)
+        run_case(q, 4, "")
+        # 'run' waits for its own child, so the shell's line about the
+        # end is hello64's - with the code hello64 exits with
+        after_run = q.command("run hello64", "[hello64] done, exit code",
+                              timeout=60)
+        check("the kernel still runs after the attempt",
+              "hello, I am a" in after_run
+              and "[hello64] done, exit code 7" in after_run)
     finally:
-        if os.path.exists(slog32):
-            os.unlink(slog32)
+        q.close()
 
     print("--- the same attempt on one core ---")
-    slog1 = tempfile.mktemp(suffix=".log")
+    q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
-        q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
-        try:
-            q1.wait_for("ThreadOS shell", timeout=40)
-            run_case(q1, 1, " (one core)")
-        finally:
-            q1.close()
+        q1.wait_serial("thread64>", timeout=90)
+        run_case(q1, 1, " (one core)")
     finally:
-        if os.path.exists(slog1):
-            os.unlink(slog1)
+        q1.close()
 
     return summary()
 

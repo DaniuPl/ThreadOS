@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Check legacy VirtIO-net PCI on both ThreadOS kernels."""
+"""Check legacy VirtIO-net PCI on the ThreadOS kernel."""
 
 import os
 import re
 import shutil
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -14,42 +15,26 @@ from ptest import check, make_iso64, no64, summary
 VIRTIO_NIC = "virtio-net-pci,disable-modern=on"
 
 
-def check_32():
-    print("--- legacy VirtIO-net PCI (32-bit kernel) ---")
-    slog = tempfile.mktemp(suffix=".log")
-    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog,
-             nic=VIRTIO_NIC)
-    try:
-        start = q.wait_for("Network:", timeout=40)
-        check("the kernel finds the legacy VirtIO network device",
-              re.search(r"Network: VirtIO-net ([0-9a-f]+:){5}", start)
-              is not None)
-        lease = q.wait_for("[net] DHCP", timeout=30)
-        check("DHCP completes over VirtIO-net",
-              "granted 10.0.2.15" in lease)
-
-        q.type_line("ifconfig")
-        ifc = q.wait_for("eth0  VirtIO-net", timeout=20)
-        check("ifconfig identifies VirtIO-net",
-              "eth0  VirtIO-net, MAC" in ifc)
-
-        q.type_line("clear")
-        q.type_line("ping 10.0.2.2")
-        pong = q.wait_for("--- statistics:", timeout=35)
-        check("VirtIO-net receives gateway echo replies",
-              "sent 4, received 4" in pong)
-    finally:
-        q.close()
-        if os.path.exists(slog):
-            os.unlink(slog)
+def wait_regex(q, since, pattern, timeout=20):
+    """What arrived on the serial port after 'since', once 'pattern'
+    turns up in it (or when the time runs out - the assertion belongs
+    to the caller). The port fills a character at a time, so a wait
+    for the start of a line says nothing about the rest of it."""
+    end = time.time() + timeout
+    while time.time() < end:
+        fresh = q.serial()[since:]
+        if re.search(pattern, fresh):
+            return fresh
+        time.sleep(0.3)
+    return q.serial()[since:]
 
 
-def check_64():
-    print("--- legacy VirtIO-net PCI (64-bit kernel) ---")
+def main():
+    print("--- legacy VirtIO-net PCI ---")
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
-        return
+        return summary()
 
     d = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
@@ -58,23 +43,37 @@ def check_64():
         check("the disc with the 64-bit kernel builds",
               make_iso64(d, iso, text=True))
         if not os.path.exists(iso):
-            return
+            return summary()
 
         q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog,
                  nic=VIRTIO_NIC, qemu="qemu-system-x86_64")
         try:
             start = q.wait_serial("Network:", timeout=90)
-            check("the long-mode kernel finds the VirtIO network device",
+            check("the kernel finds the legacy VirtIO network device",
                   re.search(r"Network: VirtIO-net ([0-9a-f]+:){5}", start)
                   is not None)
-            lease = q.wait_serial("DHCP: granted", timeout=40)
-            check("DHCP completes over VirtIO-net in long mode",
-                  "granted 10.0.2.15" in lease)
+            # The address follows the words, so the wait goes on to the
+            # comma that ends it
+            q.wait_serial("DHCP: granted", timeout=40)
+            lease = wait_regex(q, 0, r"DHCP: granted [0-9.]+,", timeout=20)
+            check("DHCP completes over VirtIO-net",
+                  "granted 10.0.2.15," in lease)
 
-            pong = q.command("ping 10.0.2.2", "--- statistics:",
-                             timeout=40)
-            check("the 64-bit kernel receives gateway echo replies",
-                  "received 3" in pong or "received 4" in pong)
+            q.wait_serial("thread64>", timeout=30)
+            ifc = q.command("ifconfig", "RX ", timeout=20)
+            check("ifconfig identifies VirtIO-net",
+                  "eth0  VirtIO-net, MAC" in ifc)
+
+            # The shell sends three echo requests; every one of them
+            # has to come back. The wait is for the whole statistics
+            # line, which reaches the port a character at a time.
+            before = len(q.serial())
+            q.type_line("ping 10.0.2.2")
+            pong = wait_regex(q, before,
+                              r"statistics: sent \d+, received \d+ ---",
+                              timeout=40)
+            check("VirtIO-net receives gateway echo replies",
+                  "sent 3, received 3 ---" in pong)
         finally:
             q.close()
     finally:
@@ -83,10 +82,6 @@ def check_64():
             if os.path.exists(path):
                 os.unlink(path)
 
-
-def main():
-    check_32()
-    check_64()
     return summary()
 
 

@@ -28,13 +28,36 @@ groups in parallel.
 
 import os
 import re
-import shutil
 import sys
-import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64
+from ptest import check, summary, no64
+
+
+def answer(q, cmd, until, timeout):
+    """Types a command and reads what it printed until until(text) says
+    all of it is there. The port is read while the kernel is still
+    writing, and half a line parses as a different answer."""
+    start = len(q.serial())
+    q.type_line(cmd)
+    deadline = time.time() + timeout
+    out = ""
+    while time.time() < deadline:
+        out = q.serial()[start:]
+        if until(out):
+            break
+        time.sleep(0.3)
+    return out
+
+
+def smpthreads(q):
+    # The verdict is the last line: it counts once it has ended
+    return answer(q, "smpthreads",
+                  lambda out: re.search(r"Threads off the boot core: \w+\r?\n",
+                                        out) is not None,
+                  timeout=180)
 
 
 def check_threads(out, suffix, ncores, again=None):
@@ -111,85 +134,38 @@ def idle_per_core(ps, count):
 
 
 def main():
-    print("--- kernel threads on every core (the 64-bit kernel) ---")
-
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
-    else:
-        d = tempfile.mkdtemp()
-        iso = tempfile.mktemp(suffix=".iso")
-        slog = tempfile.mktemp(suffix=".log")
-        try:
-            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-            if not os.path.exists(iso):
-                return summary()
+        return summary()
 
-            q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
-                     qemu="qemu-system-x86_64")
-            try:
-                q.wait_serial("thread64>", timeout=90)
-                ps = q.command("ps", "NAME", timeout=30)
-                check("every secondary core has an idle task of its own",
-                      idle_per_core(ps, 4))
-
-                out = q.command("smpthreads", "Threads off", timeout=180)
-                check_threads(out, "", 4,
-                              lambda: q.command("smpthreads", "Threads off",
-                                                timeout=180))
-
-                # The system is to work as before after all this
-                after_run = q.command("run hello64", "exit code", timeout=60)
-                check("the kernel still runs after the attempt",
-                      "hello, I am a" in after_run)
-            finally:
-                q.close()
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-            for f in (iso, slog):
-                if os.path.exists(f):
-                    os.unlink(f)
-
-    print("--- kernel threads on every core (the 32-bit kernel) ---")
-    slog32 = tempfile.mktemp(suffix=".log")
+    print("--- kernel threads on every core (four cores) ---")
+    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, cpus=4)
     try:
-        q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            ps = q3.command("ps", "NAME", timeout=30)
-            check("every secondary core has an idle task of its own (32-bit)",
-                  idle_per_core(ps, 4))
+        q.wait_serial("thread64>", timeout=90)
+        ps = answer(q, "ps", lambda out: idle_per_core(out, 4), timeout=30)
+        check("every secondary core has an idle task of its own",
+              idle_per_core(ps, 4))
 
-            out = q3.command("smpthreads", "Threads off", timeout=180)
-            check_threads(out, " (32-bit)", 4,
-                          lambda: q3.command("smpthreads", "Threads off",
-                                             timeout=180))
+        check_threads(smpthreads(q), "", 4, lambda: smpthreads(q))
 
-            after_run = q3.command("run hello", "has ended", timeout=60)
-            check("the kernel still runs after the attempt (32-bit)",
-                  "has ended (code 0)" in after_run)
-        finally:
-            q3.close()
+        # The system is to work as before after all this
+        after_run = q.command("run hello64", "exit code", timeout=60)
+        check("the kernel still runs after the attempt",
+              "hello, I am a" in after_run)
     finally:
-        if os.path.exists(slog32):
-            os.unlink(slog32)
+        q.close()
 
     # --- A single-core machine ---
     # The same code, one core: the threads are to compute the same, only
     # one after another
     print("--- the same attempt on one core ---")
-    slog1 = tempfile.mktemp(suffix=".log")
+    q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE)
     try:
-        q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
-        try:
-            q1.wait_for("ThreadOS shell", timeout=40)
-            out = q1.command("smpthreads", "Threads off", timeout=180)
-            check_threads(out, " (one core)", 1)
-        finally:
-            q1.close()
+        q1.wait_serial("thread64>", timeout=90)
+        check_threads(smpthreads(q1), " (one core)", 1)
     finally:
-        if os.path.exists(slog1):
-            os.unlink(slog1)
+        q1.close()
 
     return summary()
 

@@ -1,9 +1,8 @@
 /* The PS/2 keyboard in long mode
  *
- * Scancode translation is shared with the 32-bit kernel
- * (kernel/kbdmap.c) - what stays here is only what depends on the
- * system: taking the interrupt and deciding where the finished
- * character goes.
+ * Scancode translation is kernel/kbdmap.c's - what stays here is only
+ * what depends on the system: taking the interrupt and deciding where
+ * the finished character goes.
  *
  * There are four consoles and each has its own character queue. A key
  * lands in the one we are currently looking at, and is read by
@@ -98,10 +97,9 @@ static void to_console(char c)
 }
 
 /* The same road, opened to whoever took the keyboard over: the desktop
-   hands back the keys no window wants, so that the kernel's shell can
-   still be typed at from a screen full of windows. In protected mode
-   that is what keyboard_console_handler() gives out; long mode had
-   nothing to give, and the desktop there simply dropped those keys. */
+   hands back the keys no window wants (keyboard_console_handler() gives
+   this out), so that the kernel's shell can still be typed at from a
+   screen full of windows. */
 void keyboard64_to_console(char c)
 {
     to_console(c);

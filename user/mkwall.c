@@ -21,7 +21,7 @@
  * actually chooses.
  */
 
-#include "usys.h"
+#include "uapi.h"
 
 #define W 160
 #define H 120

@@ -192,7 +192,10 @@ void syscall64_forget_user(void)
  * Pointers from ring 3 must not be taken on trust: before the kernel
  * reads anything through them, it asks the page tables whether the
  * program has any right to reach there at all. Without that it would
- * be enough to pass a kernel memory address to have it printed out. */
+ * be enough to pass a kernel memory address to have it printed out.
+ * Where the kernel WRITES, it asks paging64_user_writable instead: a
+ * read() into the program's own code passes the first question, and
+ * the write that followed would stop the whole system. */
 /* A file name from program memory into the kernel. Returns 0 or -1. */
 static int name_from_ring3(uint64_t ptr, uint64_t len, char *out)
 {
@@ -410,18 +413,19 @@ static void handle(struct regs *r)
     case SYS64_WAIT: {
         int code = 0;
         int id = task64_wait(&code);
-        if (id >= 0 && a1) {
-            if (!paging64_user_range(a1, sizeof(int)))
-                return;              /* a bad pointer - the code is lost */
+        /* A bad pointer loses the exit code and nothing else: the child
+           has been collected by now, so the caller still gets its id -
+           returning here without one left the call's own number in rax,
+           and the program took that for a child. */
+        if (id >= 0 && a1 && paging64_user_writable(a1, sizeof(int)))
             *(int *)(uintptr_t)a1 = code;
-        }
         r->rax = (uint64_t)(int64_t)id;
         return;
     }
     case SYS64_READ: {
         if (a3 > 4096)
             a3 = 4096;
-        if (!paging64_user_range(a2, a3)) {
+        if (!paging64_user_writable(a2, a3)) {
             printk("[kernel] read: the pointer %x does not belong to the program\n",
                    (uint32_t)a2);
             r->rax = (uint64_t)-1;
@@ -541,7 +545,7 @@ static void handle(struct regs *r)
     }
     case SYS64_GETCWD: {
         char path[FS_NAME_MAX * 4];
-        if (a2 == 0 || !paging64_user_range(a1, a2)) {
+        if (a2 == 0 || !paging64_user_writable(a1, a2)) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -567,7 +571,7 @@ static void handle(struct regs *r)
             int is_dir;
         } entry;
 
-        if (!paging64_user_range(a2, sizeof(entry))) {
+        if (!paging64_user_writable(a2, sizeof(entry))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -606,7 +610,7 @@ static void handle(struct regs *r)
            As long as it holds both, the pipe will never end - which is
            why the shell closes both of its own as soon as it has handed
            them to the children. */
-        if (!paging64_user_range(a1, 2 * sizeof(int))) {
+        if (!paging64_user_writable(a1, 2 * sizeof(int))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -644,7 +648,7 @@ static void handle(struct regs *r)
      * number. */
     case SYS64_NETINFO: {
         /* Four addresses: own, mask, gateway, DNS */
-        if (!paging64_user_range(a1, 4 * sizeof(uint32_t))) {
+        if (!paging64_user_writable(a1, 4 * sizeof(uint32_t))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -687,12 +691,18 @@ static void handle(struct regs *r)
     }
     case SYS64_UDP_RECV: {
         struct udp_info info;
-        if (!paging64_user_range(a1, sizeof(info))) {
+        if (!paging64_user_writable(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
         memcpy(&info, (const void *)(uintptr_t)a1, sizeof(info));
-        if (a3 > 1400 || !paging64_user_range(a2, a3)) {
+        /* A buffer larger than any datagram is cut down, not refused,
+           as in SYS64_TCP_RECV: what arrives is 1024 bytes at most, so
+           nothing is lost to the cut, and a program with room to spare
+           is not turned away for it. */
+        if (a3 > 1400)
+            a3 = 1400;
+        if (!paging64_user_writable(a2, a3)) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -737,7 +747,13 @@ static void handle(struct regs *r)
             (uint16_t)a3, 5000);
         return;
     case SYS64_TCP_RECV:
-        if (a3 > 1400 || !paging64_user_range(a2, a3)) {
+        /* A stream may always answer with less than was asked for, so
+           a big buffer is cut down, not refused: TLS asks for the whole
+           rest of a record at once, and a record runs to 16 KiB. Clamp
+           first, check second, as with read(). */
+        if (a3 > 4096)
+            a3 = 4096;
+        if (!paging64_user_writable(a2, a3)) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -748,6 +764,22 @@ static void handle(struct regs *r)
     case SYS64_TCP_CLOSE:
         tcp_close((int)a1, task64_current_id());
         r->rax = 0;
+        return;
+    /* The passive open: a port to listen on, and the connections that
+       came to it, one at a time. Both are the caller's, like the
+       sockets above - an accepted connection belongs to whoever owns
+       the listening one. */
+    case SYS64_TCP_LISTEN:
+        if (a1 == 0 || a1 > 0xFFFF) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)tcp_listen((uint16_t)a1,
+                                               task64_current_id());
+        return;
+    case SYS64_TCP_ACCEPT:           /* a2 = how long to wait, in ms */
+        r->rax = (uint64_t)(int64_t)tcp_accept((int)a1, task64_current_id(),
+                                               (uint32_t)a2);
         return;
     case SYS64_CLOSE:
         r->rax = (uint64_t)(int64_t)task64_fd_close((int)a1);
@@ -814,7 +846,7 @@ static void handle(struct regs *r)
     }
     case SYS64_CLIP_GET: {
         uint64_t max = a2 > CLIP_MAX + 1 ? CLIP_MAX + 1 : a2;
-        if (!max || !paging64_user_range(a1, max)) {
+        if (!max || !paging64_user_writable(a1, max)) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -828,7 +860,7 @@ static void handle(struct regs *r)
         int code = 0;
         int rc = task64_trywait((int)a1, &code);
         if (rc == 0 && a2) {
-            if (!paging64_user_range(a2, sizeof(int))) {
+            if (!paging64_user_writable(a2, sizeof(int))) {
                 r->rax = (uint64_t)-1;
                 return;
             }
@@ -894,7 +926,7 @@ static void handle(struct regs *r)
             uint32_t uptime_s;
         } info;
 
-        if (!paging64_user_range(a1, sizeof(info))) {
+        if (!paging64_user_writable(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -908,7 +940,7 @@ static void handle(struct regs *r)
     case SYS64_MMAP_FILE: {
         char name[FS_NAME_MAX + 1];
         if (name_from_ring3(a1, a2, name) < 0 ||
-            !paging64_user_range(a3, sizeof(uint64_t))) {
+            !paging64_user_writable(a3, sizeof(uint64_t))) {
             r->rax = 0;
             return;
         }
@@ -933,8 +965,10 @@ static void handle(struct regs *r)
     case SYS64_THREAD:
         /* A thread starts in ring 3, so its entry point has to be the
            program's own code - and the program is the only one that
-           can say where that is */
-        r->rax = paging64_user_range(a1, 1)
+           can say where that is. Code, not just memory: a thread sent
+           into the heap or the stack would die on its first
+           instruction, and the call can say no instead. */
+        r->rax = paging64_user_code(a1)
                      ? (uint64_t)(int64_t)proc64_thread(a1, a2)
                      : (uint64_t)(int64_t)-1;
         return;
@@ -943,7 +977,7 @@ static void handle(struct regs *r)
         return;
     case SYS64_TIME: {
         struct rtc_time t;
-        if (!paging64_user_range(a1, sizeof(t))) {
+        if (!paging64_user_writable(a1, sizeof(t))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -956,7 +990,7 @@ static void handle(struct regs *r)
         struct win_event64 ev;
         int got = desktop_win_poll((int)a1, task64_current_id(), &ev);
         if (got == 1) {
-            if (!paging64_user_range(a2, sizeof(ev))) {
+            if (!paging64_user_writable(a2, sizeof(ev))) {
                 r->rax = (uint64_t)-1;
                 return;
             }
@@ -967,7 +1001,7 @@ static void handle(struct regs *r)
     }
     case SYS64_PS: {
         struct psinfo64 info;
-        if (!paging64_user_range(a2, sizeof(info)) ||
+        if (!paging64_user_writable(a2, sizeof(info)) ||
             task64_ps((int)a1, &info) < 0) {
             r->rax = (uint64_t)-1;
             return;
@@ -1021,7 +1055,7 @@ static void handle(struct regs *r)
      * behind it is the disk of a machine that boots without us. */
     case SYS64_INSTALL_LOOK: {
         struct install_info info;
-        if (!paging64_user_range(a2, sizeof(info))) {
+        if (!paging64_user_writable(a2, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1045,7 +1079,7 @@ static void handle(struct regs *r)
      * here asks who is turning it. */
     case SYS64_SND_GET: {
         struct snd_info info;
-        if (!paging64_user_range(a1, sizeof(info))) {
+        if (!paging64_user_writable(a1, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1126,7 +1160,7 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_UI_LOOK: {
-        if (!paging64_user_range(a1, UI_LOOK_N * sizeof(uint32_t))) {
+        if (!paging64_user_writable(a1, UI_LOOK_N * sizeof(uint32_t))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1135,10 +1169,10 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_CFG_GET: {
-        /* The same record the 32-bit kernel copies out */
+        /* struct cfg_entry in user64/compat64.h */
         struct { char name[32], value[32], help[80]; } out;
         const char *name = config_name((int)a1);
-        if (!name || !paging64_user_range(a2, sizeof(out))) {
+        if (!name || !paging64_user_writable(a2, sizeof(out))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1162,7 +1196,7 @@ static void handle(struct regs *r)
             return;
         }
         /* Changing what the system reads at boot is changing the
-           system: an admin's business, as on the 32-bit side */
+           system: an admin's business */
         if (task64_level() != USER_ADMIN || config_is_hidden(name)) {
             r->rax = (uint64_t)-2;
             return;
@@ -1184,6 +1218,8 @@ static void handle(struct regs *r)
             memset(ctl.name, 0, sizeof(ctl.name));
             rc = user_account_info(ctl.index, ctl.name, sizeof(ctl.name),
                                    &uid, &level);
+            if (rc == 0 && !paging64_user_writable(a1, sizeof(ctl)))
+                rc = -1;
             if (rc == 0) {
                 ctl.uid = uid;
                 ctl.level = level;
@@ -1249,7 +1285,7 @@ static void handle(struct regs *r)
     }
     case SYS64_FDINFO: {
         struct { int32_t kind; uint32_t size, pos; } info;
-        if (!paging64_user_range(a2, sizeof(info)) || (int64_t)a1 < 0) {
+        if (!paging64_user_writable(a2, sizeof(info)) || (int64_t)a1 < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1271,8 +1307,7 @@ static void handle(struct regs *r)
     case SYS64_INITRD_READ: {
         char name[FS_NAME_MAX + 1];
         uint32_t size = 0;
-        if (name_from_ring3(a1, a2, name) < 0 ||
-            (a4 && !paging64_user_range(a3, a4))) {
+        if (name_from_ring3(a1, a2, name) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1281,7 +1316,14 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
+        /* Only what will be written is checked: checking brings the
+           untouched pages in, and a buffer said to be a gigabyte long
+           would get them all for a file of a few kilobytes */
         uint64_t n = size < a4 ? size : a4;
+        if (n && !paging64_user_writable(a3, n)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
         memcpy((void *)(uintptr_t)a3, f, n);
         r->rax = n;
         return;
@@ -1294,7 +1336,7 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)(int64_t)bt_scan_start();
             return;
         }
-        if (a1 != 0 || !paging64_user_range(a2, sizeof(struct bt_info))) {
+        if (a1 != 0 || !paging64_user_writable(a2, sizeof(struct bt_info))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1310,7 +1352,7 @@ static void handle(struct regs *r)
         struct pci_info info;
         struct pci_dev dev;
         uint32_t class_code;
-        if ((int64_t)a1 < 0 || !paging64_user_range(a2, sizeof(info))) {
+        if ((int64_t)a1 < 0 || !paging64_user_writable(a2, sizeof(info))) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1379,7 +1421,7 @@ static void handle(struct regs *r)
         }
         c = *(const __typeof__(c) *)(uintptr_t)a1;
         if (c.w <= 0 || c.h <= 0 || c.w * c.h > BG_PREVIEW_MAX ||
-            !paging64_user_range(c.out, (uint64_t)(c.w * c.h) * 4)) {
+            !paging64_user_writable(c.out, (uint64_t)(c.w * c.h) * 4)) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -1413,7 +1455,7 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_PALETTE: {
-        if (!paging64_user_range(a1, 256 * sizeof(uint32_t))) {
+        if (!paging64_user_writable(a1, 256 * sizeof(uint32_t))) {
             r->rax = (uint64_t)-1;
             return;
         }

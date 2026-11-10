@@ -72,9 +72,11 @@ def create_profile(q, login, display, password, light=False):
     if password:
         q.type_line(password, enter=False)
     q.sendkey("tab")
+    # The confirmation is a field of its own whether there is a password
+    # or not: past it is the theme, then the button
     if password:
         q.type_line(password, enter=False)
-        q.sendkey("tab")
+    q.sendkey("tab")
     if light:
         q.sendkey("l")
     q.sendkey("tab")
@@ -105,7 +107,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=log)
         try:
-            q.wait_serial("Starting the graphical desktop", timeout=45)
+            q.wait_serial("The desktop is starting", timeout=45)
             got = wait_setup(q)
             check("a first-run profile wizard appears before the desktop",
                   "Welcome to ThreadOS" in got)
@@ -146,7 +148,7 @@ def main():
             q = Qemu(KERNEL, INITRD, passwordless_disk,
                      serial=passwordless_log)
             try:
-                q.wait_serial("Starting the graphical desktop", timeout=45)
+                q.wait_serial("The desktop is starting", timeout=45)
                 check("passwordless setup is offered on a fresh disk",
                       "Welcome to ThreadOS" in wait_setup(q))
                 create_profile(q, "guest", "Guest Profile", "", light=True)
@@ -158,7 +160,7 @@ def main():
             q = Qemu(KERNEL, INITRD, passwordless_disk,
                      serial=passwordless_log)
             try:
-                q.wait_serial("Starting the graphical desktop", timeout=45)
+                q.wait_serial("The desktop is starting", timeout=45)
                 check("a passwordless profile signs in automatically after restart",
                       wait_unlocked(q, timeout=30, dark=False))
             finally:
@@ -170,7 +172,7 @@ def main():
 
         q = Qemu(KERNEL, INITRD, disk, serial=log)
         try:
-            q.wait_serial("Starting the graphical desktop", timeout=45)
+            q.wait_serial("The desktop is starting", timeout=45)
             got = wait_hint(q, "signs in", timeout=30)
             check("the saved profile replaces the first-run wizard after restart",
                   "signs in" in got and

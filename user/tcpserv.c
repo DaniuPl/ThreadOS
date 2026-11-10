@@ -6,7 +6,7 @@
  * a stream in both directions.
  */
 
-#include "usys.h"
+#include "uapi.h"
 
 #define PORT 5555
 #define GREETING "ThreadOS TCP ready\n"

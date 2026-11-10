@@ -1,7 +1,7 @@
 /* The ThreadOS shared library
  *
  * Linked at a FIXED address - the same one the kernel gives it in every
- * process (USER_LIB_BASE in kernel64/elf64.h). That way the addresses in its symbol
+ * process (USER64_LIB_BASE in kernel64/elf64.h). That way the addresses in its symbol
  * table are already final, and neither the library nor the kernel has
  * anything to recompute at load time.
  *

@@ -16,8 +16,9 @@ that the text crosses from one program to another:
 
   from a window to another window: typed in the terminal, pasted into
   the settings window, where it is a value being edited
-  from a window back to the console: the same text pasted into a shell
-  that never saw it typed
+  from one text console to another: a line copied in the kernel's shell
+  on the first, pasted into the shell on the second, which never saw it
+  typed - and run there
   and the kernel keeps it: the window it was copied from can be closed
   and the text is still there, because it was never that window's
 
@@ -152,28 +153,33 @@ def main():
     try:
         q2 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ThreadOS shell", timeout=40)
-            typed(q2, "echo " + WORD)
+            q2.wait_for("thread64>", timeout=40)
+            # The kernel's shell has no echo of its own; core's does it
+            line = "run core echo " + WORD
+            typed(q2, line)
             q2.sendkey("ctrl-insert")      # copy the whole line
             time.sleep(0.5)
-            for _ in range(len("echo " + WORD)):
+            for _ in range(len(line)):
                 q2.sendkey("backspace")
                 time.sleep(0.05)
 
             # Another console: a different shell, a different line
             # buffer - and the same clipboard, because it is the
-            # kernel's
+            # kernel's. Both consoles write to the serial port, where
+            # the line typed on the first is still lying, so what the
+            # second one shows is read off the screen itself.
             q2.sendkey("alt-f2")
-            time.sleep(1.5)
+            screen = q2.wait_fbcon("console 2", timeout=10)
+            check("Alt+F2 shows the second console", "console 2" in screen)
             q2.sendkey("shift-insert")
-            time.sleep(1)
-            screen = q2.screen()
+            screen = q2.wait_fbcon(line, timeout=10)
             check("the pasted line appeared on the SECOND console",
-                  "echo " + WORD in screen)
+                  line in screen and "console 2" in screen)
             q2.sendkey("ret")
-            out = q2.wait_for(WORD, timeout=20)
-            check("and it ran as if it had been typed",
-                  WORD in out)
+            screen = q2.wait_fbcon("exit code", timeout=20)
+            check("and it ran as if it had been typed (%s)"
+                  % screen.splitlines()[-4:],
+                  any(ln.strip() == WORD for ln in screen.splitlines()))
         finally:
             q2.close()
     finally:

@@ -51,7 +51,9 @@ OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
+# The loader of the build under test (ptest.uefi_loader), found when
+# main() starts
+LOADER = None
 
 
 def behind_hub():
@@ -243,9 +245,8 @@ def install_to_stick():
     is read by somebody else: the partition table by our own GPT
     reader, the files by mtools, and the whole thing by the firmware,
     which either boots it or does not."""
-    if not os.path.exists(LOADER):
-        subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+    global LOADER
+    LOADER = uefi_loader() or "BOOTX64.EFI next to the kernel"
     for path in (LOADER, OVMF_CODE, OVMF_VARS):
         if not os.path.exists(path):
             print("SKIPPED: no %s - no installing onto a stick" % path)

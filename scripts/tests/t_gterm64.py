@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """ThreadOS smoke test: the terminal in a window, 64-bit kernel.
 
-The terminal is one program compiled twice - the ring of lines, the
-editing, the history and the drawing are the same code on both sides.
-One thing is not: how a command is started and its output caught. In
-protected mode the kernel has a call that spawns a program with its
-output redirected, and another that runs a whole pipeline. In long mode
+The terminal was one program compiled twice - the ring of lines, the
+editing, the history and the drawing were the same code on both sides.
+One thing was not: how a command is started and its output caught. The
+32-bit kernel, now gone, had a call that spawned a program with its
+output redirected, and another that ran a whole pipeline. In long mode
 there is no such call, so the terminal builds it itself out of fork,
 dup2, exec and pipe - the way a shell does.
 
@@ -17,7 +17,7 @@ kernel can only be told from the child's exit code, because a failed
 exec has no other way home.
 
 The text is read off the screen through the kernel's own font, the same
-as in the 32-bit group.
+as in the 'gterm' group.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -32,7 +32,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, no64
 
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
@@ -66,14 +66,9 @@ def command_echo(rows, command):
 def main():
     print("--- the terminal in a window (the 64-bit kernel) ---")
 
-    if KERNEL64 is None or not os.path.exists(KERNEL64):
-        print("SKIPPED: no 64-bit image (make kernel64)")
-        return 0
-    if shutil.which("grub-mkrescue") is None:
-        print("SKIPPED: no grub-mkrescue")
-        return 0
-    if shutil.which("qemu-system-x86_64") is None:
-        print("SKIPPED: no qemu-system-x86_64")
+    reason = no64()
+    if reason:
+        print("SKIPPED: " + reason)
         return 0
 
     d = tempfile.mkdtemp()
@@ -121,10 +116,16 @@ def main():
             q.mouse_goto(600, 400)
             time.sleep(1)
 
-            rows = read_rows(q, **geom)
-            check("the terminal opened and has a prompt",
-                  any(r.startswith("/") and r.rstrip().endswith((">", "#"))
-                      for r in rows))
+            def prompt_shown(rs):
+                return any(r.startswith("/") and r.rstrip().endswith((">", "#"))
+                           for r in rs)
+            rows = []
+            for _ in range(20):
+                rows = read_rows(q, **geom)
+                if prompt_shown(rows):
+                    break
+                time.sleep(0.5)
+            check("the terminal opened and has a prompt", prompt_shown(rows))
 
             # --- hardware inventory from the desktop terminal --------
             q.type_line("lspci")
@@ -180,8 +181,20 @@ def main():
             check("the user's shell came up in the terminal window",
                   "ush64$" in "\n".join(rows))
 
+            # The echo of the command holds the word too, so the wait is
+            # for a row of its own under the echo: the first picture with
+            # the word in it may be from before the output was drawn
+            def answered(rs):
+                at = next((i for i, r in enumerate(rs)
+                           if "ush64$ uecho64 hello" in r), -1)
+                return at >= 0 and "hello" in rs[at + 1:]
             q.type_line("uecho64 hello")
-            rows = wait_for(q, "hello", geom)
+            rows = []
+            for _ in range(30):
+                rows = read_rows(q, **geom)
+                if answered(rows):
+                    break
+                time.sleep(0.5)
             body = "\n".join(rows)
             check("what was typed reached the shell and ran",
                   "ush64$ uecho64 hello" in body)
@@ -193,8 +206,7 @@ def main():
                   cmd_at >= 0 and out_at > cmd_at)
 
             q.sendkey("ctrl-d")
-            time.sleep(3)
-            rows = read_rows(q, **geom)
+            rows = wait_for(q, "^D", geom)
             check("Ctrl+D ends the shell in long mode too",
                   "^D" in "\n".join(rows))
 

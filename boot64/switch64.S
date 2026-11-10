@@ -2,8 +2,7 @@
  *
  * We save only the registers the calling convention requires a callee
  * to preserve - the rest belong to the caller anyway and already sit on
- * its stack. There are six of them instead of four, which is the whole
- * difference from the 32-bit version.
+ * its stack. There are six of them: rbx, rbp and r12-r15.
  *
  * The rest of a thread's state - everything that happened between
  * calls - stays on its own stack. That is why moving RSP is enough:

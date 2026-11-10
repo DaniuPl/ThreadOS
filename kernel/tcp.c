@@ -342,6 +342,18 @@ void tcp_input(uint32_t src_ip, uint32_t dst_ip, const uint8_t *src_mac,
     uint16_t dlen = (uint16_t)(len - hlen);
 
     struct tcp_conn *c = find_conn(dst_port, src_ip, src_port);
+    /* A listening socket is only as good as the program behind it. One
+       whose program was killed stays in the table until somebody asks
+       for a free entry - and accept_syn asks for one, so the listener
+       was let go in the middle of its own use and the same entry came
+       back as the new connection, with the port and the owner wiped.
+       So it goes now, and the port answers as any other port nobody
+       listens on. */
+    if (c && c->state == TCP_LISTEN && c->owner >= 0 &&
+        !task_alive(c->owner)) {
+        tcp_reap();
+        c = 0;
+    }
     if (!c) {
         /* Nobody is listening on that port - send an RST back, as is proper */
         if (!(flags & RST))              /* one does not answer an RST with an RST */
@@ -498,6 +510,10 @@ int tcp_connect(uint32_t ip, uint16_t port, int owner, uint32_t timeout_ms)
 int tcp_listen(uint16_t port, int owner)
 {
     uint32_t irq = irq_save();
+    /* Before the port is looked up, not only in conn_alloc after it: a
+       server that was killed leaves its listening socket behind, and
+       the port would stay taken for the one started in its place. */
+    tcp_reap();
     if (port_taken(port)) {
         irq_restore(irq);
         return -1;

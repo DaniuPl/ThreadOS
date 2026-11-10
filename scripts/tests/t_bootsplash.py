@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""The graphical boot path shows a splash and keeps its kernel log on serial."""
+"""The graphical boot path shows a splash and keeps its kernel log on serial.
+
+The kernel is started by GRUB with 'desktop live' on its command line,
+the arguments of the desktop entry in boot/grub64.cfg: that is the path
+on which kernel/bootsplash.c takes the screen over. Only the arguments
+are that entry's. The mode is the test's own, 640x480, set in its
+gfxpayload so that the size checked below is known in advance; the
+real entry leaves the mode to GRUB.
+"""
 
 import os
 import shutil
@@ -9,10 +17,10 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, no64
 
 
-def boot_splash(kernel, initrd, boot_args, qemu="qemu-system-i386"):
+def boot_splash(kernel, initrd, boot_args):
     work = tempfile.mkdtemp()
     iso = tempfile.mktemp(suffix=".iso")
     log = tempfile.mktemp(suffix=".log")
@@ -23,15 +31,18 @@ def boot_splash(kernel, initrd, boot_args, qemu="qemu-system-i386"):
         if initrd and os.path.exists(initrd):
             shutil.copy(initrd, os.path.join(work, "boot", "initrd.img"))
             module = "    module2 /boot/initrd.img\n"
+        # The mode is named in gfxpayload, the variable that decides what
+        # the kernel is handed - and only AFTER the multiboot2 line:
+        # loading a kernel whose header asks for any mode sets
+        # gfxpayload=auto, and GRUB then picks 800x600 by itself
         cfg = (
             "insmod all_video\n"
-            "set gfxmode=640x480x32\n"
-            "set gfxpayload=keep\n"
             "set timeout=0\n"
             "set default=0\n"
             'menuentry "ThreadOS" {\n'
             f"    multiboot2 /boot/threados.bin {boot_args}\n"
             f"{module}"
+            "    set gfxpayload=640x480x32\n"
             "}\n"
         )
         with open(os.path.join(work, "boot", "grub", "grub.cfg"), "w") as fh:
@@ -41,19 +52,24 @@ def boot_splash(kernel, initrd, boot_args, qemu="qemu-system-i386"):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode == 0
-        check(f"the boot ISO builds for {qemu}", made)
+        check("the boot ISO builds", made)
         if not made:
             return
 
-        machine = Qemu(kernel, initrd, cdrom=iso, serial=log, qemu=qemu)
+        machine = Qemu(kernel, initrd, cdrom=iso, serial=log)
         try:
             serial = machine.wait_serial(
                 "[boot] visual loading screen active", timeout=60)
-            check(f"{qemu}: the kernel reports the graphical boot path",
+            check("the kernel reports the graphical boot path",
                   "[boot] visual loading screen active" in serial)
             w, h, pixel = machine.screen_raw()
-            check(f"{qemu}: the splash fills the 640x480 framebuffer",
-                  w == 640 and h == 480 and pixel(4, 4) == (8, 17, 31))
+            # SPLASH_BG in kernel/bootsplash.c, in two opposite corners:
+            # the text and the bar sit in the middle
+            check("the splash fills the 640x480 framebuffer (%dx%d, %s and "
+                  "%s in the corners)"
+                  % (w, h, pixel(4, 4), pixel(w - 5, h - 5)),
+                  w == 640 and h == 480 and pixel(4, 4) == (8, 17, 31) and
+                  pixel(w - 5, h - 5) == (8, 17, 31))
         finally:
             machine.close()
     finally:
@@ -64,17 +80,12 @@ def boot_splash(kernel, initrd, boot_args, qemu="qemu-system-i386"):
 
 
 def main():
-    if shutil.which("grub-mkrescue") is None:
-        print("SKIPPED: no grub-mkrescue")
+    reason = no64()
+    if reason:
+        print("SKIPPED: " + reason)
         return 0
 
-    if KERNEL and os.path.exists(KERNEL):
-        boot_splash(KERNEL, INITRD, "")
-
-    if KERNEL64 and os.path.exists(KERNEL64) and \
-            shutil.which("qemu-system-x86_64"):
-        boot_splash(KERNEL64, INITRD64, "desktop live",
-                    qemu="qemu-system-x86_64")
+    boot_splash(KERNEL, INITRD, "desktop live")
 
     return summary()
 

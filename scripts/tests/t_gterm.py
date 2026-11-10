@@ -39,8 +39,9 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 # The window opens in slot 2 - the compositor cascades at (70+12i,
-# 30+12i) - and asks for 400x240 of content, so the content starts at
-# (95,65). The terminal pads by 4 and puts its rows 10 apart.
+# 30+12i) - and asks for 400x320 of content (W0 x H0 in user/gterm.c),
+# so the content starts at (95,77). The terminal pads by 4 and puts its
+# rows 16 apart.
 WX, WY = 94, 54
 CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = TERM_PAD, TERM_ROW_H
@@ -80,6 +81,57 @@ def wait_for_line(q, want, tries=20, **kw):
     return seen
 
 
+def wait_until(q, ok, tries=20, **kw):
+    """Waits until what the window shows passes the test 'ok'"""
+    seen = []
+    for _ in range(tries):
+        seen = read_rows(q, **kw)
+        if ok(seen):
+            return seen
+        time.sleep(0.5)
+    return seen
+
+
+def first_word(row):
+    words = row.split()
+    return words[0] if words else ""
+
+
+def in_order_under(rows, command, lines):
+    """Are these lines, each a whole row, in this order under the LAST
+    echo of the command?"""
+    at = max((i for i, r in enumerate(rows) if command_echo([r], command)),
+             default=-1)
+    if at < 0:
+        return False
+    for want in lines:
+        nxt = next((i for i in range(at + 1, len(rows))
+                    if rows[i] == want), -1)
+        if nxt < 0:
+            return False
+        at = nxt
+    return True
+
+
+def last_echo_below(rows, command, first):
+    """Is the LAST echo of the command below the last row that starts
+    with 'first'? - which is how a second run of a command is told from
+    the first one when the first one's echo is still on the screen"""
+    echo = max((i for i, r in enumerate(rows) if command_echo([r], command)),
+               default=-1)
+    mark = max((i for i, r in enumerate(rows) if r.startswith(first)),
+               default=-1)
+    return mark >= 0 and echo > mark
+
+
+def text_rows(rows):
+    """The rows with a line of the session on them. Every line here
+    starts at the left edge; the mouse pointer parked inside a window
+    leaves a mark or two far to the right of a row that is otherwise
+    empty, and that is no line."""
+    return [r for r in rows if r[:1].strip()]
+
+
 def wait_for_row(q, want, tries=15, **kw):
     """Waits until some row holds the text - the command runs in another
     process, so it is not there the moment Enter is pressed."""
@@ -113,7 +165,7 @@ def main():
             q.mouse_goto(600, 380)         # the cursor out of the window
             time.sleep(1)
 
-            rows = read_rows(q, **geom)
+            rows = wait_until(q, lambda rs: "terminal" in text(rs), **geom)
             check("the terminal opened and says hello",
                   "terminal" in text(rows))
             check("and it shows a prompt with the directory",
@@ -139,13 +191,22 @@ def main():
                   and "[code -1]" not in body)
 
             # --- a command, its echo and its output --------------------
-            q.type_line("seq 3")
-            rows = wait_for_line(q, "3", **geom)
-            body = text(rows)
+            # hello64 writes its lines half a second apart - three of
+            # them counting - and ends with code 7, which the terminal
+            # reports once it has seen the program end. Until then what
+            # is typed is the program's input, so that is waited for.
+            q.type_line("hello64")
+            rows = wait_until(q, lambda rs: in_order_under(
+                rs, "hello64", ["[hello64] ending politely", "[code 7]"]),
+                **geom)
             check("the command was echoed together with the prompt",
-                  command_echo(rows, "seq 3"))
-            check("and under it is its output",
-                  "1" in rows and "2" in rows and "3" in rows)
+                  command_echo(rows, "hello64"))
+            check("and under it is its output, line after line (%s)"
+                  % [r for r in rows if r.startswith("[hello64] c")],
+                  in_order_under(rows, "hello64",
+                                 ["[hello64] counting: 1",
+                                  "[hello64] counting: 2",
+                                  "[hello64] counting: 3"]))
 
             # --- the session stays -------------------------------------
             q.type_line("date")
@@ -153,39 +214,45 @@ def main():
             body = text(rows)
             check("the date is printed (the machine's clock)", "2030-06-13" in body)
             check("and the previous command is STILL above it - a session, "
-                  "not one output", command_echo(rows, "seq 3"))
+                  "not one output", command_echo(rows, "hello64"))
 
             # --- history ------------------------------------------------
+            # The line being edited is the bottom row of the window, so
+            # that is where the recalled command has to be - an echo of
+            # it further up says nothing about the arrow
             q.sendkey("up")
             q.sendkey("up")
-            time.sleep(1)
-            rows = read_rows(q, **geom)
-            last = next((r for r in reversed(rows)
-                         if command_echo([r], "seq 3")), "")
+            rows = wait_until(q, lambda rs: command_echo(rs[-1:], "hello64"),
+                              **geom)
             check("the up arrow recalls the previous command ('%s')"
-                  % last, last.strip().endswith("seq 3"))
+                  % rows[-1], command_echo(rows[-1:], "hello64"))
 
+            # The first run's echo and output are still on the screen, so
+            # output under the last echo proves nothing by itself: that
+            # echo has to be below the date's line too, which only a
+            # second echo can be. (The first one scrolls away by the end
+            # of the second run, so two echoes cannot simply be counted.)
             q.sendkey("ret")               # and it can be run again
-            rows = wait_for_line(q, "3", **geom)
-            time.sleep(1)
-            rows = read_rows(q, **geom)
-            check("a recalled command can be run",
-                  sum(command_echo([r], "seq 3") for r in rows) >= 2)
+            ran_again = lambda rs: (last_echo_below(rs, "hello64", "2030-")
+                                    and in_order_under(
+                                        rs, "hello64",
+                                        ["[hello64] counting: 3", "[code 7]"]))
+            rows = wait_until(q, ran_again, **geom)
+            check("a recalled command can be run (its output is under "
+                  "the second echo, below the date)", ran_again(rows))
 
             # --- moving inside the line and inserting -------------------
-            # 'eq 4' with the cursor sent home and an 's' typed in front
-            # of it is 'seq 4' - which only works if the cursor really
+            # 'cho 4' with the cursor sent home and an 'e' typed in front
+            # of it is 'echo 4' - which only works if the cursor really
             # moves and typing really inserts
-            for ch in "eq 4":
+            for ch in "cho 4":
                 q.sendkey({" ": "spc"}.get(ch, ch))
             q.sendkey("home")
-            q.sendkey("s")
-            time.sleep(0.5)
-            rows = read_rows(q, **geom)
-            last = next((r for r in reversed(rows)
-                         if command_echo([r], "seq 4")), "")
+            q.sendkey("e")
+            rows = wait_until(q, lambda rs: command_echo(rs[-1:], "echo 4"),
+                              **geom)
             check("the cursor went back and the character landed IN THE MIDDLE of the line ('%s')"
-                  % last.strip(), last.strip().endswith("seq 4"))
+                  % rows[-1], command_echo(rows[-1:], "echo 4"))
             q.sendkey("ret")
             rows = wait_for_line(q, "4", **geom)
             check("and a command put together that way works", "4" in rows)
@@ -202,12 +269,12 @@ def main():
             time.sleep(2)
 
             # --- a pipe --------------------------------------------------
-            # (wc is core's: lines, words, bytes - nine lines of one
-            # digit and a newline each)
-            q.type_line("seq 9 | wc")
-            rows = wait_for_row(q, "18", **geom)
+            # (echo and wc are core's: one line of three words, fourteen
+            # bytes with its newline)
+            q.type_line("echo one two three | wc")
+            rows = wait_for_row(q, "14", **geom)
             check("the pipe 'a | b' counts what the left side printed",
-                  any(r.split() == ["9", "9", "18"] for r in rows))
+                  any(r.split() == ["1", "3", "14"] for r in rows))
 
             # --- a program that is not there ---------------------------
             q.type_line("nosuchprogram")
@@ -216,40 +283,51 @@ def main():
                   "no such program" in text(rows))
 
             # --- scrolling back ------------------------------------------
-            q.type_line("seq 40")
-            rows = wait_for_line(q, "40", **geom)
+            # core's list of its commands: twenty lines, two of them
+            # wrapped - more than the window has rows
+            q.type_line("core help")
+            rows = wait_until(q, lambda rs: any(first_word(r) == "help"
+                                                for r in rs), **geom)
             check("long output ends on the last line",
-                  "40" in rows)
-            check("and the start of the output scrolled out of the window", "1" not in rows)
+                  any(first_word(r) == "help" and "this list" in r
+                      for r in rows))
+            check("and the start of the output scrolled out of the window",
+                  not any(first_word(r) == "ls" for r in rows))
 
             # One PgUp is half a screen, so it takes a few to get back
-            # past forty lines of output to the command that made them -
-            # how many depends on how tall the window is
+            # past that output to the commands before it - how many
+            # depends on how tall the window is
             pressed = 0
             for _ in range(10):
                 q.sendkey("pgup")
                 pressed += 1
                 time.sleep(0.6)
                 rows = read_rows(q, **geom)
-                if command_echo(rows, "seq 3"):
+                if command_echo(rows, "hello64"):
                     break
             check("PgUp goes back to what scrolled away - as far as the first "
-                  "the session's commands", command_echo(rows, "seq 3"))
+                  "the session's commands", command_echo(rows, "hello64"))
+            # (polled: the notice is the last thing the terminal draws,
+            # and a picture taken while it redraws can be without it)
+            rows = wait_until(q, lambda rs: "scrolled back" in text(rs),
+                              **geom)
             check("and the terminal says we are not looking at the end",
                   "scrolled back" in text(rows))
 
             for _ in range(pressed + 2):   # and back down to the end
                 q.sendkey("pgdn")
                 time.sleep(0.3)
-            time.sleep(1)
-            rows = read_rows(q, **geom)
+            rows = wait_until(q, lambda rs: "scrolled back" not in text(rs)
+                              and any(first_word(r) == "help" for r in rs),
+                              **geom)
             check("PgDn comes back to the end of the session",
-                  "40" in rows and "scrolled back" not in text(rows))
+                  any(first_word(r) == "help" for r in rows)
+                  and "scrolled back" not in text(rows))
 
             # --- the window's size decides how much is visible ---------
             # The green light zooms; the terminal asks the window for
             # its size, so it must show more lines than before
-            before = len([r for r in read_rows(q, **geom) if r])
+            before = len(text_rows(read_rows(q, **geom)))
             q.mouse_goto(*light_xy(WX, WY, 2))
             time.sleep(0.5)
             q.mouse_click()
@@ -263,16 +341,23 @@ def main():
             big = dict(ox=1 + PAD, oy=BAR_H + CONTENT_DY + PAD,
                        cols=(w - 2 - 8) // 8,
                        rows=(zh - (TITLE_H + 2) - 8) // ROW_H)
-            rows = read_rows(q, **big)
-            after = len([r for r in rows if r])
+            # (22 rows between the bar and the dock against 19 before:
+            # the three lines of 'core help' just above the ones that
+            # were showing - pwd, cat and head - come back into view)
+            back = ["pwd", "cat", "head", "wc"]
+            in_view = lambda rs: [first_word(r) for r in text_rows(rs)
+                                  if first_word(r) in back]
+            rows = wait_until(q, lambda rs: len(text_rows(rs)) > before
+                              and in_view(rs) == back, **big)
+            after = len(text_rows(rows))
             check("once the window is stretched MORE session lines show "
                   "(%d against %d)" % (after, before), after > before)
-            # (36 rows between the bar and the dock: the bottom of what
-            # 'seq 40' printed, and the prompt after it)
-            check("and it is still the same session - what was printed before "
-                  "the resize is in place (%s)" % [r for r in rows if r][-6:],
-                  any(r.split()[:1] == ["40"] for r in rows)
-                  and any(r.split()[:1] == ["30"] for r in rows))
+            check("and it is still the same session - lines that had "
+                  "scrolled out of the small window are back, in order "
+                  "above the ones that had not (%s)" % in_view(rows),
+                  in_view(rows) == back
+                  and any(first_word(r) == "help" and "this list" in r
+                          for r in rows))
             # The mouse pointer sits inside the zoomed window and smears
             # noise at the end of the row, so only its start is matched.
             check("the prompt is at the bottom edge of the bigger window (%s)"
@@ -283,10 +368,11 @@ def main():
             # once a desktop session is logged in, keys typed with no window
             # focused no longer reach the kernel's shell, and the terminal
             # runs programs rather than shell commands such as 'write'.
-            q.type_line("fileio")
+            # (fileio64 leaves 'zring3' behind: a line of text)
+            q.type_line("fileio64")
             time.sleep(2)
             for name in ("fileone", "filetwo", "other"):
-                q.type_line("cp ring3.txt " + name)
+                q.type_line("cp zring3 " + name)
                 time.sleep(1.5)
 
             # --- Tab finishes what is being typed -----------------------
@@ -297,7 +383,7 @@ def main():
             q.sendkey("tab")
             time.sleep(1.5)
             q.sendkey("ret")
-            rows = wait_for_row(q, "ring 3 process", **big)
+            rows = wait_for_row(q, "written from ring 3", **big)
             check("Tab finishes a name when only one matches "
                   "(cat oth -> other)",
                   any("cat other" in r for r in rows))
@@ -307,20 +393,20 @@ def main():
             q.type_line("cat file", enter=False)
             time.sleep(0.5)
             q.sendkey("tab")
-            time.sleep(2)
-            rows = read_rows(q, **big)
+            rows = wait_until(q, lambda rs: any("fileone" in r and "filetwo" in r
+                                                for r in rs), **big)
             check("with several matches it lists the candidates (%s)"
                   % [r for r in rows if "fileone" in r][:1],
                   any("fileone" in r and "filetwo" in r for r in rows))
 
             # And what it added is the part they agree on: pressing
-            # Enter now runs 'cat file', which has no such file
+            # Enter now runs 'cat file', which has no such file - and
+            # that answer is the proof, because the listing above has
+            # already put the line 'cat file' on the screen
             q.sendkey("ret")
-            time.sleep(2)
-            rows = read_rows(q, **big)
+            rows = wait_for_row(q, "there is no file", **big)
             check("and it added only what they share (still 'cat file')",
-                  any(row.endswith(("> cat file", "# cat file"))
-                      for row in rows))
+                  any(r.endswith("there is no file 'file'") for r in rows))
 
             # --- and the window says where it stands --------------------
             # The window is zoomed by now, its corner under the bar

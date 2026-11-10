@@ -76,11 +76,12 @@ def main():
             # --- a list longer than the window -------------------------
             # Named so that the order is the order they were made in,
             # and so that a name read from the screen says which one it
-            # is without counting.
+            # is without counting. At the top of the disk, which is the
+            # folder the Files tile opens; the shell of the signed-in
+            # session stands in its home folder, so the path is given.
             for i in range(FILES):
-                q.type_line("write file%02d.txt x" % i)
-                time.sleep(0.35)
-            time.sleep(1)
+                q.command("write /file%02d.txt x" % i,
+                          "'/file%02d.txt' written" % i, timeout=10)
 
             q.launch_dock("gfiles")                # the "Files" tile
             time.sleep(4)

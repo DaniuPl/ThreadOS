@@ -21,6 +21,7 @@ Run on its own or through scripts/run_tests.py.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -28,8 +29,27 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary
+from ptest import _kernel_define as define
 
 DARK = theme("dark")
+# The editor's size (user/gedit.c), which says where in the cascade its
+# window opens
+GEDIT_W = define("user/gedit.c", "W0")
+GEDIT_H = define("user/gedit.c", "H0")
+# The desktop's frames a second at the most, and how many of them a
+# card lives (NOTE_LIFE, '(5 * FRAME_HZ)' in kernel/desktop.c)
+FRAME_HZ = define("kernel/desktop.c", "FRAME_HZ")
+
+
+def _note_frames():
+    full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                        "..", "kernel", "desktop.c")
+    with open(full) as fh:
+        expr = re.search(r"#define\s+NOTE_LIFE\s+([^/\n]+)", fh.read())
+    return eval(expr.group(1).replace("/", "//"), {}, {"FRAME_HZ": FRAME_HZ})
+
+
+NOTE_FRAMES = _note_frames()
 
 
 def note_x(w=SCREEN_W):
@@ -107,12 +127,19 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             q.mouse_goto(300, 300)
-            q.type_line("write notes.txt a line to find")
-            time.sleep(1)
+            # At the top of the disk, where the search looks for files;
+            # the session's shell stands in its home folder
+            q.command("write /notes.txt a line to find",
+                      "'/notes.txt' written", timeout=10)
+            # How fast the desktop draws, by its own count: a card lives
+            # a number of its frames, not of seconds
+            fps0 = q.frame_rate()
 
             # --- notifications --------------------------------------------
-            # A program's first: it comes from ring 3
-            q.type_line("run udtest")
+            # A program's first: it comes from ring 3. 'runw' and not
+            # 'run', which would wait for the program to end and keep
+            # the shell from the commands below
+            q.type_line("runw udtest")
             time.sleep(3)
             got = card(q, 0)
             check("a program's notification is a card at the top right, from "
@@ -122,7 +149,14 @@ def main():
             # tenth of a second a key, and the cards live five seconds.)
             q.click_desktop()             # the keys back to the shell
             time.sleep(0.5)
+            # (where the top card stands, and the bare background there
+            # - worked out now, so that looking for the card to be gone
+            # is a picture of the screen and nothing else)
+            spots = [(x, y) for x in range(note_x(), note_x() + NOTE_W, 4)
+                     for y in range(note_y(0), note_y(0) + NOTE_H, 4)]
+            ground = [aurora_px(x, y) for x, y in spots]
             q.type_line("notify First")
+            posted = time.time()
             q.type_line("notify Second")
             time.sleep(1)
             got, older = card(q, 0), card(q, 1)
@@ -136,26 +170,60 @@ def main():
             time.sleep(0.5)
             check("a click sends a card away, and the one under it moves up "
                   "(%s)" % (card(q, 0),), card(q, 0) == ("Shell", "First"))
-            time.sleep(6)
-            w, h, at = q.screen_raw()
-            bare = sum(1 for x in range(note_x(), note_x() + NOTE_W, 4)
-                       for y in range(note_y(0), note_y(0) + NOTE_H, 4)
-                       if at(x, y) == aurora_px(x, y))
-            check("after five seconds they go by themselves (%d of %d points "
-                  "the bare background)" % (bare, (NOTE_W // 4) * (NOTE_H // 4)),
-                  bare == (NOTE_W // 4) * (NOTE_H // 4))
+            # (and the rate again while the card is there: its glass is
+            # blurred afresh every frame, which slows them down)
+            fps1 = q.frame_rate()
+            # A card lives five seconds' worth of frames (NOTE_LIFE in
+            # kernel/desktop.c); on a host busy with other machines the
+            # frames come slower than fifty a second, so the cards are
+            # looked for until they are gone, and how long the older one
+            # stayed is held to its frames at the slowest of the rates the
+            # desktop says it draws, before, during and after - twice as
+            # long, for a rate that dips between the readings, and three
+            # seconds for the typing and the reading. (It cannot go
+            # sooner than five seconds: the desktop draws fifty a second
+            # at the most.)
+            total = len(spots)
+            bare, gone = 0, None
+            while time.time() < posted + 90:
+                w, h, at = q.screen_raw()
+                bare = sum(1 for (x, y), g in zip(spots, ground)
+                           if at(x, y) == g)
+                if bare == total:
+                    gone = time.time() - posted
+                    break
+                time.sleep(0.3)
+            q.click_desktop()             # (the keys stay the shell's)
+            rates = [r for r in (fps0, fps1, q.frame_rate()) if r]
+            fps = min(rates) if rates else None
+            bound = 2 * NOTE_FRAMES / fps + 3 if fps else 0
+            check("after five seconds they go by themselves (%s, by %.1f s: "
+                  "%d frames at %s a second of %s; %d of %d points the bare "
+                  "background)" % ("%.1f s" % gone if gone else "still there",
+                                   bound, NOTE_FRAMES, fps, rates, bare,
+                                   total),
+                  gone is not None and NOTE_FRAMES / FRAME_HZ - 0.5 <= gone
+                  <= bound)
 
             q.sendkey("print")              # Print Screen
             got = ("", "")
-            for _ in range(16):             # writing to the disk takes a while
+            # writing to the disk takes a while
+            deadline = time.time() + 60
+            while time.time() < deadline:
                 time.sleep(0.5)
                 got = card(q, 0)
-                if got[0]:
+                if got[0] == "Screenshot":
                     break
             check("a picture of the screen says it was saved (%s)" % (got,),
                   got[0] == "Screenshot" and "saved" in got[1])
 
             # --- the search -------------------------------------------------
+            # The program's window goes down to the dock first: the
+            # search is glass, and a row that is not picked is read on
+            # whatever lies under it - the window's white shapes,
+            # blurred, are no ground to read letters on. It keeps its
+            # place in the cascade, and its tile.
+            q.click(*light_xy(94, 54, 1))
             q.click_desktop()
             time.sleep(0.5)
             search(q, "cl")
@@ -215,7 +283,21 @@ def main():
             time.sleep(4)
             check("and taking it opens it in a window of its own",
                   q.dock_windows() == before + 1)
-            check("in the editor", "exec 'gedit'" in q.serial())
+            # The third window: the program's, the clock's, and this one
+            # at the next step of the cascade - and its title bar says
+            # which program it is and which file it holds
+            ex, ey = cascade(4, GEDIT_W + 2, GEDIT_H + TITLE_H + 2)
+            title = ""
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                title = q.window_title(ex, ey, GEDIT_W + 2)
+                if "notes.txt" in title:
+                    break
+                time.sleep(0.3)
+            check("in the editor ('%s')" % title, title.startswith("Editor"))
+            check("which has the file open - its name is in the title "
+                  "('%s')" % title,
+                  title.startswith("Editor: ") and title.endswith("notes.txt"))
         finally:
             q.close()
     finally:

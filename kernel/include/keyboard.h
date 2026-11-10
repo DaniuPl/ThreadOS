@@ -32,7 +32,8 @@
 #define KEY_DESK_TAKE_PREV 0x1E
 #define KEY_DESK_TAKE_NEXT 0x1F
 /* Ctrl+C: not a character but a request to interrupt. The driver turns
-   it into a SIGINT for the process holding the console (see keyboard.c). */
+   it into a SIGINT for the process holding the console (see
+   kernel64/keyboard64.c). */
 /* Ctrl+S and Ctrl+O. The other Ctrl+letter combinations arrive as the
    letter itself, which is what a shell wants; these two do not, because
    a program that writes files has to be able to tell "save" from "s".
@@ -57,14 +58,8 @@
    is what closes the input of a program that is reading. */
 #define KEY_EOF   0x04
 
-/* Installs the IRQ1 handler and unmasks the keyboard interrupt */
-void keyboard_init(void);
-
-/* The character sink of a given virtual console (that console's
-   shell). A character goes there only when no process holds the
-   console. */
+/* Somebody who takes characters one at a time */
 typedef void (*keyboard_char_handler_t)(char c);
-void keyboard_set_handler(int vc, keyboard_char_handler_t handler);
 
 /* Handler of the visible console - the desktop hands keys to it when
    no window has focus */
@@ -83,11 +78,5 @@ void keyboard_set_fkey_override(keyboard_fkey_handler_t handler);
    road onward is the same */
 void keyboard_inject(char c);
 void keyboard_inject_switch(int vc);
-
-/* Blocking read for processes (the read syscall). The current task
-   takes the console over until it dies; returns >=1 characters read
-   (without echo - the reader does the echo) or -1 when the wait was
-   interrupted by a signal (the process is about to enter a handler). */
-int keyboard_read(char *buf, uint32_t len);
 
 #endif

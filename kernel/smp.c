@@ -42,7 +42,6 @@
    gluing them onto the mapping takes different code in each mode. A
    secondary core in long mode also needs the page table address,
    because it builds its own road into long mode. */
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #include "../kernel64/gdt64.h"
 #include "../kernel64/task64.h"
@@ -59,21 +58,6 @@
 #include "../kernel64/fpu64.h"
 #define ENABLE_SSE()  fpu64_enable_core()
 #define SET_PAT()     paging64_pat_init()   /* the same PAT on every core */
-#else
-#include "include/paging.h"
-#define MAP_PHYS(a, n)   paging_map_phys((a), (n))
-#define IDENTITY_TOP()   paging_identity_limit()
-#include "include/gdt.h"
-#include "include/idt.h"
-#define LOAD_GDT()    gdt_load()
-#define LOAD_IDT()    idt_load()
-#define LOAD_TSS()    gdt_load_tss()
-#define TSS_SEL_BASE     GDT_TSS
-#define TSS_SEL_STEP     8
-#define SYSCALL_ENTRY() do { } while (0)   /* i386 enters through the int 0x80 gate */
-#define ENABLE_SSE()  do { } while (0)     /* i386 programs do not need XMM */
-#define SET_PAT()     do { } while (0)     /* i386 maps the screen uncached */
-#endif
 
 #define AP_BASE       0x8000        /* where we copy the trampoline to */
 #define AP_STACK      8192          /* one stack per woken core */
@@ -569,16 +553,10 @@ int smp_init(void)
     *counter = 0;
 
     /* The secondary core takes the same page tables the kernel walks:
-       in long mode it will not start at all without them, and in
-       protected mode it would start, only user program addresses
-       would mean nothing to it. */
+       long mode will not start at all without them. */
     uint32_t off_cr3 = (uint32_t)((uint8_t *)&ap_cr3 - ap_trampoline);
     uintptr_t cr3;
-#ifdef __x86_64__
     __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));
-#else
-    __asm__ volatile("movl %%cr3, %0" : "=r"(cr3));
-#endif
     *(volatile uint32_t *)(uintptr_t)(AP_BASE + off_cr3) = (uint32_t)cr3;
 
     uint8_t mine = (uint8_t)(apic_rd(APIC_ID) >> 24);

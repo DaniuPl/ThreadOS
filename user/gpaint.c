@@ -10,8 +10,6 @@
  * pixels cannot be read back, and a picture that cannot be read back
  * cannot be saved. So the brush paints into the program's own copy,
  * and only the part that changed goes to the window.
- *
- * One program for both kernels (uapi.h).
  */
 
 #include "udraw.h"
@@ -200,7 +198,9 @@ static void apply_wallpaper(void)
 
     int32_t rc = sys_cfg_set("wallpaper", "wallpaper.twl");
     if (rc == 0)
-        notify("The drawing is now the desktop wallpaper.",
+        /* One line of a notification card: anything longer is cut
+           before the word that says what happened */
+        notify("The drawing is now the wallpaper.",
                "Rysunek jest teraz tapetą pulpitu.");
     else
         notify("The wallpaper was saved, but Settings could not apply it.",

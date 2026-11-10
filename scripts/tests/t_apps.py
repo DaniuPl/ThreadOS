@@ -61,15 +61,21 @@ C = "user/gcalc.c"
 
 
 def calc_display(q, cx, cy, cw):
-    """The number on the display, set against its right edge - in the
-    text's colour, or the theme's red when it says Error"""
-    best = ""
-    for fg in (DARK["app_text"], DARK["app_danger"]):
-        got = q.find_ui(cx + 20, cx + cw - 10, cy + define(C, "DISP_BASE"),
-                        px=define(C, "DISP_PX"), fg=fg)
-        if len(got) > len(best):
-            best = got
-    return best
+    """The number on the display, set against its right edge in the
+    text's colour - or "Error", in bold in the theme's red and centred
+    on the display, when anything there is that red"""
+    w, h, at = shot = q.screen_raw()
+    disp_px, disp_h = define(C, "DISP_PX"), define(C, "DISP_H")
+    red = any(near(at(x, y), DARK["app_danger"], 30)
+              for x in range(cx + 20, cx + cw - 10, 2)
+              for y in range(cy + 8, cy + disp_h, 2))
+    if red:
+        return q.find_ui(cx + 20, cx + cw - 10,
+                         cy + ui_font_baseline_in(disp_px, 8, disp_h),
+                         px=disp_px, face="bold", fg=DARK["app_danger"],
+                         screen=shot)
+    return q.find_ui(cx + 20, cx + cw - 10, cy + define(C, "DISP_BASE"),
+                     px=disp_px, fg=DARK["app_text"], screen=shot)
 
 
 def calc_expr(q, cx, cy, cw):
@@ -194,6 +200,19 @@ def calendar(q):
 
 # --- paint ------------------------------------------------------------------
 
+def card(q, i):
+    """(title, line) of the i-th notification card from the top"""
+    scr = q.screen_raw()
+    x = SCREEN_W - NOTE_RIGHT - NOTE_W
+    y = NOTE_TOP + i * (NOTE_H + NOTE_GAP)
+    title = q.read_ui(x + NOTE_TEXT_X, y + NOTE_TITLE_Y, NOTE_W - 60,
+                      px=NOTE_PX, face="bold", fg=DARK["menu_text"],
+                      screen=scr)
+    line = q.read_ui(x + NOTE_TEXT_X, y + NOTE_BODY_Y, NOTE_W - 60,
+                     px=NOTE_PX, fg=DARK["menu_text"], screen=scr)
+    return title, line
+
+
 P = "user/gpaint.c"
 
 
@@ -247,22 +266,48 @@ def paint(q):
 
     wall_x = define(P, "WALL_X") + define(P, "WALL_W") // 2
     q.click(cx + wall_x, cy + define(P, "BTN_Y") + define(P, "BTN_H") // 2)
+    # The administrator's password, should Paint ask for it - a Paint
+    # the administrator's own shell started does not, and the letters
+    # are nothing to it then
     q.type_line("thread")
+    # Paint goes at once: the card comes in over the corner of its window,
+    # and glass over a dark toolbar on one side and the white wallpaper on
+    # the other is not one ground for the letters to be read against
+    seen = len(q.serial())
+    q.sendkey("alt-f4")
+    # The card is read while the window behind it goes, and it leaves on
+    # its own after a few seconds: each reading is held to the words
+    # themselves - all of them, not cut short for the card - and the
+    # fullest one is kept only to say what was there if none is
+    want = ("Paint", "The drawing is now the wallpaper.")
     wall_note = ("", "")
-    for _ in range(12):
-        time.sleep(0.5)
-        wall_note = card(q, 0)
-        if wall_note[0] == "Paint" and "wallpaper" in wall_note[1]:
+    end = time.time() + 6
+    while time.time() < end:
+        time.sleep(0.3)
+        got = card(q, 0)
+        if got == want:
+            wall_note = got
             break
+        if len(got[0]) + len(got[1]) > len(wall_note[0]) + len(wall_note[1]):
+            wall_note = got
     check("Paint can apply the drawing as the desktop wallpaper (%s)"
-          % (wall_note,),
-          wall_note[0] == "Paint" and "now the desktop wallpaper" in wall_note[1])
+          % (wall_note,), wall_note == want)
 
-    close(q, cx, cy, cw)
-    time.sleep(1.5)
-    sw, sh, at = q.screen_raw()
-    wx, wy = sw * 50 // 160, sh * 32 // 120
-    pixel = at(wx, wy)
+    end = time.time() + 20
+    while time.time() < end and "[gpaint] done" not in q.serial()[seen:]:
+        time.sleep(0.3)
+    check("Alt+F4 ends Paint", "[gpaint] done" in q.serial()[seen:])
+    # The stroke shows where the window was, once the window has gone:
+    # its closing takes some frames, and the place is looked at until
+    # the wallpaper is there and not once after a guessed while
+    pixel = None
+    end = time.time() + 20
+    while time.time() < end:
+        sw, sh, at = q.screen_raw()
+        pixel = at(sw * 50 // 160, sh * 32 // 120)
+        if pixel[0] > 200 and pixel[1] < 120 and pixel[2] < 120:
+            break
+        time.sleep(0.3)
     check("the exported wallpaper contains the painted red stroke (%s)"
           % (pixel,),
           pixel[0] > 200 and pixel[1] < 120 and pixel[2] < 120)

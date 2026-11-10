@@ -25,8 +25,10 @@ From outside:
   a double click on a folder walks into it; a file copied into it
   there is read back by the kernel's own 'cat', byte for byte
 
-  a folder with something in it is not removed, and the program says
-  why before asking anything
+  a folder with something in it goes to Trash, with what is in it,
+  once the question has been answered; in Trash it is not removed for
+  good while something is still in it, and the program says why before
+  asking anything
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -124,15 +126,17 @@ def main():
             q.mouse_home()
 
             # A file whose length we know, a folder with a folder and a
-            # file in it
-            q.type_line("write report.txt " + TEXT)
-            time.sleep(1)
-            q.type_line("run mkdir documents")
-            time.sleep(2)
-            q.type_line("run mkdir documents/inner")
-            time.sleep(2)
-            q.type_line("run cp report.txt documents/inside.txt")
-            time.sleep(2)
+            # file in it - made in the root, where the "Files" tile
+            # opens; the kernel's shell starts in the user's home. The
+            # folders and the copy are made by 'core', in ring 3.
+            q.command("cd /")
+            q.command("write report.txt " + TEXT, "written", timeout=15)
+            for line in ("run core mkdir documents",
+                         "run core mkdir documents/inner",
+                         "run core cp report.txt documents/inside.txt"):
+                said = q.command(line, "[core] done", timeout=20)
+                check("'%s' succeeds" % line[4:],
+                      "[core] done, exit code 0" in said)
 
             q.launch_dock("gfiles")                   # the "Files" tile
             time.sleep(4)
@@ -238,16 +242,62 @@ def main():
                   sorted(names(q)) == ["report-copy.txt", "report.txt"])
 
             # --- a folder with something in it --------------------------
+            # Outside Trash it goes there like anything else, once asked
+            # - Trash is where it can be had back from
             tree_click(q, "Disk")
             look(q)
             pick(q, "documents")
             x, y = gfiles_button("remove")
             click(q, CX + x, CY + y, wait=2)
             look(q)
-            said = q.gfiles_status(CX, CY)
+            # The whole question: it is put together from pieces, and a
+            # piece too many (a quote twice) still holds both words
+            want = "Move the folder 'documents' to Trash?"
+            asked = q.ug_question(CX, CY, GFILES_H)
+            end = time.time() + 10
+            while asked != want and time.time() < end:
+                time.sleep(0.5)
+                asked = q.ug_question(CX, CY, GFILES_H)
+            check("a folder with something in it is asked about before it "
+                  "goes to Trash ('%s')" % asked, asked == want)
+            yes = ug_modal(GFILES_H)["yes"]
+            click(q, CX + yes[0], CY + yes[1], wait=2.5)
+            look(q)
+            check("and 'Move' takes it from where it was (%s)" % names(q),
+                  "documents" not in names(q) and "archive" in names(q))
+
+            # Trash in a window of its own. The shell waits for what it
+            # runs, so it is free again only once that window is closed.
+            q.mouse_goto(*AWAY)
+            q.mouse_click()                    # the desktop takes the keys
+            time.sleep(1)
+            seen = len(q.serial())
+            q.type_line("run gfiles /home/admin/.Trash")
+            tx, ty = WX + 1 + 12, WY + CONTENT_DY + 12
+            trash = []
+            end = time.time() + 20
+            while time.time() < end and "documents" not in trash:
+                time.sleep(0.5)
+                trash = [n for n, _, _ in q.gfiles_rows(tx, ty)]
+            check("Trash holds the folder (%s)" % ", ".join(trash),
+                  "documents" in trash)
+            if "documents" in trash:
+                click(q, tx + GFILES_ROW_X,
+                      ty + gfiles_row_y(trash.index("documents")))
+            click(q, tx + x, ty + y, wait=2)
+            look(q)
+            said = q.gfiles_status(tx, ty)
             check("a folder with something in it is not removed, and it "
                   "says why ('%s')" % said, "not empty" in said)
-            check("and it is still there", "documents" in names(q))
+            check("and it is still there",
+                  "documents" in [n for n, _, _ in q.gfiles_rows(tx, ty)])
+            q.sendkey("alt-f4")                # Trash has the focus
+            end = time.time() + 15
+            while (time.time() < end and
+                   "[gfiles] done" not in q.serial()[seen:]):
+                time.sleep(0.3)
+            check("the Trash window closes, and the shell is free again",
+                  "[gfiles] done" in q.serial()[seen:])
 
             # --- confirmed by something that is not this program --------
             q.mouse_goto(*AWAY)
@@ -263,6 +313,10 @@ def main():
                   TEXT in after)
             check("and lists the folder made in the window",
                   "archive" in after)
+            kept = q.command("cat /home/admin/.Trash/documents/inside.txt",
+                             TEXT, timeout=15)
+            check("and what was in the folder went to Trash with it",
+                  TEXT in kept)
         finally:
             q.close()
     finally:

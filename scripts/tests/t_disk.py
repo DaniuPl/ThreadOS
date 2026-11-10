@@ -11,21 +11,17 @@ the same machine with the same disk image. A program that starts after a
 restart, and that is not in the initrd, can only have come off the
 platter.
 
-Looking for a program (kernel/prog.c) is shared by both kernels - there
-is not a word about the processor mode in it - so we check it on both
-sides.
+Looking for a program lives in kernel/prog.c, and the same search serves
+both doors into it: the kernel shell's 'run' and an exec from ring 3.
 """
 
 import os
-import shutil
-import subprocess
 import sys
 import tempfile
-import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64
+from ptest import check, summary, no64
 
 # A name that is NOT in the initrd - otherwise there is no telling
 # where the program came from
@@ -33,27 +29,19 @@ ON_DISK = "fromdisk"
 
 
 def main():
-    print("--- programs from the disk (the 64-bit kernel) ---")
+    print("--- programs from the disk ---")
 
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
         return 0
 
-    d = tempfile.mkdtemp()
-    iso = tempfile.mktemp(suffix=".iso")
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as fh:
         fh.truncate(DISK_SIZE)
     try:
-        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-        if not os.path.exists(iso):
-            return summary()
-
         # --- The first boot: the program goes from the initrd onto the disk ---
-        slog = tempfile.mktemp(suffix=".log")
-        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, disk=disk,
-                 sata=True, qemu="qemu-system-x86_64")
+        q = Qemu(KERNEL, INITRD, disk=disk, sata=True, append=TEXT_MODE)
         try:
             q.wait_serial("TFS ready", timeout=90)
             q.wait_serial("thread64>", timeout=30)
@@ -78,24 +66,21 @@ def main():
                   "Program '%s' from the disk" % ON_DISK in wyn)
         finally:
             q.close()
-            if os.path.exists(slog):
-                os.unlink(slog)
 
         # --- A second boot with the same disk ---
-        slog2 = tempfile.mktemp(suffix=".log")
-        q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
-                  sata=True, qemu="qemu-system-x86_64")
+        q2 = Qemu(KERNEL, INITRD, disk=disk, sata=True, append=TEXT_MODE)
         try:
             q2.wait_serial("thread64>", timeout=90)
-            after = q2.command("run " + ON_DISK, "[hello64] ending",
-                              timeout=30)
+            # Waited for up to what follows the exit code on the shell's
+            # closing line, so that the code itself has arrived whole
+            after = q2.command("run " + ON_DISK, " (frames ", timeout=30)
             check("the program survived the restart and still starts",
                   "Program '%s' from the disk" % ON_DISK in after)
 
             # A program from the disk is an ordinary program: it has its
             # own address space and ends with its own exit code
             check("a program from the disk ends with its own exit code",
-                  "done, exit code 7" in after)
+                  "[%s] done, exit code 7 (" % ON_DISK in after)
 
             # ...and a second time too, that is, the buffer after it was
             # given back. We count only what arrived after THIS command:
@@ -121,41 +106,9 @@ def main():
                   "run: there is no program" in bad_one)
         finally:
             q2.close()
-            if os.path.exists(slog2):
-                os.unlink(slog2)
     finally:
-        shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, disk):
-            if os.path.exists(f):
-                os.unlink(f)
-
-    # --- The same in the 32-bit kernel ---
-    # The same file looking for the program, the same path; the only
-    # difference is the ELF loader on the other side
-    print("--- programs from the disk (the 32-bit kernel) ---")
-    disk32 = tempfile.mktemp(suffix=".img")
-    slog32 = tempfile.mktemp(suffix=".log")
-    with open(disk32, "wb") as fh:
-        fh.truncate(DISK_SIZE)
-    try:
-        q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            copied = q3.command("cp hello " + ON_DISK, "cp:")
-            check("'cp' copies a program onto the disk (32-bit)",
-                  "cp: 'hello' -> '%s'" % ON_DISK in copied)
-            wyn = q3.command("run " + ON_DISK, "[hello] ending",
-                               timeout=30)
-            check("a program from the disk starts (32-bit)",
-                  "[hello] hello" in wyn)
-            check("the 32-bit kernel reports where it took it from too",
-                  "exec '%s' from the disk" % ON_DISK in wyn)
-        finally:
-            q3.close()
-    finally:
-        for f in (disk32, slog32):
-            if os.path.exists(f):
-                os.unlink(f)
+        if os.path.exists(disk):
+            os.unlink(disk)
 
     return summary()
 

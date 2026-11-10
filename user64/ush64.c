@@ -219,7 +219,7 @@ static void execute(void)
            just like every other program */
         print("ush64: I am a process in ring 3\n");
     } else if (equal(line, "exit")) {
-        print("ush64: pa!\n");
+        print("ush64: bye!\n");
         sys_exit(0);
     } else if (starts_with(line, "echo ")) {
         print(line + 5);

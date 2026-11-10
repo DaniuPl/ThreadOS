@@ -72,7 +72,7 @@ void _start(void)
     }
 
     int code = 0;
-    sys_wait_child(&code);
+    sys_wait(&code);
     report("parent ", mask, ticks, sum);
     print("[cores] done\n");
     sys_exit(0);

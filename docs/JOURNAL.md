@@ -6697,3 +6697,118 @@ works and is checked by `make test`.
       far, at 50 % half; at the top of a list the wheel turned away does
       nothing, and with natural scrolling it moves the list down and the
       other way brings it back.
+
+- [x] **One kernel for the PC: the 32-bit one is gone**
+      (Makefile, boot/, kernel/, kernel64/, user/, user64/,
+      scripts/ptest.py, scripts/run_tests.py, scripts/tests/,
+      .github/workflows/build.yml, AGENTS.md, CONTRIBUTING.md, README.md)
+      The PC system is the long-mode kernel and nothing else. The 32-bit
+      kernel - its boot code, kmain, shell, system calls, tasks, paging,
+      interrupts, exec, pipes and signals - is removed, and so are the
+      programs only it could run (user/usys.h, the three linker scripts
+      and thirty-four programs nothing built any more). Every `#if` on
+      the processor in shared code is resolved to the x86-64 side; the
+      ARM64 branches of io.h and string.c stay. Two kernels meant every
+      change to shared code was made and tested twice, and nobody boots
+      the 32-bit one; the second target is now the ARM64 kernel. The
+      programs that tests still needed - faults, deep, udpecho, udptest,
+      tcpserv, gdeaf and mkwall - are built for 64 bits through uapi.h.
+
+      Every test group boots the 64-bit kernel now. A test that names no
+      disc and no disk gets a GRUB disc made for the kernel under test
+      (ptest.boot_disc, kept for the run), and a text-mode screen is read
+      off the serial port, because the 64-bit kernel draws its consoles
+      on the framebuffer. Groups that only existed for the 32-bit kernel
+      went into their 64-bit counterparts or, where those already
+      covered the same, away: http32, net32 and tls32 became `http` and
+      parts of `net64` and `tls64`; boot, shell, process, ush, fork,
+      signals, protect, lazymem, swap, consoles, acpi, ahci and usbkbd
+      went into k64core, k64shell, k64proc, k64disk, consoles64, acpi64,
+      swap64 and usbkbd64. CI runs k64proc and http where it ran the
+      removed groups.
+
+      Moving the tests found real bugs in the 64-bit kernel:
+
+      * A start with no disk (the Live system) could not sign in at
+        all: user_login insisted on /home/<name>. Without a file system
+        the session starts in the root.
+      * The kernel shell's `run` kept the program's name and arguments
+        in statics shared by the four console shells, and waited for
+        any child - a finished `runw` program would do - so it reported
+        the wrong program and gave the prompt back early. It waits for
+        its own child now (task64_wait_for). A process killed by a
+        signal or an exception now writes back its writable file
+        mappings, as an exit does.
+      * A system call accepted only buffer pages that were already
+        present, so read() into memory a program had asked for but not
+        touched failed (gimg got 776 bytes of a JPEG).
+        paging64_user_range brings such pages in as the program's own
+        first touch would; paging64_user_writable checks a buffer the
+        kernel writes into, because read() into a program's own code
+        stopped the whole machine with a kernel page fault. The ELF
+        loader's relocations and a signal frame go through the same
+        check.
+      * SYS64_TCP_RECV refused anything over 1400 bytes, which broke
+        every TLS record longer than that. Listening and accepting
+        from ring 3 had never been there on the 64-bit side; it is
+        (SYS64_TCP_LISTEN, SYS64_TCP_ACCEPT), and a connection to a
+        dead program's port no longer reuses the listener's own entry.
+      * On a fresh disk the first `sudo` saved the bootstrap admin but
+        made neither /home/admin nor /system.cfg, so every later sign-in
+        failed with "wrong password". It makes both now, as the boot-time
+        migration does, and a missing home is called that - in the
+        kernel log, in the shell and on the lock screen - instead of a
+        wrong password.
+      * The desktop cut window titles at 23 characters, could not read
+        /desktop.icons when the session was the guest's (it is readable
+        by every account and written only by administrators), opened a
+        search result in the root by a bare name, labelled the accounts
+        manager "Code", and placed the bar's menu by MENU_Y even when it
+        had been moved up to fit. Paint's wallpaper message did not fit
+        its card.
+      * Under GRUB on QEMU's standard VGA the EDID was never read and
+        the 'resolution' setting was ignored, because GRUB always hands
+        over a framebuffer. The kernel takes that mode over now.
+      * swap.sys shrank at every boot of the same disk: the free space
+        was measured while the old file still counted as used.
+      * Only the boot core turned write protection on. Every other core
+        enabled paging without CR0.WP, so its kernel wrote straight
+        through a read-only or copy-on-write page of a program - into
+        the frame the parent still shared. boot64/ap64.S sets it too.
+      * The kernel's thread self-test said "[ OK ]" when the threads had
+        never run; it says "[ !! ]".
+      * Files asked "Move 'report.txt'' to Trash?".
+
+      A review of the moved tests also tightened them: checks that could
+      not fail (a wait that returned the whole log, a program that
+      printed once and was then "seen running", vacuous preconditions)
+      now can, fixed sleeps became polls, waits read the whole line they
+      assert, no64() fails instead of skipping. Coverage the 32-bit
+      groups had and the 64-bit ones lacked is back: wild64 hands the
+      kernel a kernel pointer in 31 pointer-taking calls, each next to
+      an honest twin; fork64 has the kernel write into a page the child
+      still shares; heap64 checks that fresh heap and mapping pages come
+      zeroed, both through a fault and through a read() into them;
+      udpecho and udptest send UDP between two processes; faults runs
+      two processes over 9000 pages each with an exact checksum; swap64
+      boots the same disk twice and wants the same swap size. Tests
+      that need a UEFI loader take the one next to the kernel under test
+      instead of rebuilding build/ during a run, and Polish words used
+      as ordinary file names and messages are English.
+
+      What has not been seen working yet: many of the groups above
+      passed while the fixes were made (multiuser, wall, users, colours,
+      tls64, http, k64proc, consoles64, k64disk, mmap, swap64, files,
+      desktop1, notify), but the last round of changes was only built,
+      with every changed test compiled, because the QEMU runs were
+      stopped - without KVM they take hours here. Before trusting this,
+      run at least k64shell, faults, tlb, consoles64, net, net64,
+      k64proc, k64disk, mmap, multiuser, wall, users, icons, apps,
+      session, scale, swap64, mouse, gterm, gterm64, nvme, tfs,
+      foreigndisk, e1000, virtio, lock, look, config, desktop64,
+      bootsplash, desks, bar, clock, maxwin, xhci, terminal, filetree,
+      files, gtermlive, lockless and proccores. Known and left: a boot
+      through threadboot under OVMF stops before the first switch to a
+      new thread, which may be the kernel's fault and not only the
+      environment's; the shell's `disk` still has one buffer for all
+      four consoles; Paint's other messages are too wide for the card.

@@ -63,12 +63,24 @@ def stats(q):
 
 
 def set_motion(q, n):
+    """'sudo set motion n', and a wait for the shell's word that it is
+    saved. A shell signed in as an administrator - the desktop's
+    session here - runs it at once; one that is not asks for the
+    password first, and gets it."""
     q.click_desktop()             # the keys to the shell
     time.sleep(0.5)
+    start = len(q.serial())
     q.type_line("sudo set motion %d" % n)
-    time.sleep(1)
-    q.type_line("thread")
-    time.sleep(1.5)
+    asked = False
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        said = q.serial()[start:]
+        if "motion = %d (saved)" % n in said:
+            break
+        if not asked and "password:" in said:
+            q.type_line("thread")
+            asked = True
+        time.sleep(0.3)
 
 
 def differ(a, b, w, h, y0, y1):
@@ -118,8 +130,9 @@ def main():
             w, h, mid = q.screen_raw()
             body = (WX + 1 + GSET_W - 3, WY + 150)     # its own background
             # The way is counted in frames, and a larger window takes
-            # longer frames: wait for it to arrive rather than guess
-            for _ in range(30):
+            # longer frames - the more so on a host busy with other
+            # machines: wait for it to arrive rather than guess
+            for _ in range(120):
                 w, h, end = q.screen_raw()
                 if near(end(*body), DARK["win_bg"], 3):
                     break
@@ -137,8 +150,14 @@ def main():
             time.sleep(0.7)
             w, h, mid = q.screen_raw()
             time.sleep(4)
-            w, h, end = q.screen_raw()
-            d = dock_geom(n_w=3)
+            # (and longer, for as long as the way down is not over)
+            deadline = time.time() + 30
+            while True:
+                w, h, end = q.screen_raw()
+                if end(*body) == aurora_px(*body) or time.time() > deadline:
+                    break
+                time.sleep(0.5)
+            d = dock_geom(n_w=1)
             moving = differ(mid, end, w, h, BAR_H, d["y"] - 20)
             check("a minimised window is seen on its way down (%d pixels "
                   "still to go)" % moving, moving > 500)
@@ -147,13 +166,21 @@ def main():
 
             # --- and with no motion at all --------------------------------
             set_motion(q, 0)
-            q.mouse_goto(*dock_window(2, 3))     # its tile brings it back
+            # Its tile brings it back: the settings are the only window,
+            # so theirs is the one window tile after the programs'
+            q.mouse_goto(*dock_window(0, 1))
             time.sleep(0.4)
             q.mouse_click()
             q.mouse_goto(600, 300)
-            time.sleep(1.5)
-            w, h, at = q.screen_raw()
-            check("brought back from the dock", near(at(*body), DARK["win_bg"], 3))
+            deadline = time.time() + 10
+            while True:
+                w, h, at = q.screen_raw()
+                if (near(at(*body), DARK["win_bg"], 3) or
+                        time.time() > deadline):
+                    break
+                time.sleep(0.3)
+            check("brought back from the dock (%s)" % (at(*body),),
+                  near(at(*body), DARK["win_bg"], 3))
             q.mouse_goto(*light_xy(WX, WY, 1))
             time.sleep(0.4)
             q.mouse_click()

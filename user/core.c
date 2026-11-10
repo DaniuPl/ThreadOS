@@ -10,10 +10,9 @@
  * the machine never gets back. The terminal starts 'core ls -l' when
  * 'ls -l' is typed; the kernel's shell can do the same by hand.
  *
- * Everything goes through the system calls any program has, on both
- * kernels (uapi.h) - which is the point: what the terminal shows is what
- * a program is allowed to see, and a refusal is the kernel's, said in
- * words.
+ * Everything goes through the system calls any program has (uapi.h) -
+ * which is the point: what the terminal shows is what a program is
+ * allowed to see, and a refusal is the kernel's, said in words.
  */
 
 #include "uapi.h"
@@ -63,11 +62,10 @@ static void pad(const char *s, int w)
         say(" ");
 }
 
-/* --- what differs between the two kernels -------------------------- */
+/* --- the directory and where we stand ------------------------------ */
 
 static int read_entry(int i, char *name, int max, uint32_t *size, int *dir)
 {
-#ifdef __x86_64__
     struct dirent64 e;
     if (sys_readdir(i, &e) != 0)
         return -1;
@@ -79,31 +77,12 @@ static int read_entry(int i, char *name, int max, uint32_t *size, int *dir)
     name[k] = 0;
     *size = e.size;
     *dir = e.is_dir;
-#else
-    char n[FS_NAME_MAX + 1];
-    int32_t r = sys_readdir(i, n);
-    if (r == -1)
-        return -1;
-    int k = 0;
-    while (n[k] && k < max - 1) {
-        name[k] = n[k];
-        k++;
-    }
-    name[k] = 0;
-    *dir = r == -2;
-    *size = *dir ? 0 : (uint32_t)r;
-#endif
     return 0;
 }
 
 static void cwd(char *buf, int max)
 {
-#ifdef __x86_64__
     sys_getcwd(buf, (uint64_t)max);
-#else
-    (void)max;
-    sys_getcwd(buf);
-#endif
     if (!buf[0]) {
         buf[0] = '/';
         buf[1] = 0;
@@ -112,11 +91,7 @@ static void cwd(char *buf, int max)
 
 static void memory(uint32_t *ram, uint32_t *used, uint32_t *up)
 {
-#ifdef __x86_64__
     struct sysinfo64 si;
-#else
-    struct sysinfo si;
-#endif
     sys_sysinfo(&si);
     *ram = si.ram_kib;
     *used = si.used_kib;
@@ -520,11 +495,7 @@ static int c_kill(int argc, char **argv)
 
 static int c_uname(void)
 {
-#ifdef __x86_64__
     say("ThreadOS x86-64 (long mode)\n");
-#else
-    say("ThreadOS i386 (protected mode)\n");
-#endif
     return 0;
 }
 

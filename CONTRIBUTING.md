@@ -49,10 +49,10 @@ that means nothing.
 3. run `make test T=<name>` until it passes, then `make test` to be
    sure the group plays well with the others running in parallel.
 
-The network groups (`net`, `net32`, `tls32`, `tls64`) stand a DNS
-server of their own on **port 53** of the host: that is where QEMU's
-user network sends the guest's questions, and there is no way to remap
-it. Binding it needs root - so either run the suite as root, or once:
+The network groups `net` and `tls64` stand a DNS server of their own
+on **port 53** of the host: that is where QEMU's user network sends the
+guest's questions, and there is no way to remap it. Binding it needs
+root - so either run the suite as root, or once:
 
 ```sh
 sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53
@@ -96,25 +96,21 @@ comments in this codebase are a paragraph long because the fault they
 describe cost a day to find; that is the right length for such a
 comment.
 
-## Two kernels, one set of sources
+## Where code goes
 
-Everything that does not genuinely depend on the processor mode lives in
-`kernel/` and is **compiled twice**. Only paging, interrupts, context
-switching and the syscall entry have separate implementations in
-`kernel64/`. When adding a driver, put it in `kernel/` and add it to
-both object lists in the `Makefile` - the second compilation is the
-cheapest known way to catch a shift, a width or a pointer that happened
-to be the right size.
-
-The 32-bit kernel is kept and must keep passing its tests. It is no
-longer where new features go, but it is a second opinion on every line
-of shared code.
+Everything that does not genuinely depend on the processor lives in
+`kernel/`; paging, interrupts, context switching and the syscall entry
+are in `kernel64/`. When adding a driver, put it in `kernel/` and add it
+to `SHARED64` in the `Makefile`. There used to be a 32-bit kernel built
+from the same files; it was removed, and its tests moved to the 64-bit
+one. A few files of `kernel/` (`string.c`, `heap.c`, and the `io.h` and
+`spinlock.h` headers) are built for the ARM64 kernel as well, and a
+change to them has to build and pass there too.
 
 ## Before sending a patch
 
 ```sh
-make            # the 32-bit kernel and its initrd
-make kernel64   # the long-mode kernel
+make            # the kernel and its initrd
 make test       # the whole suite - it has to be green
 ```
 
@@ -139,7 +135,7 @@ found later.
 
 ## Reporting a bug
 
-Please say which kernel (32- or 64-bit), how it was started (the QEMU
+Please say which kernel (x86-64 or ARM64), how it was started (the QEMU
 command line or the real machine), and attach the serial log - the
 system writes almost everything worth knowing there. `hardware` and
 `disks` from inside the system are worth more than a description of the
