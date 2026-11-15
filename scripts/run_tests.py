@@ -27,7 +27,7 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 GROUPS = [
     "boot", "bootsplash", "shell", "process", "fork", "lazymem", "signals", "protect",
     "net32", "http32", "mouse", "ush", "tfs", "foreigndisk", "k64core", "k64proc",
-    "k64shell", "k64disk", "usbmouse", "ahci", "consoles", "swap",
+    "k64shell", "k64disk", "usbmouse", "ahci", "swap",
     "tls32", "tls64", "net", "net64", "e1000", "virtio", "nvme", "xhci", "ehci", "ttf", "shapes", "sem", "disk",
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
     "kthreads", "proccores", "lockless", "tlb", "faults", "config", "settings", "netbar", "winmgr", "manywin", "maxwin", "clock", "gterm", "terminal", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gcode", "gtasks", "sysbar", "files", "filetree", "screenshot", "colours", "wheel", "scale", "look", "bar", "udraw", "motion", "notify", "appear", "apps", "lock", "session", "polish", "wall", "icons", "users", "usersgui", "login", "multiuser", "gfx64", "desktop1",

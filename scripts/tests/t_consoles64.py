@@ -21,6 +21,7 @@ really be seen.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,6 +110,37 @@ def main():
             time.sleep(2.0)
             check("the interrupted program stopped writing",
                   q.screen_fbcon() == after)
+
+            # A task writes on ITS console whether or not that console
+            # is the one shown. ping prints a line a second for three
+            # seconds: started on the second console and left running
+            # while the first is shown, it has to have put all of it on
+            # the second, and none of it on the first.
+            q.wait_serial("[net] DHCP", timeout=30)
+            seen = len(q.serial())
+            q.type_line("ping 10.0.2.2")
+            q.sendkey("alt-f1")
+            # The serial port gets every console's text, so it says
+            # when the ping is over without looking at a screen
+            end = time.time() + 30
+            while (time.time() < end
+                   and "--- statistics" not in q.serial()[seen:]):
+                time.sleep(0.3)
+            time.sleep(0.5)
+            shown = q.screen_fbcon()
+            check("a command on the second console writes nothing on the "
+                  "first while it runs",
+                  "statistics" not in shown and "seq=" not in shown)
+            q.sendkey("alt-f2")
+            time.sleep(1.0)
+            hidden = q.screen_fbcon()
+            m = re.search(r"--- statistics: sent (\d+), received (\d+)",
+                          hidden)
+            check("it wrote on its own console while that one was not "
+                  "shown (%d replies, %s)"
+                  % (hidden.count("seq="), m.group(0) if m else "no end"),
+                  m is not None and int(m.group(1)) >= 3
+                  and hidden.count("seq=") == int(m.group(1)))
         finally:
             q.close()
     finally:
