@@ -97,6 +97,10 @@ def main():
                  uefi=(OVMF_CODE, nvram))
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
+            # threadboot starts the desktop, and the desktop's sign-in
+            # screen takes every key. Once signed in, with no window
+            # focused, the keys reach the console's shell again.
+            q.wait_desktop(timeout=90)
 
             out = q.command("install text", "Type YES", timeout=40)
             check("the system lists the disks it has",
@@ -145,7 +149,13 @@ def main():
             # Now install onto the second, wiping it - and the first
             # one must come out of it untouched
             q.command("install text whole 2", "Type ERASE", timeout=40)
-            out = q.command("ERASE", "Done", timeout=240)
+            # Wiping a disk is an administrator's act, and the session
+            # signed in above is one - so it asks for the password
+            # again rather than taking the sign-in on trust
+            asked = q.command("ERASE", "admin password:", timeout=40)
+            check("wiping a disk asks for the admin password first",
+                  "install: admin password:" in asked)
+            out = q.command("thread", "Done", timeout=240)
             check("installing onto the named disk runs to the end",
                   "partition table (GPT) - done" in out
                   and "/EFI/BOOT/BOOTX64.EFI - done" in out)
