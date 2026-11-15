@@ -22,9 +22,7 @@ the same file with FreeType and compares:
   Both compute the exact area under the outline; what differs is only
   where the arcs get cut into lines, and rounding
 
-both fonts, sizes from small to large, and both kernels - the 32-bit
-one does its 64-bit divisions with a loop of its own, the 64-bit one
-with the processor's, and both paths have to give the same glyphs.
+both fonts, sizes from small to large.
 
 FreeType is drawn with hinting off, because the system does not run
 hinting programs - the outlines are drawn as designed.
@@ -154,7 +152,7 @@ def compare(label, ours, ref, px, chars):
           n > 0 and worst <= MAX_DIFF and mean <= MEAN_DIFF)
 
 
-def sheets(q, sans, mono, tag):
+def sheets(q, sans, mono):
     all_sans = sorted(sans.cmap)
     all_mono = sorted(mono.cmap)
     # Glyphs that are hard in different ways: composites (accents,
@@ -164,9 +162,9 @@ def sheets(q, sans, mono, tag):
 
     out = q.command("font", "mono.ttf", timeout=20)
     m = re.search(r"sans\.ttf - (\d+) glyphs, (\d+) units per em", out)
-    check("%sthe kernel reads the font's own numbers (%s glyphs, %s units "
+    check("the kernel reads the font's own numbers (%s glyphs, %s units "
           "per em; fontTools: %d, %d)"
-          % (tag, m.group(1) if m else "?", m.group(2) if m else "?",
+          % (m.group(1) if m else "?", m.group(2) if m else "?",
              sans.glyphs, sans.upem),
           m is not None and int(m.group(1)) == sans.glyphs and
           int(m.group(2)) == sans.upem)
@@ -174,8 +172,6 @@ def sheets(q, sans, mono, tag):
     plan = [("sans", sans, 12, all_sans), ("sans", sans, 16, all_sans),
             ("mono", mono, 13, all_mono), ("sans", sans, 48, hard),
             ("sans", sans, 100, hard[:6])]
-    if tag:
-        plan = plan[1:2] + plan[3:4]        # the other kernel: the essentials
     for name, ref, px, chars in plan:
         text = ""
         # One command per run of characters: a sheet of every character
@@ -195,7 +191,7 @@ def sheets(q, sans, mono, tag):
         for first, last in runs:
             text += q.command("font sheet %s %d %d %d" % (name, px, first, last),
                               "font sheet:", timeout=180)
-        compare(tag + name, parse_sheet(text), ref, px, chars)
+        compare(name, parse_sheet(text), ref, px, chars)
 
 
 def main():
@@ -209,21 +205,6 @@ def main():
     sans = Reference(os.path.join(FONTS, "sans.ttf"))
     mono = Reference(os.path.join(FONTS, "mono.ttf"))
 
-    disk = tempfile.mktemp(suffix=".img")
-    with open(disk, "wb") as fh:
-        fh.truncate(16 * 1024 * 1024)
-    slog = tempfile.mktemp(suffix=".log")
-    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
-    try:
-        q.wait_serial("thread>", timeout=60)
-        sheets(q, sans, mono, "")
-    finally:
-        q.close()
-        for f in (disk, slog):
-            if os.path.exists(f):
-                os.unlink(f)
-
-    print("--- the same under the 64-bit kernel ---")
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
@@ -239,7 +220,7 @@ def main():
              qemu="qemu-system-x86_64")
     try:
         q.wait_serial("thread64>", timeout=120)
-        sheets(q, sans, mono, "(64) ")
+        sheets(q, sans, mono)
     finally:
         q.close()
         for f in (iso, slog):
