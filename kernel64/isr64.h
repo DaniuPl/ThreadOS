@@ -26,4 +26,9 @@ uint32_t isr64_stack_pages(void);
 /* How many pages were read from files mapped into memory */
 uint32_t isr64_mmap_pages(void);
 
+/* Makes the page under addr if it is one that comes into being on the
+   first touch - of the current program's heap, stack or anonymous
+   memory - and is not there yet. 1 when it did. */
+int isr64_demand_page(uint64_t addr);
+
 #endif
