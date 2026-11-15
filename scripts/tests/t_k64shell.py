@@ -253,6 +253,36 @@ def main():
             check("the user's shell survived Ctrl+C and keeps reading",
                   q23.serial()[seen:].count("poctrlc") >= 2)
 
+            # A program killed by the processor rather than by a signal:
+            # its end has to reach the shell's wait all the same, as a
+            # negative code
+            seen = len(q23.serial())
+            q23.type_line("nx64")
+            limit = time.time() + 30
+            while (time.time() < limit
+                   and "ush64: done, code" not in q23.serial()[seen:]):
+                time.sleep(0.3)
+            nx = q23.serial()[seen:]
+            check("the code of a program killed by an exception reaches "
+                  "the shell (-1)",
+                  "(nx64) killed: Page Fault" in nx
+                  and "ush64: done, code -1" in nx)
+
+            # A pipe carries exactly what was written: 'core wc' counts
+            # the bytes that came through - "thread-pipe" and a newline
+            seen = len(q23.serial())
+            q23.type_line("uecho64 thread-pipe | core wc")
+            limit = time.time() + 30
+            while (time.time() < limit and re.search(
+                    r"^\s*\d+\s+\d+\s+\d+\s*$",
+                    q23.serial()[seen:].replace("\r", ""), re.M) is None):
+                time.sleep(0.3)
+            wc = re.findall(r"^\s*(\d+)\s+(\d+)\s+(\d+)\s*$",
+                            q23.serial()[seen:].replace("\r", ""), re.M)
+            check("a pipe into 'core wc': 1 line, 1 word, 12 bytes (%s)"
+                  % (" ".join(wc[-1]) if wc else "-"),
+                  bool(wc) and wc[-1] == ("1", "1", "12"))
+
             q23.type_line("exit")
             ex = q23.wait_serial("[ush64] done, exit code 0",
                                  timeout=30)
