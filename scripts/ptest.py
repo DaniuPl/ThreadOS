@@ -2048,7 +2048,10 @@ class Qemu:
             # Booting as from a real board: the kernel is loaded by GRUB, not by
 # QEMU
             cmd += ["-cdrom", cdrom, "-boot", "d"]
-        elif not esp:
+        elif not esp and not uefi:
+            # Under UEFI with neither a disc nor an ESP the machine
+            # boots from its disk, the way an installed system does;
+            # -kernel would only make QEMU refuse the Multiboot 2 image
             cmd += ["-kernel", kernel]
             if append:
                 cmd += ["-append", append]
