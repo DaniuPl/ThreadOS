@@ -515,6 +515,15 @@ int net_udp_send(int sock, int owner, uint32_t ip, uint16_t port,
                             data, len);
 }
 
+/* How many datagrams wait in a socket's queue; -1 = not ours */
+int net_udp_pending(int sock, int owner)
+{
+    if (sock < 0 || sock >= UDP_SOCKS || !udp_socks[sock].used ||
+        udp_socks[sock].owner != owner)
+        return -1;
+    return udp_socks[sock].count;
+}
+
 /* Receiving from a socket: waits up to timeout_ms for a datagram.
    Called from a thread (task_sleep), never from an interrupt. Returns
    the length or -1. */

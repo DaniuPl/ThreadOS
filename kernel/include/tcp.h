@@ -13,6 +13,21 @@ void tcp_init(void);
 /* Opens a connection; blocks up to timeout_ms. Returns an id or -1. */
 int tcp_connect(uint32_t ip, uint16_t port, int owner, uint32_t timeout_ms);
 
+/* The same without waiting: the SYN is on its way, the id comes back
+   at once and tcp_poll says when it is connected (or failed) */
+int tcp_connect_start(uint32_t ip, uint16_t port, int owner);
+/* What a connection could do now, for poll(): TCP_POLL_* bits, and in
+   the top 16 the bytes waiting to be read. -1 = no such connection. */
+#define TCP_POLL_IN        0x01  /* data waiting */
+#define TCP_POLL_OUT       0x02  /* a send would not wait */
+#define TCP_POLL_EOF       0x04  /* the other side has finished */
+#define TCP_POLL_ERROR     0x08  /* reset, or the retries ran out */
+#define TCP_POLL_CONNECTED 0x10  /* the handshake is done */
+#define TCP_POLL_ACCEPT    0x20  /* a listener has a connection waiting */
+int tcp_poll(int conn, int owner);
+/* Who is at the other end, and our own port */
+int tcp_addresses(int conn, int owner, uint32_t *remote_ip,
+                  uint16_t *remote_port, uint16_t *local_port);
 /* Listening on a port: returns the listening socket id or -1 */
 int tcp_listen(uint16_t port, int owner);
 

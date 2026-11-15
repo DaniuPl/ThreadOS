@@ -42,6 +42,8 @@ void net_ping(uint32_t ip, int count);
 int net_udp_open(uint16_t port, int owner);
 void net_udp_close(int sock, int owner);
 uint16_t net_udp_port(int sock);
+/* How many datagrams wait in a socket's queue; -1 = not ours */
+int net_udp_pending(int sock, int owner);
 
 int net_udp_send(int sock, int owner, uint32_t ip, uint16_t port,
                  const void *data, uint16_t len);

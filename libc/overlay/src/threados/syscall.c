@@ -34,8 +34,10 @@
  *            program (free mmap ranges, signal handlers) is behind a
  *            lock of its own, because threads now come here at once
  *
- * What there is no way to build - sockets, poll - answers ENOSYS,
- * rather than a Linux number falling on some unrelated ThreadOS call.
+ * Sockets, poll and select live in socket.c beside this file.
+ *
+ * What there is no way to build answers ENOSYS, rather than a Linux
+ * number falling on some unrelated ThreadOS call.
  */
 
 #include <errno.h>
@@ -54,6 +56,16 @@
 #include <sys/wait.h>
 #include "syscall.h"
 #include "kstat.h"
+
+/* src/threados/socket.c: sockets, poll and select, and descriptors that
+   are not the kernel's */
+__attribute__((__visibility__("hidden")))
+int __tos_net_owns(long n, long fd);
+__attribute__((__visibility__("hidden")))
+long __tos_net(long n, long a, long b, long c, long d, long e, long f);
+__attribute__((__visibility__("hidden")))
+long __tos_open_virtual(const char *path);
+
 
 /* --- The ThreadOS side (kernel64/syscall64.h) --------------------- */
 
@@ -447,6 +459,13 @@ static long do_open(const char *path, int flags)
 	if (fd < 0) {
 		if (is_dir(path))
 			return acc == O_RDONLY ? -ENOSYS : -EISDIR;
+		/* a file the system makes up when the disk has none
+		   (/etc/resolv.conf, socket.c) */
+		if (acc == O_RDONLY && !(flags & O_CREAT)) {
+			long v = __tos_open_virtual(path);
+			if (v >= 0)
+				return v;
+		}
 		return -ENOENT;
 	}
 	set_flags(fd, flags & ~(O_CREAT | O_EXCL | O_TRUNC | O_NOCTTY | O_CLOEXEC));
@@ -1125,6 +1144,8 @@ static long do_arch_prctl(int code, unsigned long addr)
 __attribute__((__visibility__("hidden")))
 long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 {
+	if (__tos_net_owns(n, a))
+		return __tos_net(n, a, b, c, d, e, f);
 	switch (n) {
 	case SYS_read:       return do_read(a, (void *)b, c);
 	case SYS_write:      return do_write(a, (const void *)b, c);

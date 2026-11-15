@@ -6862,3 +6862,32 @@ works and is checked by `make test`.
       installs them: without them the screen reader in ptest.py fails
       inside wait_desktop, which swallows the error and reports that
       the desktop never appeared. That alone made 28 groups red here.
+
+- [x] **BSD sockets for musl programs** (libc/overlay/src/threados/socket.c,
+      kernel/tcp.c, kernel/net.c, kernel64/syscall64.c, libc/tests/nettest.c,
+      scripts/tests/t_socket.py)
+      socket() answered ENOSYS, and every networking library starts
+      there. The kernel had TCP and UDP with calls of their own; a C
+      program wants descriptors. socket.c makes them, numbered from 64,
+      above every descriptor the kernel hands out, and every call on a
+      descriptor asks it first: connect, bind, listen, accept, send,
+      recv, the msg forms, getsockname, getpeername, SO_ERROR, O_NONBLOCK
+      and FIONREAD, read/write on a socket, poll and select over sockets
+      and files together. getaddrinfo is musl's own resolver; a disk
+      with no /etc/resolv.conf gets one made up from the system's name
+      server.
+
+      The kernel side: a connect that does not wait (tcp_connect_start),
+      tcp_poll for what a connection could do now, the addresses of a
+      connection, a UDP queue's length, and listen, accept and a recv
+      with its own timeout in the 64-bit calls. A socket now belongs to
+      the program (its tgid), not to the thread that opened it.
+
+      The test: nettest resolves a name through the test's DNS server
+      (and fails on one it does not know - the test server can answer
+      NXDOMAIN now), uploads 200000 bytes while a second thread uploads
+      50000 on its own connection - the host checks every byte and sends
+      a download the program checks - connects without waiting and polls,
+      reads with nothing there (EAGAIN), lets select and poll time out,
+      is refused by a closed port, exchanges UDP datagrams, and serves a
+      connection the host makes through QEMU's port forwarding.

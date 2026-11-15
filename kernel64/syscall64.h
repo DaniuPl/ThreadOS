@@ -189,6 +189,31 @@
    under it. */
 #define SYS64_FDINODE    89
 
+/* --- Sockets for a C library (libc/overlay/src/threados/syscall.c) ---
+ * A connection or a UDP socket belongs to the program (its tgid).
+ *
+ * SYS64_TCP_LISTEN  a1=port -> a listening socket / -1
+ * SYS64_TCP_ACCEPT  a1=listener, a2=ms to wait (0 = only look)
+ *                   -> a connection / -1
+ * SYS64_TCP_POLL    a1=connection -> TCP_POLL_* bits (kernel/include/
+ *                   tcp.h), bytes waiting in the top 16 / -1
+ * SYS64_TCP_START   a1=&udp_info (ip, port) -> a connection whose SYN is
+ *                   on its way; SYS64_TCP_POLL says when it is up
+ * SYS64_TCP_RECVT   SYS64_TCP_RECV with a4 = ms to wait (0 = only look)
+ * SYS64_TCP_ADDR    a1=connection, a2=&{u32 remote ip; u16 remote port;
+ *                   u16 local port} -> 0 / -1
+ * SYS64_UDP_POLL    a1=socket -> datagrams waiting / -1
+ * SYS64_UDP_PORT    a1=socket -> its local port / 0
+ */
+#define SYS64_TCP_LISTEN 90
+#define SYS64_TCP_ACCEPT 91
+#define SYS64_TCP_POLL   92
+#define SYS64_TCP_START  93
+#define SYS64_TCP_RECVT  94
+#define SYS64_TCP_ADDR   95
+#define SYS64_UDP_POLL   96
+#define SYS64_UDP_PORT   97
+
 #define FUTEX64_OP_WAIT    0
 #define FUTEX64_OP_WAKE    1
 #define FUTEX64_OP_REQUEUE 3

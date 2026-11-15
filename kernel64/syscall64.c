@@ -250,6 +250,21 @@ struct udp_info {
 
 static void handle(struct regs *r);
 
+/* Sockets belong to a program, not to one of its threads: a C library
+   opens a connection in one thread and reads it in another. The kernel
+   closes those of a program that has ended. */
+static int net_owner(void)
+{
+    return task64_tgid();
+}
+
+/* SYS64_TCP_ADDR's answer */
+struct tcp_addr_info {
+    uint32_t remote_ip;
+    uint16_t remote_port;
+    uint16_t local_port;
+};
+
 /* Entry from the stub. We deliver the signal just before returning -
    then and only then does the frame describe the program, not the
    kernel. */
@@ -659,10 +674,10 @@ static void handle(struct regs *r)
     }
     case SYS64_UDP_OPEN:
         r->rax = (uint64_t)(int64_t)net_udp_open((uint16_t)a1,
-                                                 task64_current_id());
+                                                 net_owner());
         return;
     case SYS64_UDP_CLOSE:
-        net_udp_close((int)a1, task64_current_id());
+        net_udp_close((int)a1, net_owner());
         r->rax = 0;
         return;
     case SYS64_UDP_SEND: {
@@ -682,7 +697,7 @@ static void handle(struct regs *r)
             return;
         }
         r->rax = (uint64_t)(int64_t)net_udp_send(
-            info.sock, task64_current_id(), info.ip, info.port,
+            info.sock, net_owner(), info.ip, info.port,
             (const void *)(uintptr_t)a2, (uint16_t)a3);
         return;
     }
@@ -700,7 +715,7 @@ static void handle(struct regs *r)
 
         uint32_t from_ip = 0;
         uint16_t from_port = 0;
-        int n = net_udp_recv(info.sock, task64_current_id(),
+        int n = net_udp_recv(info.sock, net_owner(),
                              &from_ip, &from_port,
                              (void *)(uintptr_t)a2, (uint16_t)a3,
                              info.timeout);
@@ -724,7 +739,7 @@ static void handle(struct regs *r)
         }
         memcpy(&info, (const void *)(uintptr_t)a1, sizeof(info));
         r->rax = (uint64_t)(int64_t)tcp_connect(info.ip, info.port,
-                                                task64_current_id(),
+                                                net_owner(),
                                                 info.timeout);
         return;
     }
@@ -734,7 +749,7 @@ static void handle(struct regs *r)
             return;
         }
         r->rax = (uint64_t)(int64_t)tcp_send(
-            (int)a1, task64_current_id(), (const void *)(uintptr_t)a2,
+            (int)a1, net_owner(), (const void *)(uintptr_t)a2,
             (uint16_t)a3, 5000);
         return;
     case SYS64_TCP_RECV:
@@ -743,12 +758,61 @@ static void handle(struct regs *r)
             return;
         }
         r->rax = (uint64_t)(int64_t)tcp_recv(
-            (int)a1, task64_current_id(), (void *)(uintptr_t)a2,
+            (int)a1, net_owner(), (void *)(uintptr_t)a2,
             (uint16_t)a3, 5000);
         return;
     case SYS64_TCP_CLOSE:
-        tcp_close((int)a1, task64_current_id());
+        tcp_close((int)a1, net_owner());
         r->rax = 0;
+        return;
+    case SYS64_TCP_LISTEN:
+        r->rax = (uint64_t)(int64_t)tcp_listen((uint16_t)a1, net_owner());
+        return;
+    case SYS64_TCP_ACCEPT:
+        r->rax = (uint64_t)(int64_t)tcp_accept((int)a1, net_owner(),
+                                               (uint32_t)a2);
+        return;
+    case SYS64_TCP_POLL:
+        r->rax = (uint64_t)(int64_t)tcp_poll((int)a1, net_owner());
+        return;
+    case SYS64_TCP_START: {
+        struct udp_info info;
+        if (!paging64_user_range(a1, sizeof(info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memcpy(&info, (const void *)(uintptr_t)a1, sizeof(info));
+        r->rax = (uint64_t)(int64_t)tcp_connect_start(info.ip, info.port,
+                                                      net_owner());
+        return;
+    }
+    case SYS64_TCP_RECVT:
+        if (a3 > 1400 || !paging64_user_range(a2, a3)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = (uint64_t)(int64_t)tcp_recv(
+            (int)a1, net_owner(), (void *)(uintptr_t)a2, (uint16_t)a3,
+            (uint32_t)a4);
+        return;
+    case SYS64_TCP_ADDR: {
+        struct tcp_addr_info ai;
+        if (!paging64_user_range(a2, sizeof(ai)) ||
+            tcp_addresses((int)a1, net_owner(), &ai.remote_ip,
+                          &ai.remote_port, &ai.local_port) < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memcpy((void *)(uintptr_t)a2, &ai, sizeof(ai));
+        r->rax = 0;
+        return;
+    }
+    case SYS64_UDP_POLL:
+        r->rax = (uint64_t)(int64_t)net_udp_pending((int)a1, net_owner());
+        return;
+    case SYS64_UDP_PORT:
+        r->rax = (uint64_t)(net_udp_pending((int)a1, net_owner()) < 0
+                                ? 0 : net_udp_port((int)a1));
         return;
     case SYS64_CLOSE:
         r->rax = (uint64_t)(int64_t)task64_fd_close((int)a1);

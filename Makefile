@@ -643,6 +643,11 @@ $(BUILD)/user64/pthreadtest.elf: libc/tests/pthreadtest.c $(LIBC64) libc/libc64.
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/pthreadtest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/pthreadtest.o) -o $@
 
+$(BUILD)/user64/nettest.elf: libc/tests/nettest.c $(LIBC64) libc/libc64.ld \
+                             | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/nettest.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/nettest.o) -o $@
+
 # --- SQLite -----------------------------------------------------------
 # The amalgamation exactly as sqlite.org publishes it, unpacked into the
 # build directory. Thread-safe, now that musl has threads (and PRAGMA
@@ -706,6 +711,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
+               $(BUILD)/user64/nettest.elf \
                $(BUILD)/user64/update.elf
 
 # --- C++, and litehtml ------------------------------------------------
@@ -948,6 +954,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    libctest=$(BUILD)/user64/libctest.elf \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
+	    nettest=$(BUILD)/user64/nettest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)

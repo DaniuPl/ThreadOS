@@ -456,7 +456,7 @@ static int wait_established(struct tcp_conn *c, uint32_t timeout_ms)
     return -1;
 }
 
-int tcp_connect(uint32_t ip, uint16_t port, int owner, uint32_t timeout_ms)
+int tcp_connect_start(uint32_t ip, uint16_t port, int owner)
 {
     uint8_t mac[6];
     if (net_resolve_mac(ip, mac) < 0)
@@ -487,12 +487,62 @@ int tcp_connect(uint32_t ip, uint16_t port, int owner, uint32_t timeout_ms)
     c->last_send = pit_ticks();
     int id = conn_id(c);
     irq_restore(irq);
+    return id;
+}
 
-    if (wait_established(c, timeout_ms) < 0) {
+int tcp_connect(uint32_t ip, uint16_t port, int owner, uint32_t timeout_ms)
+{
+    int id = tcp_connect_start(ip, port, owner);
+    if (id < 0)
+        return -1;
+    if (wait_established(&conns[id], timeout_ms) < 0) {
         tcp_close(id, owner);
         return -1;
     }
     return id;
+}
+
+int tcp_poll(int conn, int owner)
+{
+    struct tcp_conn *c = conn_at(conn, owner);
+    if (!c)
+        return -1;
+    uint32_t irq = irq_save();
+    int bits = 0;
+    if (c->state == TCP_LISTEN) {
+        for (int i = 0; i < TCP_CONNS; i++)
+            if (conns[i].used && conns[i].listener == conn &&
+                !conns[i].accepted && conns[i].state == TCP_ESTABLISHED)
+                bits |= TCP_POLL_ACCEPT;
+    } else {
+        int live = c->state == TCP_ESTABLISHED || c->state == TCP_CLOSE_WAIT;
+        if (c->rx_len)
+            bits |= TCP_POLL_IN;
+        if (c->fin_received || c->state == TCP_CLOSED)
+            bits |= TCP_POLL_EOF;
+        if (c->error)
+            bits |= TCP_POLL_ERROR;
+        if (live || c->state == TCP_FIN_WAIT || c->state == TCP_LAST_ACK ||
+            c->fin_received)
+            bits |= TCP_POLL_CONNECTED;
+        if (live && !c->tx_len)
+            bits |= TCP_POLL_OUT;
+        bits |= (c->rx_len > 0xFFFF ? 0xFFFF : c->rx_len) << 16;
+    }
+    irq_restore(irq);
+    return bits;
+}
+
+int tcp_addresses(int conn, int owner, uint32_t *remote_ip,
+                  uint16_t *remote_port, uint16_t *local_port)
+{
+    struct tcp_conn *c = conn_at(conn, owner);
+    if (!c)
+        return -1;
+    *remote_ip = c->remote_ip;
+    *remote_port = c->remote_port;
+    *local_port = c->local_port;
+    return 0;
 }
 
 int tcp_listen(uint16_t port, int owner)

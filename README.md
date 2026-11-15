@@ -65,7 +65,9 @@ against musl (`libc/`, with upstream musl in `third_party/musl`). `js`
 condition variables, semaphores, thread-local variables, and threads that
 run on every core (`libc/tests/pthreadtest.c`). SQLite (`sqlite3`) is the
 first library brought in whole: the upstream amalgamation, built
-unchanged.
+unchanged. They have BSD sockets too (TCP and UDP over the
+kernel's stack, poll and select, getaddrinfo through the system's name
+server).
 C++ programs use the host compiler's libstdc++ on top of musl, without
 exceptions (`libc/cxx/`). The first is litehtml (`third_party/litehtml`),
 an HTML/CSS layout engine, which lays pages out on ThreadOS exactly as

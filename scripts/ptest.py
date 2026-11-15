@@ -1368,10 +1368,12 @@ DNS_HINT = ("port 53 is taken, or out of reach - run as root, or "
             "once: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53")
 
 
-def start_dns_server(answer_ip=(10, 0, 2, 2)):
+def start_dns_server(answer_ip=(10, 0, 2, 2), only=None):
     """A very simple DNS server on the host: to every question about an A
     record it answers with the same address. Thanks to that the path
     'name -> address' can be checked with no network outside at all.
+    With 'only' (a name suffix), any other name gets NXDOMAIN - so a
+    test can see a lookup fail too.
 
     It has to be port 53 and no other: the guest asks 10.0.2.2:53 and
     QEMU's user network sends that at the host's port 53, with no way to
@@ -1406,6 +1408,17 @@ def start_dns_server(answer_ip=(10, 0, 2, 2)):
             while i < len(data) and data[i]:
                 i += data[i] + 1
             qend = i + 5
+            if only:
+                labels, j = [], 12
+                while j < len(data) and data[j]:
+                    labels.append(data[j + 1:j + 1 + data[j]].decode(
+                        "ascii", "replace").lower())
+                    j += data[j] + 1
+                if not ".".join(labels).endswith(only):
+                    sock.sendto(data[:2] + b"\x81\x83" + data[4:6] +
+                                b"\x00\x00\x00\x00\x00\x00" +
+                                data[12:qend], addr)
+                    continue
             header = data[:2] + b"\x81\x80" + data[4:6] + b"\x00\x01" \
                      + b"\x00\x00\x00\x00"
             answer = (b"\xc0\x0c"            # a pointer to the name from the question
