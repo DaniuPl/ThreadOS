@@ -12,7 +12,9 @@ trust through update.key (a system file: only an admin writes it).
 From outside:
 
   a machine installs ThreadOS onto its whole disk from a stick, and
-  starts from that disk; its update sequence is 0, a build by hand
+  starts from that disk - at its desktop, with the shell behind it
+  dropped to an ordinary user; its update sequence is 0, a build by
+  hand
 
   'update check' sees release 7 and installs nothing; 'update' without
   sudo is refused; with sudo it downloads, checks and writes - and
@@ -120,10 +122,13 @@ def boot_disk(disk, nvram, serial):
 
 
 def make_live_iso(work, kernel, initrd):
+    """A GRUB disc with the 'live' boot word: 'initrd' is the image's
+    bytes, its update sequence changed"""
     root = os.path.join(work, "live-iso")
     os.makedirs(os.path.join(root, "boot", "grub"))
     shutil.copy(kernel, os.path.join(root, "boot", "threados64.bin"))
-    shutil.copy(initrd, os.path.join(root, "boot", "initrd64.img"))
+    with open(os.path.join(root, "boot", "initrd64.img"), "wb") as fh:
+        fh.write(initrd)
     with open(os.path.join(root, "boot", "grub", "grub.cfg"), "w") as fh:
         fh.write("set timeout=0\nset default=0\n"
                  'menuentry "ThreadOS Live" {\n'
@@ -140,6 +145,19 @@ def after(q, seen, text, timeout):
     while time.time() < deadline and text not in q.serial()[seen:]:
         time.sleep(0.5)
     return q.serial()[seen:]
+
+
+def signed_in(q):
+    """The installed system starts at its desktop, and the profile that
+    signs in there is an admin - and so is the shell behind it, which
+    takes the keys no window wants. That shell's admin session is
+    ended, so that whatever needs an admin has to be asked for through
+    sudo, which is the order of things this group is about."""
+    check("the installed system reaches its desktop",
+          q.wait_desktop(timeout=90))
+    out = q.command("logout", "ordinary user again", timeout=20)
+    check("and the shell behind it drops to an ordinary user",
+          "ordinary user again" in out)
 
 
 def run(q, line, end="[update] done", timeout=240, password=False):
@@ -206,6 +224,10 @@ def main():
                  qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
+            # threadboot starts the Live desktop; the stick's blank disk
+            # gets a filesystem, so the first-run wizard comes first
+            check("the stick's system reaches its desktop",
+                  q.wait_desktop(timeout=90))
             q.command("install text whole", "Type ERASE", timeout=40)
             out = q.command("ERASE", "Done", timeout=180)
             check("ThreadOS installs onto the whole disk from a stick",
@@ -228,6 +250,7 @@ def main():
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
             q.wait_serial("[net] DHCP", timeout=60)
+            signed_in(q)
 
             out = run(q, "run update check " + base + "rel/",
                       end="[update] done, exit code")
@@ -238,8 +261,9 @@ def main():
                   "nothing - with the built-in key it is refused",
                   "NOT signed by the right key" in out)
 
-            # The test's key, the way an admin would put it there
-            out = run(q, "sudo run httpget 10.0.2.2 %d /update.key update.key"
+            # The test's key, the way an admin would put it there - in
+            # the root directory, where it is a system file
+            out = run(q, "sudo run httpget 10.0.2.2 %d /update.key /update.key"
                       % port, end="[httpget] done", password=True)
             check("update.key goes on the disk (a system file, through sudo)",
                   "[httpget] done, exit code 0" in out)
@@ -296,6 +320,7 @@ def main():
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
             q.wait_serial("[net] DHCP", timeout=60)
+            signed_in(q)
             out = run(q, "run update check " + base + "rel/",
                       end="[update] done, exit code")
             check("restarted, the disk is update sequence 7 - and up to date",
@@ -337,6 +362,7 @@ def main():
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
             q.wait_serial("[net] DHCP", timeout=60)
+            signed_in(q)
             out = run(q, "run update check " + base + "rel/",
                       end="[update] done, exit code")
             check("the restored previous system boots with a pre-1.0 label",
@@ -344,10 +370,8 @@ def main():
                   "(update sequence 0)" in out and
                   "a newer system is available" in out)
 
-            q.type_line("desktop")
-            q.wait_serial("The desktop is starting", timeout=30)
-            check("the restored system reaches its desktop",
-                  q.wait_desktop(timeout=40))
+            # (the restored system came up at its desktop: signed_in)
+            W, H = q.size()
             q.launch_dock("gsettings")
             title = ""
             wx = wy = 0
@@ -355,7 +379,7 @@ def main():
             while time.time() < deadline:
                 for slot in range(8):
                     x, y = cascade(slot, GSET_W + 2,
-                                   GSET_H + TITLE_H + 2)
+                                   GSET_H + TITLE_H + 2, w=W, h=H)
                     title = q.window_title(x, y, GSET_W + 2)
                     if title == "Settings":
                         wx, wy = x, y
@@ -376,9 +400,12 @@ def main():
                 baseline = cy + ui_font_baseline_in(UD_PX, top,
                                                     GSET_CHIP_H)
                 shot = q.screen_raw()
-                label = q.read_ui(cx + GSET_PANE_X, baseline,
-                                 GSET_W - GSET_PANE_X - 8, px=UD_PX,
-                                 fg=theme("dark")["accent_text"], screen=shot)
+                # The words stand in the middle of their 190-pixel
+                # button (user/gsettings.c), not at its edge
+                label = q.find_ui(cx + GSET_PANE_X + 2,
+                                  cx + GSET_PANE_X + 190 - 2, baseline,
+                                  px=UD_PX, fg=theme("dark")["accent_text"],
+                                  screen=shot)
                 check("Settings exposes the previous-system rollback action",
                       q.gset_heading(cx, cy, screen=shot) == "Updates" and
                       "Restore previous system" in label)
