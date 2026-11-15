@@ -6912,3 +6912,27 @@ works and is checked by `make test`.
       disc made for it (ptest.boot_disc), starting at the desktop unless
       the command line says TEXT_MODE - what QEMU's -kernel did for the
       32-bit kernel.
+
+- [x] **zlib and curl** (third_party/, Makefile, libc/tests/zlibtest.c,
+      scripts/tests/t_zlib.py, scripts/tests/t_curl.py, kernel64/shell64.c)
+      Two more libraries brought in whole, from their release archives
+      and unchanged. zlib 1.4 is its fifteen C files compiled against
+      musl. curl 8.23.0 is configured by its own configure script for a
+      cross build, with its test programs linked the way every musl
+      program here is linked; HTTP with zlib, no TLS yet. It is the first
+      outside program that needs nothing of ThreadOS but a C library:
+      sockets, poll, getaddrinfo, files.
+
+      The kernel's shell took lines of up to 80 characters, and a curl
+      command with a URL is longer than that; it takes 256 now, as long
+      as one argument of a program may be.
+
+      The tests: zlibtest prints what the same program with the same zlib
+      prints on the host (compressed sizes and the CRC of the compressed
+      bytes too), its .gz file read off the disk image is the host's byte
+      for byte and Python's gzip reads it, and a .gz Python made is read
+      on ThreadOS. curl, against a Python server that records each
+      request: GET, 2 MB into a file (its SHA-256 checked off the disk
+      image), a gzip answer inflated, a redirect, a POST, a chunked
+      answer, HEAD, a 404 turned into exit code 22 by -f, a name through
+      the system's DNS, and -w.

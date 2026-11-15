@@ -58,7 +58,9 @@
 #include "../kernel/include/desktop.h"
 #include "../kernel/include/vga.h"
 
-#define LINE_MAX 80
+/* As long as a program's whole argument may be (ARG_LEN): a URL with a
+   query, handed to curl, is past eighty characters soon enough */
+#define LINE_MAX 256
 
 static int sudo_one_shot;
 static void read_secret(char *out, int max);

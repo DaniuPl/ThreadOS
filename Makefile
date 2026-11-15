@@ -380,6 +380,80 @@ $(BUILD)/user64/nettest.elf: libc/tests/nettest.c $(LIBC64) libc/libc64.ld \
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/nettest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/nettest.o) -o $@
 
+# --- zlib ---------------------------------------------------------------
+# The release archive as zlib.net publishes it, unpacked into the build
+# directory; zconf.h comes ready-made, so there is no configure step,
+# only the library's fifteen files compiled against musl.
+ZLIB_TAR  := third_party/zlib-1.4.tar.xz
+ZLIB_TREE := $(BUILD)/zlib
+ZLIB_SRC  := adler32 compress crc32 deflate gzclose gzlib gzread gzwrite \
+             infback inffast inflate inftrees trees uncompr zutil
+ZLIB_A    := $(ZLIB_TREE)/libz.a
+
+$(ZLIB_TREE)/zlib.h: $(ZLIB_TAR)
+	rm -rf $(ZLIB_TREE) && mkdir -p $(ZLIB_TREE)
+	tar -xf $< -C $(ZLIB_TREE) --strip-components=1
+	touch $@
+
+$(ZLIB_TREE)/%.o: $(ZLIB_TREE)/zlib.h $(LIBC64)
+	$(CC) $(LIBC64_CFLAGS) -w -DHAVE_UNISTD_H -DHAVE_STDARG_H \
+	    -c $(ZLIB_TREE)/$*.c -o $@
+
+$(ZLIB_A): $(patsubst %,$(ZLIB_TREE)/%.o,$(ZLIB_SRC))
+	rm -f $@ && ar rcs $@ $^
+
+$(BUILD)/user64/zlibtest.elf: libc/tests/zlibtest.c $(ZLIB_A) $(LIBC64) \
+                              libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -I$(ZLIB_TREE) -Wall -Wextra -c $< \
+	    -o $(BUILD)/libc64/zlibtest.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/zlibtest.o $(ZLIB_A)) -o $@
+
+# --- curl ---------------------------------------------------------------
+# The release archive as curl.se publishes it, configured the way it is
+# for any other system with a C library: its own configure script, told
+# to cross-compile, linking its test programs the way every program here
+# is linked (musl's start files around them, libc.a and libgcc after).
+# HTTP and the protocols that need nothing more for now; no TLS yet, no
+# IPv6 and no Unix sockets (the kernel has neither), and the resolver in
+# the calling thread, since socketpair() is not there to wake a resolver
+# thread with.
+CURL_TAR   := third_party/curl-8.23.0.tar.xz
+CURL_TREE  := $(BUILD)/curl
+CURL_LIB   := $(CURL_TREE)/lib/.libs/libcurl.a
+CURL_TOOL  := $(CURL_TREE)/src/curl
+CURL_LDFLAGS := -static -no-pie -nostdlib -Wl,--build-id=none \
+                -Wl,-z,max-page-size=0x1000 -T $(abspath libc/libc64.ld) \
+                $(abspath $(MUSL_ROOT)/lib/crt1.o) $(abspath $(MUSL_ROOT)/lib/crti.o) \
+                -L$(abspath $(ZLIB_TREE))
+CURL_LIBS  := $(abspath $(ZLIB_A)) $(abspath $(LIBC64)) \
+              $(shell $(CC) -print-libgcc-file-name) $(abspath $(MUSL_ROOT)/lib/crtn.o)
+
+$(CURL_TREE)/Makefile: $(CURL_TAR) Makefile $(LIBC64) $(ZLIB_A)
+	rm -rf $(CURL_TREE) && mkdir -p $(CURL_TREE)
+	tar -xf $< -C $(CURL_TREE) --strip-components=1
+	cd $(CURL_TREE) && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC="$(CC)" \
+	    CFLAGS="$(LIBC64_CFLAGS) -D_GNU_SOURCE" \
+	    CPPFLAGS="-I$(abspath $(ZLIB_TREE))" \
+	    LDFLAGS="$(CURL_LDFLAGS)" LIBS="$(CURL_LIBS)" \
+	    --disable-shared --enable-static --without-ssl --with-zlib \
+	    --disable-ipv6 --disable-unix-sockets --disable-threaded-resolver \
+	    --disable-socketpair --disable-ldap --disable-ldaps --disable-rtsp \
+	    --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
+	    --disable-imap --disable-smb --disable-smtp --disable-gopher \
+	    --disable-mqtt --disable-manual --disable-docs --disable-ntlm \
+	    --disable-kerberos-auth --without-libpsl --without-brotli \
+	    --without-zstd --without-nghttp2 --without-libidn2 \
+	    --without-ca-bundle --without-ca-path \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+
+$(CURL_TOOL): $(CURL_TREE)/Makefile
+	$(MAKE) -s -C $(CURL_TREE)/lib
+	$(MAKE) -s -C $(CURL_TREE)/src curl
+
+$(BUILD)/user64/curl.elf: $(CURL_TOOL) | $(BUILD)/user64
+	strip -o $@ $<
+
 # --- SQLite -----------------------------------------------------------
 # The amalgamation exactly as sqlite.org publishes it, unpacked into the
 # build directory. Thread-safe, now that musl has threads (and PRAGMA
@@ -443,7 +517,8 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
-               $(BUILD)/user64/nettest.elf \
+               $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
+               $(BUILD)/user64/curl.elf \
                $(BUILD)/user64/update.elf
 
 # --- C++, and litehtml ------------------------------------------------
@@ -687,6 +762,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
+	    zlibtest=$(BUILD)/user64/zlibtest.elf \
+	    curl=$(BUILD)/user64/curl.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)

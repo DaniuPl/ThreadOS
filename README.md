@@ -57,7 +57,8 @@ run on every core (`libc/tests/pthreadtest.c`). SQLite (`sqlite3`) is the
 first library brought in whole: the upstream amalgamation, built
 unchanged. They have BSD sockets too (TCP and UDP over the
 kernel's stack, poll and select, getaddrinfo through the system's name
-server).
+server). zlib and curl are built from their release archives;
+`curl` runs in the terminal.
 C++ programs use the host compiler's libstdc++ on top of musl, without
 exceptions (`libc/cxx/`). The first is litehtml (`third_party/litehtml`),
 an HTML/CSS layout engine, which lays pages out on ThreadOS exactly as
@@ -210,7 +211,7 @@ user64/          programs of their own, the syscall layer
 libc/            musl port: replaced files (overlay/), linker script, tests
 apps/js/         the QuickJS host (`js`)
 apps/browser/    the litehtml browser: its test, and the patches to litehtml
-third_party/     unmodified upstream code: musl 1.2.5, QuickJS, litehtml, FFmpeg, SQLite, Brotli data
+third_party/     unmodified upstream code: musl 1.2.5, QuickJS, litehtml, FFmpeg, SQLite, zlib, curl, Brotli data
 fonts/           DejaVu subsets used by the kernel and programs
 scripts/         build helpers, release signing, test runner and tests
 tests/fuzz/      host-side fuzzing harnesses

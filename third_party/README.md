@@ -11,6 +11,8 @@ as code of our own around it (`apps/js`).
 | `quickjs/`| QuickJS, a JavaScript engine (core)    | 2026-06-04 | MIT (`LICENSE`)   | https://bellard.org/quickjs/ |
 | `litehtml/` | litehtml, an HTML/CSS layout engine, with gumbo (an HTML5 parser) inside | git 8848b99 (2026-10-12); gumbo 0.14.1 | BSD-3-Clause (`LICENSE`); gumbo Apache-2.0 (`src/gumbo/LICENSE`) | https://github.com/litehtml/litehtml |
 | `ffmpeg-9.0.tar.xz` | FFmpeg demuxers and audio/video decoders | 9.0 | LGPL-2.1-or-later (`COPYING.LGPLv2.1`) | https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz |
+| `zlib-1.4.tar.xz` | zlib, deflate compression | 1.4 | zlib (`LICENSE` in the archive) | https://zlib.net/zlib-1.4.tar.xz (SHA-256 `4f11c512053d7bab8d9e9b89bde3575add3e4c50a383b42ef6cb837035fc5a7c`, as zlib.net lists it; the GitHub release is the same file) |
+| `curl-8.23.0.tar.xz` | curl and libcurl, a URL transfer library | 8.23.0 | curl (MIT-style, `COPYING` in the archive) | https://curl.se/download/curl-8.23.0.tar.xz (SHA-256 `8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5`; the GitHub release is the same file) |
 | `sqlite-amalgamation-3540100.zip` | SQLite, an SQL database engine, and its command-line shell | 3.54.1 | Public domain (the header of `sqlite3.c`) | https://www.sqlite.org/2026/sqlite-amalgamation-3540100.zip (SHA3-256 `92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30`, as sqlite.org lists it) |
 
 Trimmed, not modified:
@@ -29,6 +31,13 @@ Trimmed, not modified:
   `.gperf` and `tag.in` they were generated from). Two files are built
   from a patched copy, `apps/browser/patches/`, which says what each
   change is and why - the directory here stays exactly upstream's.
+- **zlib**: the archive is kept intact; the build compiles the library's
+  fifteen C files from it, with the `zconf.h` it ships.
+- **curl**: the archive is kept intact and configured by its own
+  `configure` for musl (`CURL_*` in the `Makefile`): HTTP and file
+  transfers with zlib, no TLS yet, no IPv6, no Unix sockets, the
+  resolver in the calling thread. Only libcurl and the `curl` tool are
+  built.
 - **SQLite**: the amalgamation archive is kept intact and unpacked into
   the build directory (`scripts/unzipflat.py`). It is built thread-safe,
   without loadable extensions and without memory-mapped I/O, with the
