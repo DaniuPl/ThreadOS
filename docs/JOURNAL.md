@@ -6912,3 +6912,35 @@ works and is checked by `make test`.
       disc made for it (ptest.boot_disc), starting at the desktop unless
       the command line says TEXT_MODE - what QEMU's -kernel did for the
       32-bit kernel.
+
+- [x] **The 32-bit groups moved to the 64-bit kernel: boot, shell,
+      process, signals, tfs, http, config, mouse, bootsplash**
+      (scripts/tests/, user/uhttp.h, user64/compat64.h,
+      kernel64/shell64.c, user/ubytes.h, kernel/printk.c)
+      Twenty groups had been written for the 32-bit kernel. Nine are
+      ported: they boot the remaining kernel and read the serial port
+      (or, for the mouse and the loading screen, the pixels). The other
+      eleven - acpi, ahci, consoles, fork, lazymem, net32, protect, swap,
+      tls32, usbkbd, ush - repeated a 64-bit group; what the 64-bit group
+      lacked was moved into it first (consoles64, net64, tls64, swap64,
+      usbkbd64, k64proc, k64shell, k64disk), and each commit lists where
+      every deleted check went and which went with the 32-bit programs.
+
+      Moving them found six bugs. httpget and the browser took a host
+      name for the address 255.255.255.255 - uparse_ip says -1 for "not
+      an address" - which QEMU hands to the host, so every name seemed to
+      resolve and no DNS server was ever asked. tcp_recv() asked the
+      kernel for more than the 1400 bytes a call moves, so a TLS record
+      longer than that (a certificate with its intermediate) broke the
+      handshake. The kernel shell's 'run' kept the program's name in one
+      buffer for all four consoles. format_bytes() wrote "17  B". The
+      loading screen had the console's uptime painted onto it once a
+      second. And swap64 asked for 16 MiB of RAM, in which GRUB can no
+      longer load the 13 MB initrd.
+
+      Each is checked by the group that found it: tls64 (the address the
+      DNS answered, a chain through an intermediate), signals ('core
+      kill' from the second console while the first one's program runs),
+      k64disk (uls64's sizes), bootsplash (nothing of the console on any
+      look at the splash), swap64 (it runs again, and evicts over a
+      thousand pages beyond what is free).
