@@ -40,6 +40,8 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 WX, WY = 94, 54
+# The user's shell (user64/ush64.c) and its prompt
+PROMPT = "ush64$"
 CX, CY = WX + 1, WY + CONTENT_DY
 PAD, ROW_H = TERM_PAD, TERM_ROW_H
 COLS, ROWS = TERM_COLS, TERM_ROWS
@@ -91,24 +93,24 @@ def main():
             time.sleep(1)
 
             # --- a shell inside the terminal --------------------------
-            q.type_line("sh")
-            rows = wait_line(q, "ush:", geom)
+            q.type_line("ush64")
+            rows = wait_line(q, PROMPT, geom)
             body = "\n".join(rows)
             check("the user's shell came up in the terminal window",
                   "the user's shell" in body)
-            check("and it showed a prompt of its own", "ush:/>" in body)
+            check("and it showed a prompt of its own", PROMPT in body)
             check("the terminal knows something is running in it", "running" in body)
 
             # --- what is typed reaches it -----------------------------
             q.type_line("echo hello")
             rows = wait_line(q, "hello", geom)
             check("what was typed reached the shell (it echoed the command)",
-                  index_of(rows, "ush:/> echo hello") >= 0)
+                  index_of(rows, PROMPT + " echo hello") >= 0)
 
             # The order is the point: the command, then its output, then
             # the next prompt. Getting this wrong means the child's
             # output was written over by the shell.
-            cmd_at = index_of(rows, "ush:/> echo hello")
+            cmd_at = index_of(rows, PROMPT + " echo hello")
             out_at = -1
             for i in range(cmd_at + 1, len(rows)):
                 if rows[i] == "hello":
@@ -118,7 +120,7 @@ def main():
                   out_at > cmd_at)
             nxt = -1
             for i in range(out_at + 1, len(rows)):
-                if rows[i].startswith("ush:/>"):
+                if rows[i].startswith(PROMPT):
                     nxt = i
                     break
             check("and the next prompt is under the output, not on it",
@@ -132,11 +134,13 @@ def main():
             check("the numbers from 'seq 3' show in order",
                   "1" in rows and "2" in rows and "3" in rows)
 
-            # A pipeline INSIDE the shell inside the terminal
-            q.type_line("seq 9 | wc")
-            rows = wait_line(q, "lines=9", geom)
+            # A pipeline INSIDE the shell inside the terminal. The
+            # shell runs programs by their own names, and wc lives in
+            # the program 'core' (the terminal itself routes it there)
+            q.type_line("seq 9 | core wc")
+            rows = wait_line(q, "18", geom)
             check("a pipe inside the shell writes to the window too",
-                  "lines=9" in "\n".join(rows))
+                  any(r.split() == ["9", "9", "18"] for r in rows))
 
             # --- Ctrl+D ends it ---------------------------------------
             q.sendkey("ctrl-d")
