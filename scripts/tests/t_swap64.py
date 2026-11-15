@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: swapping pages out to disk in the 64-bit kernel.
+"""ThreadOS smoke test: swapping pages out to disk.
 
 The program takes more memory than the machine has RAM. Along the way
 the kernel has to throw some of its pages out to disk and fetch them
@@ -11,34 +11,60 @@ and the kernel shows in 'mem' how many of them really went out to disk.
 Without that second assertion the test would pass even if the memory
 simply fitted and swapping never started once.
 
-The store (kernel/swap.c) is shared with the 32-bit kernel. In long mode
-an eviction policy was added to it: a walk of four levels of page tables
-with the 'accessed' bit, and an entry for a page on disk which the
-processor never looks at, because it has no present bit in it.
+The store is kernel/swap.c, and the eviction policy a walk of four
+levels of page tables with the 'accessed' bit, and an entry for a page
+on disk which the processor never looks at, because it has no present
+bit in it.
 """
 
 import os
 import re
 import shutil
-import subprocess
+import struct
 import sys
 import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
+import ptest
 from ptest import check, summary, make_iso64, no64
 
 RAM_MIB = 16          # less than the program is about to take
 # More than the RAM, but not more than the RAM left free plus the swap
-# file (8 MiB): what the kernel and the initrd hold in memory is not
-# free, and the initrd grows - a megabyte of JavaScript engine went into
-# it, and 18 MiB stopped fitting
+# file (8 MiB): what the kernel holds in memory is not free
 REQUEST_MIB = 17
 
 
+def small_initrd(path, names):
+    """An initrd with only the named programs, taken out of the build's
+    own (the TIRD format of scripts/mkinitrd.py). The whole one is
+    thirteen megabytes - a browser, a JavaScript engine, fonts - and
+    GRUB cannot even load it into a machine of sixteen. Returns whether
+    every name was found."""
+    with open(INITRD64, "rb") as fh:
+        blob = fh.read()
+    files = {}
+    for i in range(struct.unpack_from("<I", blob, 4)[0]):
+        at = 8 + i * 24
+        name = blob[at:at + 16].split(b"\0")[0].decode()
+        offset, size = struct.unpack_from("<II", blob, at + 16)
+        if name in names:
+            files[name] = blob[offset:offset + size]
+    out = bytearray(b"TIRD") + struct.pack("<I", len(files))
+    offset = 8 + 24 * len(files)
+    for name, data in files.items():
+        out += struct.pack("<16sII", name.encode(), offset, len(data))
+        offset += len(data)
+    for data in files.values():
+        out += data
+    with open(path, "wb") as fh:
+        fh.write(out)
+    return set(files) == set(names)
+
+
 def main():
-    print("--- swapping pages to the disk (the 64-bit kernel) ---")
+    print("--- swapping pages to the disk ---")
 
     reason = no64()
     if reason:
@@ -49,10 +75,18 @@ def main():
     iso = tempfile.mktemp(suffix=".iso")
     slog = tempfile.mktemp(suffix=".log")
     disk = tempfile.mktemp(suffix=".img")
+    initrd = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as fh:
         fh.truncate(64 * 1024 * 1024)
     try:
-        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
+        check("an initrd with the swap test alone",
+              small_initrd(initrd, {"swaptest64"}))
+        whole, ptest.INITRD64 = ptest.INITRD64, initrd
+        try:
+            check("the disc with the 64-bit kernel builds",
+                  make_iso64(d, iso))
+        finally:
+            ptest.INITRD64 = whole
         if not os.path.exists(iso):
             return summary()
 
@@ -109,7 +143,7 @@ def main():
             q.close()
     finally:
         shutil.rmtree(d, ignore_errors=True)
-        for f in (iso, slog, disk):
+        for f in (iso, slog, disk, initrd):
             if os.path.exists(f):
                 os.unlink(f)
 
