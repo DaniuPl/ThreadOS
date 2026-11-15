@@ -6912,3 +6912,47 @@ works and is checked by `make test`.
       disc made for it (ptest.boot_disc), starting at the desktop unless
       the command line says TEXT_MODE - what QEMU's -kernel did for the
       32-bit kernel.
+
+- [x] **Install, update and account tests on the one kernel left**
+      (kernel64/shell64.c, kernel/fs.c, user/update.c, scripts/ptest.py,
+      scripts/tests/t_{foreigndisk,install,isoinstall,wholedisk,stick,
+      update,iso,ginstal,multiuser,usbmouse,net,users,usersgui,login,
+      session,lock}.py)
+      Sixteen groups ported to the 64-bit kernel, and run for the first
+      time since the October work on accounts, the first-run wizard,
+      Live media and updates, which had rewritten them without running
+      them. What they found in the code:
+
+      The kernel tells a person with somebody else's disk to type
+      'format' or 'format N', and only the 32-bit shell had that
+      command. It is in the 64-bit shell now, admin only, and it does
+      nothing until YES is typed out.
+
+      The text installer asked for the admin password after YES or
+      ERASE even from live media, where the graphical one stopped
+      asking on 19 October; it now asks only on an installed system,
+      as the journal entry of that day says the kernel does.
+
+      'update' read "update.key" relative to where it was started - a
+      home directory, since sessions start there - so an admin's 'sudo
+      run update' would trust a key any user could leave in their own
+      home. It reads /update.key, the system file. And that file had
+      become unreadable to ordinary sessions with the private system
+      files, so 'update check' fell back to the built-in key; it is a
+      public key, readable again like system.cfg.
+
+      What changed for the tests: threadboot starts the desktop, so a
+      stick's or an installed disk's shell is reached behind it once
+      wait_desktop has signed in; ptest no longer gives -kernel to a
+      machine booting off its disk under OVMF; the screen is 800x600,
+      not 640x480, wherever a test placed something by hand; loaders
+      and discs come from beside the kernel under test, not build/; and
+      the whole-screen installer, which cannot start from a desktop
+      that already holds the screen, is started from a GRUB disc's
+      shell entry. The Polish installer is read with the Polish letters.
+      Several checks that could not fail now can: system.cfg exists
+      before the checks on it, files written are read back off the disk
+      by the host, the kernel's text that must not stay on the screen
+      is shown to have been printed. A stick has no way to the
+      whole-screen installer since threadboot starts the desktop - only
+      'install text', typed into the shell behind it.
