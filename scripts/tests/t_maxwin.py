@@ -72,8 +72,11 @@ def grey(px):
 
 
 def dock_shows(at):
-    """The dock's first tile, with its white window in the middle"""
-    return min(at(*dock_tile(0, n_w=3))) > 200
+    """The dock's first tile - the folder, white a little below its
+    middle - with the terminal's window in the dock beside it"""
+    g = dock_geom(n_w=1)
+    tx, ty = g["tiles"][0]
+    return min(at(tx + g["tile"] // 2, ty + g["tile"] // 2 + 3)) > 200
 
 
 def main():
@@ -117,8 +120,13 @@ def main():
             # The dock is how every other window is reached
             check("the dock still shows (the window did not cover it)",
                   dock_shows(at))
+            # The bar hides when nobody uses it; brought out, it is over
+            # the window, not under it
+            q.reveal_bar(500)
             check("and so does the menu bar",
-                  near(at(300, 12), bar_glass()[12][300], 1))
+                  near(q.screen_raw()[2](300, 12), bar_glass()[12][300], 1))
+            q.mouse_goto(600, work_bottom() - 30)
+            time.sleep(1)
 
             # The ruler: the ground now reaches the right side of the
             # screen, which it can only do if the program was told the
