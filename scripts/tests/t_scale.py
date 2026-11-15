@@ -62,13 +62,11 @@ C = "user/gcalc.c"
 def boot(disk, slog, edid, settings):
     """A machine in text mode, the settings made, then the desktop"""
     q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog, edid=edid)
-    q.wait_for("ThreadOS shell", timeout=40)
+    q.wait_serial("thread64>", timeout=60)
     for key, value in settings:
-        q.type_line("sudo set %s %s" % (key, value))
-        time.sleep(1)
-        q.command("thread", "saved", timeout=30)
+        q.sudo("set %s %s" % (key, value), "saved")
     q.type_line("desktop")
-    time.sleep(9)
+    q.wait_desktop(timeout=60)
     q.mouse_home()
     q.mouse_goto(300, 200)
     time.sleep(1)
@@ -125,9 +123,7 @@ def native():
 
             # The setting, while the desktop runs: the mode changes
             # under it, and everything is painted for the new size
-            q.type_line("sudo set resolution 1280x960")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
+            q.sudo("set resolution 1280x960", "saved")
             time.sleep(3)
             m = mode(q)
             w, h, at = q.screen_raw()
@@ -149,9 +145,7 @@ def native():
                   "screen says (%s, %dx%d)" % (m, w, h),
                   m is not None and m[3:] == (1280, 960) and
                   (w, h) == (1280, 960))
-            q.type_line("sudo set resolution native")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
+            q.sudo("set resolution native", "saved")
             time.sleep(3)
             m = mode(q)
             w, h, at = q.screen_raw()
@@ -264,7 +258,8 @@ def twice():
             if not m:
                 return
             k = 32
-            q.launch_dock("gterm")
+            # The pointer goes by the layout, 640x480 - not by the panel
+            q.launch_dock("gterm", w=640, h=480)
             time.sleep(3)
             w, h, at = q.screen_raw()
             # The first application window's title bar, letters and lights
@@ -305,13 +300,13 @@ def live():
     try:
         q = boot(disk, slog, (1920, 1080), [])
         try:
-            q.type_line("run gcalc")
+            # From the menu: a program the shell started would keep the
+            # shell waiting for it, and the shell is asked things below
+            q.launch_menu("gcalc")
+            time.sleep(4)
+            q.launch_menu("gappear")
             time.sleep(4)
             q.click(1900, 300)                   # the keys back to the shell
-            time.sleep(0.5)
-            q.type_line("run gappear")
-            time.sleep(4)
-            q.click(1900, 300)
             time.sleep(0.5)
             check("before: 100%% on the 1920x1080 screen (%s)" % (mode(q),),
                   mode(q) == (1920, 1080, 100, 1920, 1080))
@@ -320,10 +315,7 @@ def live():
             pad, sc_w = define(A, "PAD"), define(A, "SC_W")
             q.click(ax + 1 + pad + 3 * (sc_w + 8) + sc_w // 2,
                     ay + CONTENT_DY + define(A, "SC_Y") + define(A, "SC_H") // 2)
-            time.sleep(1)
-            for ch_ in "thread\n":
-                q.sendkey(Qemu.KEYNAMES.get(ch_, ch_))
-                time.sleep(0.12)
+            # (the session is the administrator's: no password asked)
             time.sleep(3)
             q.sendkey("alt-f4")                  # Appearance, off the calculator
             time.sleep(2)
@@ -366,9 +358,7 @@ def live():
 
             q.click(1200, 300)
             time.sleep(0.5)
-            q.type_line("sudo set scale 0")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
+            q.sudo("set scale 0", "saved")
             time.sleep(3)
             m = mode(q)
             check("'Auto' again: the screen's own density, 100%% (%s)" % (m,),
