@@ -53,16 +53,31 @@ def new_disk():
     return path
 
 
-def dock_ready(q, timeout=40):
+def dock_ready(q, timeout=40, password=None):
     """Waits for the desktop WITHOUT looking at the background colour -
     the background is the very thing these tests change. The dock's
-    first tile has its white window on it whatever the background is."""
+    first tile has its white window on it whatever the background is.
+
+    A disk with an account on it starts at the sign-in screen. Its hint
+    is read against the aurora, which is exactly what is not behind it
+    here, so the password is typed without reading the screen: a few
+    seconds after the compositor has drawn something, and again if the
+    dock still has not come."""
     deadline = time.time() + timeout
+    drawn = typed = None
     while time.time() < deadline:
         try:
-            w, _, at = q.screen_raw()
-            if w >= 640 and min(at(*dock_tile(0))) > 200:
+            # The dock is laid out for the mode the screen is in: GRUB
+            # leaves 800x600, and the desktop keeps the loader's mode
+            w, h, at = q.screen_raw()
+            if w >= 640 and min(at(*dock_tile(0, w=w, h=h))) > 200:
                 return True
+            if w >= 640 and password:
+                drawn = drawn or time.time()
+                if (time.time() - drawn > 3 and
+                        (typed is None or time.time() - typed > 10)):
+                    q.type_line(password)
+                    typed = time.time()
         except Exception:
             pass
         time.sleep(0.3)
@@ -77,7 +92,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ThreadOS shell", timeout=40)
+            q.wait_serial("thread64>", timeout=90)
 
             out = q.command("set", "usage:", timeout=30)
             # A listing that shows nothing would pass every other check
@@ -95,8 +110,12 @@ def main():
             # through 'sudo' - the password is asked for on the next
             # line and never shown (see t_users.py for that road)
             def set_as_admin(command, wait="saved"):
+                start = len(q.serial())
                 q.type_line("sudo " + command)
-                time.sleep(1)
+                end = time.time() + 20
+                while (time.time() < end
+                       and "password:" not in q.serial()[start:]):
+                    time.sleep(0.3)
                 return q.command("thread", wait, timeout=30)
 
             changed = set_as_admin("set name machine")
@@ -108,8 +127,9 @@ def main():
 
             # The change is in force at once, not only after a restart:
             # the prompt says the new name from the next line on
-            after = q.command("pwd", "/", timeout=30)
-            check("the prompt says the new name at once", "machine>" in after)
+            after = q.command("pwd", "64>", timeout=30)
+            check("the prompt says the new name at once",
+                  "machine64>" in after)
 
             # An unknown name is an error, not a new setting
             bad = set_as_admin("set nosuchsetting 7", "set:")
@@ -128,7 +148,7 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ThreadOS shell", timeout=40)
+            q2.wait_serial("machine64>", timeout=90)
             boot = q2.serial()
             # The kernel says at boot what it read - and it says the new
             # name, so the file was read before anything used it
@@ -210,7 +230,8 @@ def main():
         print("--- the desktop after a restart on the same disk ---")
         q2 = Qemu(KERNEL, INITRD, disk2, serial=tempfile.mktemp(suffix=".log"))
         try:
-            check("the desktop came up after the restart", dock_ready(q2, timeout=40))
+            check("the desktop came up after the restart, once signed in",
+                  dock_ready(q2, timeout=60, password="thread"))
             time.sleep(2)
             w, h, at = q2.screen_raw()
             r, g, b = at(600, 300)
