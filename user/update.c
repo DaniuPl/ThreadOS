@@ -236,12 +236,16 @@ static int parse(const char *t, uint32_t len, struct release *r)
 }
 
 /* The key: update.key from the disk if an admin put one there, else
-   the one this program was built with */
+   the one this program was built with. By its full name: only in the
+   root directory is update.key a system file nobody but an admin can
+   write, and a session starts in its own home - where a plain user's
+   update.key would otherwise be the key an admin's 'sudo run update'
+   trusted. */
 static const uint8_t *signing_key(void)
 {
     static uint8_t key[65];
     static char text[140];
-    int fd = sys_open("update.key", O_READ);
+    int fd = sys_open("/update.key", O_READ);
     if (fd < 0)
         return official_key;
     int64_t n = sys_read(fd, text, sizeof(text) - 1);
