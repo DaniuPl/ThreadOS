@@ -19,9 +19,10 @@ What is checked here is the whole road, not the flag:
   and three wrong ones in a row shut the door for a while
   the right lasts for ONE command: after 'sudo set ...' the next
   command is a plain user's again
-  a program in ring 3 is refused by the KERNEL, not by the program: rm
-  and cp are told 'not allowed', which is a different answer from
-  'there is no such file'
+  a program in ring 3 is refused by the KERNEL, not by the program:
+  writing over swap.sys is 'not permitted', which is a different
+  answer from 'there is no such file' - and the file is still on the
+  disk afterwards, as the host reads it
   the new password survives a restart, and the public settings file
   contains no account credential
 
@@ -37,7 +38,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, TfsImage
 
 DISK_MB = 16
 
@@ -66,11 +67,13 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ThreadOS shell", timeout=40)
+            boot = q.wait_serial("thread64>", timeout=60)
+            m = re.search(r"Page swapping: (\d+) KiB on the disk", boot)
+            swap_bytes = int(m.group(1)) * 1024 if m else None
 
-            out = q.command("whoami", "user", timeout=30)
+            out = q.command("whoami", "(user)", timeout=30)
             check("the machine comes up as an ordinary user",
-                  "user" in out)
+                  "guest (user)" in out)
 
             refused = q.command("set name machine", "set:", timeout=30)
             check("changing a setting is refused",
@@ -89,14 +92,19 @@ def main():
                   "no permission" in wr)
 
             # ...and neither must a program in ring 3: this refusal
-            # comes from the kernel, through the syscall
-            rm = q.command("run rm swap.sys", "ended", timeout=60)
-            check("a ring 3 program is refused too",
-                  "no permission" in rm)
+            # comes from the kernel, through the syscall. An ordinary
+            # file next to it is written by the same program, so what
+            # is refused is the system file and not the user.
+            ok = q.command("run js -e writeFile('mine.txt','x')",
+                           "done, exit code", timeout=60)
+            check("a ring 3 program may write an ordinary file",
+                  "done, exit code 0" in ok)
+            wr = q.command("run js -e writeFile('swap.sys','x')",
+                           "done, exit code", timeout=60)
+            check("a ring 3 program is refused writing over a system file",
+                  "writeFile 'swap.sys': Permission denied" in wr)
             check("and it is a refusal, not 'there is no file'",
-                  "there is no file" not in rm)
-            fls = q.command("fls", "swap.sys", timeout=30)
-            check("the system file is still on the disk", "swap.sys" in fls)
+                  "No such file" not in wr)
 
             # --- the password ---------------------------------------
             q.type_line("sudo set name machine")
@@ -112,9 +120,9 @@ def main():
                   "name = machine (saved)" in out)
 
             # One command, not a session
-            out = q.command("whoami", "user", timeout=30)
+            out = q.command("whoami", "(user)", timeout=30)
             check("after the command we are an ordinary user again",
-                  "user" in out)
+                  "guest (user)" in out)
 
             # --- an admin session, and the way out of it -------------
             q.type_line("sudo")
@@ -165,11 +173,26 @@ def main():
         finally:
             q.close()
 
+        # swap.sys is private even to read, so the guest cannot list
+        # it - the host reads the disk instead, before the next boot
+        # sizes the file anew
+        swap = [i for i in TfsImage(disk).inodes if i["used"]
+                and not i["dir"] and i["name"] == "swap.sys"
+                and i["parent"] == -1]
+        check("the system file is still on the disk, whole (%s B, the "
+              "boot reserved %s B)" % (swap[0]["size"] if swap else "none",
+                                      swap_bytes),
+              len(swap) == 1 and swap_bytes and swap[0]["size"] == swap_bytes)
+
         print("--- after a restart on the same disk ---")
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ThreadOS shell", timeout=40)
+            # The prompt carries the machine's name, which was changed
+            # through sudo before the restart
+            boot = q2.wait_serial("64> ", timeout=60)
+            check("the name set as admin survived the restart",
+                  "machine64> " in boot)
             q2.type_line("sudo set color 12")
             time.sleep(1)
             out = q2.command("thread", "sudo:", timeout=30)
