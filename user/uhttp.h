@@ -612,9 +612,12 @@ static inline int http_get(uint32_t ip, uint32_t port, const char *host,
 /* Resolves a name (or takes an address directly). 0 = it failed. */
 static inline uint32_t http_resolve(const char *host)
 {
-    uint32_t ip = uparse_ip(host);
-    if (ip)
-        return ip;
+    /* uparse_ip says -1 for a name. Cut to 32 bits that is the address
+       255.255.255.255, which QEMU's network hands to the host - so a
+       name seemed to resolve while no question ever went to the DNS. */
+    int64_t ip = uparse_ip(host);
+    if (ip > 0)
+        return (uint32_t)ip;
 
     struct netinfo ni;
     if (netinfo(&ni) < 0 || !ni.dns)
