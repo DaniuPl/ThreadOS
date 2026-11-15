@@ -76,6 +76,9 @@ def main():
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
+            # Where windows open depends on the screen's size: GRUB
+            # gives the desktop 800x600
+            W, H = q.size()
             q.mouse_home()
 
             # --- the terminal ------------------------------------------
@@ -113,9 +116,9 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3 of the cascade - which on this screen is back at
-            # the start. A background asked for under Appearance.
-            sx, sy = cascade(3, GSET_W + 2, GSET_H + TITLE_H + 2)
+            # Slot 3 of the cascade. A background asked for under
+            # Appearance.
+            sx, sy = cascade(3, GSET_W + 2, GSET_H + TITLE_H + 2, w=W, h=H)
             SX, SY = sx + 1, sy + CONTENT_DY
             q.click(SX + gset_section("Appearance")[0],
                     SY + gset_section("Appearance")[1])
@@ -139,7 +142,7 @@ def main():
             q.launch_menu("gusers")
             time.sleep(2)
             ux, uy = cascade(4, USERS_W + 2,
-                             USERS_H + TITLE_H + 2)
+                             USERS_H + TITLE_H + 2, w=W, h=H)
             check("the account manager opens from the desktop menu",
                   q.window_title(ux, uy, USERS_W + 2) == "User Accounts")
             ucx, ucy = ux + 1, uy + CONTENT_DY
@@ -155,7 +158,7 @@ def main():
             time.sleep(2)
             row_base = ucy + ui_font_baseline_in(UD_PX, 118, 18)
             second_account = q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
-            check("the 32-bit account manager creates an account through the syscall",
+            check("the account manager creates an account through the syscall",
                   second_account == "guiuser")
 
             q.click(ucx + 50, ucy + 124)
@@ -163,8 +166,13 @@ def main():
             typed(q, "thread")
             q.click(ucx + 316, ucy + USERS_H - 28)
             time.sleep(1)
-            role = q.read_ui(ucx + 160, row_base, 55, px=UD_PX)
-            check("the account manager changes a user's role",
+            # The role is set flush right against x=215 (user/gusers.c),
+            # so where it starts depends on the word; the band reaches
+            # to the end of the row's highlight, not to the last pixel
+            # of the word, or the last glyph is read cut off
+            role = q.find_ui(ucx + 150, ucx + 224, row_base, px=UD_PX,
+                             fg=theme("dark")["app_dim"])
+            check("the account manager changes a user's role ('%s')" % role,
                   role == "admin")
 
             q.click(ucx + 300, ucy + 157)
