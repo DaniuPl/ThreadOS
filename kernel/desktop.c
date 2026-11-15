@@ -4362,6 +4362,22 @@ static void found_add(int kind, int index, int art, const char *name,
         found_n++;
 }
 
+/* Where the search looks for files: the signed-in account's home,
+   where its files are kept - the root holds the system's. With no
+   home to go to (no disk, or a guest) it is the root. 'path' gets the
+   directory's name, for opening what is found there by its whole
+   path: a program started from here does not stand in it. */
+static int search_files_dir(char *path, int cap)
+{
+    int dir = FS_ROOT;
+    if (!desktop_home_path(path, cap) || fs_chdir(FS_ROOT, path, &dir) < 0) {
+        dir = FS_ROOT;
+        path[0] = '/';
+        path[1] = '\0';
+    }
+    return dir;
+}
+
 static void search_refresh(void)
 {
     if (found_gen == search_gen)
@@ -4398,11 +4414,12 @@ static void search_refresh(void)
         if (s)
             found_add(FIND_SETTING, i, art_of_app("gsettings"), n, s, scores);
     }
-    char name[64];
+    char name[64], where[64];
     uint32_t size;
     int dir;
-    for (int i = 0; i < 64 && fs_readdir(FS_ROOT, i, name, &size, &dir); i++) {
-        if (dir)
+    int at = search_files_dir(where, sizeof(where));
+    for (int i = 0; i < 64 && fs_readdir(at, i, name, &size, &dir); i++) {
+        if (dir || name[0] == '.')
             continue;
         int s = match(name, q, qn);
         if (s)
@@ -4525,12 +4542,15 @@ static void search_go(int i)
                     ends_with_ci(f.name, ".webm");
         const char *app = picture ? "gimg" : media ? "gmedia" : "gedit";
         const char *with = picture ? "gimg " : media ? "gmedia " : "gedit ";
-        char cmd[96];
+        char where[64], path[160], cmd[192];
+        search_files_dir(where, sizeof(where));
+        if (!path_append(path, sizeof(path), where, f.name))
+            return;
         int n = 0;
         for (int k = 0; with[k]; k++)
             cmd[n++] = with[k];
-        for (int k = 0; f.name[k] && n < (int)sizeof(cmd) - 1; k++)
-            cmd[n++] = f.name[k];
+        for (int k = 0; path[k] && n < (int)sizeof(cmd) - 1; k++)
+            cmd[n++] = path[k];
         cmd[n] = '\0';
         int art = art_of_app(app);
         remember_launch(exec_spawn(cmd), -1, art);
@@ -4917,7 +4937,11 @@ static void save_screenshot(void)
     name[p++] = 'c';
     name[p] = '\0';
 
-    int slot = fs_open(FS_ROOT, name, 1);
+    /* Into the signed-in account's home, with its other files - where
+       Files' Home and the search find it - rather than among the
+       system's in the root */
+    char home[64];
+    int slot = fs_open(search_files_dir(home, sizeof(home)), name, 1);
     if (slot < 0) {
         kfree(row);
         return;
