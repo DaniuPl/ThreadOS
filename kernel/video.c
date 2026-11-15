@@ -352,6 +352,13 @@ int video_init_vesa(int w, int h)
        only works on a virtual machine. We merely add a working
        buffer so that the compositor does not flicker. */
     if (video_have_loader_lfb()) {
+        /* The loader set the mode and may not have said how large the
+           panel is (GRUB does not; ThreadBoot does, kernel/mb2.c). On
+           the standard VGA the panel's EDID is there to be read all
+           the same - and without its size the scale is a guess from
+           the panel's height. */
+        if (!edid_mm_w || !edid_mm_h)
+            read_edid();
         decide_scale();
         take_buffers();
         /* A panel whose size does not divide by the scale has a strip
