@@ -159,8 +159,8 @@ static int execute(struct command *sq, struct completion *cq, int qid,
     doorbell_sq(qid, *tail);
 
     /* Counted in turns of the loop, because this may run with
-       interrupts off and no clock to look at. A tenth of a second was
-       too little: a host busy writing its own disk keeps a virtual
+       interrupts off and no clock to look at. Twenty million turns were
+       too few: a host busy writing its own disk keeps a virtual
        controller's answer back for longer than that. */
     for (int spin = 0; spin < 1000000000; spin++) {
         volatile struct completion *u = &cq[*head];
@@ -177,7 +177,7 @@ static int execute(struct command *sq, struct completion *cq, int qid,
 
         /* A late answer to a command we stopped waiting for. Taking it
            as this one's would leave every later command reading the
-           answer of the one before it, and the disk failing for good */
+           answer of the one before it, and the disk failing for good. */
         if (returned != cid)
             continue;
         return code;
