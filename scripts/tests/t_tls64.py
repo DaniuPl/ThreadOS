@@ -309,7 +309,8 @@ def main():
 
             src = "apps/browser/web.cpp"
             w0, h0 = define(src, "W0"), define(src, "H0")
-            wx, wy = cascade(2, w0 + 2, h0 + TITLE_H + 2)
+            # the first window on the desktop: it takes the first slot
+            wx, wy = cascade(0, w0 + 2, h0 + TITLE_H + 2)
             cx, cy = wx + 1, wy + CONTENT_DY
             bar = define(src, "BAR_H")
             q2.mouse_home()

@@ -154,7 +154,9 @@ def session(q, tag, bits, ram_re):
           after(seen, "date")[0].startswith(RTC_DATE))
 
     # --- processes, and settings ----------------------------------------
-    seen = run(q, "ps", "core")
+    # (to the prompt after the list, not to its first row: "core" is at
+    # the top, and the terminal may not have drawn the rest yet)
+    seen = run(q, "ps")
     out = " ".join(after(seen, "ps"))
     check("%s ps lists the terminal and itself" % tag,
           "gterm" in out and "core" in out)
