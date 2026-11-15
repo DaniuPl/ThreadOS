@@ -58,9 +58,12 @@ def dot_at(at, g, k):
     return at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
 
 def bar_name(q):
+    """The system's name at the left end of the bar - in bold, the way
+    draw_bar() writes it; "" while the bar is hidden"""
     return q.find_ui(BAR_NAME_X, BAR_NAME_X + 100,
                      ui_font_baseline_in(BAR_PX, 0, BAR_H),
-                     charset="ThreadOS", px=BAR_PX, under=on_bar)
+                     charset="ThreadOS", px=BAR_PX, face="bold",
+                     under=on_bar)
 
 
 def open_two(q, want=None):
@@ -180,16 +183,19 @@ def main():
             q2 = Qemu(KERNEL, INITRD, disk2, append=TEXT_MODE,
                       serial=tempfile.mktemp(suffix=".log"))
             try:
-                q2.wait_for("ThreadOS shell", timeout=40)
-                q2.type_line("sudo set dock %d" % size)
-                time.sleep(1)
-                q2.command("thread", "saved", timeout=30)
+                q2.wait_serial("thread64>", timeout=60)
+                check("the dock's size is set",
+                      "dock = %d (saved)" % size in
+                      q2.sudo("set dock %d" % size, "saved"))
                 q2.type_line("desktop")
-                time.sleep(5)
+                # Started from the console, the desktop picks a mode of
+                # its own - measured, not assumed
+                check("the desktop came up", q2.wait_desktop(timeout=40))
+                sw, sh = q2.size()
                 q2.mouse_home()
                 open_two(q2, want=want)
 
-                g = dock_geom(n_w=2, want=want)
+                g = dock_geom(n_w=2, want=want, w=sw, h=sh)
                 w, h, at = q2.screen_raw()
                 tx, ty = g["tiles"][0]
                 t = g["tile"]
@@ -210,9 +216,9 @@ def main():
                       tile_px(at, g, DOCK_N + 1) == tile_px(at, g, SETTINGS))
 
                 # The one that matters: a tile clicks where it is drawn,
-                # whatever size the setting made it. The Terminal goes
+                # whatever size the setting made it. The monitor went
                 # behind the settings, then its tile brings it back.
-                q2.click(*dock_window(0, 2, want=want))
+                q2.click(*dock_window(0, 2, want=want, w=sw, h=sh))
                 q2.mouse_goto(600, 300)
                 check("and a click on a window's tile, where it is seen, "
                       "gives that window the focus", q2.wait_focus(94, 54))
