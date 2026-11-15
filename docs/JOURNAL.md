@@ -6710,3 +6710,15 @@ works and is checked by `make test`.
       fontTools' glyphs, metrics and tables for three system fonts and
       two WOFF2s from the web, a variable font among them. make fuzz has
       the Brotli and WOFF parsers too.
+
+- [x] **Libraries are welcome** (AGENTS.md, CONTRIBUTING.md, README.md)
+      Rule 6 used to say "no new dependencies", so features that a library
+      already does well had to be written again here: Brotli, WOFF2,
+      the TrueType rasteriser. The project now takes libraries on
+      purpose, so it can grow faster. The conditions keep what made
+      `third_party/` work: a pinned release built from source in the
+      tree, unmodified, recorded in `third_party/README.md`, under a
+      licence that fits an MIT system (GPL only after asking), and a
+      QEMU test that uses it on ThreadOS (plus a fuzz harness for parsers
+      of untrusted input). The kernel still takes only freestanding code.
+      This is a rule change with no code, so there is no test.

@@ -68,10 +68,24 @@ real. Use a separate `BUILD=` directory for experiments.
 5. **Shared code must build and pass on both kernels.** When you change
    something in `kernel/` or `user/`, rebuild both kernels (`make` and
    `make kernel64`). Run the tests for both.
-6. **No new dependencies.** The kernel and programs are freestanding (no
-   libc, except programs built against `libc/` musl). Third-party code goes
-   into `third_party/` unmodified. Changes go into `libc/overlay/`, `apps/browser/patches/` or into
-   our own wrapper code.
+6. **Libraries are welcome; bring them in properly.** Do not rewrite what a
+   good library already does. A new library must be:
+   - **in the tree, built from source** by the `Makefile`: a pinned release
+     in `third_party/<name>/` (or its upstream archive), never downloaded at
+     build time and never a prebuilt binary;
+   - **unmodified.** Changes go into `libc/overlay/`, a patch directory
+     next to the code that uses it (like `apps/browser/patches/`), or our
+     own wrapper code;
+   - **recorded** in `third_party/README.md`: version, licence, source,
+     and what was trimmed;
+   - **licensed** MIT, BSD, Apache-2.0, zlib, ISC, LGPL or similar. GPL
+     code would change the licence of what links it; ask the owner first;
+   - **tested** like everything else: a QEMU test that exercises it on
+     ThreadOS, and a fuzz harness if it parses untrusted input.
+
+   Programs link libraries against `libc/` musl. The kernel can take only
+   freestanding code (no libc), compiled with the kernel's flags for both
+   kernels. Prefer a library that builds for both 32- and 64-bit programs.
 7. **Never commit secrets.** The update signing key belongs only in the
    repository secret `THREADOS_UPDATE_KEY`. Tests generate keys of their
    own.

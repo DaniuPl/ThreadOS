@@ -217,7 +217,7 @@ user64/          64-bit-only programs, the 64-bit syscall layer
 libc/            musl port: replaced files (overlay/), linker script, tests
 apps/js/         the QuickJS host (`js`)
 apps/browser/    the litehtml browser: its test, and the patches to litehtml
-third_party/     unmodified upstream code: musl 1.2.5, QuickJS, litehtml
+third_party/     unmodified upstream code: musl 1.2.5, QuickJS, litehtml, FFmpeg, Brotli data
 fonts/           DejaVu subsets used by the kernel and programs
 scripts/         build helpers, release signing, test runner and tests
 tests/fuzz/      host-side fuzzing harnesses
@@ -292,7 +292,8 @@ These files are committed. Regenerate them only when their inputs change:
 one, replace its directory. ThreadOS-specific changes to musl live in
 `libc/overlay/`, changes to litehtml as patches in `apps/browser/patches/`.
 QuickJS is wrapped by `apps/js/`. After an update, run
-`make test T=libc`.
+`make test T=libc`. New libraries are welcome. CONTRIBUTING.md says
+what bringing one in involves.
 
 ## Features
 
@@ -355,5 +356,6 @@ QuickJS is wrapped by `apps/js/`. After an update, run
   reasoning behind every major decision.
 
 Licensed under the MIT license (see [LICENSE](LICENSE)). `third_party/`
-keeps its upstream MIT licenses. `fonts/` is under the Bitstream Vera /
+keeps each project's own license (MIT, BSD, Apache-2.0, LGPL; see
+[third_party/README.md](third_party/README.md)). `fonts/` is under the Bitstream Vera /
 DejaVu license ([fonts/LICENSE-DejaVu.txt](fonts/LICENSE-DejaVu.txt)).

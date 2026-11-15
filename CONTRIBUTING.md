@@ -110,6 +110,32 @@ The 32-bit kernel is kept and must keep passing its tests. It is no
 longer where new features go, but it is a second opinion on every line
 of shared code.
 
+## Libraries: use them, bring them in properly
+
+ThreadOS does not have to write its own version of everything. A
+well-tested library is usually better than a quick rewrite, and new
+libraries are welcome. Bringing one in means:
+
+- **a pinned upstream release in `third_party/<name>/`** (or its release
+  archive), built from source by the `Makefile`. Nothing is downloaded
+  at build time, and no prebuilt binaries are committed;
+- **the code stays exactly as upstream published it.** ThreadOS changes
+  go into `libc/overlay/`, a patch directory next to the code that uses
+  the library (like `apps/browser/patches/`), or wrapper code of our own,
+  so updating a library still means replacing its directory;
+- **a row in `third_party/README.md`** with the version, licence, source
+  and anything that was trimmed;
+- **a licence that allows redistribution with an MIT system:** MIT, BSD,
+  Apache-2.0, zlib, ISC, LGPL and similar. GPL code would change the
+  licence of everything linked with it, so ask before adding it;
+- **a test, like any other feature:** a QEMU group that uses the library
+  on ThreadOS. A library that parses untrusted input also gets a harness
+  in `make fuzz`.
+
+Programs link libraries against `libc/` musl. Code that goes into the
+kernel must be freestanding (no libc) and build with the kernel's flags
+for both kernels.
+
 ## Before sending a patch
 
 ```sh
