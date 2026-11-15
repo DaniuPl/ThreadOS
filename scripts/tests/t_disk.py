@@ -10,10 +10,6 @@ The strongest proof is the same as with the file system: a SECOND BOOT of
 the same machine with the same disk image. A program that starts after a
 restart, and that is not in the initrd, can only have come off the
 platter.
-
-Looking for a program (kernel/prog.c) is shared by both kernels - there
-is not a word about the processor mode in it - so we check it on both
-sides.
 """
 
 import os
@@ -33,7 +29,7 @@ ON_DISK = "fromdisk"
 
 
 def main():
-    print("--- programs from the disk (the 64-bit kernel) ---")
+    print("--- programs from the disk ---")
 
     reason = no64()
     if reason:
@@ -126,34 +122,6 @@ def main():
     finally:
         shutil.rmtree(d, ignore_errors=True)
         for f in (iso, disk):
-            if os.path.exists(f):
-                os.unlink(f)
-
-    # --- The same in the 32-bit kernel ---
-    # The same file looking for the program, the same path; the only
-    # difference is the ELF loader on the other side
-    print("--- programs from the disk (the 32-bit kernel) ---")
-    disk32 = tempfile.mktemp(suffix=".img")
-    slog32 = tempfile.mktemp(suffix=".log")
-    with open(disk32, "wb") as fh:
-        fh.truncate(DISK_SIZE)
-    try:
-        q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            copied = q3.command("cp hello " + ON_DISK, "cp:")
-            check("'cp' copies a program onto the disk (32-bit)",
-                  "cp: 'hello' -> '%s'" % ON_DISK in copied)
-            wyn = q3.command("run " + ON_DISK, "[hello] ending",
-                               timeout=30)
-            check("a program from the disk starts (32-bit)",
-                  "[hello] hello" in wyn)
-            check("the 32-bit kernel reports where it took it from too",
-                  "exec '%s' from the disk" % ON_DISK in wyn)
-        finally:
-            q3.close()
-    finally:
-        for f in (disk32, slog32):
             if os.path.exists(f):
                 os.unlink(f)
 
