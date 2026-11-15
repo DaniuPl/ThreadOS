@@ -85,9 +85,15 @@ def check_threads(out, suffix, ncores, again=None):
         # And because it is the machine's speed that gets in the way -
         # four virtual machines share this host, and one of them can
         # lose its cores in the middle of a measurement - a reading
-        # that loses is taken again, and the better of the two counts.
-        # The threshold does not move.
-        if four >= 3 * one and again:
+        # that loses is taken again, up to four readings, and the best
+        # ratio counts. The threshold does not move; what grew is the
+        # patience, because four cores of a guest need four of the
+        # host's, and the suite now shares the host with heavier
+        # neighbours. A kernel that runs the threads one after another
+        # comes out at four times the batch however often it is asked.
+        for _ in range(3):
+            if four < 3 * one or not again:
+                break
             retry = re.search(r"One batch: (\d+) ticks, four at once: "
                               r"(\d+)", again())
             if retry:
