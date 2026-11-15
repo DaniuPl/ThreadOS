@@ -3213,6 +3213,14 @@ class Qemu:
         if self in _LIVE:
             _LIVE.remove(self)
         self.proc.kill()
+        # Until it has really gone it holds the locks on its disk
+        # images, and the next machine started on the same disk is
+        # refused ("Failed to get write lock") - on a busy host that
+        # takes a moment after the kill
+        try:
+            self.proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            pass
         for p in (self.qmp_path, self.dump_path):
             if os.path.exists(p):
                 os.unlink(p)
