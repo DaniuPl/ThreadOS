@@ -13,9 +13,11 @@ IP that means nothing at all, and that is exactly what we check: the
 same network code, the same path for a packet, a different card
 underneath.
 
-We check both directions of traffic on both kernels - receiving with no
-reception means nothing, and sending with no answer proves nothing
-beyond that something went out on the wire.
+We check both directions of traffic - receiving with no reception
+means nothing, and sending with no answer proves nothing beyond that
+something went out on the wire. The card's registers lie high up and
+have to be added to the kernel's mapping, which is the only thing in
+this driver that depends on the processor mode.
 """
 
 import os
@@ -32,72 +34,7 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    # --- The 32-bit kernel ---
-    print("--- the e1000 card (the 32-bit kernel) ---")
-    slog = tempfile.mktemp(suffix=".log")
-    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog, nic="e1000")
-    try:
-        start = q.wait_for("Network:", timeout=40)
-        check("the kernel finds the e1000 card and says which it is",
-              re.search(r"Network: e1000 ([0-9a-f]+:){5}", start) is not None)
-
-        # DHCP is a full round trip: a question by broadcast, the
-        # server's answer, accepting the lease
-        lease = q.wait_for("[net] DHCP", timeout=30)
-        time.sleep(0.5)
-        lease = q.screen()
-        check("DHCP over the e1000 granted an address",
-              "granted 10.0.2.15" in lease)
-
-        q.type_line("ifconfig")
-        ifc = q.wait_for("eth0  e1000", timeout=20)
-        check("ifconfig names the card",
-              "eth0  e1000, MAC" in ifc)
-
-        # ICMP: slirp's gateway answers, so the frame really went out
-        # and really came back
-        q.type_line("clear")
-        q.type_line("ping 10.0.2.2")
-        pong = q.wait_for("40 B od 10.0.2.2", timeout=30)
-        check("ping over the e1000: an ICMP echo answer from the gateway",
-              "40 B od 10.0.2.2" in pong)
-        stats = q.wait_for("--- statistics:", timeout=30)
-        check("ping over the e1000: every packet came back",
-              "sent 4, received 4" in stats)
-
-        q.type_line("arp")
-        arp = q.wait_for("10.0.2.2", timeout=20)
-        check("the ARP table knows the gateway's hardware address",
-              re.search(r"10\.0\.2\.2\s+([0-9a-f]+:){5}", arp) is not None)
-
-        # TCP to the host: the longest path this card has to travel
-        http_port, http_stop = start_http_server()
-        try:
-            q.type_line("clear")
-            q.type_line("run httpget 10.0.2.2 %d /" % http_port)
-            page = q.wait_for("content ", timeout=40)
-            check("TCP over the e1000: an HTTP 200 answer with the whole content",
-                  "[httpget] HTTP 200" in page and
-                  "ThreadOS TCP works" in page)
-        finally:
-            http_stop()
-
-        q.type_line("ifconfig")
-        count = q.wait_for("RX ", timeout=20)
-        m = re.search(r"RX (\d+) packets, TX (\d+) packets", count)
-        check("the counters show traffic both ways",
-              m is not None and int(m.group(1)) > 10 and int(m.group(2)) > 10)
-    finally:
-        q.close()
-        if os.path.exists(slog):
-            os.unlink(slog)
-
-    # --- The 64-bit kernel ---
-    # The card's registers lie high up and have to be added to the
-    # mapping, and the page tables are built by different code in each
-    # kernel - that is the only thing in this driver that depends on the
-    # processor mode
-    print("--- the e1000 card (the 64-bit kernel) ---")
+    print("--- the e1000 card ---")
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
@@ -116,25 +53,43 @@ def main():
                    qemu="qemu-system-x86_64")
         try:
             start = q64.wait_serial("Network:", timeout=90)
-            check("the 64-bit kernel finds the e1000 too",
+            check("the kernel finds the e1000 card and says which it is",
                   re.search(r"Network: e1000 ([0-9a-f]+:){5}", start) is not None)
 
             lease = q64.wait_serial("DHCP: granted", timeout=40)
-            check("DHCP over the e1000 in long mode",
+            check("DHCP over the e1000 granted an address",
                   "granted 10.0.2.15" in lease)
 
             q64.wait_serial("thread64>", timeout=30)
+            # The prompt comes after the whole answer, so waiting for it
+            # never reads half a line
+            ifc = q64.command("ifconfig", "thread64>", timeout=20)
+            check("ifconfig names the card", "eth0  e1000, MAC" in ifc)
+
+            # ICMP: slirp's gateway answers, so the frame really went
+            # out and really came back
             pong = q64.command("ping 10.0.2.2", "--- statistics:",
                                  timeout=40)
-            check("ping from the 64-bit kernel over the e1000",
-                  "sent 3, received 3" in pong or
-                  "sent 4, received 4" in pong)
+            check("ping over the e1000: every packet came back",
+                  "sent 3, received 3" in pong)
+
+            arp = q64.command("arp", "thread64>", timeout=20)
+            check("the ARP table knows the gateway's hardware address",
+                  re.search(r"10\.0\.2\.2\s+([0-9a-f]+:){5}", arp)
+                  is not None)
 
             page = q64.command("run httpget 10.0.2.2 %d /" % http_port,
                                  "exit code", timeout=60)
-            check("TCP from ring 3 over the e1000 in long mode",
+            check("TCP from ring 3 over the e1000: an HTTP 200 answer "
+                  "with the whole content",
                   "[httpget] HTTP 200" in page and
                   "ThreadOS TCP works" in page)
+
+            count = q64.command("ifconfig", "thread64>", timeout=20)
+            m = re.search(r"RX (\d+) packets, TX (\d+) packets", count)
+            check("the counters show traffic both ways",
+                  m is not None and int(m.group(1)) > 10
+                  and int(m.group(2)) > 10)
         finally:
             q64.close()
             http_stop()
