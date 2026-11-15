@@ -18,7 +18,8 @@ outside it:
 
   a pipe between two of them counts what the first wrote
 
-The same on the 32-bit and the 64-bit kernel: one program, built twice.
+The same on the desktop the machine starts with and on one started from
+the kernel's shell, with the disk on a SATA controller.
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -183,22 +184,24 @@ def session(q, tag, bits, ram_re):
 
 def main():
     print()
-    print("--- the terminal's commands (the 32-bit kernel) ---")
+    print("--- the terminal's commands (the desktop the machine starts "
+          "with) ---")
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
         f.truncate(16 * 1024 * 1024)
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=tempfile.mktemp(suffix=".log"))
         try:
-            check("(32) the desktop came up", q.wait_desktop(timeout=40))
-            session(q, "(32)", "i386 (protected mode)",
-                    r"RAM detected: (\d+) KiB")
+            check("(boot) the desktop came up", q.wait_desktop(timeout=40))
+            session(q, "(boot)", "x86-64 (long mode)",
+                    r"Memory: (\d+) KiB RAM")
         finally:
             q.close()
     finally:
         os.unlink(disk)
 
-    print("--- the terminal's commands (the 64-bit kernel) ---")
+    print("--- the terminal's commands (the desktop started from the "
+          "shell, on a SATA disk) ---")
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
