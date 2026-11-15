@@ -2170,12 +2170,18 @@ class Qemu:
     # of the dark theme, which is what a machine nobody configured has
     DESK_BG = aurora_px(600, 300)
 
-    def wait_desktop(self, timeout=25):
+    def wait_desktop(self, timeout=60, ready=None):
         """Waits until the compositor draws the desktop. In graphics mode
         the VGA text buffer (0xB8000) stops being a window onto what can
         be seen, so we look for readiness in pixels rather than in
         text. Fresh disks stop at profile setup; the shared desktop
-        fixtures create a known administrator before continuing."""
+        fixtures create a known administrator before continuing. (Which
+        takes its time - the password is hashed, the home made - on a
+        host running four machines at once: a minute by default.)
+
+        The desktop is there when a place nothing stands on is the bare
+        aurora; a test that put something else behind the desktop - a
+        wallpaper - says what to look for instead: ready(at, w, h)."""
         deadline = time.time() + timeout
         login_sent = False
         setup_sent = False
@@ -2183,10 +2189,21 @@ class Qemu:
             try:
                 w, h, at = self.screen_raw()
                 if not setup_sent and w >= 640:
-                    setup_y = (h - 438) // 2
-                    title = self.read_ui(
-                        (w - 480) // 2 + 20, setup_y + 34, width=440,
-                        px=20, face="bold", screen=(w, h, at))
+                    # The first-run card, 480x438 in the middle of the
+                    # logical screen - drawn larger on a dense panel, as
+                    # the sign-in screen below is
+                    title = ""
+                    for k in (16, 24, 32):
+                        lw, lh = w * 16 // k, h * 16 // k
+                        if k != 16 and lw < 640:
+                            continue
+                        title = self.read_ui(
+                            ((lw - 480) // 2 + 20) * k // 16,
+                            ((lh - 438) // 2 + 34) * k // 16,
+                            width=440 * k // 16, px=(20 * k + 8) // 16,
+                            face="bold", screen=(w, h, at))
+                        if "Welcome" in title:
+                            break
                     if "Welcome to ThreadOS" in title:
                         self.type_line("admin", enter=False)
                         self.sendkey("tab")
@@ -2200,8 +2217,9 @@ class Qemu:
                         self.sendkey("ret")
                         setup_sent = True
                 want = aurora_px(600, 300, w, h) if w >= 640 else self.DESK_BG
-                if w >= 640 and all(abs(at(600, 300)[i] - want[i]) <= 25
-                                    for i in range(3)):
+                if w >= 640 and (ready(at, w, h) if ready else
+                                 all(abs(at(600, 300)[i] - want[i]) <= 25
+                                     for i in range(3))):
                     self._size = (w, h)
                     return True
                 if not login_sent and w >= 640:
@@ -2292,6 +2310,18 @@ class Qemu:
         self.mouse_button(True)
         self.mouse_button(False)
 
+    def double_click(self):
+        """Two clicks close enough together to be one double click. The
+        desktop counts them within 0.6 s and Files within 0.5 s, and two
+        mouse_click()s spend 0.8 s - on a busy host the second can come
+        too late. Each state still lasts a few frames, so that the
+        desktop, which looks at the buttons once a frame, sees it."""
+        for down in (True, False, True, False):
+            self.cmd({"execute": "input-send-event", "arguments": {"events": [
+                {"type": "btn", "data": {"button": "left", "down": down}}]}})
+            time.sleep(0.12)
+        time.sleep(0.2)
+
     def mouse_right_click(self):
         self.mouse_button(True, "right")
         self.mouse_button(False, "right")
@@ -2365,8 +2395,7 @@ class Qemu:
         i = self.SHORTCUTS.index(name)
         self.mouse_goto(10 + i * 88 + 38, BAR_H + 8 + 34)
         time.sleep(0.4)
-        self.mouse_click()
-        self.mouse_click()
+        self.double_click()
 
     def open_menu(self):
         """A click on the mark at the left end of the bar"""
