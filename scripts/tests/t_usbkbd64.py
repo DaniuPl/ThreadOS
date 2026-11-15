@@ -92,6 +92,48 @@ def main():
                   "console 2" in second_one)
         finally:
             q.close()
+
+        # --- Fast typing, behind xHCI ---------------------------------
+        # A read on an xHCI (or EHCI) endpoint is two calls: one hands
+        # the controller a read to wait in, the next takes what came
+        # back. The driver took one report a round, so a read was out
+        # only every other round - and two reports to a key (pressed,
+        # let go). Typed faster than that, keys queued in the keyboard
+        # until it threw them away. Eighty a second, each held ten
+        # milliseconds: every letter has to arrive, in order - the shell
+        # says back what it was given, as a command it does not know.
+        print("--- fast typing on a keyboard behind xHCI ---")
+        slog2 = tempfile.mktemp(suffix=".log")
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, usbkbd="xhci",
+                 qemu="qemu-system-x86_64")
+        try:
+            q.wait_serial("A USB keyboard", timeout=60)
+            q.wait_serial("thread64>", timeout=30)
+            # The DHCP line lands in the middle of whatever is being
+            # typed when it comes; the word is to be read back whole
+            q.wait_serial("[net] DHCP", timeout=30)
+            q.sendkey("ret")
+            time.sleep(1)
+            word = "thequickbrownfoxjumps"
+            seen = len(q.serial())
+            for ch in word:
+                q.hmp("sendkey %s 10" % ch)
+                time.sleep(0.012)
+            time.sleep(1)
+            q.sendkey("ret")
+            end = time.time() + 20
+            while (time.time() < end
+                   and "Unknown command" not in q.serial()[seen:]):
+                time.sleep(0.3)
+            said = [ln.strip() for ln in q.serial()[seen:].splitlines()
+                    if "Unknown command" in ln]
+            check("eighty keys a second all arrive, in order (%s)"
+                  % (said[-1] if said else "-"),
+                  bool(said) and "Unknown command: %s " % word in said[-1])
+        finally:
+            q.close()
+            if os.path.exists(slog2):
+                os.unlink(slog2)
     finally:
         shutil.rmtree(d, ignore_errors=True)
         for f in (iso, slog):
