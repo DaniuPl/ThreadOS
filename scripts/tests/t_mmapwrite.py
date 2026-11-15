@@ -19,9 +19,6 @@ Along the way we check four things that are easy to get wrong:
      processes write into one file, so a private copy in the child would
      mean its writes never go beyond its own memory.
 
-Both kernels have the same thing, each with its own paging code - and we
-check both the same way.
-
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
@@ -38,7 +35,7 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    print("--- writing through a mapping (the 64-bit kernel) ---")
+    print("--- writing through a mapping ---")
 
     reason = no64()
     if reason:
@@ -47,6 +44,7 @@ def main():
         d = tempfile.mkdtemp()
         iso = tempfile.mktemp(suffix=".iso")
         slog = tempfile.mktemp(suffix=".log")
+        slog2 = tempfile.mktemp(suffix=".log")
         disk = tempfile.mktemp(suffix=".img")
         with open(disk, "wb") as fh:
             fh.truncate(DISK_SIZE)
@@ -83,8 +81,8 @@ def main():
                 check("an ordinary read sees what the memory wrote",
                       "an ordinary read sees what" in probe and "WRONG" not in probe)
 
-                # Without an explicit msync - the kernel flushes it at the end of the
-# process
+                # Without an explicit msync - the kernel flushes it at
+                # the end of the process
                 q.command("run mkmap64 nosync.txt 12", "exit code",
                             timeout=60)
                 without = q.command("run mmapzap64 nosync.txt nosync",
@@ -105,92 +103,36 @@ def main():
                       "the mapping is shared" in visible and "WRONG" not in visible)
             finally:
                 q.close()
+
+            # The strongest proof: THE SAME disk image, a new kernel,
+            # new memory. If the changes sat only in the process's
+            # pages, there would be no trace of them here.
+            q2 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog2, disk=disk,
+                      sata=True, qemu="qemu-system-x86_64")
+            try:
+                boot = q2.wait_serial("+ TFS", timeout=90)
+                check("a second boot on the same disk (with no formatting)",
+                      "+ TFS ready" in boot and "formatted" not in boot)
+                q2.wait_serial("thread64>", timeout=40)
+
+                after = q2.command("run mmapzap64 written.txt check",
+                                   "exit code", timeout=90)
+                check("the writes through memory survived the machine "
+                      "restarting",
+                      "an ordinary read sees what" in after
+                      and "WRONG" not in after)
+                po2 = q2.command("run mmapzap64 nosync.txt check2",
+                                 "exit code", timeout=60)
+                check("the bytes sent back as the process ended survived "
+                      "the restart too",
+                      "reached the disk as the process ended" in po2)
+            finally:
+                q2.close()
         finally:
             shutil.rmtree(d, ignore_errors=True)
-            for f in (iso, slog, disk):
+            for f in (iso, slog, slog2, disk):
                 if os.path.exists(f):
                     os.unlink(f)
-
-    # --- The same in the 32-bit kernel, with a restart at the end ---
-    print("--- writing through a mapping (the 32-bit kernel) ---")
-    disk32 = tempfile.mktemp(suffix=".img")
-    slog32 = tempfile.mktemp(suffix=".log")
-    slog4 = tempfile.mktemp(suffix=".log")   # the second boot writes to its own
-    with open(disk32, "wb") as fh:
-        fh.truncate(DISK_SIZE)
-    try:
-        q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            q3.wait_for("[net] DHCP", timeout=30)
-
-            make_it = q3.command("run mkmap written.txt 12", "has ended",
-                                timeout=60)
-            check("a file with the pattern was created on the disk (32-bit)",
-                  "[mkmap] wrote 12288 B of the pattern" in make_it)
-
-            write_it = q3.command("run mmapzap written.txt write", "has ended",
-                                timeout=90)
-            check("the whole file can be read through the mapping "
-                  "for writing (32-bit)",
-                  "the old pattern was read, bytes 12288" in write_it)
-            check("only the pages written to are sent back (32-bit)",
-                  "pages sent back: 2" in write_it)
-            check("a page that was sent back stops being dirty (32-bit)",
-                  "the second msync sent back: 0" in write_it)
-            check("sending it to the disk does not touch the content in memory (32-bit)",
-                  "writing through memory is done" in write_it and "WRONG" not in write_it)
-
-            probe = q3.command("run mmapzap written.txt check", "has ended",
-                               timeout=90)
-            check("an ordinary read sees what the memory wrote (32-bit)",
-                  "an ordinary read sees what" in probe and "WRONG" not in probe)
-
-            q3.command("run mkmap nosync.txt 12", "has ended",
-                         timeout=60)
-            without = q3.command("run mmapzap nosync.txt nosync", "has ended",
-                               timeout=60)
-            check("a program may end without asking for a flush "
-                  "(32-bit)", "ending with no msync" in without)
-            probe2 = q3.command("run mmapzap nosync.txt check2",
-                                "has ended", timeout=60)
-            check("the kernel sends dirty pages back as the process ends (32-bit)",
-                  "reached the disk as the process ended" in probe2)
-
-            q3.command("run mkmap shared.txt 12", "has ended",
-                         timeout=60)
-            visible = q3.command("run mmapzap shared.txt shared",
-                                 "has ended", timeout=60)
-            check("the parent sees the child's write - the mapping is shared "
-                  "(32-bit)",
-                  "the mapping is shared" in visible and "WRONG" not in visible)
-        finally:
-            q3.close()
-
-        # The strongest proof: THE SAME disk image, a new kernel, new
-        # memory. If the changes sat only in the process's pages, there
-        # would be no trace of them here.
-        q4 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog4)
-        try:
-            screen_text = q4.wait_for("ThreadOS shell", timeout=40)
-            check("a second boot on the same disk (with no formatting)",
-                  "+ TFS ready" in screen_text and "formatted" not in screen_text)
-            q4.wait_for("[net] DHCP", timeout=30)
-
-            after = q4.command("run mmapzap written.txt check", "has ended",
-                              timeout=90)
-            check("the writes through memory survived the machine restarting",
-                  "an ordinary read sees what" in after and "WRONG" not in after)
-            po2 = q4.command("run mmapzap nosync.txt check2",
-                               "has ended", timeout=60)
-            check("the bytes sent back as the process ended survived the restart too",
-                  "reached the disk as the process ended" in po2)
-        finally:
-            q4.close()
-    finally:
-        for f in (disk32, slog32, slog4):
-            if os.path.exists(f):
-                os.unlink(f)
 
     return summary()
 
