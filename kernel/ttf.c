@@ -86,22 +86,7 @@ static int inside(const struct ttf_font *f, uint32_t off, uint32_t n)
    next to the cost of drawing: it runs a few times per row of a glyph. */
 static int64_t div64(int64_t a, int64_t b)
 {
-#ifdef __x86_64__
     return a / b;
-#else
-    int neg = (a < 0) != (b < 0);
-    uint64_t n = a < 0 ? (uint64_t)-a : (uint64_t)a;
-    uint64_t d = b < 0 ? (uint64_t)-b : (uint64_t)b;
-    uint64_t q = 0, r = 0;
-    for (int i = 63; i >= 0; i--) {
-        r = (r << 1) | ((n >> i) & 1);
-        if (r >= d) {
-            r -= d;
-            q |= (uint64_t)1 << i;
-        }
-    }
-    return neg ? -(int64_t)q : (int64_t)q;
-#endif
 }
 
 /* FreeType's FT_MulFix: a * b / 65536, rounded, the sign applied to

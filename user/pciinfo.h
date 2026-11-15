@@ -14,16 +14,7 @@ struct pci_info {
 
 static inline int sys_pci_info(int index, struct pci_info *out)
 {
-#ifdef __x86_64__
     return (int)syscall64(SYS64_PCI_INFO, index, (int64_t)(uintptr_t)out);
-#else
-    int32_t result;
-    __asm__ volatile("int $0x80"
-                     : "=a"(result)
-                     : "a"(SYS_PCI_INFO), "b"(index), "c"(out)
-                     : "memory");
-    return result;
-#endif
 }
 
 #endif

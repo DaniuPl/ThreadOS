@@ -18,15 +18,9 @@
    to be glued onto the mapping, and different code does that in each
    mode. This is the only place in this file that knows about the
    processor mode at all. */
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n) paging64_map_phys((a), (n))
 #define MAP_FB(a, n)   paging64_map_phys_wc((a), (n))   /* write-combining */
-#else
-#include "include/paging.h"
-#define MAP_PHYS(a, n) paging_map_phys((a), (n))
-#define MAP_FB(a, n)   paging_map_phys((a), (n))
-#endif
 #include "include/pmm.h"
 #include "include/string.h"
 #include "include/io.h"

@@ -25,10 +25,13 @@ import sys
 import tempfile
 import time
 
-KERNEL = sys.argv[1] if len(sys.argv) > 1 else "build/threados.bin"
-INITRD = sys.argv[2] if len(sys.argv) > 2 else None
-KERNEL64 = sys.argv[3] if len(sys.argv) > 3 else None
-INITRD64 = sys.argv[4] if len(sys.argv) > 4 else None
+# The kernel and its initrd. There used to be a 32-bit kernel beside
+# this one, and tests written for it still say KERNEL and INITRD: they
+# name the same images now, and Qemu boots them through GRUB (see
+# Qemu.__init__), the way the 32-bit kernel was booted with -kernel.
+KERNEL64 = sys.argv[1] if len(sys.argv) > 1 else "build/threados64.bin"
+INITRD64 = sys.argv[2] if len(sys.argv) > 2 else "build/initrd64.img"
+KERNEL, INITRD = KERNEL64, INITRD64
 VGA_ADDR = 0xB8000
 VGA_BYTES = 80 * 25 * 2
 VIDEO_W = 320
@@ -1904,6 +1907,13 @@ class Qemu:
                  nic="rtl8139", cpus=None, devices=None, edid=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
+        # The kernel is Multiboot 2, which QEMU's -kernel does not load:
+        # a test that names it and no disc gets a GRUB disc made for it
+        if kernel == KERNEL64 and not cdrom and not uefi and not esp:
+            cdrom = boot_disc(append)
+            append = None
+        if qemu == "qemu-system-i386":
+            qemu = "qemu-system-x86_64"
         # The 64-bit kernel needs a processor with long mode, and
         # qemu-system-i386 does not pretend to be one
         cmd = [qemu,
@@ -3251,7 +3261,7 @@ def summary():
 
 
 
-def make_iso64(workdir, iso, graphics=False, text=False):
+def make_iso64(workdir, iso, graphics=False, text=False, cmdline=""):
     """Assembles a disc with the 64-bit kernel and its initrd.
 
     The 64-bit kernel cannot be started through -kernel: QEMU loads only
@@ -3276,10 +3286,35 @@ def make_iso64(workdir, iso, graphics=False, text=False):
     with open(workdir + "/boot/grub/grub.cfg", "w") as fh:
         fh.write(header + "set timeout=0\nset default=0\n"
                  'menuentry "ThreadOS 64" {\n'
-                 "    multiboot2 /boot/threados64.bin\n" + mod + "}\n")
+                 "    multiboot2 /boot/threados64.bin" +
+                 (" " + cmdline if cmdline else "") + "\n" + mod + "}\n")
     return subprocess.run(["grub-mkrescue", "-o", iso, workdir],
                           stdout=subprocess.DEVNULL,
                           stderr=subprocess.DEVNULL).returncode == 0
+
+
+_boot_discs = {}
+
+
+def boot_disc(append=None):
+    """A GRUB disc that starts the kernel the way QEMU's -kernel started
+    the 32-bit one: at the desktop, unless the command line says
+    TEXT_MODE. One disc per command line, made once per test process."""
+    words = (append or "").split()
+    text = TEXT_MODE in words
+    words = [w for w in words if w != TEXT_MODE]
+    if not text and "desktop" not in words:
+        words.insert(0, "desktop")
+    cmdline = " ".join(words)
+    key = (cmdline, text)
+    if key not in _boot_discs:
+        work = tempfile.mkdtemp(prefix="bootdisc")
+        iso = os.path.join(work, "boot.iso")
+        if not make_iso64(os.path.join(work, "root"), iso,
+                          graphics=not text, text=text, cmdline=cmdline):
+            raise RuntimeError("grub-mkrescue could not make a boot disc")
+        _boot_discs[key] = iso
+    return _boot_discs[key]
 
 
 def no64():

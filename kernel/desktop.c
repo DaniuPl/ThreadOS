@@ -47,14 +47,9 @@
 #include "include/bt.h"
 #include "include/net.h"
 #include "include/netdev.h"
-#ifdef __x86_64__
 #include "../kernel64/task64.h"
 #define desktop_uid task64_uid
 #define desktop_kill_uid task64_kill_uid
-#else
-#define desktop_uid task_uid
-#define desktop_kill_uid task_kill_uid
-#endif
 
 /* Palette indices.
  *
@@ -109,11 +104,7 @@ struct icon {
 };
 /* The 64-bit system has the litehtml browser (apps/browser); the 32-bit
    one keeps gweb, because there is no C++ runtime built for it */
-#ifdef __x86_64__
 #define WEB_APP "web"
-#else
-#define WEB_APP "gweb"
-#endif
 #define ART_N      16
 #define ART_LETTER 14
 #define ART_TRASH  15
@@ -4520,7 +4511,6 @@ static void search_go(int i)
                       ends_with_ci(f.name, ".jpeg") ||
                       ends_with_ci(f.name, ".bmp") ||
                       ends_with_ci(f.name, ".psc");
-#ifdef __x86_64__
         int media = ends_with_ci(f.name, ".mp3") ||
                     ends_with_ci(f.name, ".wav") ||
                     ends_with_ci(f.name, ".aac") ||
@@ -4533,9 +4523,6 @@ static void search_go(int i)
                     ends_with_ci(f.name, ".mkv") ||
                     ends_with_ci(f.name, ".avi") ||
                     ends_with_ci(f.name, ".webm");
-#else
-        int media = 0;
-#endif
         const char *app = picture ? "gimg" : media ? "gmedia" : "gedit";
         const char *with = picture ? "gimg " : media ? "gmedia " : "gedit ";
         char cmd[96];
@@ -5246,11 +5233,7 @@ static void draw_about(void)
 
     char line[64];
     int n;
-#ifdef __x86_64__
     n = cat(line, 0, locale_text("64-bit kernel, "));
-#else
-    n = cat(line, 0, locale_text("32-bit kernel, "));
-#endif
     n = cat_num(line, n, (uint32_t)smp_cpus());
     int cpu_count = smp_cpus();
     const char *cpu_word;

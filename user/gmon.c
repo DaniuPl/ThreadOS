@@ -19,11 +19,7 @@
 #define PAD 12
 #define HIST 60               /* half-second samples: the last thirty seconds */
 
-#ifdef __x86_64__
 typedef struct sysinfo64 info_t;
-#else
-typedef struct sysinfo info_t;
-#endif
 
 static int history[HIST];     /* percent used, oldest first */
 static int samples;

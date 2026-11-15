@@ -32,16 +32,10 @@
 #include "include/io.h"
 #include "include/task.h"
 #include "include/user.h"
-#ifdef __x86_64__
 #include "../kernel64/task64.h"
 #define current_level task64_level
 #define current_uid task64_uid
 #define slot_open task64_slot_open
-#else
-#define slot_open task_slot_open
-#define current_level task_level
-#define current_uid task_uid
-#endif
 
 #define MAGIC          "TFS3"
 #define SECTORS_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)

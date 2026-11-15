@@ -6891,3 +6891,24 @@ works and is checked by `make test`.
       reads with nothing there (EAGAIN), lets select and poll time out,
       is refused by a closed port, exchanges UDP datagrams, and serves a
       connection the host makes through QEMU's port forwarding.
+
+- [x] **The 32-bit kernel is gone** (Makefile, boot/, kernel/, user/,
+      scripts/ptest.py, scripts/run_tests.py, AGENTS.md, CONTRIBUTING.md,
+      README.md, .github/workflows/build.yml)
+      ThreadOS is a 64-bit system now, as its owner decided. Every new
+      feature had gone into the 64-bit kernel for months, while every
+      change to shared code still had to build and pass on both. Removed:
+      the 32-bit entry (boot/boot.S, boot/ap.S, its GRUB menu), the
+      kernel files only it used (task, syscall, exec, paging, gdt, idt,
+      isr, keyboard, kfile, pipe, signal, shell, usermode, kmain), the
+      programs built only for it (hello, sh, the evil* probes, the
+      32-bit test programs), user/usys.h and its linker scripts, its
+      rules in the Makefile, and every `#ifdef __x86_64__` branch's other
+      side in the shared code (unifdef). `make` builds the kernel and
+      initrd; `make kernel64` stays as a name for the same.
+
+      The tests take two images now, and the ones written for the 32-bit
+      kernel run on this one: Qemu(KERNEL, ...) without a disc gets a GRUB
+      disc made for it (ptest.boot_disc), starting at the desktop unless
+      the command line says TEXT_MODE - what QEMU's -kernel did for the
+      32-bit kernel.

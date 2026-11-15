@@ -11,7 +11,6 @@
 #include "../user/usha1.h"
 #undef THREADOS_UAPI_H
 
-#ifdef __x86_64__
 #include "../kernel64/task64.h"
 #define current_level task64_level
 #define current_uid task64_uid
@@ -21,16 +20,6 @@
 #define set_shell_identity task64_set_identity_name
 #define set_shell_level task64_set_level_name
 #define kill_uid task64_kill_uid
-#else
-#define current_level task_level
-#define current_uid task_uid
-#define set_current_uid task_set_uid
-#define set_current_level task_set_level
-#define set_current_cwd task_set_cwd
-#define set_shell_identity task_set_identity_name
-#define set_shell_level task_set_level_name
-#define kill_uid task_kill_uid
-#endif
 
 #define USER_DB_FILE ".users"
 #define USER_DB_MAGIC "THRUSR2"

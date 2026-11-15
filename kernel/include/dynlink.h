@@ -26,11 +26,7 @@
  * writes the result and WHERE - and that stays with the caller.
  */
 
-#ifdef __x86_64__
 typedef uint64_t dyn_addr;
-#else
-typedef uint32_t dyn_addr;
-#endif
 
 /* Loads the library from the initrd (or from disk). Called once, at
    startup. 1 = it is there and usable. */

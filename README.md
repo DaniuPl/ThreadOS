@@ -23,25 +23,16 @@ and on real UEFI PCs.
 
 ## Architecture
 
-**Two kernels, one source tree.**
+**One kernel.** ThreadOS runs in long mode with 4-level paging and NX.
+`boot64/` enters long mode, `kernel64/` holds what depends on the
+processor mode (paging, interrupts, context switching, the
+`syscall`/`sysret` entry, process setup), and `kernel/` holds the rest:
+drivers, the filesystem, the network stack, the window compositor. It
+boots through Multiboot 2 (GRUB) or threadboot (UEFI), and the build
+makes `build/threados64.bin` and `build/initrd64.img`. A 32-bit kernel
+was built from the same `kernel/` files until November 2026.
 
-| | 32-bit kernel | 64-bit kernel |
-|---|---|---|
-| Mode | protected mode, paging | long mode, 4-level paging with NX |
-| Sources | `boot/`, `kernel/` | `boot64/`, `kernel64/` + the shared part of `kernel/` |
-| Syscalls | `int 0x80` (`kernel/syscall.c`) | `syscall`/`sysret` (`kernel64/syscall64.c`) |
-| Boots via | Multiboot 1 (QEMU `-kernel`) or Multiboot 2 (GRUB) | Multiboot 2 (GRUB) or threadboot (UEFI) |
-| Output | `build/threados.bin` + `build/initrd.img` | `build/threados64.bin` + `build/initrd64.img` |
-
-The two columns share more than they differ. Drivers, the filesystem, the
-network stack, the window compositor and most of the kernel live in
-`kernel/` and are compiled twice. The list is `SHARED64` in the
-`Makefile`. Only the CPU-mode-specific parts have two implementations:
-paging, interrupts, context switching, the syscall entry and process
-setup. The 32-bit kernel is still built and tested, because a second
-compilation catches width and pointer-size bugs in the shared code.
-
-**Boot paths (64-bit).**
+**Boot paths.**
 
 - BIOS or UEFI with GRUB: `build/threados64.iso` boots GRUB, and GRUB
   loads the kernel and initrd through Multiboot 2.
@@ -55,11 +46,10 @@ compilation catches width and pointer-size bugs in the shared code.
 
 **Userland.** Programs are freestanding ELF files packed into the initrd
 (`scripts/mkinitrd.py`). They can also be run from disk. Sources in
-`user/` build for both kernels: `user/uapi.h` includes either
-`user/usys.h` (32-bit) or `user64/usys64.h` + `user64/compat64.h`
-(64-bit). Crypto, TLS, HTTP and DNS are header-only code. The programs
+`user/` speak to the kernel through `user/uapi.h` (`user64/usys64.h` +
+`user64/compat64.h`). Crypto, TLS, HTTP and DNS are header-only code. The programs
 that use them link against `libthread.so`, which the kernel maps into
-every process once. On the 64-bit side, programs can also be built
+every process once. Programs can also be built
 against musl (`libc/`, with upstream musl in `third_party/musl`). `js`
 (QuickJS) is built this way. Such programs have POSIX threads: mutexes,
 condition variables, semaphores, thread-local variables, and threads that
@@ -131,11 +121,9 @@ A test that is missing an optional tool prints `SKIPPED` and the reason.
 
 | Command | Produces |
 |---|---|
-| `make` | `build/threados.bin`, `build/initrd.img` (32-bit) |
-| `make kernel64` | `build/threados64.bin`, `build/initrd64.img` |
+| `make` (or `make kernel64`) | `build/threados64.bin`, `build/initrd64.img` |
 | `make efi` | `build/BOOTX64.EFI` (threadboot) |
-| `make iso64` | `build/threados64.iso` (builds the 64-bit kernel and threadboot first) |
-| `make iso` | `build/threados.iso` (32-bit) |
+| `make iso64` | `build/threados64.iso` (builds the kernel and threadboot first) |
 | `make stick` | `build/threados-stick.img` |
 | `make libc64` | musl for ThreadOS (built automatically when needed) |
 | `make browser` | litehtml and its layout test, for ThreadOS and for the host |
@@ -157,9 +145,8 @@ and QuickJS.
 ## Running in QEMU
 
 ```sh
-make run              # 64-bit system from the hybrid disc, to the desktop
+make run              # the system from the hybrid disc, to the desktop
 make run KVM=1        # with hardware virtualisation
-make run32            # 32-bit kernel
 make run-iso64-uefi   # the hybrid disc under OVMF
 make run-stick        # the USB image under OVMF, exactly as a PC boots it
 ```
@@ -213,13 +200,13 @@ cross-section of groups. It is started by hand from the Actions tab.
 ## Repository layout
 
 ```
-boot/            32-bit entry, GRUB menus (grub.cfg, grub64.cfg)
+boot/            the GRUB menu (grub64.cfg)
 boot/efi/        threadboot, the UEFI loader
 boot64/          long-mode entry, ISR and syscall stubs, AP startup
-kernel/          shared kernel code + the 32-bit kernel; headers in kernel/include/
-kernel64/        64-bit-only kernel code, linker script
+kernel/          kernel code that does not depend on the CPU mode; headers in kernel/include/
+kernel64/        paging, interrupts, tasks, system calls, linker script
 user/            ring 3 programs and the header-only libraries (crypto, TLS, HTTP, GUI kit)
-user64/          64-bit-only programs, the 64-bit syscall layer
+user64/          programs of their own, the syscall layer
 libc/            musl port: replaced files (overlay/), linker script, tests
 apps/js/         the QuickJS host (`js`)
 apps/browser/    the litehtml browser: its test, and the patches to litehtml
@@ -236,10 +223,9 @@ docs/            screenshots and the development journal
 
 | What | Where |
 |---|---|
-| a ring 3 program | `user/<name>.c`; add it to `USER_ELFS` and/or `USER64_ELFS` and to the `mkinitrd.py` lines of `$(INITRD)` / `$(INITRD64)`. Initrd names are at most 15 characters. |
-| a 32-bit system call | `kernel/syscall.c` and a wrapper in `user/usys.h` |
-| a 64-bit system call | `kernel64/syscall64.h` (number), `kernel64/syscall64.c` (handler), `user64/usys64.h` (wrapper), plus `user64/compat64.h` if shared programs need it under the 32-bit name |
-| a driver | `kernel/<name>.c`, `kernel/include/<name>.h`; add `$(BUILD)/<name>.o` to `OBJS` and `<name>` to `SHARED64` |
+| a ring 3 program | `user/<name>.c`; add it to `USER64_ELFS` and to the `mkinitrd.py` line of `$(INITRD64)`. Initrd names are at most 15 characters. |
+| a system call | `kernel64/syscall64.h` (number), `kernel64/syscall64.c` (handler), `user64/usys64.h` (wrapper), plus `user64/compat64.h` if `user/` programs need it under its older name; for musl programs, `libc/overlay/src/threados/syscall.c` |
+| a driver | `kernel/<name>.c`, `kernel/include/<name>.h`; add `<name>` to `SHARED64` |
 | a test group | `scripts/tests/t_<name>.py`, registered in `GROUPS` in `scripts/run_tests.py` |
 
 Test helpers read layout constants directly from C sources

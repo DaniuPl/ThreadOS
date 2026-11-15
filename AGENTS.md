@@ -7,39 +7,41 @@ This one is shorter and lists the commands.
 
 ## What this is
 
-ThreadOS is a hobby x86 operating system written in C and assembly. One
-source tree builds **two kernels**:
+ThreadOS is a hobby x86-64 operating system written in C and assembly.
+It is one 64-bit long-mode kernel: `kernel/` holds the code that does
+not depend on the CPU mode (drivers, filesystems, network, desktop),
+`kernel64/` and `boot64/` hold paging, interrupts, context switching,
+the syscall entry and the entry into long mode. Ring 3 programs live in
+`user/` and `user64/`; `user/uapi.h` gives them the system call layer
+(`user64/usys64.h` plus `user64/compat64.h`). Programs built against
+musl (`libc/`) have POSIX threads and sockets.
 
-- a 32-bit protected-mode kernel: `kernel/` plus `boot/`
-- a 64-bit long-mode kernel: the shared `kernel/` files plus `kernel64/`
-  and `boot64/`
-
-Code that does not depend on the CPU mode lives in `kernel/` and is
-**compiled twice**. Only paging, interrupts, context switching and the
-syscall entry are separate in `kernel64/`. Ring 3 programs in `user/` are
-built for both kernels. `user/uapi.h` selects the system call layer:
-`user/usys.h` for 32-bit, or `user64/usys64.h` plus `user64/compat64.h`
-for 64-bit.
+There used to be a 32-bit kernel as well. It was removed; names that
+came with it (`kernel/include/task.h`, for one) are still used by the
+shared code and answered by `kernel64/compat64.c`.
 
 ## Commands
 
 ```sh
-make -j8                      # 32-bit kernel + initrd (build/threados.bin, build/initrd.img)
-make -j8 kernel64             # 64-bit kernel + initrd (build/threados64.bin, build/initrd64.img)
+make -j8                      # kernel + initrd (build/threados64.bin, build/initrd64.img)
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
 make iso64 stick              # hybrid disc and USB image
-make run                      # boot the 64-bit desktop in QEMU
+make run                      # boot the desktop in QEMU
 make test                     # full suite: 100+ QEMU groups, ~20-30 min with -j4
 make test T=files,filetree    # selected groups
 make fuzz                     # parsers under ASan/UBSan on the host
 ```
 
 Build into another directory with `make BUILD=/some/dir ...`. Run tests
-against that build by passing the four images as arguments:
+against that build by passing the two images as arguments:
 
 ```sh
-python3 scripts/run_tests.py -tfiles $B/threados.bin $B/initrd.img $B/threados64.bin $B/initrd64.img
+python3 scripts/run_tests.py -tfiles $B/threados64.bin $B/initrd64.img
 ```
+
+The screen reader in `scripts/ptest.py` needs `freetype-py` and
+`fontTools` (`pip install freetype-py fonttools`), as CI installs them.
+Without them every desktop test reports that the desktop never appeared.
 
 **Never rebuild `build/` while a test run is using it.** The tests boot the
 images in `build/`, and replacing them mid-run produces failures that look
@@ -65,9 +67,8 @@ real. Use a separate `BUILD=` directory for experiments.
    compare (`t_polish`, `t_libc`, `scripts/tests/js/`).
 4. **Comments explain *why*,** not what. Match the comment density and the
    tone of the surrounding code.
-5. **Shared code must build and pass on both kernels.** When you change
-   something in `kernel/` or `user/`, rebuild both kernels (`make` and
-   `make kernel64`). Run the tests for both.
+5. **There is one kernel, the 64-bit one.** Do not bring back 32-bit
+   code paths, `#ifdef __x86_64__` branches or `-m32` builds.
 6. **Libraries are welcome; bring them in properly.** Do not rewrite what a
    good library already does. A new library must be:
    - **in the tree, built from source** by the `Makefile`: a pinned release
@@ -84,8 +85,7 @@ real. Use a separate `BUILD=` directory for experiments.
      ThreadOS, and a fuzz harness if it parses untrusted input.
 
    Programs link libraries against `libc/` musl. The kernel can take only
-   freestanding code (no libc), compiled with the kernel's flags for both
-   kernels. Prefer a library that builds for both 32- and 64-bit programs.
+   freestanding code (no libc), compiled with the kernel's flags.
 7. **Never commit secrets.** The update signing key belongs only in the
    repository secret `THREADOS_UPDATE_KEY`. Tests generate keys of their
    own.
@@ -94,10 +94,9 @@ real. Use a separate `BUILD=` directory for experiments.
 
 | Task | Files |
 |---|---|
-| Add a system call (32-bit) | `kernel/syscall.c`, `user/usys.h` |
-| Add a system call (64-bit) | `kernel64/syscall64.c`, `kernel64/syscall64.h`, `user64/usys64.h` (and `user64/compat64.h` if shared programs use it) |
-| Add a ring 3 program | `user/<name>.c`; add it to `USER_ELFS` / `USER64_ELFS` and to the `mkinitrd.py` lines of `$(INITRD)` / `$(INITRD64)` in the `Makefile` (initrd names are at most 15 characters) |
-| Add a driver | `kernel/<name>.c` + `kernel/include/<name>.h`; add `$(BUILD)/<name>.o` to `OBJS` (32-bit) and `<name>` to `SHARED64` (64-bit) |
+| Add a system call | `kernel64/syscall64.c`, `kernel64/syscall64.h`, `user64/usys64.h` (and `user64/compat64.h` if `user/` programs use it); for musl programs, `libc/overlay/src/threados/syscall.c` |
+| Add a ring 3 program | `user/<name>.c` (or `libc/tests/`, `apps/` for musl programs); add it to `USER64_ELFS` and to the `mkinitrd.py` line of `$(INITRD64)` in the `Makefile` (initrd names are at most 15 characters) |
+| Add a driver | `kernel/<name>.c` + `kernel/include/<name>.h`; add `<name>` to `SHARED64` in the `Makefile` |
 | Desktop / compositor | `kernel/desktop.c`, `kernel/gfx.c`, `kernel/uitext.c` |
 | GUI widget kit for programs | `user/ugui.h`, `user/udraw.h` |
 | Filesystem (TFS3) | `kernel/fs.c`; FAT in `kernel/fat.c` |

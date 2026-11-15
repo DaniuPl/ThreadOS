@@ -22,15 +22,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential gcc-multilib \
+            build-essential \
             grub-pc-bin grub-efi-amd64-bin xorriso mtools \
             clang lld python3
 
-      - name: The 32-bit kernel and its initrd
+      - name: The kernel and its initrd
         run: make -j$(nproc)
-
-      - name: The long-mode kernel and its initrd
-        run: make -j$(nproc) kernel64
 
       - name: threadboot - our own EFI loader
         run: make efi
@@ -54,7 +51,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential gcc-multilib \
+            build-essential \
             qemu-system-x86 grub-pc-bin grub-efi-amd64-bin xorriso mtools \
             ovmf clang lld python3 openssl libssl-dev
           # FreeType and fontTools are what the TrueType test compares
@@ -64,7 +61,6 @@ jobs:
       - name: Build everything the tests boot
         run: |
           make -j$(nproc)
-          make -j$(nproc) kernel64
           make efi
 
       # The network groups stand a DNS server of their own on the
@@ -85,7 +81,7 @@ jobs:
       - name: The groups that cover the most ground
         if: github.event_name != 'schedule'
         run: |
-          make test J=2 T=boot,shell,process,tfs,k64core,k64shell,k64disk,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,ush,tls64,net64,desktop64,files,ginstal,stick
+          make test J=2 T=k64core,k64shell,k64disk,libc,pthread,sqlite,socket,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,ush,tls64,net64,desktop64,files,ginstal,stick
 
       - name: Everything, once a night
         if: github.event_name == 'schedule'

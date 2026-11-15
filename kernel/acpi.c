@@ -28,15 +28,9 @@
    are built by different code in each kernel. The road to switching
    the power off itself - RSDP, RSDT, FADT, _S5_ in bytecode - is the
    same. */
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define IDENTITY_TOP()   paging64_identity_top()
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
-#else
-#include "include/paging.h"
-#define IDENTITY_TOP()   paging_identity_limit()
-#define MAP_PHYS(a, n)   paging_map_phys((a), (n))
-#endif
 
 struct rsdp {
     char signature[8];          /* "RSD PTR " */

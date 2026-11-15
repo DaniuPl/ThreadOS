@@ -182,8 +182,7 @@ static inline int32_t sys_notify(const char *title, const char *text)
                               (int64_t)(uintptr_t)text);
 }
 
-/* The settings - the same record and the same answers as on the 32-bit
-   side (usys.h) */
+/* The settings - the record the kernel's settings are kept in */
 #define CFG_NAME_MAX 32
 #define CFG_VAL_MAX  32
 #define CFG_HELP_MAX 80

@@ -1,14 +1,11 @@
 # ThreadOS - the build
 #
 # Targets (BUILD=<dir> puts everything somewhere other than build/):
-#   make            - the 32-bit kernel and its initrd
-#   make kernel64   - the 64-bit kernel and its initrd
+#   make            - the kernel and its initrd (make kernel64 is the same)
 #   make efi        - threadboot, the UEFI loader (needs clang + lld)
 #   make iso64      - the hybrid BIOS + UEFI disc, the installer included
-#   make iso        - a disc with the 32-bit kernel
 #   make stick      - a bootable USB image (GPT + an EFI partition)
-#   make run        - the 64-bit system in QEMU, from its disc, to the desktop
-#   make run32      - the 32-bit kernel in QEMU
+#   make run        - the system in QEMU, from its disc, to the desktop
 #   make test       - the test suite (T=group,... selects, J=n runs n at once)
 #   make fuzz       - feeds the parsers corrupted data (under sanitizers)
 #   make clean      - removes what was built
@@ -21,187 +18,18 @@ CXX     := g++
 AS      := gcc
 LD      := gcc
 
-# -Wshadow earns its place: renaming a variable to 'count' inside a
-# function whose parameter is already 'count' compiled silently and
-# broke the NVMe driver.
-CFLAGS  := -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
-           -Wall -Wextra -Wshadow -O2 -g
-ASFLAGS := -m32
-# One day it will be worth linking with -lgcc (which needs gcc-multilib
-# with a 32-bit libgcc), for instance when 64-bit division turns up. So
-# far the kernel does without it.
-# --no-warn-rwx-segments: the .user section deliberately holds code and
-# data together (RWX)
-LDFLAGS := -m32 -ffreestanding -nostdlib -static -no-pie -T kernel/linker.ld \
-           -Wl,--build-id=none -Wl,--no-warn-rwx-segments
-
 BUILD   := build
-# The fonts in both initrds - cut out of DejaVu by scripts/mkfonts.py and
+# The fonts in the initrd - cut out of DejaVu by scripts/mkfonts.py and
 # committed, so building needs neither fonttools nor the DejaVu package
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
-KERNEL  := $(BUILD)/threados.bin
-ISO     := $(BUILD)/threados.iso
-INITRD  := $(BUILD)/initrd.img
-DISK    := $(BUILD)/disk.img
 
-# The user programs (ELF files loaded out of the initrd)
-USER_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
-               -fno-pic -no-pie -static -nostdlib -O2 -Wall -Wextra \
-               -Wl,--build-id=none -Wl,--no-warn-rwx-segments
-# The 32-bit ABI lowers some uint64_t division to libgcc helpers. These
-# freestanding programs link the compiler runtime, but still no libc.
-LIBGCC32 := $(shell $(CC) -m32 -print-libgcc-file-name)
-USER_ELFS := $(BUILD)/user/hello.elf $(BUILD)/user/evil.elf \
-             $(BUILD)/user/evil2.elf \
-             $(BUILD)/user/sh.elf $(BUILD)/user/echo.elf \
-             $(BUILD)/user/memtest.elf $(BUILD)/user/fileio.elf \
-             $(BUILD)/user/cat.elf $(BUILD)/user/wc.elf \
-             $(BUILD)/user/seq.elf $(BUILD)/user/grep.elf \
-             $(BUILD)/user/head.elf $(BUILD)/user/ls.elf \
-             $(BUILD)/user/rm.elf $(BUILD)/user/date.elf \
-             $(BUILD)/user/cp.elf $(BUILD)/user/mv.elf \
-             $(BUILD)/user/mkdir.elf $(BUILD)/user/spin.elf \
-             $(BUILD)/user/core.elf \
-             $(BUILD)/user/guiapp.elf $(BUILD)/user/gclock.elf \
-             $(BUILD)/user/mmaptest.elf $(BUILD)/user/gfiles.elf \
-             $(BUILD)/user/shmtest.elf $(BUILD)/user/shmread.elf \
-             $(BUILD)/user/mkwall.elf \
-             $(BUILD)/user/gmon.elf $(BUILD)/user/threads.elf $(BUILD)/user/prio.elf $(BUILD)/user/gterm.elf \
-             $(BUILD)/user/gedit.elf $(BUILD)/user/gtasks.elf \
-             $(BUILD)/user/gcode.elf \
-             $(BUILD)/user/udtest.elf $(BUILD)/user/gappear.elf \
-             $(BUILD)/user/gcalc.elf $(BUILD)/user/gcal.elf \
-             $(BUILD)/user/gpaint.elf \
-             $(BUILD)/user/gusers.elf \
-             $(BUILD)/user/gimg.elf \
-             $(BUILD)/user/udpecho.elf $(BUILD)/user/udptest.elf \
-             $(BUILD)/user/nslookup.elf \
-             $(BUILD)/user/httpget.elf $(BUILD)/user/tcpserv.elf \
-             $(BUILD)/user/gweb.elf \
-             $(BUILD)/user/cryptotest.elf \
-             $(BUILD)/user/certtest.elf \
-             $(BUILD)/user/aestest.elf \
-             $(BUILD)/user/wpatest.elf \
-             $(BUILD)/user/forktest.elf $(BUILD)/user/ptree.elf $(BUILD)/user/sigtest.elf $(BUILD)/user/lazymem.elf $(BUILD)/user/swaptest.elf \
-             $(BUILD)/user/mkmap.elf $(BUILD)/user/mmapfile.elf \
-             $(BUILD)/user/deep.elf $(BUILD)/user/mmapzap.elf \
-             $(BUILD)/user/tlbtest.elf $(BUILD)/user/faults.elf \
-             $(BUILD)/user/gsettings.elf $(BUILD)/user/gdeaf.elf \
-             $(BUILD)/user/ginstal.elf \
-             $(BUILD)/user/gmikser.elf \
-             $(BUILD)/user/dynlib.elf $(BUILD)/user/cores.elf \
-             $(BUILD)/user/mutex.elf $(BUILD)/user/prodcons.elf \
-             $(BUILD)/user/syscalls.elf \
-             $(BUILD)/user/lspci.elf $(BUILD)/user/ifconfig.elf
-
-OBJS := $(BUILD)/boot.o \
-        $(BUILD)/isr_stubs.o \
-        $(BUILD)/kmain.o \
-        $(BUILD)/vga.o \
-        $(BUILD)/serial.o \
-        $(BUILD)/printk.o \
-        $(BUILD)/locale.o \
-        $(BUILD)/bootsplash.o \
-        $(BUILD)/string.o \
-        $(BUILD)/gdt.o \
-        $(BUILD)/idt.o \
-        $(BUILD)/isr.o \
-        $(BUILD)/pic.o \
-        $(BUILD)/pit.o \
-        $(BUILD)/keyboard.o \
-        $(BUILD)/kbdmap.o \
-        $(BUILD)/pmm.o \
-        $(BUILD)/paging.o \
-        $(BUILD)/heap.o \
-        $(BUILD)/shell.o \
-        $(BUILD)/switch.o \
-        $(BUILD)/task.o \
-        $(BUILD)/syscall.o \
-        $(BUILD)/usermode.o \
-        $(BUILD)/initrd.o \
-        $(BUILD)/exec.o \
-        $(BUILD)/prog.o \
-        $(BUILD)/ata.o \
-        $(BUILD)/fs.o \
-        $(BUILD)/kfile.o \
-        $(BUILD)/pipe.o \
-        $(BUILD)/sem.o \
-        $(BUILD)/rtc.o \
-        $(BUILD)/mouse.o \
-        $(BUILD)/video.o \
-        $(BUILD)/desktop.o \
-        $(BUILD)/pci.o \
-        $(BUILD)/shm.o \
-        $(BUILD)/rtl8139.o \
-        $(BUILD)/e1000.o \
-        $(BUILD)/rtl8168.o \
-        $(BUILD)/virtio_net.o \
-        $(BUILD)/netdev.o \
-        $(BUILD)/smp.o \
-        $(BUILD)/ap.o \
-        $(BUILD)/net.o \
-        $(BUILD)/dhcp.o \
-        $(BUILD)/tcp.o \
-        $(BUILD)/signal.o \
-        $(BUILD)/swap.o \
-        $(BUILD)/ahci.o \
-        $(BUILD)/nvme.o \
-        $(BUILD)/blk.o \
-        $(BUILD)/uhci.o \
-        $(BUILD)/ehci.o \
-        $(BUILD)/ttf.o \
-        $(BUILD)/fonts.o \
-        $(BUILD)/uitext.o \
-        $(BUILD)/gfx.o \
-        $(BUILD)/aurora.o \
-        $(BUILD)/xhci.o \
-        $(BUILD)/usbhc.o \
-        $(BUILD)/usbkbd.o \
-        $(BUILD)/usbmouse.o \
-        $(BUILD)/usbmass.o \
-        $(BUILD)/bt.o \
-        $(BUILD)/usbnet.o \
-        $(BUILD)/part.o \
-        $(BUILD)/fat.o \
-        $(BUILD)/gpt.o \
-        $(BUILD)/fatcmd.o \
-        $(BUILD)/install.o \
-        $(BUILD)/hwinfo.o \
-        $(BUILD)/hda.o \
-        $(BUILD)/dynlink.o \
-        $(BUILD)/smpmem.o \
-        $(BUILD)/smpthreads.o \
-        $(BUILD)/biglock.o \
-        $(BUILD)/tlb.o \
-        $(BUILD)/config.o \
-        $(BUILD)/user.o \
-        $(BUILD)/clip.o \
-        $(BUILD)/acpi.o \
-        $(BUILD)/mb2.o \
-        $(BUILD)/fbcon.o
-
-.PHONY: all iso iso64 initrd64 libc64 browser run run32 run-iso run-iso64-uefi test fuzz clean \
+.PHONY: all iso64 initrd64 libc64 browser run run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick
 
-all: $(KERNEL) $(INITRD)
+all: kernel64
 
 $(BUILD):
 	mkdir -p $(BUILD)
-
-$(BUILD)/boot.o: boot/boot.S | $(BUILD)
-	$(AS) $(ASFLAGS) -c $< -o $@
-
-# The secondary cores' trampoline goes through gcc rather than as: it
-# has preprocessor macros in it that compute addresses at the place it
-# is copied to
-$(BUILD)/ap.o: boot/ap.S | $(BUILD)
-	$(CC) $(ASFLAGS) -c $< -o $@
-
-$(BUILD)/isr_stubs.o: kernel/isr.S | $(BUILD)
-	$(AS) $(ASFLAGS) -c $< -o $@
-
-$(BUILD)/switch.o: kernel/switch.S | $(BUILD)
-	$(AS) $(ASFLAGS) -c $< -o $@
 
 # The dependency on the headers is spelled out here: without it a
 # change in kernel/include/ rebuilt nothing and make ended green, while
@@ -209,28 +37,11 @@ $(BUILD)/switch.o: kernel/switch.S | $(BUILD)
 KERNEL_HEADERS := $(wildcard kernel/include/*.h)
 USERCTL_HEADER := user/userctl.h
 
-$(BUILD)/%.o: kernel/%.c $(KERNEL_HEADERS) $(USERCTL_HEADER) | $(BUILD)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(KERNEL): $(OBJS) kernel/linker.ld
-	$(LD) $(LDFLAGS) $(OBJS) -o $@
-	@grub-file --is-x86-multiboot $@ 2>/dev/null \
-	    && echo "OK: $@ is a valid Multiboot image" \
-	    || echo "INFO: no grub-file - skipping the Multiboot check"
-
-$(BUILD)/user: | $(BUILD)
-	mkdir -p $(BUILD)/user
-
 # The userspace headers are pulled in by many programs (the syscall
 # library, the network, the cryptography), so a change to any of them
 # has to rebuild everything - hence a wildcard instead of a hand-kept
 # list.
 USER_HEADERS := $(wildcard user/*.h)
-
-$(BUILD)/user/%.elf: user/%.c $(USER_HEADERS) user/user.ld | $(BUILD)/user
-	$(CC) $(USER_CFLAGS) -T user/user.ld $< -o $@ $(LIBGCC32)
-
-$(BUILD)/user/gcode.elf: user/gedit.c
 
 # --- The shared library ----------------------------------------------
 #
@@ -253,7 +64,6 @@ LIB_HEADERS := ubignum.h usha256.h usha512.h uchacha.h uaes.h urand.h ux25519.h 
                udns.h caroots.h uthread.h
 LIB_SRC  := $(patsubst %,$(BUILD)/libsrc/%,$(LIB_HEADERS))
 LIB_DECL := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
-LIBTHREAD := $(BUILD)/libthread.so
 
 $(BUILD)/libsrc $(BUILD)/decl $(BUILD)/dyn:
 	mkdir -p $@
@@ -267,96 +77,22 @@ $(BUILD)/decl/%.h: user/%.h scripts/split_headers.py | $(BUILD)/decl
 $(BUILD)/libsrc/libthread.c: user/libthread.c | $(BUILD)/libsrc
 	cp $< $@
 
-# -Bsymbolic: calls inside the library are bound at link time. Without
-# it they would go through its own jump table, and that is filled in at
-# load time - which here there is nobody to do.
-$(LIBTHREAD): $(BUILD)/libsrc/libthread.c $(LIB_SRC) user/libthread.ld \
-              $(USER_HEADERS) Makefile
-	$(CC) -m32 -std=gnu11 -ffreestanding -fno-stack-protector -fPIC -O2 \
-	    -Wall -Wextra -I$(BUILD)/libsrc -Iuser -c $< -o $(BUILD)/libthread.o
-	$(CC) -m32 -shared -nostdlib -Wl,--build-id=none -Wl,-Bsymbolic \
-	    -Wl,-soname,libthread.so -Wl,--no-warn-rwx-segments \
-	    -T user/libthread.ld -o $@ $(BUILD)/libthread.o
-
 $(BUILD)/dyn/%.c: user/%.c | $(BUILD)/dyn
 	cp $< $@
 
 # The programs that take the cryptography from the library instead of
-# carrying it themselves
-USER_DYN_CFLAGS := -m32 -std=gnu11 -ffreestanding -fno-stack-protector \
-                   -fno-pic -no-pie -nostdlib -O2 -Wall -Wextra \
-                   -Wl,--build-id=none -Wl,--no-warn-rwx-segments
-
-# A pattern rule limited to those five names: the rest of the programs
-# build as they always did, with everything inside
+# carrying it themselves (libthread64.so, below)
 USER_DYN := cryptotest certtest httpget gweb nslookup dynlib
-USER_DYN_ELFS := $(patsubst %,$(BUILD)/user/%.elf,$(USER_DYN))
 
-$(USER_DYN_ELFS): $(BUILD)/user/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL) \
-                     $(LIBTHREAD) user/userdyn.ld Makefile | $(BUILD)/user
-	$(CC) $(USER_DYN_CFLAGS) -I$(BUILD)/decl -Iuser -T user/userdyn.ld \
-	    $< $(LIBTHREAD) $(LIBGCC32) -o $@
-
-$(INITRD): $(USER_ELFS) $(LIBTHREAD) scripts/mkinitrd.py $(FONTS)
-	python3 scripts/mkinitrd.py $@ \
-	    libthread.so=$(LIBTHREAD) \
-	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
-	    hello=$(BUILD)/user/hello.elf evil=$(BUILD)/user/evil.elf \
-	    evil2=$(BUILD)/user/evil2.elf \
-	    sh=$(BUILD)/user/sh.elf echo=$(BUILD)/user/echo.elf \
-	    memtest=$(BUILD)/user/memtest.elf fileio=$(BUILD)/user/fileio.elf \
-	    cat=$(BUILD)/user/cat.elf wc=$(BUILD)/user/wc.elf \
-	    seq=$(BUILD)/user/seq.elf grep=$(BUILD)/user/grep.elf \
-	    head=$(BUILD)/user/head.elf ls=$(BUILD)/user/ls.elf \
-	    rm=$(BUILD)/user/rm.elf date=$(BUILD)/user/date.elf \
-	    cp=$(BUILD)/user/cp.elf mv=$(BUILD)/user/mv.elf \
-	    mkdir=$(BUILD)/user/mkdir.elf spin=$(BUILD)/user/spin.elf \
-	    core=$(BUILD)/user/core.elf \
-	    guiapp=$(BUILD)/user/guiapp.elf gclock=$(BUILD)/user/gclock.elf \
-	    mmaptest=$(BUILD)/user/mmaptest.elf gfiles=$(BUILD)/user/gfiles.elf \
-	    shmtest=$(BUILD)/user/shmtest.elf shmread=$(BUILD)/user/shmread.elf \
-	    gmon=$(BUILD)/user/gmon.elf threads=$(BUILD)/user/threads.elf \
-	    prio=$(BUILD)/user/prio.elf gterm=$(BUILD)/user/gterm.elf \
-	    gedit=$(BUILD)/user/gedit.elf gtasks=$(BUILD)/user/gtasks.elf \
-	    gcode=$(BUILD)/user/gcode.elf \
-	    udtest=$(BUILD)/user/udtest.elf gappear=$(BUILD)/user/gappear.elf \
-	    gcalc=$(BUILD)/user/gcalc.elf gcal=$(BUILD)/user/gcal.elf \
-	    gpaint=$(BUILD)/user/gpaint.elf \
-	    gusers=$(BUILD)/user/gusers.elf \
-	    gimg=$(BUILD)/user/gimg.elf \
-	    udpecho=$(BUILD)/user/udpecho.elf udptest=$(BUILD)/user/udptest.elf \
-	    nslookup=$(BUILD)/user/nslookup.elf \
-	    httpget=$(BUILD)/user/httpget.elf tcpserv=$(BUILD)/user/tcpserv.elf \
-	    gweb=$(BUILD)/user/gweb.elf \
-	    cryptotest=$(BUILD)/user/cryptotest.elf \
-	    certtest=$(BUILD)/user/certtest.elf \
-	    aestest=$(BUILD)/user/aestest.elf \
-	    wpatest=$(BUILD)/user/wpatest.elf \
-	    forktest=$(BUILD)/user/forktest.elf ptree=$(BUILD)/user/ptree.elf \
-	    sigtest=$(BUILD)/user/sigtest.elf \
-	    lazymem=$(BUILD)/user/lazymem.elf \
-	    swaptest=$(BUILD)/user/swaptest.elf \
-	    mkmap=$(BUILD)/user/mkmap.elf mmapfile=$(BUILD)/user/mmapfile.elf \
-	    deep=$(BUILD)/user/deep.elf tlbtest=$(BUILD)/user/tlbtest.elf \
-	    faults=$(BUILD)/user/faults.elf \
-	    mkwall=$(BUILD)/user/mkwall.elf \
-	    gsettings=$(BUILD)/user/gsettings.elf gdeaf=$(BUILD)/user/gdeaf.elf \
-	    ginstal=$(BUILD)/user/ginstal.elf \
-	    gmikser=$(BUILD)/user/gmikser.elf \
-	    mmapzap=$(BUILD)/user/mmapzap.elf \
-	    dynlib=$(BUILD)/user/dynlib.elf \
-	    cores=$(BUILD)/user/cores.elf \
-	    mutex=$(BUILD)/user/mutex.elf prodcons=$(BUILD)/user/prodcons.elf \
-	    syscalls=$(BUILD)/user/syscalls.elf \
-	    lspci=$(BUILD)/user/lspci.elf hardware=$(BUILD)/user/lspci.elf \
-	    ifconfig=$(BUILD)/user/ifconfig.elf
-
-# --- The 64-bit kernel (long mode) -----------------------------------
+# --- The kernel (long mode) -------------------------------------------
 #
-# A second image built from the same sources: only the entry point
-# (boot64/boot64.S enters long mode) and the kmain64 skeleton differ.
-# The rest is the same files compiled a second time - what separates
-# the two modes fits in the io.h header and a handful of casts.
+# kernel/ holds what does not depend on the processor mode (drivers,
+# the filesystem, the network, the desktop); kernel64/ and boot64/ hold
+# what does: paging, interrupts, the context switch, system calls and
+# the entry into long mode. There used to be a 32-bit kernel built from
+# the same kernel/ files; it was removed, and kernel/ still carries the
+# names that came with it (task.h, for one), which kernel64/compat64.c
+# answers.
 KERNEL64 := $(BUILD)/threados64.bin
 CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
             -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -Wshadow -O2 -g
@@ -483,11 +219,7 @@ $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
 
 $(BUILD)/user64/gcode.elf: user/gedit.c
 
-# --- The shared library in long mode ---------------------------------
-#
-# The same trick as in the 32-bit kernel and out of the same headers -
-# only the address the library sits at and the width of the registers
-# differ. Nobody writes the source a second time.
+# --- The shared library, built (see "The shared library" above) -----
 LIBTHREAD64 := $(BUILD)/libthread64.so
 LIB_DECL64  := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
 
@@ -1012,39 +744,8 @@ run-iso64-uefi: $(ISO64)
 	    -drive if=pflash,format=raw,unit=0,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
 	    -drive if=pflash,format=raw,unit=1,file=$(BUILD)/ovmf_vars.fd
 
-# An empty 16 MiB disk image for the TFS filesystem (the kernel will
-# format it). TFS3 hands out blocks from a bitmap, so the room goes
-# where it is needed.
-$(DISK): | $(BUILD)
-	dd if=/dev/zero of=$@ bs=1M count=16 status=none
-
-# An ISO to burn or to start with 'qemu -cdrom'. GRUB loads the kernel
-# through Multiboot and hands it the initrd as a module; the menu lets
-# you pick the desktop or the text console (boot/grub.cfg).
-iso: $(KERNEL) $(INITRD) boot/grub.cfg
-	@command -v grub-mkrescue >/dev/null || { \
-	    echo "ERROR: no grub-mkrescue."; \
-	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-common xorriso"; \
-	    echo "  Fedora:        dnf install grub2-tools xorriso"; \
-	    exit 1; }
-	mkdir -p $(BUILD)/isodir/boot/grub
-	cp $(KERNEL) $(BUILD)/isodir/boot/threados.bin
-	cp $(INITRD) $(BUILD)/isodir/boot/initrd.img
-	cp boot/grub.cfg $(BUILD)/isodir/boot/grub/grub.cfg
-	grub-mkrescue -o $(ISO) $(BUILD)/isodir
-	@echo "Done: $(ISO) - 'make run-iso', or write it to a stick"
-
-# QEMU can load a Multiboot kernel directly - with no ISO and no GRUB.
-# The disk (-hda) lands on the first ATA bus as the master.
-# Network: an RTL8139 card in QEMU's user mode (the address comes from
-# DHCP: 10.0.2.15, gateway 10.0.2.2). hostfwd puts the TCP server from
-# ThreadOS in front of the host: after 'run tcpserv' one can type 'nc
-# localhost 5555' in a terminal.
-NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
-           -device rtl8139,netdev=n0
-
-# 'make run' is the 64-bit system - the one everything new goes into -
-# started off the disc the way a real machine starts it: GRUB, the
+# 'make run' is the system started off the disc the way a real machine
+# starts it: GRUB, the
 # desktop straight away (the first menu entry; the second stays at the
 # shell). The machine has what the system has drivers for: a SATA disk
 # behind AHCI, an e1000 network card, HD Audio and two cores. The disk
@@ -1057,7 +758,6 @@ NETOPTS := -netdev user,id=n0,hostfwd=tcp::5555-:5555 \
 #   make run KVM=1        with hardware virtualisation, if /dev/kvm is
 #                         there - it starts in a second instead of ten
 #   make run QEMU_EXTRA="..."  anything else QEMU should be told
-#   make run32            the 32-bit kernel, loaded by QEMU directly
 AUDIO ?= none
 DISK64 := $(BUILD)/disk64.img
 QEMU64_ACCEL := $(if $(KVM),-enable-kvm -cpu host,)
@@ -1075,15 +775,6 @@ run: $(ISO64) $(DISK64)
 	    -audiodev $(AUDIO),id=snd0 -device intel-hda \
 	    -device hda-output,audiodev=snd0 $(QEMU_EXTRA)
 
-run32: $(KERNEL) $(INITRD) $(DISK)
-	qemu-system-i386 -kernel $(KERNEL) -initrd $(INITRD) -hda $(DISK) $(NETOPTS)
-
-# Starting off the ISO the way a real machine would: a disk (TFS + the
-# swap file) and a network card, because without them half the system
-# has nothing to do.
-run-iso: iso $(DISK)
-	qemu-system-i386 -cdrom $(ISO) -boot d -hda $(DISK) $(NETOPTS)
-
 # The automatic test: a boot in QEMU with no window, and the VGA screen
 # read back. The test makes a fresh disk image itself and checks that
 # what was written survives between boots. The groups run in parallel,
@@ -1092,14 +783,14 @@ run-iso: iso $(DISK)
 # be redrawn.
 #
 #   make test            every group
-#   make test T=k64      the 64-bit kernel only (or k64,uefi)
+#   make test T=k64core  selected groups (T=k64core,uefi)
 #   make test J=1        one after another, for debugging
 # The disc too, where GRUB can make it: t_isoinstall installs from the
 # one 'make iso64' builds, not from a copy of its own
-test: $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64) browser \
+test: $(KERNEL64) $(INITRD64) browser \
       $(if $(shell command -v grub-mkrescue 2>/dev/null),$(ISO64))
 	python3 -u scripts/run_tests.py $(if $(T),-t$(T)) $(if $(J),-j$(J)) \
-	    $(KERNEL) $(INITRD) $(KERNEL64) $(INITRD64)
+	    $(KERNEL64) $(INITRD64)
 
 # The parsers get their data straight off the network - this target
 # runs them under sanitizers on the host, feeding them corrupted input

@@ -32,13 +32,8 @@
    front - they have to be glued onto the mapping. Different code does
    that in each mode, and this is the only place in this file that
    knows about the mode at all. */
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n) paging64_map_phys((a), (n))
-#else
-#include "include/paging.h"
-#define MAP_PHYS(a, n) paging_map_phys((a), (n))
-#endif
 #include "include/printk.h"
 #include "include/string.h"
 

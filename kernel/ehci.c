@@ -57,13 +57,8 @@
 #include "include/pit.h"
 #include "include/io.h"
 
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
-#else
-#include "include/paging.h"
-#define MAP_PHYS(a, n)   paging_map_phys((a), (n))
-#endif
 
 /* --- registers ------------------------------------------------------- */
 
@@ -768,10 +763,6 @@ int ehci_init(void)
         addr |= (uint64_t)dev.bar[1] << 32;
     if (!addr)
         return give_up("the firmware gave the controller no address");
-#ifndef __x86_64__
-    if (addr > 0xFFFFFFFFull)
-        return give_up("the controller sits above 4 GiB (32-bit mode)");
-#else
     /* The structures below are handed to the controller as 32-bit
        addresses. They are in the kernel image, which is loaded low -
        but "is loaded low" is a promise about somebody else's code, so
@@ -779,7 +770,6 @@ int ehci_init(void)
     if ((uint64_t)(uintptr_t)frame_list >> 32 ||
         (uint64_t)(uintptr_t)&int_buf[INT_PIPES - 1][63] >> 32)
         return give_up("the driver's own structures lie above 4 GiB");
-#endif
 
     if (MAP_PHYS((uintptr_t)addr, 0x1000) < 0)
         return give_up("could not map the controller's window");

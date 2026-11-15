@@ -34,7 +34,6 @@ struct file_desc {
 
 /* The current task's fd table (for the file syscall layer) */
 struct file_desc *task_fds(void);
-int task_slot_open(int inode);   /* is the inode open in any task */
 
 /* fork: a new task with the given address space, inheriting the
    current one's heap, working directory, priority and descriptors */

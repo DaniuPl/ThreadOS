@@ -33,13 +33,8 @@
 /* The registers lie in memory, and that is described by different code
    in each kernel - the only thing in this file that depends on the
    processor mode */
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
-#else
-#include "include/paging.h"
-#define MAP_PHYS(a, n)   paging_map_phys((a), (n))
-#endif
 
 #define E1000_VENDOR 0x8086
 #define E1000_DEVICE 0x100E        /* 82540EM - the one QEMU pretends to be */

@@ -38,13 +38,8 @@
 #include "include/fs.h"
 #include "include/efirt.h"
 
-#ifdef __x86_64__
 #include "../kernel64/paging64.h"
 #define IDENTITY_TOP() paging64_identity_top()
-#else
-#include "include/paging.h"
-#define IDENTITY_TOP() paging_identity_limit()
-#endif
 
 #define DIR_OURS     "/EFI/ThreadOS"
 #define PATH_LOADER  "/EFI/ThreadOS/BOOTX64.EFI"
@@ -349,7 +344,6 @@ static int step_wipe(int n)
 static int step_boot_entry(void)
 {
     plan.entry = -1;
-#ifdef __x86_64__
     struct partition pt;
     int idx = plan.info.mode == INST_WHOLE ? 0 : (int)plan.info.esp_index - 1;
     if (!efirt_available()) {
@@ -373,9 +367,6 @@ static int step_boot_entry(void)
     }
     plan.entry = (int)num;
     return 0;
-#else
-    return 1;
-#endif
 }
 
 int install_step(int n)

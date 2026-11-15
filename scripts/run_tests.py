@@ -11,7 +11,7 @@ otherwise lines from several machines would mix into one unreadable
 column.
 
   make test              all the groups
-  make test T=k64        the 64-bit kernel only
+  make test T=k64core    selected groups
   make test J=1          one after another (for debugging)
 """
 

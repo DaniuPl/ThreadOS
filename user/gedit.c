@@ -284,7 +284,6 @@ static void reread_files(void)
     }
 #endif
     for (int i = 0; i < 128 && nfiles < FILES_MAX; i++) {
-#ifdef __x86_64__
         struct dirent64 e;
         if (sys_readdir(i, &e) != 0)
             break;
@@ -302,25 +301,6 @@ static void reread_files(void)
             continue;
         }
         ecopy(names[nfiles], e.name, NAME_MAX);
-#else
-        char name[FS_NAME_MAX + 1];
-        int32_t r = sys_readdir(i, name);
-        if (r == -1)
-            break;
-        if (r == -2) {
-#ifdef GCODE_IDE
-            ecopy(names[nfiles], name, NAME_MAX);
-            file_is_dir[nfiles++] = 1;
-#endif
-            continue;                    /* a directory, not a file */
-        }
-#ifdef GCODE_IDE
-        if (text_equal(name, IDE_TERM_OUTFILE) ||
-            text_equal(name, IDE_TERM_ERRFILE))
-            continue;
-#endif
-        ecopy(names[nfiles], name, NAME_MAX);
-#endif
 #ifdef GCODE_IDE
         file_is_dir[nfiles] = 0;
 #endif
@@ -331,11 +311,7 @@ static void reread_files(void)
 #ifdef GCODE_IDE
 static void project_read_path(void)
 {
-#ifdef __x86_64__
     sys_getcwd(project_path, sizeof(project_path));
-#else
-    sys_getcwd(project_path);
-#endif
     if (!project_path[0])
         ecopy(project_path, "/", sizeof(project_path));
 }
@@ -508,7 +484,6 @@ static int ide_term_start(void)
         ecopy(note, "Project path is too long for Terminal", sizeof(note) - 1);
         return 0;
     }
-#ifdef __x86_64__
     if (!ide_term_join_path(terminal_err_path,
                             (int)sizeof(terminal_err_path), project_path,
                             IDE_TERM_ERRFILE)) {
@@ -517,11 +492,6 @@ static int ide_term_start(void)
     }
     const char *shell = "ush64";
     const char *errfile = IDE_TERM_ERRFILE;
-#else
-    terminal_err_path[0] = '\0';
-    const char *shell = "sh";
-    const char *errfile = (const char *)0;
-#endif
     int input_fd = -1;
     int32_t pid = uterm_start_one(shell, IDE_TERM_OUTFILE, errfile, &input_fd);
     if (pid < 0) {

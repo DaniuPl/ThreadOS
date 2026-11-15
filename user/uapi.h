@@ -11,11 +11,7 @@
 #ifndef THREADOS_UAPI_H
 #define THREADOS_UAPI_H
 
-#ifdef __x86_64__
 #include "../user64/usys64.h"
 #include "../user64/compat64.h"
-#else
-#include "usys.h"
-#endif
 
 #endif

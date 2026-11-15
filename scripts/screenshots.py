@@ -4,7 +4,7 @@
     python3 scripts/screenshots.py
 
 needs QEMU, grub-mkrescue, mtools, OVMF and Pillow, and a built 64-bit
-system (make kernel64 efi). It boots the 64-bit kernel in QEMU, clicks
+system (make efi). It boots the kernel in QEMU, clicks
 its way through the system the way the tests do - through the same
 harness, scripts/ptest.py - and saves what QEMU's screen shows. So what
 is in docs/ is what the kernel drew.
@@ -25,9 +25,7 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.argv = [sys.argv[0], os.path.join(ROOT, "build", "threados.bin"),
-            os.path.join(ROOT, "build", "initrd.img"),
-            os.path.join(ROOT, "build", "threados64.bin"),
+sys.argv = [sys.argv[0], os.path.join(ROOT, "build", "threados64.bin"),
             os.path.join(ROOT, "build", "initrd64.img")]
 sys.path.insert(0, HERE)
 from ptest import *          # noqa: F401,F403,E402

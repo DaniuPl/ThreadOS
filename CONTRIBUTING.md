@@ -96,19 +96,16 @@ comments in this codebase are a paragraph long because the fault they
 describe cost a day to find; that is the right length for such a
 comment.
 
-## Two kernels, one set of sources
+## One kernel
 
-Everything that does not genuinely depend on the processor mode lives in
-`kernel/` and is **compiled twice**. Only paging, interrupts, context
-switching and the syscall entry have separate implementations in
-`kernel64/`. When adding a driver, put it in `kernel/` and add it to
-both object lists in the `Makefile` - the second compilation is the
-cheapest known way to catch a shift, a width or a pointer that happened
-to be the right size.
+ThreadOS is a 64-bit system. Everything that does not depend on the
+processor mode lives in `kernel/`; paging, interrupts, context switching
+and the syscall entry live in `kernel64/`. When adding a driver, put it
+in `kernel/` and add it to `SHARED64` in the `Makefile`.
 
-The 32-bit kernel is kept and must keep passing its tests. It is no
-longer where new features go, but it is a second opinion on every line
-of shared code.
+There used to be a 32-bit kernel built from the same `kernel/` files. It
+was removed in November 2026 (see the journal). Do not bring back 32-bit
+code paths or `#ifdef __x86_64__` branches.
 
 ## Libraries: use them, bring them in properly
 
@@ -133,14 +130,12 @@ libraries are welcome. Bringing one in means:
   in `make fuzz`.
 
 Programs link libraries against `libc/` musl. Code that goes into the
-kernel must be freestanding (no libc) and build with the kernel's flags
-for both kernels.
+kernel must be freestanding (no libc) and build with the kernel's flags.
 
 ## Before sending a patch
 
 ```sh
-make            # the 32-bit kernel and its initrd
-make kernel64   # the long-mode kernel
+make            # the kernel and its initrd
 make test       # the whole suite - it has to be green
 ```
 
