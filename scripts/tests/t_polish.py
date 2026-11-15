@@ -157,8 +157,10 @@ def terminal(q):
                         cell=TERM_CELL, row_h=TERM_ROW_H, base=TERM_BASE,
                         px=TERM_PX, extra=PL)
     rows = [r for r in rows if r]
+    # (after the prompt: '>', or '#' for the administrator the
+    # desktop's session is)
     check("and edits the line letter by letter (%s)" % rows[-1:],
-          rows[-1].endswith("> bc"))
+          rows[-1].endswith(("> bc", "# bc")))
 
 
 def usb():
