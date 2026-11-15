@@ -29,6 +29,12 @@ static volatile int screen_output = 1;
 void printk_screen_output(int enabled)
 {
     screen_output = enabled != 0;
+    /* Silencing the console means the screen shows a picture of its own
+       (the loading screen), and the console's corner - the uptime - is
+       to stay off it as well, as it does off the desktop. Turning the
+       console back on is for a message that has to be seen, an error
+       at boot or a fatal exception, so the screen goes back with it. */
+    vga_screen_taken(!enabled);
 }
 
 static void kputchar(char c)

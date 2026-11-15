@@ -8,6 +8,10 @@ connects to a server over TCP.
 
 We put the HTTP server up on the host and forward a port to it, so the
 attempt does not depend on any network outside.
+
+Before that the kernel's own commands: what DHCP handed over, a ping to
+the gateway with a command typed ahead while it sleeps, a name looked up
+through a DNS server of ours, and at the end the card's counters.
 """
 
 import os
@@ -74,6 +78,53 @@ def main():
             q.wait_serial("thread64>", timeout=60)
             q.wait_serial("[net] DHCP", timeout=40)
 
+            # --- The kernel's own view of the network -----------------
+            # What DHCP handed over has to be what slirp gives: the
+            # address, the gateway and the name server are slirp's
+            # fixed ones, and the card is the one QEMU was given
+            ifc = q.command("ifconfig", "RX ", timeout=25)
+            check("ifconfig names the card that answered",
+                  "eth0  RTL8139, MAC" in ifc)
+            check("ifconfig shows the address, the gateway and the DNS "
+                  "server from DHCP",
+                  "IP 10.0.2.15" in ifc and "gateway 10.0.2.2" in ifc
+                  and "DNS 10.0.2.3" in ifc)
+
+            # 'ping' sleeps in the shell's thread for seconds; a command
+            # typed meanwhile is to wait in the keyboard's queue and run
+            # right after it, not vanish
+            seen = len(q.serial())
+            q.type_line("ping 10.0.2.2")
+            q.type_line("dns 10.0.2.3")
+            pong = q.wait_serial("DNS server set to", timeout=40)[seen:]
+            m = re.search(r"sent (\d+), received (\d+)", pong)
+            check("ping: every echo came back from the gateway"
+                  + (f" ({m.group(2)}/{m.group(1)})" if m else ""),
+                  m is not None and int(m.group(1)) >= 3
+                  and m.group(1) == m.group(2)
+                  and pong.count("40 B od 10.0.2.2: seq=") == int(m.group(1)))
+            check("a command typed while ping ran is not lost, and runs "
+                  "after it",
+                  "DNS server set to 10.0.2.3" in pong
+                  and pong.index("--- statistics")
+                  < pong.index("DNS server set to"))
+
+            # A name, asked of a server of ours on the host - the answer
+            # is ours, so it cannot have come from anywhere else
+            dns_stop, dns_ok = start_dns_server()
+            if not dns_ok:
+                print("SKIPPED (DNS): " + DNS_HINT)
+            else:
+                try:
+                    q.command("dns 10.0.2.2", "DNS server set", timeout=20)
+                    ns = q.command("run nslookup threados.test",
+                                   "exit code", timeout=40)
+                    check("nslookup resolves a name through the DNS server "
+                          "it was given",
+                          "threados.test has the address 10.0.2.2" in ns)
+                finally:
+                    dns_stop()
+
             seen = len(q.serial())
             q.type_line(f"run unet64 10.0.2.2 {http_port}")
             out = q.wait_serial("[unet64] done, exit code",
@@ -118,6 +169,17 @@ def main():
             check("a shorter download over a longer file leaves only the "
                   "shorter one", SHORT.decode().strip() in out and
                   "the first download" not in out)
+
+            # The card's counters: everything above went through it, so
+            # both have to have moved on from the first 'ifconfig'
+            def counters(text):
+                m = re.search(r"RX (\d+) packets, TX (\d+) packets", text)
+                return (int(m.group(1)), int(m.group(2))) if m else None
+            before = counters(ifc)
+            after = counters(q.command("ifconfig", "RX ", timeout=25))
+            check(f"the RX/TX packet counters grow ({before} -> {after})",
+                  before is not None and after is not None
+                  and after[0] > before[0] and after[1] > before[1])
         finally:
             q.close()
     finally:

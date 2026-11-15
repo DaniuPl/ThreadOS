@@ -122,6 +122,10 @@ def main():
                   m is not None and int(m.group(1), 16) & 0x15 == 0x15)
             check("the guilty program is killed, not the whole system",
                   "killed: Page Fault" in nx)
+            # Killed AT the instruction: a fault that returned to the
+            # program would let it say what it did next
+            check("the program's code after the attempt never ran",
+                  "[nx64] ERROR" not in nx)
 
             # The other road to kernel memory: ask the kernel
             # itself for it. It has to refuse, because it checks the
@@ -139,6 +143,9 @@ def main():
                      if m else ""),
                   m is not None and int(m.group(1), 16) == 0x05
                   and int(m.group(2), 16) == 0x100000)
+            check("the kernel printed none of its memory, and the code "
+                  "after the read never ran",
+                  "[wild64] ERROR" not in wild)
 
             # And what this whole handling exists for
             surv = q23.wait_serial("The system survived", timeout=30)

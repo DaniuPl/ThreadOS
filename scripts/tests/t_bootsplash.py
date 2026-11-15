@@ -1,80 +1,144 @@
 #!/usr/bin/env python3
-"""The graphical boot path shows a splash and keeps its kernel log on serial."""
+"""ThreadOS smoke test: the loading screen of a boot to the desktop.
+
+A boot that ends at the desktop shows a loading screen instead of the
+kernel's text console: a dark background over the whole framebuffer
+the loader set, the name, a line saying what is being done and a
+progress bar. The kernel's log does not stop - it goes to the serial
+port alone, where whoever needs it can still read it.
+
+What is checked is what can be seen, while it can be seen: the screen
+is read from the moment QEMU starts, over and over for as long as the
+splash is up, until the desktop takes its place. The splash covers the
+mode GRUB left - whatever size that is, which the kernel reports on the
+serial port - so the expectations are worked out from that size, the
+way kernel/bootsplash.c works out where to draw.
+
+Run on its own or through scripts/run_tests.py, which starts all the
+groups in parallel.
+"""
 
 import os
-import shutil
-import subprocess
+import re
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, no64
 
-
-def boot_splash(kernel, initrd, boot_args, qemu="qemu-system-i386"):
-    work = tempfile.mkdtemp()
-    iso = tempfile.mktemp(suffix=".iso")
-    log = tempfile.mktemp(suffix=".log")
-    try:
-        os.makedirs(os.path.join(work, "boot", "grub"))
-        shutil.copy(kernel, os.path.join(work, "boot", "threados.bin"))
-        module = ""
-        if initrd and os.path.exists(initrd):
-            shutil.copy(initrd, os.path.join(work, "boot", "initrd.img"))
-            module = "    module2 /boot/initrd.img\n"
-        cfg = (
-            "insmod all_video\n"
-            "set gfxmode=640x480x32\n"
-            "set gfxpayload=keep\n"
-            "set timeout=0\n"
-            "set default=0\n"
-            'menuentry "ThreadOS" {\n'
-            f"    multiboot2 /boot/threados.bin {boot_args}\n"
-            f"{module}"
-            "}\n"
-        )
-        with open(os.path.join(work, "boot", "grub", "grub.cfg"), "w") as fh:
-            fh.write(cfg)
-        made = subprocess.run(
-            ["grub-mkrescue", "-o", iso, work],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode == 0
-        check(f"the boot ISO builds for {qemu}", made)
-        if not made:
-            return
-
-        machine = Qemu(kernel, initrd, cdrom=iso, serial=log, qemu=qemu)
-        try:
-            serial = machine.wait_serial(
-                "[boot] visual loading screen active", timeout=60)
-            check(f"{qemu}: the kernel reports the graphical boot path",
-                  "[boot] visual loading screen active" in serial)
-            w, h, pixel = machine.screen_raw()
-            check(f"{qemu}: the splash fills the 640x480 framebuffer",
-                  w == 640 and h == 480 and pixel(4, 4) == (8, 17, 31))
-        finally:
-            machine.close()
-    finally:
-        shutil.rmtree(work, ignore_errors=True)
-        for path in (iso, log):
-            if os.path.exists(path):
-                os.unlink(path)
+# kernel/bootsplash.c's colours
+SPLASH_BG = (0x08, 0x11, 0x1F)
+SPLASH_TEXT = (0xE8, 0xF0, 0xFA)
+SPLASH_ACCENT = (0x57, 0xB8, 0xFF)
 
 
 def main():
-    if shutil.which("grub-mkrescue") is None:
-        print("SKIPPED: no grub-mkrescue")
-        return 0
+    reason = no64()
+    if reason:
+        print("SKIPPED: " + reason)
+        return summary()
 
-    if KERNEL and os.path.exists(KERNEL):
-        boot_splash(KERNEL, INITRD, "")
+    log = tempfile.mktemp(suffix=".log")
+    q = Qemu(KERNEL, INITRD, serial=log)
+    try:
+        def splash_up(s):
+            """Every corner of the screen in the splash's background"""
+            w, h, at = s
+            return w >= 320 and all(
+                at(x, y) == SPLASH_BG
+                for x, y in ((2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3)))
 
-    if KERNEL64 and os.path.exists(KERNEL64) and \
-            shutil.which("qemu-system-x86_64"):
-        boot_splash(KERNEL64, INITRD64, "desktop live",
-                    qemu="qemu-system-x86_64")
+        def shot():
+            try:
+                return q.screen_raw()
+            except Exception:
+                return None
+
+        first = None
+        end = time.time() + 60
+        while time.time() < end and first is None:
+            s = shot()
+            if s and splash_up(s):
+                first = s
+            time.sleep(0.05)
+        check("the splash covers the whole screen, corner to corner",
+              first is not None)
+        if first is None:
+            return summary()
+        w, h, _ = first
+
+        # Where bootsplash.c puts things, for this size
+        scale = 3 if w >= 640 else 2
+        cy = h // 2
+        tx, ty = (w - 8 * 8 * scale) // 2, cy - 58 * scale // 2
+        bar_w = min(w - 64, 480)
+        bx, by = (w - bar_w) // 2, cy + 38
+        # The console draws its 80x25 cells of 8x8 in the middle of the
+        # screen; above the name nothing of the splash's is there
+        top = (h - 25 * 8) // 2
+        band = [(x, y) for y in range(top, ty - 2)
+                for x in range((w - 80 * 8) // 2, (w + 80 * 8) // 2)]
+
+        # Watch it for as long as it is up
+        title_px, dirty, shots, filled = 0, 0, 0, []
+        s = first
+        end = time.time() + 60
+        while time.time() < end:
+            if s and (s[0], s[1]) == (w, h) and splash_up(s):
+                at = s[2]
+                shots += 1
+                title_px = max(title_px, sum(
+                    at(x, y) == SPLASH_TEXT
+                    for y in range(ty, ty + 8 * scale)
+                    for x in range(tx, tx + 8 * 8 * scale)))
+                filled.append(sum(at(x, by + 2) == SPLASH_ACCENT
+                                  for x in range(bx, bx + bar_w)))
+                dirty += any(at(x, y) != SPLASH_BG for x, y in band)
+            elif s and s[0] >= 640 and not splash_up(s):
+                break                      # the desktop is there
+            s = shot()
+            time.sleep(0.05)
+
+        serial = q.wait_serial("[boot] visual loading screen active",
+                               timeout=30)
+        check("the kernel reports the graphical boot path",
+              "[boot] visual loading screen active" in serial)
+        m = re.search(r"Framebuffer: (\d+)x(\d+)", serial)
+        check("the splash fills the framebuffer the loader set (%dx%d, "
+              "the kernel says %s)" % (w, h, m.group(0) if m else "nothing"),
+              m is not None and (int(m.group(1)), int(m.group(2))) == (w, h))
+        check("the name is drawn in the middle (%d of its pixels)"
+              % title_px, title_px > 200)
+        # The steps are uneven: the first two last seconds each, the
+        # rest come and go in a fraction of one. So what is asked is
+        # that some later look found the bar longer than the first look
+        # that found it at all - the very first may catch the background
+        # drawn and the bar not yet.
+        drawn = [f for f in filled if f > 0]
+        check("the progress bar begins to fill (%d of %d pixels)"
+              % (drawn[0] if drawn else 0, bar_w), bool(drawn))
+        check("and fills further as the boot goes on (%d -> %d pixels)"
+              % (drawn[0] if drawn else 0, max(filled or [0])),
+              bool(drawn) and max(drawn) > drawn[0])
+        check("nothing of the console is drawn over the splash - no log "
+              "line, no uptime in its corner (%d of %d looks)"
+              % (dirty, shots), shots > 0 and dirty == 0)
+
+        # The log goes on, on the serial port only, past the moment the
+        # splash came up
+        after = q.wait_serial("The 64-bit system is ready", timeout=60)
+        check("the kernel's log carries on on the serial port",
+              after.find("initrd:") >
+              after.find("[boot] visual loading screen active"))
+
+        check("and the desktop takes the splash's place",
+              q.wait_desktop(timeout=60))
+    finally:
+        q.close()
+        if os.path.exists(log):
+            os.unlink(log)
 
     return summary()
 

@@ -1199,8 +1199,11 @@ static void execute(const char *line)
             printk("run: give a program name (see 'ls')\n");
             return;
         }
-        /* The name is the first word, the rest are arguments */
-        static char prog[16];
+        /* The name is the first word, the rest are arguments. On this
+           thread's stack: the name is printed again once the program
+           has ended, and meanwhile another console's shell may have
+           run a program of its own. */
+        char prog[16];
         int pn = 0;
         while (name[pn] && name[pn] != ' ' && pn < (int)sizeof(prog) - 1) {
             prog[pn] = name[pn];

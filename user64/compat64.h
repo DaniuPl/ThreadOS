@@ -479,6 +479,12 @@ static inline int32_t tcp_recv(int32_t conn, void *buf, uint32_t max,
                                uint32_t timeout_ms)
 {
     (void)timeout_ms;
+    /* The kernel moves at most 1400 bytes a call and refuses a larger
+       request outright. A stream may always give less than was asked,
+       so callers loop anyway - but a TLS record longer than that,
+       asked for whole, was a failed handshake. */
+    if (max > 1400)
+        max = 1400;
     return (int32_t)sys_tcp_recv((int)conn, buf, max);
 }
 

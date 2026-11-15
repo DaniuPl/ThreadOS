@@ -5,11 +5,11 @@ A file written by a ring 3 process and a file written from the kernel's
 shell are to be the same file seen by both - and both are to survive a
 restart of the machine. That last part matters most here: everything
 else can be faked with a cache, and a SECOND BOOT on the same disk image
-cannot.
+cannot. After the second boot the disk image is also read on the host,
+by code that knows the layout and not the kernel's code.
 
-At the end of the first boot we call 'crash', that is, a deliberate page
-fault in the kernel. The diagnostic is to give the exception number and
-the address from CR2, and the system is to stop rather than blunder on.
+Everything is read from the serial port: GRUB gives the kernel a
+framebuffer, so the VGA character memory says nothing.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -22,135 +22,133 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, TfsImage
+
+PROMPT = "64>"
+RING3 = "ThreadOS 64: a file written from ring 3"   # user64/fileio64.c
+TEXT = "hello-from-the-tfs-disk"
 
 
 def main():
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
+    slog = tempfile.mktemp(suffix=".log")
 
-    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
+    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
     try:
-        q.wait_for("ThreadOS shell", timeout=40)
+        boot = q.wait_serial("thread64>", timeout=90)
+        check("the first boot formatted the empty disk",
+              "TFS: an empty disk formatted" in boot)
+        q.wait_serial("[net] DHCP", timeout=30)
+        time.sleep(0.5)
 
-        # --- The file system on the disk (TFS) ---
         # A ring 3 process writes and reads a file with syscalls
-        q.type_line("run fileio")
-        screen = q.wait_for("[fileio] OK")
+        out = q.command("run fileio64", "[fileio64] done", timeout=40)
         check("a ring 3 process wrote and read a file off the disk",
-              "read off the disk: a file written by a ring 3 process" in screen)
+              "written and read back match byte for byte" in out
+              and "[fileio64] done, exit code 0" in out)
 
-        # The kernel's shell: write -> cat (a write and a read within one boot)
-        q.type_line("write greeting hello-from-the-tfs-disk")
+        # The kernel's shell: write -> cat (a write and a read within
+        # one boot)
+        out = q.command("write greeting " + TEXT, PROMPT)
         check("writing a file from the kernel's shell",
-              "wrote" in q.wait_for("wrote"))
-        q.type_line("cat greeting")
-        check("reading the written file back (cat)",
-              "hello-from-the-tfs-disk" in q.wait_for("hello-from-the-tfs-disk"))
+              "write: 'greeting' written" in out)
+        out = q.command("cat greeting", PROMPT)
+        check("reading the written file back (cat)", TEXT in out)
 
-        # fls shows both files
-        q.type_line("fls")
-        screen = q.wait_for("Root directory")
-        check("fls lists the files on the disk",
-              "greeting" in screen and "ring3.txt" in screen)
+        # fls shows both files - the ring 3 one too, so it is one disk
+        out = q.command("fls", "Used:")
+        check("fls lists both files on the disk",
+              "greeting  (" in out and "zring3  (" in out)
 
-        # cat of a file that does not exist
-        q.type_line("cat nofile")
+        out = q.command("cat nofile", PROMPT)
         check("cat reports that the file is missing",
-              "there is no file 'nofile'" in q.wait_for("there is no file"))
+              "there is no file 'nofile'" in out)
 
-        # The 'cat' program in ring 3: it reads a file through an fd and
-        # writes to fd 1 (a unified I/O model: read the file -> write to
-        # the console). We clear the screen so as not to catch the old
-        # echo of 'hello-from-the-tfs-disk'.
-        q.type_line("clear")
-        time.sleep(0.3)
-        q.type_line("run cat greeting")
-        check("the ring 3 'cat' reads a file through an fd and writes to fd 1",
-              "hello-from-the-tfs-disk" in q.wait_for("hello-from-the-tfs-disk",
-                                                timeout=20))
-
-        # At the end: crash should cause a page fault with a diagnostic
-        q.type_line("crash")
-        screen = q.screen()
-        check("the page fault was served (exception 14)",
-              "CPU EXCEPTION 14: Page Fault" in screen)
-        check("CR2 points at the faulty address",
-              "(CR2): e0000000" in screen)
-        check("the system stopped after the exception", "The system has stopped" in screen)
+        # A ring 3 'cat': it reads a file through a descriptor and
+        # writes to descriptor 1 - the file the kernel shell wrote
+        out = q.command("run ucat64 greeting", "[ucat64] done", timeout=30)
+        check("a ring 3 cat reads the shell's file through an fd",
+              TEXT in out.split("run ucat64 greeting", 1)[-1]
+              and "[ucat64] done, exit code 0" in out)
     finally:
         q.close()
 
     # --- Persistence: a second boot on THE SAME disk ---
     print("--- a second boot (the same disk) ---")
-    q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE)
+    slog2 = tempfile.mktemp(suffix=".log")
+    q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
     try:
-        screen = q2.wait_for("ThreadOS shell")
-        check("the second boot: the disk was found"
-              " (already formatted, no second format)",
-              "+ TFS ready" in screen and "formatted" not in screen)
+        boot = q2.wait_serial("thread64>", timeout=90)
+        check("the second boot found the file system and did not format "
+              "it again",
+              "+ TFS ready" in boot and "formatted" not in boot)
+        q2.wait_serial("[net] DHCP", timeout=30)
+        time.sleep(0.5)
 
-        q2.type_line("fls")
-        screen = q2.wait_for("Root directory")
+        out = q2.command("fls", "Used:")
         check("the files survived the restart (fls)",
-              "greeting" in screen and "ring3.txt" in screen)
+              "greeting  (" in out and "zring3  (" in out)
+        out = q2.command("cat greeting", PROMPT)
+        check("the file's content survived the restart (cat)", TEXT in out)
+        out = q2.command("cat zring3", PROMPT)
+        check("the file written by ring 3 survived the restart", RING3 in out)
 
-        q2.type_line("cat greeting")
-        check("the file's content survived the restart (cat)",
-              "hello-from-the-tfs-disk" in q2.wait_for("hello-from-the-tfs-disk"))
-
-        q2.type_line("cat ring3.txt")
-        check("the file written by ring 3 survived the restart",
-              "a file written by a ring 3 process" in q2.wait_for("ring3"))
-
-        # --- a new name, without moving a single block ------------------
-        # 'mv' used to read the whole file and write it out again; the
-        # blocks of a file do not move when it is renamed, and now
-        # neither does the code pretend they do.
-        q2.type_line("mv greeting powitanie")
-        q2.wait_for("mv:", timeout=20)
-        # The screen keeps what scrolled past, and 'greeting' was
-        # printed on it a moment ago - so it is wiped before the
-        # listing is read, or the old name would be found in the old
-        # output rather than in the directory.
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("fls")
-        screen = q2.wait_for("Root directory")
+        # --- a new name, without moving a single block ---------------
+        out = q2.command("run core mv greeting powitanie", "[core] done")
+        check("mv ends without an error", "[core] done, exit code 0" in out)
+        out = q2.command("fls", "Used:")
         check("mv gives a new name, and the old one goes",
-              "powitanie" in screen and "greeting" not in screen)
-
-        q2.type_line("cat powitanie")
-        check("and the content is the same - the blocks did not move",
-              "hello-from-the-tfs-disk" in q2.wait_for("hello-from-the-tfs-disk"))
+              "powitanie  (" in out and "greeting  (" not in out)
+        out = q2.command("cat powitanie", PROMPT)
+        check("and the content is the same", TEXT in out)
 
         # The rules a rename has: the name must be free, and the source
         # must exist. A rename that overwrites is a delete nobody asked
         # for.
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("mv powitanie ring3.txt")
-        screen = q2.wait_for("mv:", timeout=20)
-        check("it does not allow a name that is taken", "cannot" in screen)
-
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("mv nosuchfile whatever")
-        screen = q2.wait_for("mv:", timeout=20)
+        out = q2.command("run core mv powitanie zring3", "[core] done")
+        check("it does not allow a name that is taken",
+              "mv: cannot move 'powitanie' to 'zring3'" in out
+              and "[core] done, exit code 1" in out)
+        out = q2.command("run core mv nosuchfile whatever", "[core] done")
         check("and it does not rename something that is not there",
-              "cannot" in screen)
-
-        q2.type_line("clear")
-        time.sleep(1)
-        q2.type_line("fls")
-        screen = q2.wait_for("Root directory")
+              "mv: cannot move 'nosuchfile'" in out
+              and "[core] done, exit code 1" in out)
+        out = q2.command("fls", "Used:")
         check("after both refusals the files are as they were",
-              "powitanie" in screen and "ring3.txt" in screen)
+              "powitanie  (" in out and "zring3  (" in out
+              and "whatever" not in out)
+        out = q2.command("cat zring3", PROMPT)
+        check("and the file whose name was asked for is untouched",
+              RING3 in out)
     finally:
         q2.close()
-        if os.path.exists(disk):
-            os.unlink(disk)
+
+    # --- The image read on the host --------------------------------
+    # By TfsImage, written from the layout's description: a rename that
+    # copied the blocks and left the old ones taken would show here as
+    # a leak, and a name changed only in a cache as the old name
+    try:
+        img = TfsImage(disk)
+        check("on the disk image: the renamed file holds the shell's text",
+              (img.read("/powitanie") or b"").decode(errors="replace")
+              .strip() == TEXT)
+        check("on the disk image: the ring 3 file holds what the program "
+              "wrote",
+              (img.read("/zring3") or b"").decode(errors="replace")
+              .strip() == RING3)
+        check("on the disk image: the old name is gone",
+              img.find("/greeting") is None)
+        taken, past, free_held = img.leaks()
+        check(f"on the disk image: every block taken belongs to a file "
+              f"({len(taken)} taken but not held, {len(past)} past a "
+              f"file's end, {len(free_held)} held but free)",
+              not taken and not past and not free_held)
+    finally:
+        for f in (disk, slog, slog2):
+            if os.path.exists(f):
+                os.unlink(f)
 
     return summary()
 

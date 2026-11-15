@@ -72,8 +72,17 @@ def main():
                   and int(m.group(3)) > 0)
             check("the TFS comes up on the disk seen through AHCI",
                   m is not None and m.group(2) == "ready")
+            # The disk was empty: the file system on it was WRITTEN
+            # through the controller, not merely found there
+            check("the TFS formatted the empty disk through AHCI",
+                  re.search(r"TFS: an empty disk formatted \(\d+ blocks",
+                            q23.serial()) is not None)
 
-            q23.type_line("disk")
+            # Writing a raw sector is the admin's to do: the shell
+            # starts as a plain user, so it goes through sudo
+            q23.type_line("sudo disk")
+            q23.wait_serial("password:", timeout=30)
+            q23.type_line("thread")
             io = q23.wait_serial("disk: sector", timeout=30)
             m = re.search(r"disk: sector (\d+) written and "
                           r"read back, differences (\d+)", io)

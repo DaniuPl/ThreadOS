@@ -113,8 +113,75 @@ def main():
                               % https_port, "exit code", timeout=90)
             check("the certificate was checked against the store from the disk",
                   "certificate checked" in ver)
+            # The address is the one our DNS server gives. A name taken
+            # for an address used to come out as 255.255.255.255, which
+            # QEMU hands to the host as well - so everything above
+            # passed without the DNS ever being asked.
+            check("the name was resolved through the DNS, not taken for "
+                  "an address",
+                  "[httpget] TLS threados.test (10.0.2.2:%d)" % https_port
+                  in ver)
             check("the content was fetched over a verified TLS",
                   "HTTP 200, content %d B" % len(PAGE) in ver)
+
+            # --- Certificates that are not RSA, and a chain -----------
+            # Each server's issuer becomes the one trusted root before
+            # the server is asked, so "checked" means the signature in
+            # CertificateVerify and the chain both held.
+            def trust(der):
+                q.command("run httpget 10.0.2.2 %d /%s roots.der"
+                          % (http_port, der), "exit code", timeout=60)
+
+            # A server with a certificate on the P-256 curve: the whole
+            # chain and CertificateVerify go through ECDSA
+            ec_port, ec_stop = start_https_server(ec=True)
+            if ec_port is not None:
+                try:
+                    trust("eccert.der")
+                    got = q.command("run httpget https://threados.test %d /"
+                                    % ec_port, "exit code", timeout=120)
+                    check("a certificate on the P-256 curve checked (ECDSA)",
+                          "certificate checked" in got)
+                    check("the content was fetched over TLS with an EC key",
+                          "HTTP 200, content %d B" % len(PAGE) in got)
+                finally:
+                    ec_stop()
+
+            # The P-384 curve, with SHA-384 signatures - ISRG Root X2,
+            # among others, is like that
+            p384_port, p384_stop = start_https_server(ec=True, p384=True)
+            if p384_port is not None:
+                try:
+                    trust("p384cert.der")
+                    got = q.command("run httpget https://threados.test %d /"
+                                    % p384_port, "exit code", timeout=150)
+                    check("a certificate on the P-384 curve checked "
+                          "(ECDSA + SHA-384)", "certificate checked" in got)
+                finally:
+                    p384_stop()
+
+            # A two-level chain: only the root is trusted, so the client
+            # has to go through the intermediate the server sends
+            ch_port, ch_stop = start_https_chain_server()
+            if ch_port is not None:
+                try:
+                    trust("rootca.der")
+                    got = q.command("run httpget https://threados.test %d /"
+                                    % ch_port, "exit code", timeout=120)
+                    check("a chain through an intermediate closed up to a "
+                          "trusted root", "certificate checked" in got)
+                finally:
+                    ch_stop()
+
+            # The RSA server again, trusted, but asked at its IP address:
+            # the certificate does not name it, so the connection is to
+            # be torn down - a valid certificate for somebody else
+            trust("cert.der")
+            bad = q.command("run httpget https://10.0.2.2 %d /" % https_port,
+                            "exit code", timeout=90)
+            check("a wrong name in the certificate is refused",
+                  "the certificate does not cover this name" in bad
+                  and "HTTP 200" not in bad)
 
             # --- The cryptography and X.509 in themselves ---
             kr = q.command("run cryptotest", "exit code", timeout=120)
