@@ -189,6 +189,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/tlbtest64.elf \
                $(BUILD)/user64/mmapfile64.elf \
                $(BUILD)/user64/mmapzap64.elf \
+               $(BUILD)/user64/deep64.elf \
                $(BUILD)/user64/dynlib.elf \
                $(BUILD)/user64/cores.elf \
                $(BUILD)/user64/mutex.elf \
@@ -679,6 +680,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    tlbtest64=$(BUILD)/user64/tlbtest64.elf \
 	    mmapfile64=$(BUILD)/user64/mmapfile64.elf \
 	    mmapzap64=$(BUILD)/user64/mmapzap64.elf \
+	    deep64=$(BUILD)/user64/deep64.elf \
 	    dynlib=$(BUILD)/user64/dynlib.elf \
 	    cores=$(BUILD)/user64/cores.elf \
 	    mutex=$(BUILD)/user64/mutex.elf prodcons=$(BUILD)/user64/prodcons.elf \
