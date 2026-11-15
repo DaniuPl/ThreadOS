@@ -30,12 +30,15 @@ def main():
     gdisk = tempfile.mktemp(suffix=".img")
     with open(gdisk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
-    q9 = Qemu(KERNEL, INITRD, gdisk)
+    q9 = Qemu(KERNEL, INITRD, gdisk, serial=tempfile.mktemp(suffix=".log"))
     try:
         q9.wait_desktop()
-        q9.type_line("write report abc")   # a file on the disk (before the desktop)
-        time.sleep(0.5)
-        time.sleep(1.0)
+        # A file on the disk, at its root: the shell behind the desktop
+        # stands in the account's home, while Files from the menu opens
+        # on the whole disk
+        check("the shell wrote a file to the disk",
+              "written" in q9.command("write /report abc", "written",
+                                      timeout=20))
 
         def near(px, want, tol=45):
             return all(abs(px[i] - want[i]) <= tol for i in range(3))
