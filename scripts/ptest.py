@@ -2048,7 +2048,10 @@ class Qemu:
             # Booting as from a real board: the kernel is loaded by GRUB, not by
 # QEMU
             cmd += ["-cdrom", cdrom, "-boot", "d"]
-        elif not esp:
+        elif not esp and not uefi:
+            # Under UEFI firmware with no disc and no stick the machine
+            # boots off its disk, the way an installed one does - and
+            # QEMU refuses -kernel for a 64-bit ELF in any case
             cmd += ["-kernel", kernel]
             if append:
                 cmd += ["-append", append]
