@@ -283,10 +283,11 @@ def main():
             # once a desktop session is logged in, keys typed with no window
             # focused no longer reach the kernel's shell, and the terminal
             # runs programs rather than shell commands such as 'write'.
-            q.type_line("fileio")
-            time.sleep(2)
+            # (fileio64 writes 'zring3' and reads it back)
+            q.type_line("fileio64")
+            wait_for_row(q, "match byte for byte", **big)
             for name in ("fileone", "filetwo", "other"):
-                q.type_line("cp ring3.txt " + name)
+                q.type_line("cp zring3 " + name)
                 time.sleep(1.5)
 
             # --- Tab finishes what is being typed -----------------------
@@ -297,7 +298,7 @@ def main():
             q.sendkey("tab")
             time.sleep(1.5)
             q.sendkey("ret")
-            rows = wait_for_row(q, "ring 3 process", **big)
+            rows = wait_for_row(q, "written from ring 3", **big)
             check("Tab finishes a name when only one matches "
                   "(cat oth -> other)",
                   any("cat other" in r for r in rows))
