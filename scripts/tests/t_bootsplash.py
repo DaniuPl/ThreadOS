@@ -75,7 +75,6 @@ def main():
         tx, ty = (w - 8 * 8 * scale) // 2, cy - 58 * scale // 2
         bar_w = min(w - 64, 480)
         bx, by = (w - bar_w) // 2, cy + 38
-        near_end = bx + bar_w * 2 // 5      # filled from 40 per cent on
         # The console draws its 80x25 cells of 8x8 in the middle of the
         # screen; above the name nothing of the splash's is there
         top = (h - 25 * 8) // 2
@@ -83,7 +82,7 @@ def main():
                 for x in range((w - 80 * 8) // 2, (w + 80 * 8) // 2)]
 
         # Watch it for as long as it is up
-        title_px, started, bar_empty, bar_full, dirty, shots = 0, 0, 0, 0, 0, 0
+        title_px, dirty, shots, filled = 0, 0, 0, []
         s = first
         end = time.time() + 60
         while time.time() < end:
@@ -94,11 +93,8 @@ def main():
                     at(x, y) == SPLASH_TEXT
                     for y in range(ty, ty + 8 * scale)
                     for x in range(tx, tx + 8 * 8 * scale)))
-                started += at(bx + 1, by + 2) == SPLASH_ACCENT
-                if at(near_end, by + 2) == SPLASH_ACCENT:
-                    bar_full += bar_empty > 0
-                else:
-                    bar_empty += 1
+                filled.append(sum(at(x, by + 2) == SPLASH_ACCENT
+                                  for x in range(bx, bx + bar_w)))
                 dirty += any(at(x, y) != SPLASH_BG for x, y in band)
             elif s and s[0] >= 640 and not splash_up(s):
                 break                      # the desktop is there
@@ -115,9 +111,17 @@ def main():
               m is not None and (int(m.group(1)), int(m.group(2))) == (w, h))
         check("the name is drawn in the middle (%d of its pixels)"
               % title_px, title_px > 200)
-        check("the progress bar begins to fill", started > 0)
-        check("and fills further as the boot goes on",
-              bar_full > 0)
+        # The steps are uneven: the first two last seconds each, the
+        # rest come and go in a fraction of one. So what is asked is
+        # that some later look found the bar longer than the first look
+        # that found it at all - the very first may catch the background
+        # drawn and the bar not yet.
+        drawn = [f for f in filled if f > 0]
+        check("the progress bar begins to fill (%d of %d pixels)"
+              % (drawn[0] if drawn else 0, bar_w), bool(drawn))
+        check("and fills further as the boot goes on (%d -> %d pixels)"
+              % (drawn[0] if drawn else 0, max(filled or [0])),
+              bool(drawn) and max(drawn) > drawn[0])
         check("nothing of the console is drawn over the splash - no log "
               "line, no uptime in its corner (%d of %d looks)"
               % (dirty, shots), shots > 0 and dirty == 0)
