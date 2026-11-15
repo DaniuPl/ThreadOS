@@ -63,7 +63,9 @@ every process once. On the 64-bit side, programs can also be built
 against musl (`libc/`, with upstream musl in `third_party/musl`). `js`
 (QuickJS) is built this way. Such programs have POSIX threads: mutexes,
 condition variables, semaphores, thread-local variables, and threads that
-run on every core (`libc/tests/pthreadtest.c`).
+run on every core (`libc/tests/pthreadtest.c`). SQLite (`sqlite3`) is the
+first library brought in whole: the upstream amalgamation, built
+unchanged.
 C++ programs use the host compiler's libstdc++ on top of musl, without
 exceptions (`libc/cxx/`). The first is litehtml (`third_party/litehtml`),
 an HTML/CSS layout engine, which lays pages out on ThreadOS exactly as
@@ -219,7 +221,7 @@ user64/          64-bit-only programs, the 64-bit syscall layer
 libc/            musl port: replaced files (overlay/), linker script, tests
 apps/js/         the QuickJS host (`js`)
 apps/browser/    the litehtml browser: its test, and the patches to litehtml
-third_party/     unmodified upstream code: musl 1.2.5, QuickJS, litehtml, FFmpeg, Brotli data
+third_party/     unmodified upstream code: musl 1.2.5, QuickJS, litehtml, FFmpeg, SQLite, Brotli data
 fonts/           DejaVu subsets used by the kernel and programs
 scripts/         build helpers, release signing, test runner and tests
 tests/fuzz/      host-side fuzzing harnesses

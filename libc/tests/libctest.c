@@ -246,6 +246,100 @@ static void files(void)
 	rmdir("libc_dir");
 }
 
+/* ftruncate cuts a file back and grows it with zeros: a database
+   rolling back a transaction depends on both */
+static void truncation(void)
+{
+	const char *name = "libc_tr.bin";
+	unsigned char buf[6000];
+	for (int i = 0; i < (int)sizeof(buf); i++)
+		buf[i] = (unsigned char)(i * 7 + 1);
+	int fd = open(name, O_CREAT | O_TRUNC | O_RDWR, 0644);
+	if (fd < 0 || write(fd, buf, sizeof(buf)) != (ssize_t)sizeof(buf)) {
+		printf("ftruncate: cannot make the file\n");
+		return;
+	}
+	struct stat st;
+	printf("ftruncate to 1500: %d\n", ftruncate(fd, 1500));
+	fstat(fd, &st);
+	printf("size %lld\n", (long long)st.st_size);
+	printf("ftruncate to 3100: %d\n", ftruncate(fd, 3100));
+	fstat(fd, &st);
+	unsigned char back[4000];
+	ssize_t n = pread(fd, back, sizeof(back), 0);
+	int same = n >= 1500 && !memcmp(back, buf, 1500);
+	int zeros = 1;
+	for (ssize_t i = 1500; i < n; i++)
+		zeros &= back[i] == 0;
+	printf("size %lld, read %zd, the first 1500 kept %d, the rest zeros %d\n",
+	       (long long)st.st_size, n, same, zeros);
+	/* a write past the end leaves zeros between */
+	if (pwrite(fd, "xyz", 3, 5000) != 3)
+		printf("pwrite past the end failed\n");
+	fstat(fd, &st);
+	n = pread(fd, back, 10, 4995);
+	printf("pwrite at 5000: size %lld, around it %d %d %d %c%c%c\n",
+	       (long long)st.st_size, back[0], back[4], (int)n,
+	       back[5], back[6], back[7]);
+	/* one file, one inode number, by name and by descriptor alike -
+	   SQLite compares the two to tell its file was not replaced */
+	struct stat by_name, other;
+	int fd2 = open("libc_tr2.bin", O_CREAT | O_WRONLY, 0644);
+	fstat(fd, &st);
+	stat(name, &by_name);
+	stat("libc_tr2.bin", &other);
+	printf("inode: by name = by descriptor %d, another file differs %d\n",
+	       st.st_ino == by_name.st_ino, st.st_ino != other.st_ino);
+	close(fd2);
+	unlink("libc_tr2.bin");
+	printf("ftruncate to 0: %d\n", ftruncate(fd, 0));
+	fstat(fd, &st);
+	printf("size %lld\n", (long long)st.st_size);
+	close(fd);
+	unlink(name);
+}
+
+/* A file unlinked while open lives on behind its descriptor: that is
+   how tmpfile() works, and how a database keeps its temporary files */
+static void unlinked(void)
+{
+	const char *name = "libc_ul.txt";
+	int fd = open(name, O_CREAT | O_TRUNC | O_RDWR, 0644);
+	if (fd < 0 || write(fd, "still here after unlink\n", 24) != 24) {
+		printf("unlinked: cannot make the file\n");
+		return;
+	}
+	printf("unlink while open: %d\n", unlink(name));
+	printf("the name is gone: %d\n", access(name, F_OK) != 0 && errno == ENOENT);
+	int again = open(name, O_CREAT | O_EXCL | O_WRONLY, 0644);
+	printf("a new file may take the name: %d\n", again >= 0);
+	if (again >= 0) {
+		close(again);
+		unlink(name);
+	}
+	char buf[64] = {0};
+	if (write(fd, "and more\n", 9) != 9)
+		printf("unlinked: write failed\n");
+	ssize_t n = pread(fd, buf, sizeof(buf) - 1, 0);
+	printf("the descriptor still reads it: %zd [%s]\n", n, strtok(buf, "\n"));
+	close(fd);
+
+	FILE *t = tmpfile();
+	if (!t) {
+		printf("tmpfile: %s\n", strerror(errno));
+		return;
+	}
+	for (int i = 0; i < 500; i++)
+		fprintf(t, "%d,", i * i);
+	rewind(t);
+	long sum = 0;
+	int v;
+	while (fscanf(t, "%d,", &v) == 1)
+		sum += v;
+	printf("tmpfile: written, read back, sum %ld\n", sum);
+	fclose(t);
+}
+
 static void processes(void)
 {
 	pid_t p = fork();
@@ -288,6 +382,20 @@ static void timing(void)
 
 int main(int argc, char **argv)
 {
+	if (argc > 1 && !strcmp(argv[1], "hold")) {
+		/* For the test of what a crash leaves behind: a file unlinked
+		   while open, held until the machine is switched off */
+		int fd = open("libc_held.bin", O_CREAT | O_TRUNC | O_RDWR, 0644);
+		static char block[5000];
+		memset(block, 'h', sizeof(block));
+		if (fd < 0 || write(fd, block, sizeof(block)) != (ssize_t)sizeof(block) ||
+		    unlink("libc_held.bin"))
+			return 1;
+		printf("holding an unlinked file\n");
+		fflush(stdout);
+		for (;;)
+			sleep(1);
+	}
 	atexit(bye);
 	printf("args: %d [%s]\n", argc, argc > 1 ? argv[1] : "");
 	numbers();
@@ -298,6 +406,8 @@ int main(int argc, char **argv)
 		printf("longjmp: back from 1000 calls deep\n");
 	heap();
 	files();
+	truncation();
+	unlinked();
 	fflush(stdout);
 	processes();
 	timing();

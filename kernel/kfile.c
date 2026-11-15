@@ -76,6 +76,9 @@ static void release_fd(struct file_desc *fd)
             pipe_close_writer(fd->pipe);
     }
     fd->used = 0;
+    /* an unlinked file goes with the last descriptor on it */
+    if (fd->kind == FD_FILE)
+        fs_slot_closed(fd->inode);
 }
 
 int file_close(int fd)

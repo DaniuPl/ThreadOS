@@ -64,6 +64,14 @@ int fs_owner(int slot);
 int fs_can_write(int slot);
 int fs_set_owner(int slot, int uid);
 int fs_truncate(int slot);
+/* The file made 'size' bytes long: cut back (the blocks past the end
+   freed, the rest of the last block zeroed) or grown (a hole of zeros) */
+int fs_truncate_to(int slot, uint32_t size);
+/* A descriptor on the inode was closed: an unlinked file goes once the
+   last one is. Each kernel's task code calls it, and answers in turn
+   whether any descriptor still holds an inode (task_slot_open,
+   task64_slot_open). */
+void fs_slot_closed(int slot);
 int fs_read_at(int slot, uint32_t off, void *buf, uint32_t len);
 /* The disk block under the 'index'-th block of a file (alloc=1
    allocates it); 0 = error. Plus the first ATA sector of that block -

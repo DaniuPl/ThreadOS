@@ -11,6 +11,7 @@ as code of our own around it (`apps/js`).
 | `quickjs/`| QuickJS, a JavaScript engine (core)    | 2026-06-04 | MIT (`LICENSE`)   | https://bellard.org/quickjs/ |
 | `litehtml/` | litehtml, an HTML/CSS layout engine, with gumbo (an HTML5 parser) inside | git 8848b99 (2026-10-12); gumbo 0.14.1 | BSD-3-Clause (`LICENSE`); gumbo Apache-2.0 (`src/gumbo/LICENSE`) | https://github.com/litehtml/litehtml |
 | `ffmpeg-9.0.tar.xz` | FFmpeg demuxers and audio/video decoders | 9.0 | LGPL-2.1-or-later (`COPYING.LGPLv2.1`) | https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz |
+| `sqlite-amalgamation-3540100.zip` | SQLite, an SQL database engine, and its command-line shell | 3.54.1 | Public domain (the header of `sqlite3.c`) | https://www.sqlite.org/2026/sqlite-amalgamation-3540100.zip (SHA3-256 `92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30`, as sqlite.org lists it) |
 
 Trimmed, not modified:
 
@@ -28,6 +29,11 @@ Trimmed, not modified:
   `.gperf` and `tag.in` they were generated from). Two files are built
   from a patched copy, `apps/browser/patches/`, which says what each
   change is and why - the directory here stays exactly upstream's.
+- **SQLite**: the amalgamation archive is kept intact and unpacked into
+  the build directory (`scripts/unzipflat.py`). It is built thread-safe,
+  without loadable extensions and without memory-mapped I/O, with the
+  math functions and FTS5 (`SQLITE_OPTS` in the `Makefile`). The shell
+  is SQLite's own `shell.c`.
 - **FFmpeg**: the upstream source archive is kept intact. The 64-bit
   build enables only the MOV/MP4, MP3, WAV, AAC, FLAC, Ogg, Matroska and
   AVI demuxers and the codecs used for those formats. GPL and version 3

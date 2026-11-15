@@ -36,7 +36,9 @@
 #include "../kernel64/task64.h"
 #define current_level task64_level
 #define current_uid task64_uid
+#define slot_open task64_slot_open
 #else
+#define slot_open task_slot_open
 #define current_level task_level
 #define current_uid task_uid
 #endif
@@ -57,6 +59,11 @@
 #define FS_TYPE_MASK 1
 #define FS_OWNER_SHIFT 1
 #define FS_NOTFOUND  (-2)
+/* The parent of a file unlinked while still open: it has no name and
+   is in no directory, and its blocks go when the last descriptor on it
+   closes (fs_slot_closed). One left on the disk by a crash is freed at
+   the next mount. */
+#define FS_ORPHAN    (-3)
 
 struct inode {
     char name[FS_NAME_MAX + 1];   /* 64 B, with a NUL */
@@ -358,6 +365,28 @@ static int fit(uint32_t start, uint32_t sectors)
     return total_blocks > DATA_START;
 }
 
+/* The bitmap and the inode table off the disk, and what a crash left
+   behind cleared: files unlinked while open, whose last close never
+   came */
+static void load_tables(void)
+{
+    for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
+        block_read(BITMAP_START + i, bitmap + i * FS_BLOCK);
+    uint8_t *dst = (uint8_t *)inodes;
+    for (uint32_t i = 0; i < INODE_BLOCKS; i++)
+        block_read(INODE_START + i, dst + i * FS_BLOCK);
+    int orphans = 0;
+    for (int i = 0; i < FS_MAX_FILES; i++) {
+        if (inodes[i].used && inodes[i].parent == FS_ORPHAN) {
+            inode_free_blocks(&inodes[i]);
+            inodes[i].used = 0;
+            orphans++;
+        }
+    }
+    if (orphans)
+        flush_inodes();
+}
+
 /* Formats because somebody asked in so many words. 'partition' is 0
    for the whole disk, or a partition number counted from one - and
    that second case is the one that matters on a machine that belongs
@@ -448,11 +477,7 @@ int fs_init(void)
         if (p) {
             printk("[ OK ] TFS: in partition %u (from sector %u)\n",
                    (uint32_t)p, fs_base);
-            for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
-                block_read(BITMAP_START + i, bitmap + i * FS_BLOCK);
-            uint8_t *dst = (uint8_t *)inodes;
-            for (uint32_t i = 0; i < INODE_BLOCKS; i++)
-                block_read(INODE_START + i, dst + i * FS_BLOCK);
+            load_tables();
             ready = 1;
             return 1;
         }
@@ -467,11 +492,7 @@ int fs_init(void)
         }
         format_disk();
     } else {
-        for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
-            block_read(BITMAP_START + i, bitmap + i * FS_BLOCK);
-        uint8_t *dst = (uint8_t *)inodes;
-        for (uint32_t i = 0; i < INODE_BLOCKS; i++)
-            block_read(INODE_START + i, dst + i * FS_BLOCK);
+        load_tables();
     }
     ready = 1;
     return 1;
@@ -745,11 +766,36 @@ int fs_unlink(int cwd, const char *path)
                 return -1;
             }
     }
+    /* A file somebody still has open loses its name now and its data
+       at the last close - the Unix way, which a C library's tmpfile()
+       and a database's temporary files count on: create, unlink at
+       once, and go on using the descriptor */
+    if (inode_type(&inodes[slot]) == FS_TYPE_FILE && slot_open(slot)) {
+        inodes[slot].parent = FS_ORPHAN;
+        inodes[slot].name[0] = '\0';
+        flush_inode(slot);
+        irq_restore(flags);
+        return 0;
+    }
     inode_free_blocks(&inodes[slot]);
     inodes[slot].used = 0;
     flush_inodes();
     irq_restore(flags);
     return 0;
+}
+
+void fs_slot_closed(int slot)
+{
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES)
+        return;
+    uint32_t flags = irq_save();
+    if (inodes[slot].used && inodes[slot].parent == FS_ORPHAN &&
+        !slot_open(slot)) {
+        inode_free_blocks(&inodes[slot]);
+        inodes[slot].used = 0;
+        flush_inode(slot);
+    }
+    irq_restore(flags);
 }
 
 /* Changing a name - and, when the paths point at different
@@ -944,6 +990,99 @@ int fs_truncate(int slot)
         return -1;
     uint32_t flags = irq_save();
     inode_free_blocks(&inodes[slot]);
+    flush_inode(slot);
+    irq_restore(flags);
+    return 0;
+}
+
+/* Gives back a file's blocks from the keep-th on, and the pointer
+   blocks left with nothing to point at */
+static void inode_cut(struct inode *in, uint32_t keep)
+{
+    static uint32_t ptrs[FS_INDIRECT];
+    static uint32_t ptrs2[FS_INDIRECT];
+
+    for (uint32_t i = keep; i < FS_DIRECT; i++) {
+        if (in->direct[i]) {
+            block_free(in->direct[i]);
+            in->direct[i] = 0;
+        }
+    }
+
+    uint32_t from = keep > FS_DIRECT ? keep - FS_DIRECT : 0;
+    if (in->indirect && from < FS_INDIRECT &&
+        block_read(in->indirect, ptrs) == 0) {
+        for (uint32_t i = from; i < FS_INDIRECT; i++) {
+            if (ptrs[i]) {
+                block_free(ptrs[i]);
+                ptrs[i] = 0;
+            }
+        }
+        if (!from) {
+            block_free(in->indirect);
+            in->indirect = 0;
+        } else {
+            block_write(in->indirect, ptrs);
+        }
+    }
+
+    uint32_t base = FS_DIRECT + FS_INDIRECT;
+    from = keep > base ? keep - base : 0;
+    if (in->dindirect && block_read(in->dindirect, ptrs) == 0) {
+        for (uint32_t hi = 0; hi < FS_INDIRECT; hi++) {
+            uint32_t first = hi * FS_INDIRECT;
+            if (!ptrs[hi] || first + FS_INDIRECT <= from)
+                continue;                    /* nothing there, or all kept */
+            uint32_t lo0 = from > first ? from - first : 0;
+            if (block_read(ptrs[hi], ptrs2) < 0)
+                continue;
+            for (uint32_t lo = lo0; lo < FS_INDIRECT; lo++) {
+                if (ptrs2[lo]) {
+                    block_free(ptrs2[lo]);
+                    ptrs2[lo] = 0;
+                }
+            }
+            if (!lo0) {
+                block_free(ptrs[hi]);
+                ptrs[hi] = 0;
+            } else {
+                block_write(ptrs[hi], ptrs2);
+            }
+        }
+        if (!from) {
+            block_free(in->dindirect);
+            in->dindirect = 0;
+        } else {
+            block_write(in->dindirect, ptrs);
+        }
+    }
+}
+
+/* A file made exactly 'size' bytes long (ftruncate). Shortening gives
+   the blocks past the end back and zeroes the rest of the last one:
+   bytes past the end must read as zeros if the file grows again, and a
+   C library's ftruncate is how a database cuts itself back after a
+   rollback. Growing only moves the size - the blocks in between are
+   holes, which read as zeros. */
+int fs_truncate_to(int slot, uint32_t size)
+{
+    if (!ready || slot < 0 || slot >= FS_MAX_FILES || !inodes[slot].used ||
+        !can_access(slot) || size > FS_MAX_SIZE)
+        return -1;
+    uint32_t flags = irq_save();
+    struct inode *in = &inodes[slot];
+    if (size < in->size) {
+        inode_cut(in, (size + FS_BLOCK - 1) / FS_BLOCK);
+        if (size % FS_BLOCK) {
+            uint32_t bno = inode_block(in, size / FS_BLOCK, 0);
+            if (bno && block_read(bno, block_buf) == 0) {
+                memset(block_buf + size % FS_BLOCK, 0,
+                       FS_BLOCK - size % FS_BLOCK);
+                block_write(bno, block_buf);
+            }
+        }
+    }
+    in->size = size;
     flush_inode(slot);
     irq_restore(flags);
     return 0;

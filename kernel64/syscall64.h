@@ -179,6 +179,16 @@
 #define SYS64_GETTGID    86
 #define SYS64_NCORES     87
 
+/* A file cut back or grown to a length: a1=fd, a2=bytes -> 0 / -1
+   (-2 = not allowed) */
+#define SYS64_FTRUNCATE  88
+
+/* Which file stands behind a descriptor: a1=fd -> its inode (a TFS
+   slot, the same for every descriptor of that file) / -1. stat's
+   st_ino, which a database compares to tell its file was not replaced
+   under it. */
+#define SYS64_FDINODE    89
+
 #define FUTEX64_OP_WAIT    0
 #define FUTEX64_OP_WAKE    1
 #define FUTEX64_OP_REQUEUE 3

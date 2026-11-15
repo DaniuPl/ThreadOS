@@ -47,7 +47,7 @@
  * errors. The rest are files on disk - each with its own position in
  * the file, because two processes may read the same file at different
  * paces. */
-#define FD_MAX   8
+#define FD_MAX   32
 #define FD_FIRST 3
 
 /* The kinds live in the header - programs and syscalls know about them
@@ -1614,11 +1614,33 @@ int task64_fd_seek(int fd, uint32_t pos)
    that which lets a reader ever see the end of the data */
 static void release(struct task64 *t, int fd)
 {
-    if (t->fds[fd].kind == FDK_POTOK_R)
+    int kind = t->fds[fd].kind;
+    if (kind == FDK_POTOK_R)
         pipe64_unref(t->fds[fd].slot, 1);
-    else if (t->fds[fd].kind == FDK_POTOK_W)
+    else if (kind == FDK_POTOK_W)
         pipe64_unref(t->fds[fd].slot, 0);
     t->fds[fd].kind = FDK_FREE;
+    /* an unlinked file goes with the last descriptor on it */
+    if (kind == FDK_FILE)
+        fs_slot_closed(t->fds[fd].slot);
+}
+
+/* Does any descriptor of any task hold this inode open? The filesystem
+   asks before it frees an unlinked file. Threads share a table, so one
+   table may be seen several times; the answer is the same. */
+int task64_slot_open(int slot)
+{
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    int open = 0;
+    do {
+        if (t->state != TASK_ZOMBIE && t->fds)
+            for (int i = 0; i < FD_MAX && !open; i++)
+                open = t->fds[i].kind == FDK_FILE && t->fds[i].slot == slot;
+        t = t->next;
+    } while (t != current && !open);
+    irq_restore(flags);
+    return open;
 }
 
 int task64_fd_close(int fd)

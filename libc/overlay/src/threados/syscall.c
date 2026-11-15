@@ -91,6 +91,8 @@
 #define T_GETTGID   86
 #define T_NCORES    87
 #define T_CORE      42
+#define T_FTRUNCATE 88
+#define T_FDINODE   89
 
 #define T_FUTEX_WAIT    0
 #define T_FUTEX_WAKE    1
@@ -104,7 +106,7 @@
 #define K_PIPE_R 2
 #define K_PIPE_W 3
 
-#define T_FDS    8                   /* FD_MAX in kernel64/task64.c */
+#define T_FDS    32                  /* FD_MAX in kernel64/task64.c */
 #define T_HZ     100                 /* the timer, kernel64/kmain64.c */
 #define T_CHUNK  4096                /* the most one read or write moves */
 #define AT_EMPTY  0x1000             /* AT_EMPTY_PATH, a GNU name */
@@ -427,6 +429,13 @@ static long do_open(const char *path, int flags)
 		if (is_dir(path))
 			return -EEXIST;
 	}
+	/* tmpfile() and mkstemp() make their files in /tmp, which a fresh
+	   ThreadOS disk does not have: it is made the first time a file is
+	   created there */
+	if ((flags & O_CREAT) && !strncmp(path, "/tmp/", 5) && !is_dir("/tmp")) {
+		char tmp[] = "/tmp";
+		tos(T_MKDIR, (long)tmp, 4, 0, 0);
+	}
 	long how = 0;
 	if (flags & O_CREAT)
 		how |= T_OPEN_CREATE;
@@ -456,6 +465,15 @@ static void fill_stat(struct kstat *st, unsigned mode, unsigned size, long ino)
 	st->st_uid = st->st_gid = tos(T_LEVEL, 0, 0, 0, 0) == 0 ? 0 : 1000;
 }
 
+/* A file's inode number is its TFS slot (plus one: zero is no file),
+   the same through every descriptor and by its name - a database
+   compares the two to tell its file was not replaced under it */
+static long file_ino(int fd)
+{
+	long slot = tos(T_FDINODE, fd, 0, 0, 0);
+	return slot < 0 ? 100 + fd : slot + 1;
+}
+
 static long do_fstat(int fd, struct kstat *st)
 {
 	struct fdinfo fi;
@@ -464,7 +482,7 @@ static long do_fstat(int fd, struct kstat *st)
 		return -EBADF;
 	switch (fi.kind) {
 	case K_FILE:
-		fill_stat(st, S_IFREG | 0644, fi.size, 100 + fd);
+		fill_stat(st, S_IFREG | 0644, fi.size, file_ino(fd));
 		return 0;
 	case K_PIPE_R:
 	case K_PIPE_W:
@@ -492,8 +510,9 @@ static long do_stat(const char *path, struct kstat *st)
 	if (fd >= 0) {
 		struct fdinfo fi = { 0 };
 		fdinfo(fd, &fi);
+		long ino = file_ino(fd);
 		tos(T_CLOSE, fd, 0, 0, 0);
-		fill_stat(st, S_IFREG | 0644, fi.size, 1000);
+		fill_stat(st, S_IFREG | 0644, fi.size, ino);
 		return 0;
 	}
 	if (is_dir(path)) {
@@ -583,6 +602,11 @@ static long do_fcntl(int fd, int cmd, long arg)
 		              (arg & (O_APPEND | O_NONBLOCK)));
 		return 0;
 	case F_GETLK:
+		/* Nobody else holds a lock - the answer is "unlocked", which
+		   is how a lock test says it would succeed */
+		touch((void *)arg, sizeof(struct flock));
+		((struct flock *)arg)->l_type = F_UNLCK;
+		return 0;
 	case F_SETLK:
 	case F_SETLKW:
 		return 0;                    /* one program at a time: no locks */
@@ -1163,7 +1187,12 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		struct fdinfo fi;
 		if (a < 0 || a >= T_FDS || fdinfo(a, &fi) < 0 || fi.kind != K_FILE)
 			return -EBADF;
-		return (unsigned long)b == fi.size ? 0 : -ENOSYS;
+		if (b < 0)
+			return -EINVAL;
+		if (b > 0xFFFFFFFFL)
+			return -EFBIG;
+		long r = tos(T_FTRUNCATE, a, b, 0, 0);
+		return r == -2 ? -EACCES : r < 0 ? -EIO : 0;
 	}
 	case SYS_getcwd:     return do_getcwd((char *)a, b);
 	case SYS_chdir:      return name_call(T_CHDIR, (const char *)a);

@@ -3279,3 +3279,120 @@ def no64():
     if shutil.which("qemu-system-x86_64") is None:
         return "no qemu-system-x86_64"
     return None
+
+
+# --- A TFS3 disk image, read on the host -----------------------------
+#
+# Written from kernel/fs.c's description of the layout, not from its
+# code, so a test can see what the kernel left on the disk: a file a
+# program wrote, byte for byte, and which blocks the bitmap says are
+# taken. Read-only.
+
+TFS_BLOCK = _kernel_define("kernel/include/fs.h", "FS_BLOCK")
+TFS_FILES = _kernel_define("kernel/include/fs.h", "FS_MAX_FILES")
+TFS_DIRECT = _kernel_define("kernel/include/fs.h", "FS_DIRECT")
+TFS_NAME = _kernel_define("kernel/include/fs.h", "FS_NAME_MAX") + 1
+TFS_BITMAP = _kernel_define("kernel/fs.c", "BITMAP_START")
+TFS_BITMAP_BLOCKS = _kernel_define("kernel/fs.c", "BITMAP_BLOCKS")
+
+
+class TfsImage:
+    """The files and the block bitmap of a TFS3 filesystem in an image,
+    starting at sector 'base' (0 = the whole disk)"""
+
+    def __init__(self, path, base=0):
+        with open(path, "rb") as fh:
+            fh.seek(base * 512)
+            self.data = fh.read()
+        if self.data[:4] != b"TFS3":
+            raise ValueError("no TFS3 superblock")
+        _, self.ninodes, self.nblocks, self.data_start = struct.unpack_from(
+            "<8sIII", self.data, 0)
+        at = TFS_BLOCK * TFS_BITMAP
+        self.bitmap = self.data[at:at + TFS_BLOCK * TFS_BITMAP_BLOCKS]
+        at += TFS_BLOCK * TFS_BITMAP_BLOCKS          # the inode table
+        table = self.data[at:at + TFS_FILES * 128]
+        self.inodes = []
+        for i in range(TFS_FILES):
+            raw = table[i * 128:(i + 1) * 128]
+            name = raw[:TFS_NAME].split(b"\0")[0].decode("utf-8", "replace")
+            size, used, typ, parent = struct.unpack_from("<IBBh", raw,
+                                                         TFS_NAME)
+            ptrs = struct.unpack_from("<%dIII" % TFS_DIRECT, raw,
+                                      TFS_NAME + 8)
+            self.inodes.append(dict(name=name, size=size, used=used,
+                                    dir=typ & 1, parent=parent,
+                                    direct=ptrs[:TFS_DIRECT],
+                                    indirect=ptrs[TFS_DIRECT],
+                                    dindirect=ptrs[TFS_DIRECT + 1]))
+
+    def _block(self, n):
+        return self.data[n * TFS_BLOCK:(n + 1) * TFS_BLOCK]
+
+    def _ptrs(self, n):
+        return struct.unpack("<%dI" % (TFS_BLOCK // 4), self._block(n)) \
+            if n else (0,) * (TFS_BLOCK // 4)
+
+    def blocks_of(self, ino):
+        """Every block the inode holds, pointer blocks included, in
+        file order (holes as 0)"""
+        data = list(ino["direct"])
+        meta = []
+        if ino["indirect"]:
+            meta.append(ino["indirect"])
+            data += self._ptrs(ino["indirect"])
+        if ino["dindirect"]:
+            meta.append(ino["dindirect"])
+            for p in self._ptrs(ino["dindirect"]):
+                if p:
+                    meta.append(p)
+                    data += self._ptrs(p)
+                else:
+                    data += (0,) * (TFS_BLOCK // 4)
+        return data, meta
+
+    def path(self, slot):
+        parts = []
+        while slot >= 0:
+            parts.append(self.inodes[slot]["name"])
+            slot = self.inodes[slot]["parent"]
+        return "/" + "/".join(reversed(parts))
+
+    def find(self, path):
+        for i, ino in enumerate(self.inodes):
+            if ino["used"] and not ino["dir"] and self.path(i) == path:
+                return ino
+        return None
+
+    def read(self, path):
+        """A file's bytes, as the kernel would read them: holes are
+        zeros, and the file ends at its size"""
+        ino = self.find(path)
+        if ino is None:
+            return None
+        data, _ = self.blocks_of(ino)
+        out = bytearray()
+        for b in data[:(ino["size"] + TFS_BLOCK - 1) // TFS_BLOCK]:
+            out += self._block(b) if b else bytes(TFS_BLOCK)
+        return bytes(out[:ino["size"]])
+
+    def taken(self, n):
+        return bool(self.bitmap[n // 8] >> (n % 8) & 1)
+
+    def leaks(self):
+        """Blocks the bitmap says are taken that no inode holds, and
+        blocks an inode holds past its size (which a cut-back file
+        should have given up)"""
+        held, past = set(), []
+        for ino in self.inodes:
+            if not ino["used"]:
+                continue
+            data, meta = self.blocks_of(ino)
+            want = (ino["size"] + TFS_BLOCK - 1) // TFS_BLOCK
+            past += [b for b in data[want:] if b]
+            held.update(b for b in data if b)
+            held.update(meta)
+        free_but_held = [b for b in held if not self.taken(b)]
+        taken_not_held = [b for b in range(self.data_start, self.nblocks)
+                          if self.taken(b) and b not in held]
+        return taken_not_held, past, free_but_held

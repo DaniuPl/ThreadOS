@@ -6791,3 +6791,56 @@ works and is checked by `make test`.
       one) and on one; afterwards no thread is left, including one main
       never joined. With exit() ending only the calling thread, or with
       SYS64_EXIT_GROUP not ending the others, the test fails.
+
+- [x] **SQLite, and the file semantics it needed** (third_party/,
+      Makefile, scripts/unzipflat.py, kernel/fs.c, kernel/kfile.c,
+      kernel/task.c, kernel64/task64.c, kernel64/syscall64.c,
+      libc/overlay/, libc/tests/libctest.c, scripts/ptest.py,
+      scripts/tests/t_sqlite.py, scripts/tests/t_libc.py)
+      The first library brought in whole under the new rule 6: SQLite
+      3.54.1, the amalgamation archive exactly as sqlite.org publishes
+      it, built thread-safe with FTS5 and the math functions, and its
+      own shell as `sqlite3`. A database is a hard client for an
+      operating system, and it found five things missing:
+
+      * ftruncate only worked when the size did not change. TFS can now
+        cut a file to any length (fs_truncate_to: the blocks past the
+        end and emptied pointer blocks freed, the rest of the last block
+        zeroed) or grow it with a hole; SYS64_FTRUNCATE. SQLite cuts the
+        file back after a rolled-back transaction and after VACUUM.
+      * stat and fstat gave one file two different inode numbers, so
+        SQLite concluded its database had been replaced under it and
+        refused to write ("attempt to write a readonly database"). The
+        number is now the TFS slot (SYS64_FDINODE).
+      * Unlinking an open file freed it at once. Now, in both kernels,
+        it loses its name and keeps its blocks until the last descriptor
+        on it closes, as on Unix; one left behind by a crash is freed at
+        the next mount. tmpfile() and SQLite's temporary files depend on
+        it. musl's tmpfile() also gets a /tmp, made when first needed.
+      * A process had 8 descriptors, three of them the console; SQLite
+        sorting on four threads opens a temporary file per thread. It
+        is 32 now (64-bit kernel).
+      * F_GETLK answered without saying "unlocked".
+
+      musl's __clone also refuses anything that is not a thread now:
+      posix_spawn and system() would otherwise have run an exec in a
+      thread sharing its parent's memory.
+
+      scripts/ptest.py has a TFS reader of its own (TfsImage), written
+      from fs.c's description of the layout: files by path, and a check
+      that every block the bitmap marks as taken belongs to a file and
+      none lies past a file's end.
+
+      The tests: t_sqlite builds the same SQLite on the host. build.sql
+      (20000 rows, a join, window functions, a sort bigger than the
+      cache on four threads, a rolled-back transaction that had grown
+      the file, savepoints, a trigger, JSON, dates, FTS5, VACUUM) prints
+      exactly what the host prints; the database file read off the disk
+      image is the host's byte for byte, with no journal left and no
+      block leaked; check.sql answers the same on it and on the host's
+      database fetched over HTTP. libctest (compared with glibc) cuts a
+      file back and grows it, writes past its end, compares inode
+      numbers, reads through a descriptor whose file was unlinked, and
+      uses tmpfile(). t_libc then switches the machine off while a
+      program holds an unlinked file: the disk has it, nameless; the
+      next boot frees it, and no block is left taken.

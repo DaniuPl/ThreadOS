@@ -643,6 +643,35 @@ $(BUILD)/user64/pthreadtest.elf: libc/tests/pthreadtest.c $(LIBC64) libc/libc64.
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/pthreadtest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/pthreadtest.o) -o $@
 
+# --- SQLite -----------------------------------------------------------
+# The amalgamation exactly as sqlite.org publishes it, unpacked into the
+# build directory. Thread-safe, now that musl has threads (and PRAGMA
+# threads sorts on several cores); without loadable extensions (there
+# is no dlopen) and without memory-mapped I/O (the C library maps no
+# files). The math functions and FTS5 are what a real application
+# expects to find.
+SQLITE_ZIP  := third_party/sqlite-amalgamation-3540100.zip
+SQLITE_SRC  := $(BUILD)/sqlite
+SQLITE_OPTS := -DSQLITE_THREADSAFE=1 -DSQLITE_OMIT_LOAD_EXTENSION \
+               -DSQLITE_MAX_MMAP_SIZE=0 -DSQLITE_ENABLE_MATH_FUNCTIONS \
+               -DSQLITE_ENABLE_FTS5
+
+$(SQLITE_SRC)/sqlite3.c: $(SQLITE_ZIP)
+	rm -rf $(SQLITE_SRC) && mkdir -p $(SQLITE_SRC)
+	python3 scripts/unzipflat.py $< $(SQLITE_SRC)
+
+$(SQLITE_SRC)/shell.c: $(SQLITE_SRC)/sqlite3.c
+
+$(BUILD)/libc64/sqlite3.o: $(SQLITE_SRC)/sqlite3.c $(LIBC64) | $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -w $(SQLITE_OPTS) -c $< -o $@
+
+$(BUILD)/libc64/sqlite-shell.o: $(SQLITE_SRC)/shell.c $(LIBC64) | $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -w $(SQLITE_OPTS) -I$(SQLITE_SRC) -c $< -o $@
+
+$(BUILD)/user64/sqlite3.elf: $(BUILD)/libc64/sqlite3.o $(BUILD)/libc64/sqlite-shell.o \
+                             libc/libc64.ld | $(BUILD)/user64
+	$(call LIBC64_LINK,$(BUILD)/libc64/sqlite-shell.o $(BUILD)/libc64/sqlite3.o) -o $@
+
 # --- JavaScript: QuickJS ----------------------------------------------
 #
 # Fabrice Bellard's engine (third_party/quickjs, upstream 2026-06-04),
@@ -676,7 +705,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 	$(call LIBC64_LINK,$(BUILD)/libc64/js.o $(QJS_OBJS)) -o $@
 
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
-               $(BUILD)/user64/pthreadtest.elf \
+               $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
                $(BUILD)/user64/update.elf
 
 # --- C++, and litehtml ------------------------------------------------
@@ -918,6 +947,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    syscalls=$(BUILD)/user64/syscalls.elf \
 	    libctest=$(BUILD)/user64/libctest.elf \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
+	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)

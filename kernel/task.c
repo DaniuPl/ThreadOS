@@ -1041,6 +1041,24 @@ int task_current_id(void)
     return current->id;
 }
 
+/* Does any descriptor of any task hold this inode open? The filesystem
+   asks before it frees an unlinked file. */
+int task_slot_open(int inode)
+{
+    irqflags_t flags = spin_lock_irq(&lock);
+    int open = 0;
+    struct task *t = current;
+    do {
+        if (t->state != TASK_ZOMBIE)
+            for (int i = 0; i < TASK_MAX_FD && !open; i++)
+                open = t->fds[i].used && t->fds[i].kind == FD_FILE &&
+                       t->fds[i].inode == inode;
+        t = t->next;
+    } while (t != current && !open);
+    spin_unlock_irq(&lock, flags);
+    return open;
+}
+
 int task_alive(int id)
 {
     irqflags_t flags = spin_lock_irq(&lock);

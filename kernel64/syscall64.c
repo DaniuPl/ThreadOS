@@ -825,6 +825,21 @@ static void handle(struct regs *r)
     case SYS64_SEEK:
         r->rax = (uint64_t)(int64_t)task64_fd_seek((int)a1, (uint32_t)a2);
         return;
+    case SYS64_FDINODE:
+        r->rax = (uint64_t)(int64_t)(task64_fd_kind((int)a1) == FDK_FILE
+                                         ? task64_fd_slot((int)a1) : -1);
+        return;
+    case SYS64_FTRUNCATE: {
+        int slot = task64_fd_kind((int)a1) == FDK_FILE
+                       ? task64_fd_slot((int)a1) : -1;
+        if (slot < 0 || a2 > 0xFFFFFFFFULL)
+            r->rax = (uint64_t)-1;
+        else if (!fs_can_write(slot))
+            r->rax = (uint64_t)-2;
+        else
+            r->rax = (uint64_t)(int64_t)fs_truncate_to(slot, (uint32_t)a2);
+        return;
+    }
     case SYS64_TRYWAIT: {
         int code = 0;
         int rc = task64_trywait((int)a1, &code);
