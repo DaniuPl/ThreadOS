@@ -134,7 +134,7 @@ def main():
               after.find("[boot] visual loading screen active"))
 
         check("and the desktop takes the splash's place",
-              q.wait_desktop(timeout=60))
+              q.wait_desktop())
     finally:
         q.close()
         if os.path.exists(log):

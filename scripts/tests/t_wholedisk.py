@@ -109,7 +109,7 @@ def main():
             # threadboot starts the desktop, and its shell takes the
             # keys no window wants once somebody has signed in
             check("the stick's system reaches its desktop",
-                  q.wait_desktop(timeout=60))
+                  q.wait_desktop())
 
             out = q.command("install text whole", "Type ERASE",
                             timeout=40)
@@ -218,7 +218,7 @@ def main():
             # A fresh filesystem: the first-run wizard makes the profile,
             # and the shell behind the desktop works in its home
             check("and it starts at its desktop, past the first-run wizard",
-                  q2.wait_desktop(timeout=90))
+                  q2.wait_desktop())
             out = q2.command("write kept.txt on-our-partition", "write:",
                              timeout=20)
             check("and a file can be kept on it", "written" in out)

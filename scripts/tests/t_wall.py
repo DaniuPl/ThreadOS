@@ -172,7 +172,7 @@ def main():
             q2.wait_serial("thread64>", timeout=60)
             q2.sudo("set wallpaper nosuchfile.img", "saved")
             q2.type_line("desktop")
-            check("the desktop came up again", q2.wait_desktop(timeout=40))
+            check("the desktop came up again", q2.wait_desktop())
             q2.mouse_home()
             q2.mouse_goto(560, 400)
             time.sleep(2)

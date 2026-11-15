@@ -74,7 +74,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             q.mouse_home()
 
             # --- an application window opens ---------------------------
@@ -136,7 +136,7 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, serial=slog2)
         try:
-            check("the desktop came up (a second attempt)", q2.wait_desktop(timeout=40))
+            check("the desktop came up (a second attempt)", q2.wait_desktop())
             q2.mouse_home()
             # 'gdeaf' is not in the dock - the kernel shell starts it, which in
             # graphics mode listens as long as no window has focus

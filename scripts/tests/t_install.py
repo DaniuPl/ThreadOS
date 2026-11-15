@@ -140,7 +140,7 @@ def main():
             # threadboot starts the desktop, and its shell takes the
             # keys no window wants once somebody has signed in
             check("the stick's system reaches its desktop",
-                  q.wait_desktop(timeout=60))
+                  q.wait_desktop())
 
             # Somebody who does not type the word gets nothing done
             out = q.command("install text", "Type YES", timeout=30)
@@ -213,7 +213,7 @@ def main():
                   uefi=(OVMF_CODE, nvram))
         try:
             q3.wait_serial("The 64-bit system is ready", timeout=120)
-            q3.wait_desktop(timeout=60)
+            q3.wait_desktop()
             out = q3.command("install text", "Type YES", timeout=30)
             check("the installer sees that /EFI/BOOT/BOOTX64.EFI is taken",
                   "IS TAKEN ALREADY" in out)

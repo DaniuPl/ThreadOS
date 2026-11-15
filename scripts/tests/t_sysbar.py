@@ -57,7 +57,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             q.mouse_home()
             # The bar hides when nobody uses it: the pointer on its top
             # edge brings it out, clear of what is read on it
@@ -213,7 +213,7 @@ def shortcuts():
     try:
         q = Qemu(KERNEL, INITRD, serial=slog)
         try:
-            check("(shortcuts) the desktop came up", q.wait_desktop(timeout=40))
+            check("(shortcuts) the desktop came up", q.wait_desktop())
             q.mouse_home()
             bar_click(q, bar_clock_x() + BAR_CLOCK_W // 2)
             time.sleep(4)

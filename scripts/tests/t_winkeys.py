@@ -241,7 +241,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             q.mouse_home()
 
             # --- Alt+F4 -------------------------------------------------

@@ -154,7 +154,7 @@ def signed_in(q):
     ended, so that whatever needs an admin has to be asked for through
     sudo, which is the order of things this group is about."""
     check("the installed system reaches its desktop",
-          q.wait_desktop(timeout=90))
+          q.wait_desktop())
     out = q.command("logout", "ordinary user again", timeout=20)
     check("and the shell behind it drops to an ordinary user",
           "ordinary user again" in out)
@@ -227,7 +227,7 @@ def main():
             # threadboot starts the Live desktop; the stick's blank disk
             # gets a filesystem, so the first-run wizard comes first
             check("the stick's system reaches its desktop",
-                  q.wait_desktop(timeout=90))
+                  q.wait_desktop())
             q.command("install text whole", "Type ERASE", timeout=40)
             out = q.command("ERASE", "Done", timeout=180)
             check("ThreadOS installs onto the whole disk from a stick",

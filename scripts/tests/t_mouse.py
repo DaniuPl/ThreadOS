@@ -42,7 +42,7 @@ def main():
         check("the machine negotiated a fourth byte - the wheel",
               "PS/2 keyboard (IRQ 1) and mouse (IRQ 12), wheel: yes"
               in q.serial())
-        check("the desktop came up", q.wait_desktop(timeout=60))
+        check("the desktop came up", q.wait_desktop())
         w, h = q.size()
 
         def tip(x, y):

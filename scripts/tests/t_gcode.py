@@ -253,7 +253,7 @@ def test_boot():
         fh.truncate(16 * 1024 * 1024)
     q = Qemu(KERNEL, INITRD, disk=disk, serial=slog)
     try:
-        check("the desktop starts", q.wait_desktop(timeout=40))
+        check("the desktop starts", q.wait_desktop())
         q.mouse_home()
         open_code(q)
     finally:
@@ -303,7 +303,7 @@ def test_shell():
             q.wait_serial("thread64>", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
-            check("the 64-bit desktop starts", q.wait_desktop(timeout=40))
+            check("the 64-bit desktop starts", q.wait_desktop())
             q.mouse_home()
             open_code(q)
         finally:

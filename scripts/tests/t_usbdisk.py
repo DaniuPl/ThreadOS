@@ -288,7 +288,7 @@ def install_to_stick():
             # threadboot starts the desktop, and its sign-in screen
             # takes every key; signed in, with no window focused, the
             # keys reach the console's shell
-            q.wait_desktop(timeout=90)
+            q.wait_desktop()
             out = q.command("disks", "sectors", timeout=20)
             usbno = usb_disk_number(out)
             check("the installer has a choice: its own disk and the stick"

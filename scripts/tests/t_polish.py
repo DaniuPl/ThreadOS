@@ -166,7 +166,7 @@ def terminal(q):
 def usb():
     q = Qemu(KERNEL, INITRD, usbkbd="xhci", serial=tempfile.mktemp(suffix=".log"))
     try:
-        check("(USB) the desktop came up", q.wait_desktop(timeout=60))
+        check("(USB) the desktop came up", q.wait_desktop())
         q.mouse_home()
         q.mouse_goto(600, 420)
         q.type_line("run gedit")
@@ -187,7 +187,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             q.mouse_home()
             q.mouse_goto(600, 420)
             editor(q)

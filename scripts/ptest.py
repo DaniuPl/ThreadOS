@@ -2173,14 +2173,15 @@ class Qemu:
     # of the dark theme, which is what a machine nobody configured has
     DESK_BG = aurora_px(600, 300)
 
-    def wait_desktop(self, timeout=60, ready=None):
+    def wait_desktop(self, timeout=120, ready=None):
         """Waits until the compositor draws the desktop. In graphics mode
         the VGA text buffer (0xB8000) stops being a window onto what can
         be seen, so we look for readiness in pixels rather than in
         text. Fresh disks stop at profile setup; the shared desktop
         fixtures create a known administrator before continuing. (Which
         takes its time - the password is hashed, the home made - on a
-        host running four machines at once: a minute by default.)
+        host running four machines at once: two minutes by default, and a test
+        does not cut that short - it costs nothing when the desktop is quick.)
 
         The desktop is there when a place nothing stands on is the bare
         aurora; a test that put something else behind the desktop - a

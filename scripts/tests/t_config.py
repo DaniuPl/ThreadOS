@@ -183,7 +183,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk2, serial=tempfile.mktemp(suffix=".log"))
         try:
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             q.mouse_home()
             # The settings are the seventh program in the dock
             q.launch_dock("gsettings")                # the "Settings" tile

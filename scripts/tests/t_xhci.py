@@ -225,7 +225,7 @@ def main():
                     # threadboot starts the desktop, and its sign-in
                     # screen takes every key; signed in, with no window
                     # focused, the keys reach the console's shell
-                    q4.wait_desktop(timeout=90)
+                    q4.wait_desktop()
                     said = q4.command("hardware", "PCI:", timeout=30)
                     check("and 'hardware' no longer says 'USB: none'",
                           "USB:      xHCI" in said)

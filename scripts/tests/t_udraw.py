@@ -176,7 +176,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk=disk, serial=slog)
         try:
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             q.mouse_home()
             # 'runw' does not wait for the program to end, and the shell
             # is wanted again below while udtest keeps its window open

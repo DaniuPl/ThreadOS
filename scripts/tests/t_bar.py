@@ -87,7 +87,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             q.mouse_home()
 
             q.mouse_goto(LOGO_XY[0], 1)
@@ -190,7 +190,7 @@ def main():
                 q2.type_line("desktop")
                 # Started from the console, the desktop picks a mode of
                 # its own - measured, not assumed
-                check("the desktop came up", q2.wait_desktop(timeout=40))
+                check("the desktop came up", q2.wait_desktop())
                 sw, sh = q2.size()
                 q2.mouse_home()
                 open_two(q2, want=want)

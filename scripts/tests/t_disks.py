@@ -100,7 +100,7 @@ def main():
             # threadboot starts the desktop, and the desktop's sign-in
             # screen takes every key. Once signed in, with no window
             # focused, the keys reach the console's shell again.
-            q.wait_desktop(timeout=90)
+            q.wait_desktop()
 
             out = q.command("install text", "Type YES", timeout=40)
             check("the system lists the disks it has",

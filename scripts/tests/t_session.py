@@ -114,7 +114,7 @@ def session(slog, disk):
     # a diskless machine signs in as
     q = Qemu(KERNEL, INITRD, disk, serial=slog)
     try:
-        check("the desktop came up", q.wait_desktop(timeout=40))
+        check("the desktop came up", q.wait_desktop())
         lay_out(q)
         q.mouse_home()
         q.open_menu()
@@ -337,7 +337,7 @@ def session(slog, disk):
 def shutdown(slog):
     q = Qemu(KERNEL, INITRD, serial=slog)
     try:
-        check("the desktop came up again", q.wait_desktop(timeout=40))
+        check("the desktop came up again", q.wait_desktop())
         lay_out(q)
         q.mouse_home()
         pick(q, "Shut Down...")

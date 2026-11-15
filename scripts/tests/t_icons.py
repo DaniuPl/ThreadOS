@@ -94,7 +94,7 @@ def main():
             q.type_line("desktop")
             # Started from the console, the desktop picks a mode of its
             # own - measured, not assumed
-            check("the desktop came up", q.wait_desktop(timeout=40))
+            check("the desktop came up", q.wait_desktop())
             sw, sh = q.size()
             q.mouse_home()
             q.mouse_goto(560, 300)
@@ -147,7 +147,7 @@ def main():
             q2.command("write desktop.icons #only-a-comment", "written",
                        timeout=30)
             q2.type_line("desktop")
-            check("the desktop came up again", q2.wait_desktop(timeout=40))
+            check("the desktop came up again", q2.wait_desktop())
             q2.mouse_home()
             q2.mouse_goto(560, 300)
             time.sleep(2)

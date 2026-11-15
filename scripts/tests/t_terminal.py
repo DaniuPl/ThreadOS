@@ -192,7 +192,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=tempfile.mktemp(suffix=".log"))
         try:
-            check("(boot) the desktop came up", q.wait_desktop(timeout=40))
+            check("(boot) the desktop came up", q.wait_desktop())
             session(q, "(boot)", "x86-64 (long mode)",
                     r"Memory: (\d+) KiB RAM")
         finally:

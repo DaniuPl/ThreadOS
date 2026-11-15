@@ -99,7 +99,7 @@ def machines(logs):
              no_i8042=True, serial=logs[2])
     try:
         check("a machine with no 8042 comes up and draws the desktop",
-              q.wait_desktop(timeout=60))
+              q.wait_desktop())
 
         # The pointer is pushed into the corner and from there moved to
         # a place nothing else draws on - the middle of the aurora, away

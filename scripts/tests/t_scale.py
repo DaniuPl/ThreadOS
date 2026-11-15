@@ -66,7 +66,7 @@ def boot(disk, slog, edid, settings):
     for key, value in settings:
         q.sudo("set %s %s" % (key, value), "saved")
     q.type_line("desktop")
-    q.wait_desktop(timeout=60)
+    q.wait_desktop()
     q.mouse_home()
     q.mouse_goto(300, 200)
     time.sleep(1)

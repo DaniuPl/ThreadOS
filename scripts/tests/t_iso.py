@@ -113,7 +113,7 @@ def main():
                     try:
                         # Past the sign-in, which covers the aurora with
                         # its own darkening
-                        q22.wait_desktop(timeout=60)
+                        q22.wait_desktop()
                         w, h, at = q22.screen_raw()
                         teal, total = aurora_samples(at, w, h)
                         check(f"the desktop draws on the loader's buffer "

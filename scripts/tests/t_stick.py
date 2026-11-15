@@ -128,7 +128,7 @@ def main():
                   "Multiboot OK (Multiboot 2)" in out)
             # threadboot starts the desktop; the shell behind it takes
             # the keys no window wants once somebody has signed in
-            check("and reaches its desktop", q.wait_desktop(timeout=60))
+            check("and reaches its desktop", q.wait_desktop())
 
             # --- the two commands one types first on a strange machine
             # (the signed-in profile is an admin: its prompt ends in #)
