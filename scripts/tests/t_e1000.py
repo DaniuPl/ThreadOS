@@ -33,6 +33,21 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
 
+def wait_shell(q, timeout=90):
+    """The first console's prompt. The other three consoles print theirs
+    earlier, so the first 'thread64>' on the port does not mean the
+    shell the keyboard talks to is there - and a command waiting for the
+    prompt after it would take the first console's for its own."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        out = q.serial()
+        at = out.find("Commands:")
+        if at >= 0 and "thread64>" in out[at:]:
+            return out
+        time.sleep(0.3)
+    raise RuntimeError("timeout: the first console's shell never came up")
+
+
 def main():
     print("--- the e1000 card ---")
     reason = no64()
@@ -60,7 +75,7 @@ def main():
             check("DHCP over the e1000 granted an address",
                   "granted 10.0.2.15" in lease)
 
-            q64.wait_serial("thread64>", timeout=30)
+            wait_shell(q64)
             # The prompt comes after the whole answer, so waiting for it
             # never reads half a line
             ifc = q64.command("ifconfig", "thread64>", timeout=20)
