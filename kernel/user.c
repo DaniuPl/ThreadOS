@@ -636,8 +636,13 @@ int user_login(const char *name, const char *password)
     for (const char *p = a->name; *p && at < (int)sizeof(path) - 1; p++)
         path[at++] = *p;
     path[at] = 0;
-    int home;
-    if (fs_chdir(FS_ROOT, path, &home) < 0) {
+    /* The home directory, made now if it is missing: on a fresh disk
+       the bootstrap admin has none until somebody signs in, and with no
+       disk at all there is nowhere to make one - the session then
+       starts at the root rather than not at all */
+    int home = FS_ROOT;
+    if (fs_ready() && fs_chdir(FS_ROOT, path, &home) < 0 &&
+        (ensure_home(a) < 0 || fs_chdir(FS_ROOT, path, &home) < 0)) {
         set_current_uid(old_uid);
         set_current_level(old_level);
         return -1;

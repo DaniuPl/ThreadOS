@@ -6844,3 +6844,21 @@ works and is checked by `make test`.
       uses tmpfile(). t_libc then switches the machine off while a
       program holds an unlinked file: the disk has it, nameless; the
       next boot frees it, and no block is left taken.
+
+- [x] **Signing in on a fresh disk, or with no disk** (kernel/user.c)
+      The account work of 19 October (built but never run) made
+      user_login change into /home/<name> and fail when it could not.
+      The bootstrap admin of a fresh disk has no home until a first-run
+      setup makes one, and a machine with no disk has nowhere to make
+      it, so admin/thread was refused everywhere the 32-bit tests sign
+      in: the console's `login admin`, and the desktop's login screen
+      in every 32-bit desktop test, which then timed out waiting for a
+      desktop. The home directory is now made at sign-in when missing,
+      and with no filesystem the session starts at the root. lock,
+      threadboot and sound pass again; the 32-bit half of multiuser
+      signs in.
+
+      The test environment needed freetype-py and fontTools, as CI
+      installs them: without them the screen reader in ptest.py fails
+      inside wait_desktop, which swallows the error and reports that
+      the desktop never appeared. That alone made 28 groups red here.
