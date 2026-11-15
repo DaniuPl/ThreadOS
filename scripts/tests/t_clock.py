@@ -20,9 +20,9 @@ to be worth having, and they are what is checked here:
   say a few seconds more. A clock drawn once and never refreshed would
   pass the first of those and fail the second.
 
-  It does not get crowded out. With eleven windows open the dock's
-  tiles get smaller to fit, and the clock - on the bar, in a place of
-  its own - is still there and still running.
+  It does not get crowded out. With more windows open than the dock
+  has room for its tiles get smaller to fit, and the clock - on the
+  bar, in a place of its own - is still there and still running.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -44,19 +44,38 @@ CHARS = ("0123456789: -ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
 
 def read_clock(q):
-    """The clock off the bar, in the bar's lettering"""
-    x = bar_clock_x() + 4
-    q.mouse_goto(x, 1)
-    time.sleep(0.3)
-    q.mouse_goto(x, BAR_H // 2)
-    time.sleep(0.2)
-    for px in range(BAR_PX, 7, -1):
-        text = q.find_ui(bar_clock_x() - 90, SCREEN_W,
-                         ui_font_baseline_in(BAR_PX, 0, BAR_H), charset=CHARS,
-                         px=px, under=on_bar)
-        if text:
-            return text
+    """The clock off the bar, in the bar's lettering. The bar hides
+    when nobody uses it, so the pointer brings it out first - from the
+    middle of the top edge, away from the clock. The clock is set
+    against the right end of its own place on the bar, and a longer
+    text is drawn smaller to fit it (draw_bar())."""
+    w = q.size()[0]
+    # A busy desktop - a dozen programs on a host running other
+    # machines too - may take a while to bring the bar out
+    end = time.time() + 8
+    while time.time() < end:
+        q.reveal_bar()
+        for px in range(BAR_PX, 7, -1):
+            text = q.find_ui(bar_clock_x(w), w,
+                             ui_font_baseline_in(BAR_PX, 0, BAR_H),
+                             charset=CHARS, px=px, under=on_bar)
+            if text:
+                return text
+        time.sleep(0.5)
     return ""
+
+
+def clock_until(q, ok, timeout=8):
+    """The clock read again until it says what 'ok' wants, or the time
+    is up - a setting changed a moment ago shows at the next redraw"""
+    text = ""
+    end = time.time() + timeout
+    while time.time() < end:
+        text = read_clock(q)
+        if ok(text):
+            break
+        time.sleep(0.5)
+    return text
 
 
 def seconds(text):
@@ -113,29 +132,45 @@ def main():
                   "(%d s)" % delta, 2 <= delta <= 8)
 
             # --- a crowded dock --------------------------------------
-            for k in range(DOCK_N):
-                q.launch_dock(k, n_w=1 + k)
+            # Large tiles, so that every program and one window more
+            # than there are programs no longer fit the screen's width
+            # at the size asked for (the setting is read every frame)
+            q.click_desktop()
+            check("the dock's size is set to large",
+                  "dock = 2 (saved)" in q.sudo("set dock 2", "saved"))
+            crowd = DOCK_N + 1
+            for k in range(crowd):
+                q.launch_dock(k % DOCK_N, n_w=k, want=DOCK_TILE_L)
                 time.sleep(2.5)
             q.mouse_goto(600, 300)
             time.sleep(2)
 
-            g = dock_geom(n_w=1 + DOCK_N)
+            g = dock_geom(n_w=crowd, want=DOCK_TILE_L)
             w, h, at = q.screen_raw()
-            check("ten windows: the dock's tiles got smaller to fit "
+            check("%d windows: the dock's tiles got smaller to fit "
                   "(%d px) and it ends inside the screen (at %d)"
-                  % (g["tile"], g["x"] + g["w"]),
-                  g["tile"] < DOCK_TILE_M and g["x"] + g["w"] <= w - DOCK_MARGIN)
+                  % (crowd, g["tile"], g["x"] + g["w"]),
+                  q.dock_windows(want=DOCK_TILE_L) == crowd and
+                  g["tile"] < DOCK_TILE_L and
+                  g["x"] + g["w"] <= w - DOCK_MARGIN)
 
             def inner(k):
                 tx, ty = g["tiles"][k]
                 return tuple(at(tx + i, ty + j) for j in range(3, g["tile"] - 3)
                              for i in range(3, g["tile"] - 3))
+            # The last window is the second one started from the first
+            # tile (whose hop, when it was clicked, has to be over)
+            end = time.time() + 8
+            while time.time() < end and \
+                    inner(len(g["tiles"]) - 1) != inner(0):
+                time.sleep(0.5)
+                w, h, at = q.screen_raw()
             check("and the last window's tile is where the layout says - "
                   "the same picture as its program's",
-                  inner(len(g["tiles"]) - 1) == inner(DOCK_N - 1))
+                  inner(len(g["tiles"]) - 1) == inner(0))
 
             third = read_clock(q)
-            check("the clock can still be read with eleven windows open "
+            check("the clock can still be read with the dock crowded "
                   "('%s')" % third, re.match(SHAPE, third) is not None)
             check("and it keeps running",
                   ok2 and re.match(SHAPE, third) is not None and
@@ -146,28 +181,23 @@ def main():
             q.click_desktop()
             time.sleep(0.5)
             for key, value in (("datefmt", "iso"), ("timefmt", "12h")):
-                q.type_line("sudo set %s %s" % (key, value))
-                time.sleep(0.5)
-                q.command("thread", "saved", timeout=30)
-                time.sleep(1)
-            regional = read_clock(q)
+                q.sudo("set %s %s" % (key, value), "saved")
+            iso12 = (r"^[A-Z][a-z]{2} \d{4}-\d\d-\d\d "
+                     r"\d{1,2}:\d\d:\d\d [AP]M$")
+            regional = clock_until(q, lambda t: re.match(iso12, t))
             check("ISO dates and a twelve-hour clock follow the Region "
                   "settings ('%s')" % regional,
-                  re.match(r"^[A-Z][a-z]{2} \d{4}-\d\d-\d\d "
-                           r"\d{1,2}:\d\d:\d\d [AP]M$", regional) is not None)
+                  re.match(iso12, regional) is not None)
 
             for key, value in (("datefmt", "dmy"), ("timefmt", "24h"),
                                ("language", "pl")):
-                q.type_line("sudo set %s %s" % (key, value))
-                time.sleep(0.5)
-                q.command("thread", "saved", timeout=30)
-                time.sleep(1)
-            polish = read_clock(q)
+                q.sudo("set %s %s" % (key, value), "saved")
             days = ["Pon", "Wt", "Śr", "Czw", "Pt", "Sob", "Ndz"]
             months = ["Sty", "Lut", "Mar", "Kwi", "Maj", "Cze",
                       "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru"]
             expected = "%s %d %s" % (days[day.weekday()], day.day,
                                      months[day.month - 1])
+            polish = clock_until(q, lambda t: t.startswith(expected + " "))
             check("Polish language localizes the bar's date ('%s')" % polish,
                   polish.startswith(expected + " "))
         finally:
