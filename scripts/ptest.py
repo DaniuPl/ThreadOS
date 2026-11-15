@@ -54,6 +54,13 @@ DISK_SIZE = 16 * 1024 * 1024
 RTC_BASE = "2030-06-13T12:34:56"
 RTC_DATE = "2030-06-13"
 
+# The desktop's screen when a test does not ask for another: GRUB's own
+# mode, which it hands the kernel with 'gfxpayload=keep' (boot_disc).
+# It used to be the 32-bit kernel's 640x480; every default below that
+# places something on the screen is for this size, and a test that
+# boots another one passes its w and h.
+SCREEN_W, SCREEN_H = 800, 600
+
 def _menu_items():
     """The launch menu's entries, straight out of kernel/desktop.c"""
     full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
@@ -972,7 +979,7 @@ def _tdiv(a, b):
     return q if (a >= 0) == (b >= 0) else -q
 
 
-def aurora_px(x, y, w=640, h=480, dark=True):
+def aurora_px(x, y, w=SCREEN_W, h=SCREEN_H, dark=True):
     """One pixel of the aurora, by the arithmetic kernel/aurora.c spells
     out - whole numbers, in the same order, so the very same value."""
     t = "DARK" if dark else "LIGHT"
@@ -1066,8 +1073,7 @@ def frost_ref(x, y, w, h, blur, tint, a, sw, sh, dark=True):
 _BAR_GLASS = {}
 
 
-def bar_glass(dark=True, w=SCREEN_W if "SCREEN_W" in globals() else 640,
-              h=480):
+def bar_glass(dark=True, w=SCREEN_W, h=SCREEN_H):
     """The menu bar's glass as kernel/desktop.c draws it once: the strip
     of the aurora under it, blurred, then the theme's tint laid over -
     as rows of (r, g, b), BAR_H of them. Exact, so a pixel of the bar
@@ -1115,9 +1121,8 @@ def ui_baseline_in(top, height):
     return ui_font_baseline_in(UI_PX, top, height)
 
 
-# --- where things are on a 640 x 480 desktop (kernel/desktop.c) ---------
+# --- where things are on the desktop (kernel/desktop.c) -----------------
 
-SCREEN_W, SCREEN_H = 640, 480
 MAX_DOCK_WINDOWS = 12           # MAX_WIN in kernel/desktop.c
 def _dock_apps():
     """The programs a dock nobody configured holds, in order, by the name
@@ -1919,10 +1924,11 @@ class Qemu:
         cmd = [qemu,
                "-display", "none", "-no-reboot",
                # The screen tells no resolution of its own (no EDID):
-               # the desktop then starts at 640x480, the size every
-               # click and every reading in these tests is laid out
-               # for. The tests of the panel's own resolution turn it
-               # back on with a size of their choosing (edid=).
+               # the desktop then starts in GRUB's mode, SCREEN_W x
+               # SCREEN_H, the size every click and every reading in
+               # these tests is laid out for. The tests of the panel's
+               # own resolution turn it back on with a size of their
+               # choosing (edid=).
                # The card is the standard VGA in its usual slot either
                # way - only what it says about the screen differs.
                "-vga", "none", "-device",
@@ -2320,6 +2326,18 @@ class Qemu:
         self.click(self.size()[0] - 8, 34)
         time.sleep(0.3)
 
+    def reveal_bar(self, x=None):
+        """The bar hides after three seconds nobody uses it, and the
+        pointer at the top edge brings it back - for as long as it
+        stays there (bar_visible() in kernel/desktop.c). The pointer is
+        left at (x, 1): the middle of the bar by default, where nothing
+        a test reads is drawn."""
+        if x is None:
+            x = self.size()[0] // 2
+        self.mouse_goto(x, 1)
+        # A frame or two for the compositor to draw it again
+        time.sleep(0.5)
+
     def open_menu(self):
         """A click on the mark at the left end of the bar"""
         self.mouse_goto(LOGO_XY[0], 1)
@@ -2327,9 +2345,9 @@ class Qemu:
         self.click(*LOGO_XY)
         time.sleep(0.6)
 
-    # The size of the screen the desktop draws on: 640x480 under the
-    # 32-bit kernel, what the loader set (800x600 in QEMU) under the
-    # 64-bit one. Measured the first time something is placed by it.
+    # The size of the screen the desktop draws on: what the loader set
+    # (SCREEN_W x SCREEN_H in QEMU, unless the test gave the screen an
+    # EDID). Measured the first time something is placed by it.
     _size = None
 
     def size(self):
