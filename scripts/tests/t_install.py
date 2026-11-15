@@ -39,7 +39,10 @@ OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
+# The loader of the same build as the kernel under test - which is not
+# always build/ (make BUILD=...)
+BUILD = os.path.dirname(os.path.abspath(KERNEL64))
+LOADER = os.path.join(BUILD, "BOOTX64.EFI")
 
 FOREIGN_BOOTMGR = b"MZ-this-is-somebody-elses-bootmgfw-" * 300
 FOREIGN_FALLBACK = b"MZ-somebody-elses-loader-in-EFI-BOOT-" * 200
@@ -89,8 +92,8 @@ def main():
         print("SKIPPED: no mtools")
         return summary()
     if not os.path.exists(LOADER):
-        subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+        subprocess.run(["make", "BUILD=" + BUILD, "efi"], cwd=ROOT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
         print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
@@ -134,6 +137,10 @@ def main():
                   "there is nothing to install from",
                   f"loader: {len(want_loader)} B" in head)
             q.wait_serial("The 64-bit system is ready", timeout=90)
+            # threadboot starts the desktop, and its shell takes the
+            # keys no window wants once somebody has signed in
+            check("the stick's system reaches its desktop",
+                  q.wait_desktop(timeout=60))
 
             # Somebody who does not type the word gets nothing done
             out = q.command("install text", "Type YES", timeout=30)
@@ -206,6 +213,7 @@ def main():
                   uefi=(OVMF_CODE, nvram))
         try:
             q3.wait_serial("The 64-bit system is ready", timeout=120)
+            q3.wait_desktop(timeout=60)
             out = q3.command("install text", "Type YES", timeout=30)
             check("the installer sees that /EFI/BOOT/BOOTX64.EFI is taken",
                   "IS TAKEN ALREADY" in out)
