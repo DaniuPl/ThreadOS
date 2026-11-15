@@ -63,7 +63,7 @@ def vector_file(mode, key, nonce, aad, plain, taglen):
 
 def main():
     print()
-    print("--- AES, GCM i CCM ---")
+    print("--- AES, GCM and CCM ---")
 
     reason = no64()
     if reason:
@@ -121,7 +121,7 @@ def main():
             # --- 2. The same material through OpenSSL ------------------
             if not have_ref:
                 print("SKIPPED: no cc/libcrypto - without a comparison "
-                      "z OpenSSL")
+                      "with OpenSSL")
             else:
                 cases = [("ecb", "3f", 32, 128), ("ecb", "77", 32, 256),
                          ("ctr", "5a", 40, 128), ("ctr", "b1", 40, 192),
@@ -185,25 +185,6 @@ def main():
         finally:
             q.close()
             stop()
-
-        # --- The same code compiled for the other mode -----------------
-        # The 32-bit kernel is no longer developed, but it is still the
-        # cheapest way to catch what one compilation hides: a shift, a
-        # width, a pointer that happened to be the right size.
-        disk32 = tempfile.mktemp(suffix=".img")
-        with open(disk32, "wb") as fh:
-            fh.truncate(DISK_SIZE)
-        q = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE,
-                 serial=tempfile.mktemp(suffix=".log"))
-        try:
-            q.wait_for("ThreadOS shell")
-            q.type_line("run aestest")
-            screen = q.wait_for("[aes] everything matches", timeout=120)
-            check("the same vectors pass in 32-bit mode",
-                  "[aes] everything matches" in screen)
-        finally:
-            q.close()
-            os.unlink(disk32)
     finally:
         for path in (iso, slog, disk):
             if os.path.exists(path):

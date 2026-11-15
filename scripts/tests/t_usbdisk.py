@@ -38,6 +38,13 @@ INSTALL_MIB = 400          # room for the EFI partition and ours
 FROM_HOST = b"mtools wrote this on the host, not us.\n"
 
 
+def sudo(q, cmd, text, timeout=30):
+    """Writing to a FAT is an administrator's act: the shell asks for
+    the password first, and only then runs the command."""
+    q.command("sudo " + cmd, "password:", timeout=20)
+    return q.command("thread", text, timeout=timeout)
+
+
 def usb_disk_number(listing):
     """Which number the pendrive got in 'disks'. It is not a constant:
     booting through UEFI adds a disk of the firmware's own, so the
@@ -278,6 +285,10 @@ def install_to_stick():
                  uefi=(OVMF_CODE, nvram))
         try:
             q.wait_serial("The 64-bit system is ready", timeout=140)
+            # threadboot starts the desktop, and its sign-in screen
+            # takes every key; signed in, with no window focused, the
+            # keys reach the console's shell
+            q.wait_desktop(timeout=90)
             out = q.command("disks", "sectors", timeout=20)
             usbno = usb_disk_number(out)
             check("the installer has a choice: its own disk and the stick"
@@ -289,7 +300,12 @@ def install_to_stick():
                             "Type ERASE", timeout=60)
             check("the plan is about the stick, not the machine's disk",
                   "USB" in out or ("disk %d" % usbno) in out)
-            out = q.command("ERASE", "Done", timeout=300)
+            # Wiping a disk is an administrator's act, and the session
+            # signed in above is one - so it asks for the password again
+            asked = q.command("ERASE", "admin password:", timeout=40)
+            check("wiping the stick asks for the admin password first",
+                  "install: admin password:" in asked)
+            out = q.command("thread", "Done", timeout=300)
             check("installing onto the stick runs to the end",
                   "partition table (GPT) - done" in out
                   and "EFI partition (FAT32) - done" in out
@@ -417,17 +433,21 @@ def main():
             # The whole point of mounting a FAT "from disk 2": the rest
             # of the system must not have moved.
             q.command("write attempt.txt the-stick-did-not-move-the-disk",
-                      "wrote", timeout=20)
-            out = q.command("cat attempt.txt", "pendrive", timeout=20)
+                      "written", timeout=20)
+            out = q.command("cat attempt.txt", "did-not-move", timeout=20)
             check("the TFS on our own disk still works, despite the USB mount",
                   "the-stick-did-not-move-the-disk" in out)
 
             # --- writing: our file, read back by mtools --------------
-            q.command("fatmkdir /FROMSYSTEM", "fatmkdir", timeout=20)
-            q.command("fatput /FROMSYSTEM/hello.txt hello-from-threados",
-                      "fatput", timeout=20)
-            out = q.command("fatcopy hello64 /FROMSYSTEM/hello64.bin",
-                            "hello64.bin, ", timeout=60)
+            out = sudo(q, "fatmkdir /FROMSYSTEM", "fatmkdir:")
+            check("a directory is made on the stick",
+                  "fatmkdir: /FROMSYSTEM" in out)
+            out = sudo(q, "fatput /FROMSYSTEM/hello.txt hello-from-threados",
+                       "fatput:")
+            check("a file is written onto the stick",
+                  "fatput: /FROMSYSTEM/hello.txt, 19 B" in out)
+            out = sudo(q, "fatcopy hello64 /FROMSYSTEM/hello64.bin",
+                       "hello64.bin, ", timeout=60)
             # The line the command prints when it has finished, size and
             # all - "B" somewhere in the output, which is what this used
             # to look for, is there whether the copy worked or not

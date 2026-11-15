@@ -20,10 +20,9 @@ code - for the same reason as with page swapping: TFS has one shared
 buffer for a block, and a page fault can land in the middle of any file
 operation.
 
-Both kernels have the same thing, each with its own paging code - and we
-check both the same way. Along the way we check here the other area that
-grows under your fingers: the stack. A program gets eight pages, and a
-recursion goes considerably deeper.
+Along the way we check here the other area that grows under your
+fingers: the stack. A program gets four pages, and a recursion goes
+considerably deeper.
 """
 
 import os
@@ -46,7 +45,7 @@ def pages_from_files(text):
 
 
 def main():
-    print("--- files mapped into memory (the 64-bit kernel) ---")
+    print("--- files mapped into memory ---")
 
     reason = no64()
     if reason:
@@ -99,12 +98,12 @@ def main():
             # costs as much as was taken from it
             q.command("run mkmap64 big.txt 400", "exit code",
                         timeout=120)
-            malo = q.command("run mmapfile64 big.txt 1", "exit code",
-                               timeout=90)
+            one = q.command("run mmapfile64 big.txt 1", "exit code",
+                            timeout=90)
             check("mapping a big file works",
-                  "I never touched the rest of the file" in malo)
+                  "I never touched the rest of the file" in one)
             check("touching one byte costs one page, "
-                  "and not the whole file", pages_from_files(malo) == 1)
+                  "and not the whole file", pages_from_files(one) == 1)
 
             # ...and reading the whole of it costs as much as it has pages
             many = q.command("run mmapfile64 big.txt", "exit code",
@@ -112,8 +111,8 @@ def main():
             check("reading the whole file pulls in every one of its pages",
                   pages_from_files(many) == 400 * 1024 // 4096)
 
-            # A mapping does not outlive the process: the memory returns to the
-# pool
+            # A mapping does not outlive the process: the memory
+            # returns to the pool
             m = re.search(r"mmapfile64\] done, exit code 0 "
                           r"\(frames (\d+) -> (\d+)", many)
             check("once the program ended the frames came back to the pool",
@@ -124,74 +123,30 @@ def main():
                                "exit code", timeout=60)
             check("a file that is not there is reported as an error",
                   "the file cannot be mapped" in missing)
+
+            # The stack grows under your fingers too. A program gets
+            # four pages, and a recursion goes far deeper - and on the
+            # way back it checks whether every frame is still its own.
+            # Adding pages on top of overwriting somebody else's frames
+            # would look the same halfway.
+            stack = q.command("run deep64", "exit code", timeout=60)
+            check("the stack grows on demand: the recursion goes past "
+                  "four pages", "[deep64] I went down to level 40" in stack)
+            check("and every frame survived untouched",
+                  "every frame whole" in stack and "WRONG" not in stack)
+            # Forty frames of four kilobytes, so at least thirty-six
+            # pages beyond the four it started with - counted by the
+            # kernel, not by the program
+            m = re.search(r"deep64\] done, exit code 0 \(frames \d+ -> "
+                          r"\d+, heap pages \d+, stack (\d+)", stack)
+            check("the kernel added the pages to the stack (%s)"
+                  % (m.group(1) if m else "?"),
+                  m is not None and int(m.group(1)) >= 36)
         finally:
             q.close()
     finally:
         shutil.rmtree(d, ignore_errors=True)
         for f in (iso, slog, disk):
-            if os.path.exists(f):
-                os.unlink(f)
-
-    # --- The same in the 32-bit kernel ---
-    print("--- files mapped into memory (the 32-bit kernel) ---")
-    disk32 = tempfile.mktemp(suffix=".img")
-    slog32 = tempfile.mktemp(suffix=".log")
-    with open(disk32, "wb") as fh:
-        fh.truncate(DISK_SIZE)
-    try:
-        q3 = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE, serial=slog32)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            q3.wait_for("[net] DHCP", timeout=30)
-
-            make_it = q3.command("run mkmap map.txt 12", "has ended",
-                                timeout=60)
-            check("a file with the pattern was created on the disk (32-bit)",
-                  "[mkmap] wrote 12288 B of the pattern" in make_it)
-
-            read_out = q3.command("run mmapfile map.txt", "has ended",
-                                timeout=90)
-            addr = re.search(r"the file at address (\d+)", read_out)
-            check("the file got an address in the mmap area (32-bit)",
-                  addr is not None and
-                  0xB0000000 <= int(addr.group(1)) < 0xBF000000)
-            check("every byte of the file matches the pattern (32-bit)",
-                  "the checked bytes match, and there were 12288" in read_out)
-            check("trying to write to the mapping kills the process (32-bit)",
-                  "writing to the mapping was refused" in read_out and
-                  re.search(r"killed on core \d+: Page Fault", read_out) is not None)
-            check("the file's content after the refused write is untouched (32-bit)",
-                  "WRONG" not in read_out)
-
-            # Paging on demand: a large file, one byte touched
-            before = q3.command("mem", "from files:")
-            m1 = re.search(r"from files:\s+(\d+)", before)
-            q3.command("run mkmap big.txt 400", "has ended",
-                         timeout=120)
-            malo = q3.command("run mmapfile big.txt 1", "has ended",
-                                timeout=90)
-            check("mapping a big file works (32-bit)",
-                  "I never touched the rest of the file" in malo)
-            after = q3.command("mem", "from files:")
-            m2 = re.search(r"from files:\s+(\d+)", after)
-            check("touching one byte costs one page (32-bit)",
-                  m1 is not None and m2 is not None and
-                  int(m2.group(1)) - int(m1.group(1)) == 1)
-
-            # The stack grows under your fingers too. A program gets eight
-            # pages, and a recursion goes far deeper - and on the way
-            # back it checks whether every frame is still its own.
-            # Adding pages on top of overwriting somebody else's frames
-            # would look the same halfway.
-            stack = q3.command("run deep", "has ended", timeout=60)
-            check("the stack grows on demand: the recursion goes past eight "
-                  "pages", "[deep] I went down to level 40" in stack)
-            check("and every frame survived untouched",
-                  "every frame whole" in stack and "WRONG" not in stack)
-        finally:
-            q3.close()
-    finally:
-        for f in (disk32, slog32):
             if os.path.exists(f):
                 os.unlink(f)
 

@@ -2,10 +2,9 @@
 """ThreadOS smoke test: the disk, the file system and the network
 (64-bit kernel).
 
-The same drivers as in the 32-bit kernel, compiled a second time. The
-controller's registers lie high up, outside the memory described at
-startup - without adding them to the mapping the first read from a BAR
-would end in a page fault.
+The controller's registers lie high up, outside the memory described
+at startup - without adding them to the mapping the first read from a
+BAR would end in a page fault.
 
 At the end a second boot on THE SAME disk. That is the only proof that a
 file really lies on the disk and not in memory - and the first moment at
@@ -55,11 +54,10 @@ def main():
             # group checks happens only afterwards
             q23.wait_serial("thread64>", timeout=90)
 
-            # The disk: the same drivers as in the 32-bit kernel,
-            # compiled a second time. The controller's registers lie
-            # high up, outside the memory described at startup -
-            # without adding them to the mapping the first read from
-            # a BAR would end in a page fault.
+            # The disk: the controller's registers lie high up,
+            # outside the memory described at startup - without
+            # adding them to the mapping the first read from a BAR
+            # would end in a page fault.
             # One line speaks about both layers: what the driver
             # found and whether the file system stood on it
             dsk = q23.wait_serial("] Disk ", timeout=30)
@@ -116,7 +114,7 @@ def main():
             m2 = re.search(r"frames (\d+) -> (\d+), "
                            r"heap pages (\d+)", hp)
             check("the pages come into being only when they are touched"
-                  + (f" (z {m.group(2) if m else '?'} "
+                  + (f" (of {m.group(2) if m else '?'} "
                      f"asked for: {m2.group(3)})" if m2 else ""),
                   m2 is not None and 1 <= int(m2.group(3)) <= 8)
             check("not one frame is left after the program"
@@ -158,11 +156,9 @@ def main():
                   "ucat64: give a file name" in ub
                   and "exit code 1" in ub)
 
-            # The network: the card, the IP layer, DHCP and TCP
-            # are again the same files as in the 32-bit kernel. Three
-            # of the four came across without a single change - the
-            # card driver only needed explicit casts of addresses,
-            # because the card addresses memory with 32 bits.
+            # The network: the card, the IP layer, DHCP and TCP. The
+            # card driver needs explicit casts of addresses, because
+            # the card addresses memory with 32 bits.
             kar = q23.wait_serial("] Network: RTL8139", timeout=40)
             check("the 64-bit kernel finds the network card",
                   re.search(r"Network: RTL8139 ([0-9a-f]+:){5}",
@@ -256,9 +252,7 @@ def main():
             check("the program confirms the result with its exit code",
                   "[fileio64] done, exit code 0" in fio)
 
-            # fs.c came across to long mode without a single
-            # character changed - the disk seen through the block
-            # layer looks the same in both modes
+            # The disk seen through the block layer, from the shell
             q23.type_line("write note writes to the disk")
             wr = q23.wait_serial("write: 'note' written",
                                  timeout=30)

@@ -35,6 +35,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -46,7 +47,12 @@ PATTERN = re.compile(r"\[syscalls\] (child|parent ): cores (\d+), "
 
 def measure(q, cmd_text, label):
     """One run: (mask_together, longest_time) or None."""
-    out = q.command(cmd_text, "done", timeout=300)
+    # 'run' is over when the shell says the exit code - waiting only for
+    # the program's own last line would leave the shell's line to land
+    # in the next command's output. 'runw' gives the prompt back at
+    # once, so its end is the program's own last line.
+    out = q.command(cmd_text, "exit code" if cmd_text.startswith("run ")
+                    else "[syscalls] done", timeout=300)
     proc = [(int(m.group(2)), int(m.group(3)), int(m.group(4)),
              int(m.group(5))) for m in PATTERN.finditer(out)]
 
@@ -111,65 +117,61 @@ def run_case(q, ncores, label):
               parallel_run[1] > serial_run[1] // 2)
 
 
+def wait_shell(q, timeout=90):
+    """The first console's prompt. The other three consoles print theirs
+    earlier, so the first 'thread64>' on the port does not mean the
+    shell the keyboard talks to is there."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        out = q.serial()
+        at = out.find("Commands:")
+        if at >= 0 and "thread64>" in out[at:]:
+            return out
+        time.sleep(0.3)
+    raise RuntimeError("timeout: the first console's shell never came up")
+
+
 def main():
-    print("--- system calls without the lock (the 64-bit kernel) ---")
+    print("--- system calls without the lock ---")
 
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
-    else:
-        d = tempfile.mkdtemp()
-        iso = tempfile.mktemp(suffix=".iso")
-        slog = tempfile.mktemp(suffix=".log")
-        try:
-            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-            if not os.path.exists(iso):
-                return summary()
+        return summary()
 
-            q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
-                     qemu="qemu-system-x86_64")
-            try:
-                q.wait_serial("thread64>", timeout=90)
-                run_case(q, 4, "")
-                after_run = q.command("run hello64", "exit code", timeout=60)
-                check("the kernel still runs after the attempt",
-                      "hello, I am a" in after_run)
-            finally:
-                q.close()
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-            for f in (iso, slog):
-                if os.path.exists(f):
-                    os.unlink(f)
-
-    print("--- system calls without the lock (the 32-bit kernel) ---")
-    slog32 = tempfile.mktemp(suffix=".log")
-    try:
-        q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            run_case(q3, 4, " (32-bit)")
-            after_run = q3.command("run hello", "has ended", timeout=60)
-            check("the kernel still runs after the attempt (32-bit)",
-                  "has ended (code 0)" in after_run)
-        finally:
-            q3.close()
-    finally:
-        if os.path.exists(slog32):
-            os.unlink(slog32)
-
-    print("--- the same attempt on one core ---")
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    slog = tempfile.mktemp(suffix=".log")
     slog1 = tempfile.mktemp(suffix=".log")
     try:
-        q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
+        if not os.path.exists(iso):
+            return summary()
+
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
+                 qemu="qemu-system-x86_64")
         try:
-            q1.wait_for("ThreadOS shell", timeout=40)
+            wait_shell(q)
+            run_case(q, 4, "")
+            after_run = q.command("run hello64", "exit code", timeout=60)
+            check("the kernel still runs after the attempt",
+                  "[hello64] done, exit code 7" in after_run)
+        finally:
+            q.close()
+
+        print("--- the same attempt on one core ---")
+        q1 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog1,
+                  qemu="qemu-system-x86_64")
+        try:
+            wait_shell(q1)
             run_case(q1, 1, " (one core)")
         finally:
             q1.close()
     finally:
-        if os.path.exists(slog1):
-            os.unlink(slog1)
+        shutil.rmtree(d, ignore_errors=True)
+        for f in (iso, slog, slog1):
+            if os.path.exists(f):
+                os.unlink(f)
 
     return summary()
 

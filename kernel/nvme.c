@@ -158,7 +158,11 @@ static int execute(struct command *sq, struct completion *cq, int qid,
     *tail = (uint16_t)((*tail + 1) % QSIZE);
     doorbell_sq(qid, *tail);
 
-    for (int spin = 0; spin < 20000000; spin++) {
+    /* Counted in turns of the loop, because this may run with
+       interrupts off and no clock to look at. Twenty million turns were
+       too few: a host busy writing its own disk keeps a virtual
+       controller's answer back for longer than that. */
+    for (int spin = 0; spin < 1000000000; spin++) {
         volatile struct completion *u = &cq[*head];
         if ((u->stan & 1) != *phase)
             continue;
@@ -171,8 +175,11 @@ static int execute(struct command *sq, struct completion *cq, int qid,
             *phase ^= 1;            /* a lap flips the phase */
         doorbell_cq(qid, *head);
 
+        /* A late answer to a command we stopped waiting for. Taking it
+           as this one's would leave every later command reading the
+           answer of the one before it, and the disk failing for good. */
         if (returned != cid)
-            return -1;             /* an answer to a different question */
+            continue;
         return code;
     }
     return -1;

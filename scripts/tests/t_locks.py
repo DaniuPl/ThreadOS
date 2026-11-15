@@ -30,6 +30,7 @@ import re
 import shutil
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -80,75 +81,70 @@ def verify(out, suffix, ncores):
           sum(share) == 64)
 
 
+def wait_shell(q, timeout=90):
+    """The first console's prompt. The other three consoles print theirs
+    earlier, so the first 'thread64>' on the port does not mean the
+    shell the keyboard talks to is there."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        out = q.serial()
+        at = out.find("Commands:")
+        if at >= 0 and "thread64>" in out[at:]:
+            return out
+        time.sleep(0.3)
+    raise RuntimeError("timeout: the first console's shell never came up")
+
+
 def main():
-    print("--- the locks in the 64-bit kernel (four cores) ---")
+    print("--- the locks (four cores) ---")
 
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
-    else:
-        d = tempfile.mkdtemp()
-        iso = tempfile.mktemp(suffix=".iso")
-        slog = tempfile.mktemp(suffix=".log")
-        try:
-            check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
-            if not os.path.exists(iso):
-                return summary()
+        return summary()
 
-            q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
-                     qemu="qemu-system-x86_64")
-            try:
-                q.wait_serial("thread64>", timeout=90)
-                out = q.command("smpmem", "Cores that counted", timeout=120)
-                verify(out, "", 4)
-
-                # The system is to live on after all this: if the locks
-                # left a broken heap behind them, the next program would
-                # have nothing to come into being from
-                after_run = q.command("run hello64", "exit code", timeout=60)
-                check("the kernel still runs after the attempt",
-                      "hello, I am a" in after_run)
-            finally:
-                q.close()
-        finally:
-            shutil.rmtree(d, ignore_errors=True)
-            for f in (iso, slog):
-                if os.path.exists(f):
-                    os.unlink(f)
-
-    print("--- the locks in the 32-bit kernel (four cores) ---")
-    slog32 = tempfile.mktemp(suffix=".log")
-    try:
-        q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32, cpus=4)
-        try:
-            q3.wait_for("ThreadOS shell", timeout=40)
-            out = q3.command("smpmem", "Cores that counted", timeout=120)
-            verify(out, " (32-bit)", 4)
-            after_run = q3.command("run hello", "has ended", timeout=60)
-            check("the kernel still runs after the attempt (32-bit)",
-                  "has ended (code 0)" in after_run)
-        finally:
-            q3.close()
-    finally:
-        if os.path.exists(slog32):
-            os.unlink(slog32)
-
-    # --- A single-core machine ---
-    # The same code, one core: the lock is to be harmless where there is
-    # nobody to compete with
-    print("--- the same attempt on one core ---")
+    d = tempfile.mkdtemp()
+    iso = tempfile.mktemp(suffix=".iso")
+    slog = tempfile.mktemp(suffix=".log")
     slog1 = tempfile.mktemp(suffix=".log")
     try:
-        q1 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog1)
+        check("the disc with the 64-bit kernel builds", make_iso64(d, iso))
+        if not os.path.exists(iso):
+            return summary()
+
+        q = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog, cpus=4,
+                 qemu="qemu-system-x86_64")
         try:
-            q1.wait_for("ThreadOS shell", timeout=40)
+            wait_shell(q)
+            out = q.command("smpmem", "Cores that counted", timeout=120)
+            verify(out, "", 4)
+
+            # The system is to live on after all this: if the locks
+            # left a broken heap behind them, the next program would
+            # have nothing to come into being from
+            after_run = q.command("run hello64", "exit code", timeout=60)
+            check("the kernel still runs after the attempt",
+                  "[hello64] done, exit code 7" in after_run)
+        finally:
+            q.close()
+
+        # --- A single-core machine ---
+        # The same code, one core: the lock is to be harmless where
+        # there is nobody to compete with
+        print("--- the same attempt on one core ---")
+        q1 = Qemu(KERNEL, INITRD, cdrom=iso, serial=slog1,
+                  qemu="qemu-system-x86_64")
+        try:
+            wait_shell(q1)
             out = q1.command("smpmem", "Cores that counted", timeout=120)
             verify(out, " (one core)", 1)
         finally:
             q1.close()
     finally:
-        if os.path.exists(slog1):
-            os.unlink(slog1)
+        shutil.rmtree(d, ignore_errors=True)
+        for f in (iso, slog, slog1):
+            if os.path.exists(f):
+                os.unlink(f)
 
     return summary()
 

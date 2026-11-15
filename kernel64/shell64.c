@@ -1328,7 +1328,14 @@ static void execute(const char *line)
            and that is how it should be. */
         keyboard64_set_intr_target(id);   /* from now on Ctrl+C goes to it */
         int code = 0;
-        int done = task64_wait(&code);
+        int done;
+        /* A program started with 'runw' is this shell's child too, and
+           nobody waits for it - so its exit may be the first one found.
+           Taking it would report its code as this program's and give
+           the prompt back while this one still runs. */
+        do
+            done = task64_wait(&code);
+        while (done >= 0 && done != id);
         keyboard64_set_intr_target(-1);
         if (done < 0)
             printk("run: the child was lost\n");

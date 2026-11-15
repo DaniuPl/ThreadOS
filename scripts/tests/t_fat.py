@@ -44,6 +44,13 @@ def rot_sum(data):
     return s
 
 
+def sudo(q, cmd, text, timeout=30):
+    """Writing to a FAT is an administrator's act: the shell asks for
+    the password first, and only then runs the command."""
+    q.command("sudo " + cmd, "password:", timeout=20)
+    return q.command("thread", text, timeout=timeout)
+
+
 def main():
     print()
     print("--- FAT12/16/32: the EFI partition ---")
@@ -133,25 +140,31 @@ def main():
             # --- Writing. Everything below is checked by mtools after
             # the machine is switched off, not by asking the system
             # whether it thinks it succeeded.
-            out = q.command("fatmkdir /EFI/ThreadOS", "fatmkdir", timeout=15)
-            check("created", "could not" not in out)
-            out = q.command("fatput /EFI/ThreadOS/hello.txt hello-world",
-                            "fatput", timeout=15)
-            check("written", "could not" not in out)
-            out = q.command("fatput /threados64-testowy.bin ABCDEFGH",
-                            "fatput", timeout=15)
-            check("a file with a long name was written", "could not" not in out)
-            out = q.command("fatcopy libthread.so /EFI/ThreadOS/libthread.so",
-                            "fatcopy", timeout=40)
+            # A write is an administrator's act: without the password
+            # nothing may reach the partition the machine boots from
+            out = q.command("fatmkdir /EFI/Refused", "FAT write:", timeout=15)
+            check("a write without admin rights is refused",
+                  "admin access required" in out)
+            out = sudo(q, "fatmkdir /EFI/ThreadOS", "fatmkdir:")
+            check("created", "fatmkdir: /EFI/ThreadOS" in out)
+            out = sudo(q, "fatput /EFI/ThreadOS/hello.txt hello-world",
+                       "fatput:")
+            check("written", "fatput: /EFI/ThreadOS/hello.txt, 11 B" in out)
+            out = sudo(q, "fatput /threados64-test-file.bin ABCDEFGH",
+                       "fatput:")
+            check("a file with a long name was written",
+                  "fatput: /threados64-test-file.bin, 8 B" in out)
+            out = sudo(q, "fatcopy libthread.so /EFI/ThreadOS/libthread.so",
+                       "fatcopy:", timeout=40)
             check("a file from the initrd copied onto the EFI partition",
-                  "could not" not in out and "-> /EFI/ThreadOS" in out)
-            out = q.command("fatrm /big.bin", "fatrm", timeout=20)
-            check("removed", "could not" not in out)
+                  "libthread.so -> /EFI/ThreadOS/libthread.so" in out)
+            out = sudo(q, "fatrm /big.bin", "fatrm:")
+            check("removed", "fatrm: /big.bin" in out)
 
             out = q.command("fatls /", "entries", timeout=15)
             check("after the removal it is not in the directory",
                   "big.bin" not in out
-                  and "threados64-testowy.bin" in out)
+                  and "threados64-test-file.bin" in out)
             q.command("fat", "cluster", timeout=15)
         finally:
             q.close()
@@ -160,8 +173,10 @@ def main():
         listing = fat_dir(disk, ESP_START)
         check("mtools reads a directory we created",
               "ThreadOS" in listing)
+        check("and the refused write left nothing behind",
+              "Refused" not in (fat_dir(disk, ESP_START, "::/EFI") or ""))
         check("mtools reads a long name we wrote",
-              "threados64-testowy.bin" in listing)
+              "threados64-test-file.bin" in listing)
         check("the long name has a correct short name too (~1)",
               re.search(r"THREAD~\d\s+BIN", listing) is not None)
         check("the file we removed is gone for mtools too",
@@ -169,7 +184,7 @@ def main():
         got = fat_get(disk, ESP_START, "/EFI/ThreadOS/hello.txt")
         check("the content of the written file, read back by mtools",
               got is not None and got.strip() == b"hello-world")
-        got = fat_get(disk, ESP_START, "/threados64-testowy.bin")
+        got = fat_get(disk, ESP_START, "/threados64-test-file.bin")
         check("and the file with the long name",
               got is not None and got.strip() == b"ABCDEFGH")
 
@@ -211,7 +226,7 @@ def main():
                                           label="SMALLFAT")
             check(f"the {name} image in an MBR table is ready",
                   ok and fat_kind(path, start) == want_kind)
-            fat_put(path, start, LONG_TEXT, "/od-mtools.txt")
+            fat_put(path, start, LONG_TEXT, "/from-mtools.txt")
 
             q2 = Qemu(KERNEL, INITRD, cdrom=iso, disk=path, serial=slog2,
                       qemu="qemu-system-x86_64")
@@ -221,25 +236,25 @@ def main():
                 check(f"{name} recognised by the cluster count, "
                       f"not by the string in the boot sector",
                       want_kind in out)
-                out = q2.command("fatcat /od-mtools.txt", "partitions",
+                out = q2.command("fatcat /from-mtools.txt", "EFI partition.",
                                  timeout=15)
                 check(f"{name}: mtools' file was read",
                       LONG_TEXT.decode().strip() in out)
-                out = q2.command("fatcopy hello64 /hello64-z-initrd.bin",
-                                 "fatcopy", timeout=40)
+                out = sudo(q2, "fatcopy hello64 /hello64-from-initrd.bin",
+                           "fatcopy:", timeout=40)
                 check(f"{name}: writing a file through the cluster chain",
-                      "could not" not in out)
+                      "hello64 -> /hello64-from-initrd.bin" in out)
                 out = q2.command("fatls /", "entries", timeout=15)
                 check(f"{name}: both files in the root directory",
-                      "od-mtools.txt" in out
-                      and "hello64-z-initrd.bin" in out)
+                      "from-mtools.txt" in out
+                      and "hello64-from-initrd.bin" in out)
             finally:
                 q2.close()
 
             listing = fat_dir(path, start)
             check(f"{name}: mtools sees what we wrote",
-                  "hello64-z-initrd.bin" in listing)
-            got = fat_get(path, start, "/hello64-z-initrd.bin")
+                  "hello64-from-initrd.bin" in listing)
+            got = fat_get(path, start, "/hello64-from-initrd.bin")
             check(f"{name}: and the content matches the file in the initrd",
                   got is not None and len(got) > 4000
                   and got[:4] == b"\x7fELF")
@@ -253,19 +268,19 @@ def main():
         # Read by cluster count alone, such a volume looks like FAT16
         # and everything after that is garbage: an empty directory on a
         # stick full of files, which is exactly how this was found.
-        maly32 = tempfile.mktemp(suffix=".img")
-        ok, start = make_mbr_fat_disk(maly32, 32, fat32=True,
+        small32 = tempfile.mktemp(suffix=".img")
+        ok, start = make_mbr_fat_disk(small32, 32, fat32=True,
                                       label="SMALLFAT32")
         # The evidence that it really is FAT32 comes from mtools, not
         # from us: "sectors per fat: 0" is what a FAT32 boot sector has
         # instead of a sixteen-bit count, and no FAT16 volume has it.
-        info = fat_minfo(maly32, start)
+        info = fat_minfo(small32, start)
         check("a 32 MiB image formatted by mtools AS A FAT32 "
               "(minfo: sectors per fat = 0)",
               ok and "sectors per fat: 0" in info)
-        fat_put(maly32, start, LONG_TEXT, "/od-mtools.txt")
+        fat_put(small32, start, LONG_TEXT, "/from-mtools.txt")
 
-        q3 = Qemu(KERNEL, INITRD, cdrom=iso, disk=maly32, serial=slog2,
+        q3 = Qemu(KERNEL, INITRD, cdrom=iso, disk=small32, serial=slog2,
                   qemu="qemu-system-x86_64")
         try:
             q3.wait_serial("thread64>", timeout=90)
@@ -275,14 +290,15 @@ def main():
                   "FAT32" in out and "SMALLFAT32" in out)
             out = q3.command("fatls /", "entries", timeout=15)
             check("and a file shows on it, not an empty directory",
-                  "od-mtools.txt" in out)
-            out = q3.command("fatcat /od-mtools.txt", "partitions", timeout=15)
+                  "from-mtools.txt" in out)
+            out = q3.command("fatcat /from-mtools.txt", "EFI partition.",
+                             timeout=15)
             check("with the content character for character",
                   LONG_TEXT.decode().strip() in out)
         finally:
             q3.close()
-            if os.path.exists(maly32):
-                os.unlink(maly32)
+            if os.path.exists(small32):
+                os.unlink(small32)
 
         # --- And the thing this driver must never do
         check("the FAT boot sector vanished from none of the images",

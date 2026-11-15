@@ -22,9 +22,6 @@ pieces inside. It asserts:
   that the blur is the one kernel/gfx.c says it is - two passes of a
   box, each way, rounded the way it says - to the last bit, including
   the pixels around it that it must read and never write
-
-on both kernels, because the 32-bit one does its arithmetic in a
-narrower register and the two must still draw the same pixels.
 """
 
 import math
@@ -97,7 +94,7 @@ def blur_ref(pw, ph, r):
     return out
 
 
-def shapes(q, tag, full=True):
+def shapes(q):
     plan = [
         ("a rounded rectangle on whole pixels", "rrect", (32, 32, 480, 320, 128),
          lambda x, y: in_rrect(x, y, 2, 2, 30, 20, 8), 36, 26),
@@ -120,8 +117,6 @@ def shapes(q, tag, full=True):
         ("a dot", "line", (200, 200, 200, 200, 120),
          lambda x, y: in_line(x, y, 12.5, 12.5, 12.5, 12.5, 7.5), 26, 26),
     ]
-    if not full:
-        plan = plan[1:2] + plan[5:6]
     for name, kind, args, inside, pw, ph in plan:
         out = q.command("shape %s %s %d %d" % (kind, " ".join(map(str, args)),
                                              pw, ph), "drawn", timeout=30)
@@ -131,39 +126,24 @@ def shapes(q, tag, full=True):
             # boundary: the true area is 0 or 255 and nothing else
             straight = [ours[y][x] for y in range(ph) for x in range(pw)
                         if ours and (10 <= x <= 23 or 10 <= y <= 13)] if ours else []
-            check("%s%s: straight edges are exact - only 0 and 255 there"
-                  % (tag, name), bool(straight) and set(straight) <= {0, 255})
-        compare(tag + name, ours, area(inside, pw, ph))
+            check("%s: straight edges are exact - only 0 and 255 there"
+                  % name, bool(straight) and set(straight) <= {0, 255})
+        compare(name, ours, area(inside, pw, ph))
 
-    for r, pw, ph in ((2, 30, 20), (3, 40, 30)) if full else ((3, 40, 30),):
+    for r, pw, ph in ((2, 30, 20), (3, 40, 30)):
         out = q.command("shape blur %d %d %d" % (r, pw, ph), "shape: blur",
                         timeout=30)
         ours = parse(out, pw, ph, 3)
         ref = blur_ref(pw, ph, r)
         bad = -1 if ours is None else sum(
             1 for a, b in zip(ours, ref) for p, s in zip(a, b) if p != s)
-        check("%sthe blur, radius %d on %dx%d: every pixel as defined, the "
-              "border left alone (%d differ)" % (tag, r, pw, ph, bad), bad == 0)
+        check("the blur, radius %d on %dx%d: every pixel as defined, the "
+              "border left alone (%d differ)" % (r, pw, ph, bad), bad == 0)
 
 
 def main():
     print()
     print("--- soft-edged shapes against their exact areas ---")
-    disk = tempfile.mktemp(suffix=".img")
-    with open(disk, "wb") as fh:
-        fh.truncate(16 * 1024 * 1024)
-    slog = tempfile.mktemp(suffix=".log")
-    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
-    try:
-        q.wait_serial("thread>", timeout=60)
-        shapes(q, "")
-    finally:
-        q.close()
-        for f in (disk, slog):
-            if os.path.exists(f):
-                os.unlink(f)
-
-    print("--- the same under the 64-bit kernel ---")
     reason = no64()
     if reason:
         print("SKIPPED: " + reason)
@@ -179,7 +159,7 @@ def main():
              qemu="qemu-system-x86_64")
     try:
         q.wait_serial("thread64>", timeout=120)
-        shapes(q, "(64) ", full=False)
+        shapes(q)
     finally:
         q.close()
         for f in (iso, slog):

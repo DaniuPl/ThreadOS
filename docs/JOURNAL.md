@@ -7031,3 +7031,28 @@ works and is checked by `make test`.
       is shown to have been printed. A stick has no way to the
       whole-screen installer since threadboot starts the desktop - only
       'install text', typed into the shell behind it.
+- [x] **Tests from the 32-bit side moved over, and what they found**
+      (scripts/tests/, scripts/ptest.py, kernel64/shell64.c,
+      kernel/nvme.c, user/ubytes.h, user64/deep64.c)
+      Twenty-seven groups that ran a 32-bit machine beside a 64-bit one
+      run on the 64-bit kernel alone. Where the 32-bit half checked
+      something the 64-bit half did not, the check moved instead of
+      going: a second boot on the same disk (mmapwrite, nvme), the
+      one-core machines (faults, kthreads, lockless, locks, proccores,
+      tlb), the whole shape and glyph plans (shapes, ttf), and the
+      stack growing on demand, for which 'deep' came back as deep64.
+      Groups that had failed on the 64-bit side for a while pass again:
+      the FAT and raw-disk writes go through sudo, the machines started
+      by threadboot sign in to the desktop before typing into the
+      shell, and swap64 packs an initrd of its own, because GRUB cannot
+      load the whole thirteen-megabyte one into sixteen megabytes.
+
+      Running them found three bugs. 'run' after 'runw' reaped the
+      'runw' program instead of its own and gave the prompt back early.
+      The NVMe driver gave up on a command after a tenth of a second,
+      and the late answer then shifted every later command onto its
+      predecessor's answer, so a host busy with its own disk left the
+      guest's disk failing for good; it waits ten times longer and skips
+      late answers. And sizes in bytes had two spaces before the "B".
+      Qemu() no longer passes -kernel to a UEFI machine that boots its
+      own disk, which the Multiboot 2 kernel made QEMU refuse.

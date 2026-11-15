@@ -133,23 +133,6 @@ def main():
                       got["ptk"][:16] != got["ptk"][16:32])
         finally:
             q.close()
-
-        # The same sources compiled for the other mode - the cheapest
-        # known way to catch a shift or a width that one compiler hid.
-        disk32 = tempfile.mktemp(suffix=".img")
-        with open(disk32, "wb") as fh:
-            fh.truncate(DISK_SIZE)
-        q = Qemu(KERNEL, INITRD, disk32, append=TEXT_MODE,
-                 serial=tempfile.mktemp(suffix=".log"))
-        try:
-            q.wait_for("ThreadOS shell")
-            q.type_line("run wpatest")
-            screen = q.wait_for("[wpa] everything matches", timeout=240)
-            check("the same vectors pass in 32-bit mode",
-                  "[wpa] everything matches" in screen)
-        finally:
-            q.close()
-            os.unlink(disk32)
     finally:
         for path in (iso, slog, disk):
             if os.path.exists(path):

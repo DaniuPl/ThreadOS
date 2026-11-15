@@ -18,11 +18,6 @@ We check two things at once:
      code - the only difference is the bus underneath. The usbhc.c layer
      is to hide that, and that is exactly what we measure here.
 
-We do it in both kernels: the controller addresses memory with 64 bits,
-so in 32-bit mode the upper halves of the addresses are zeros, and the
-64-bit registers are written in two halves. If something in that is
-wrong, only one of the kernels will start.
-
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
 """
@@ -55,7 +50,7 @@ def type_text(q, text, delay=0.12):
 
 
 def main():
-    print("--- a USB keyboard on xHCI (the 64-bit kernel) ---")
+    print("--- a USB keyboard on xHCI ---")
 
     reason = no64()
     if reason:
@@ -79,6 +74,8 @@ def main():
                 check("the keyboard was found on the xHCI controller",
                       re.search(r"A USB keyboard \(HID, xHCI\) on port \d+",
                                 start) is not None)
+                check("the controller did not report itself as UHCI",
+                      "HID, UHCI" not in start)
 
                 q.wait_serial("thread64>", timeout=30)
                 time.sleep(0.5)
@@ -88,6 +85,16 @@ def main():
                 after = q.serial()[before:]
                 check("a command typed through xHCI runs",
                       "Uptime:" in after)
+
+                # Several keys in a row: the reports have to go one
+                # after another through the same transfer ring, not
+                # just the first one
+                before = len(q.serial())
+                type_text(q, "help")
+                time.sleep(1.5)
+                help_text = q.serial()[before:]
+                check("the whole word arrives character by character",
+                      "Commands: help" in help_text)
 
                 # A capital letter comes from a modifier in the HID report -
                 # that is a different path through a report than an
@@ -154,7 +161,7 @@ def main():
                 m = re.search(r"A USB keyboard \(HID, xHCI\) on port "
                               r"(\d+)", start)
                 check("and the keyboard BEHIND it - in a socket the "
-                      "there is no controller"
+                      "controller itself does not have"
                       + (" (port %s)" % m.group(1) if m else ""),
                       m is not None and int(m.group(1)) > 4)
 
@@ -212,10 +219,13 @@ def main():
                 try:
                     start = q4.wait_serial("The 64-bit system is ready",
                                            timeout=140)
-                    check("after a UEFI boot the USB keyboard is "
-                          "finds",
+                    check("after a UEFI boot the USB keyboard is found",
                           re.search(r"A USB keyboard \(HID, xHCI\)",
                                     start) is not None)
+                    # threadboot starts the desktop, and its sign-in
+                    # screen takes every key; signed in, with no window
+                    # focused, the keys reach the console's shell
+                    q4.wait_desktop(timeout=90)
                     said = q4.command("hardware", "PCI:", timeout=30)
                     check("and 'hardware' no longer says 'USB: none'",
                           "USB:      xHCI" in said)
@@ -228,43 +238,6 @@ def main():
             for f in (nvram, slogu):
                 if os.path.exists(f):
                     os.unlink(f)
-
-    # --- The same in the 32-bit kernel ---
-    print("--- a USB keyboard on xHCI (the 32-bit kernel) ---")
-    slog32 = tempfile.mktemp(suffix=".log")
-    try:
-        q3 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog32,
-                  usbkbd="xhci")
-        try:
-            start = q3.wait_serial("A USB keyboard", timeout=60)
-            check("the keyboard was found on the xHCI controller (32-bit)",
-                  re.search(r"A USB keyboard \(HID, xHCI\) on port \d+",
-                            start) is not None)
-            check("the controller did not report itself as UHCI",
-                  "HID, UHCI" not in start)
-
-            q3.wait_serial("ThreadOS shell", timeout=40)
-            time.sleep(1.0)
-            before = len(q3.serial())
-            type_text(q3, "uptime")
-            time.sleep(1.5)
-            after = q3.serial()[before:]
-            check("a command typed through xHCI runs (32-bit)",
-                  "uptime:" in after and "ticks" in after)
-
-            # Several keys in a row: the reports have to go one after another
-            # through the same transfer ring, not just the first one
-            before = len(q3.serial())
-            type_text(q3, "help")
-            time.sleep(1.5)
-            help_text = q3.serial()[before:]
-            check("the whole word arrives character by character (32-bit)",
-                  "help" in help_text and "Available commands" in help_text)
-        finally:
-            q3.close()
-    finally:
-        if os.path.exists(slog32):
-            os.unlink(slog32)
 
     return summary()
 
