@@ -6912,3 +6912,61 @@ works and is checked by `make test`.
       disc made for it (ptest.boot_disc), starting at the desktop unless
       the command line says TEXT_MODE - what QEMU's -kernel did for the
       32-bit kernel.
+
+- [x] **The desktop's tests on the 64-bit kernel, and what they found**
+      (scripts/ptest.py, scripts/tests/t_*.py, kernel64/task64.c,
+      kernel64/paging64.c, kernel64/isr64.c, kernel/desktop.c,
+      kernel/video.c, user/gcalc.c, user/gpaint.c, user/mkwall.c,
+      user64/ush64.c, user64/gdeaf.c, user64/seq.c, user64/spin.c)
+
+      With the 32-bit kernel gone the desktop groups boot the 64-bit one
+      through GRUB, at 800x600 rather than 640x480, and meet the
+      accounts, the hiding bar and the shortcuts of October, which no
+      test had run. Most of what failed was the tests' assumptions;
+      some of it was the system.
+
+      Fixed in the system. A system call refused a buffer its program
+      had not touched yet: a heap page comes into being on the first
+      touch, and the kernel did not make it - so the picture viewer read
+      776 bytes of a JPEG and gave up. The 64-bit kernel said nothing
+      when a program ended; it says "process 'x' has ended (code n)" as
+      the 32-bit one did. The desktop's search listed the root and
+      opened what it found by a bare name its program could not find;
+      it looks in the account's home now and passes the whole path, and
+      Print Screen saves there too. A window kept 23 letters of its
+      title ('Files: /home/admin/.Tra'); it keeps 63. The accounts
+      program stood in the menu as a second 'Code' (labels were looked
+      up through the picture's number). Under GRUB's mode the kernel
+      never read the panel's EDID, so its size was guessed from the
+      height; and the 'resolution' setting could not change a loader's
+      mode even on the Bochs/QEMU card, where it can. read_edid() took
+      pci_find_device()'s "not found" for "found". The calculator's
+      Error had moved off its display, and Paint's notifications were
+      longer than a card. gdeaf, seq, spin and mkwall are 64-bit
+      programs again, and ush64 redirects into files ('>', '>>').
+
+      Fixed in the tests. ptest lays the desktop out for 800x600 unless
+      told otherwise, brings the bar out before reading or clicking it,
+      types a sudo password only when one is asked for, waits a minute
+      for a desktop that first runs its profile setup, finds the
+      sign-in and first-run screens on a scaled panel, opens Home
+      through its shortcut and double-clicks within a quarter of a
+      second. The groups expect an administrator's session - a '#'
+      prompt in the home, settings written without a password (t_settings
+      signs into an ordinary account, made from the shell, to test the
+      password itself) - wait for the 64-bit shell on the serial port,
+      read its text console off the framebuffer, and close what the
+      shell ran before asking the shell anything more: the 64-bit
+      shell waits for what 'run' starts.
+
+      Checked by the groups alttab, appear, apps, bar, clip, clock,
+      colours, desks, desktop1, desktop2, files, filetree, gcode,
+      gedit, gterm, gtermlive, gtermsh, gui64, icons, look, manywin,
+      maxwin, motion, netbar, notify, polish, scale, screenshot,
+      settings, snap, sysbar, terminal, udraw, wall, wheel, winkeys
+      and winmgr, which pass - but for one of motion's: an idle frame
+      at 800x600 costs QEMU about 17 ms, so the desktop spends more
+      than half of each second drawing (60-77% on a loaded host, where
+      the test asks for less than 50%). Every idle frame still blits the whole
+      background and compares the whole screen with what the card has;
+      skipping a frame nothing changed in is what is left to do.
