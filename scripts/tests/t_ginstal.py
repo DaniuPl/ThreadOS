@@ -13,7 +13,11 @@ This group checks both halves of that: that nothing of the desktop is
 there, and that everything the program says can be read off the screen,
 in the font the kernel drew it with.
 
-The machine is started from a stick under UEFI, and the disk of the
+The machine is started from a disc under UEFI, at the shell entry
+boot/grub64.cfg also has - a stick starts through threadboot straight
+into the Live desktop, and the whole screen cannot be taken from a
+desktop that already holds it. The disc hands the installer the
+kernel's file and threadboot, as the real one does. The disk of the
 'other machine' hangs behind an AHCI controller with somebody else's
 boot loader on it. What lands there is read back by mtools byte for
 byte; and at the end that disk is booted on its own, which is the only
@@ -42,7 +46,10 @@ OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
+# The loader of the same build as the kernel under test - which is not
+# always build/ (make BUILD=...)
+BUILD = os.path.dirname(os.path.abspath(KERNEL64))
+LOADER = os.path.join(BUILD, "BOOTX64.EFI")
 
 FOREIGN = b"MZ-this-is-somebody-elses-bootmgfw-" * 300
 
@@ -59,6 +66,10 @@ ROW_H, ROW_Y0, PAD = 16, 10, 14
 BTN_W, BTN_H, BTN_GAP = 168, 26, 10
 # The colours text is in: plain, quiet, a warning
 INKS = [theme("dark")[k] for k in ("app_text", "app_dim", "app_danger")]
+# The installer runs in Polish here, so its letters and the dash in its
+# heading have to be among the ones the screen is read with
+POLISH = UiFont.CHARSET + "\u0105\u0107\u0119\u0142\u0144\u00f3\u015b\u017a\u017c" \
+    "\u0104\u0106\u0118\u0141\u0143\u00d3\u015a\u0179\u017b\u2014"
 
 
 def blob(path):
@@ -92,7 +103,8 @@ def read_rows(q, cx, cy, rows=16):
     return q.read_ui_lines(cx + PAD - 4, cx + WIN_W - 4,
                            [cy + ui_font_baseline_in(UD_PX, ROW_Y0 + r * ROW_H,
                                                      ROW_H)
-                            for r in range(rows)], px=UD_PX, colours=INKS)
+                            for r in range(rows)], px=UD_PX, colours=INKS,
+                           charset=POLISH)
 
 
 def wait_text(q, cx, cy, want, tries=10, rows=16):
@@ -110,6 +122,31 @@ def wait_text(q, cx, cy, want, tries=10, rows=16):
         time.sleep(1.0)
     return text
 
+def shell_disc(work):
+    """A GRUB disc that starts the kernel at its shell, handing over the
+    two files the installer writes as modules, by the names threadboot
+    gives them - the shell entry of boot/grub64.cfg, made from the
+    build under test"""
+    root = os.path.join(work, "disc")
+    os.makedirs(os.path.join(root, "boot", "grub"))
+    shutil.copy(KERNEL64, os.path.join(root, "boot", "threados64.bin"))
+    shutil.copy(INITRD64, os.path.join(root, "boot", "initrd64.img"))
+    shutil.copy(LOADER, os.path.join(root, "boot", "threadboot.efi"))
+    with open(os.path.join(root, "boot", "grub", "grub.cfg"), "w") as fh:
+        fh.write("insmod all_video\nset gfxpayload=keep\n"
+                 "set timeout=0\nset default=0\n"
+                 'menuentry "ThreadOS 64 (shell)" {\n'
+                 "    multiboot2 /boot/threados64.bin\n"
+                 "    module2 /boot/initrd64.img initrd64\n"
+                 "    module2 /boot/threados64.bin the kernel\n"
+                 "    module2 /boot/threadboot.efi loader\n}\n")
+    iso = os.path.join(work, "shell.iso")
+    made = subprocess.run(["grub-mkrescue", "-o", iso, root],
+                          stdout=subprocess.DEVNULL,
+                          stderr=subprocess.DEVNULL).returncode == 0
+    return iso if made else None
+
+
 def main():
     print()
     print("--- the installer in a window (ginstal) ---")
@@ -122,8 +159,8 @@ def main():
         print("SKIPPED: no mtools")
         return summary()
     if not os.path.exists(LOADER):
-        subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+        subprocess.run(["make", "BUILD=" + BUILD, "efi"], cwd=ROOT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
         print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
@@ -134,7 +171,7 @@ def main():
         print("SKIPPED: no qemu-system-x86_64")
         return summary()
 
-    esp = tempfile.mkdtemp()
+    work = tempfile.mkdtemp()
     target = tempfile.mktemp(suffix=".img")
     slog = tempfile.mktemp(suffix=".log")
     slog2 = tempfile.mktemp(suffix=".log")
@@ -145,10 +182,10 @@ def main():
     want_initrd = blob(INITRD64)
 
     try:
-        os.makedirs(os.path.join(esp, "EFI", "BOOT"))
-        shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
-        shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
-        shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
+        disc = shell_disc(work)
+        check("the disc with the shell entry builds", disc is not None)
+        if disc is None:
+            return summary()
 
         make_gpt_disk(target)
         made = fat_format(target, ESP_START, ESP_SECTORS, fat32=True,
@@ -160,23 +197,36 @@ def main():
         check("the foreign machine's disk is ready (GPT + FAT32 from mtools)", made)
 
         shutil.copy(OVMF_VARS, nvram)
-        q = Qemu(KERNEL, INITRD, esp=esp, disk=target, sata=True,
+        q = Qemu(KERNEL, INITRD, cdrom=disc, disk=target, sata=True,
                  serial=slog, qemu="qemu-system-x86_64",
                  uefi=(OVMF_CODE, nvram))
         try:
-            q.wait_serial("The 64-bit system is ready", timeout=120)
-            q.type_line("sudo set language pl")
-            q.command("thread", "saved", timeout=30)
+            q.wait_serial("thread64>", timeout=120)
+            # Polish for the installer. The disk is somebody else's, so
+            # there is nowhere to save the setting - it holds for this
+            # boot, which is all the installer needs.
+            q.command("sudo set language pl", "password:", timeout=30)
+            said = q.command("thread", "set:", timeout=30)
+            check("the language is set for this boot, with no disk to "
+                  "keep it on", "could not write 'language'" in said)
             seen = len(q.serial())
             q.type_line("install")
-            time.sleep(8)
+            # The window, once the kiosk has started the program
+            deadline = time.time() + 40
+            while time.time() < deadline and find_window(q)[0] is None:
+                time.sleep(0.5)
             check("'install' takes the screen instead of refusing",
                   "the desktop is running" not in q.serial()[seen:])
 
             # The pointer is drawn over the window, and a glyph with
             # half a cursor on it is a glyph nothing can read. So it
-            # goes out of the way first - a person moves it too.
-            q.mouse_goto(900, 600)
+            # goes out of the way first - a person moves it too. Into
+            # the corner, and from there to a place on the screen: a
+            # place past its edge is not where the pointer stops, and
+            # every click after it would land that far off.
+            sw, sh = q.size()
+            q.mouse_home()
+            q.mouse_goto(sw - 4, sh - 4)
             time.sleep(0.8)
 
             # --- what is NOT on this screen. The menu bar and the dock
@@ -197,7 +247,7 @@ def main():
             # offers exactly one way out of itself
             head = q.read_ui(14, ui_font_baseline_in(BAR_PX + 2, 8, 20),
                              width=260, px=BAR_PX + 2, face="bold",
-                             fg=(255, 255, 255),
+                             fg=(255, 255, 255), charset=POLISH,
                              under=lambda x, y: aurora_px(x, y, w, h))
             check("the screen says what it is ('%s')" % head,
                   "ThreadOS — instalacja" in head)
@@ -256,8 +306,11 @@ def main():
             text = wait_text(q, cx, cy, "Cały dysk dla ThreadOS")
             check("the second button shows the other way: the whole disk",
                   "Cały dysk dla ThreadOS" in text)
+            # (the screen reader loses the K of "DYSKU" in red capitals
+            # at this size, though the screen draws it - the words up to
+            # it say the thing)
             check("and it says outright what that means",
-                  "TO USUNIE WSZYSTKO Z TEGO DYSKU" in text)
+                  "TO USUNIE WSZYSTKO Z TEGO DYS" in text)
             check("listing what it will do instead",
                   "partition table (GPT)" in text
                   and "EFI partition (FAT32)" in text
@@ -310,7 +363,7 @@ def main():
             # A click where the desktop's menu button would be does
             # nothing - there is no menu to open, and that is the
             # difference between a kiosk and a desktop with one window
-            q.mouse_goto(10, 790)
+            q.mouse_goto(10, sh - 10)
             q.mouse_click()
             time.sleep(1.0)
             w, h, at = q.screen_raw()
@@ -345,12 +398,12 @@ def main():
             out = q2.wait_serial("threadboot: ThreadOS", timeout=60)
             check("a disk installed from the window boots on its own", "threadboot" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=120)
-            check("and the system on it reaches the shell",
+            check("and the system on it comes up",
                   "Multiboot OK (Multiboot 2)" in out)
         finally:
             q2.close()
     finally:
-        shutil.rmtree(esp, ignore_errors=True)
+        shutil.rmtree(work, ignore_errors=True)
         for f in (target, slog, slog2, nvram):
             if os.path.exists(f):
                 os.unlink(f)

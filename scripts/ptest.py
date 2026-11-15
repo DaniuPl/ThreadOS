@@ -2951,7 +2951,7 @@ class Qemu:
 
     def read_ui_lines(self, x0, x1, baselines, px=None,
                       faces=("sans", "bold"), screen=None, gap=14,
-                      colours=None):
+                      colours=None, charset=None):
         """A page of TrueType text - what a program wrote into its
         window through user/udraw.h - one line per baseline, the lines
         joined with newlines.
@@ -2996,7 +2996,8 @@ class Qemu:
                 got = ""
                 for f in faces:
                     one = self.find_ui(x0 + a, x0 + b + 8, base, px=px,
-                                       face=f, screen=screen, colours=colours)
+                                       face=f, screen=screen, colours=colours,
+                                       charset=charset)
                     if len(one) > len(got):
                         got = one
                 if got:

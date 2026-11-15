@@ -198,7 +198,7 @@ def main():
                   f"({len(want_kernel)} B)",
                   f"kernel: {len(want_kernel)} B" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=90)
-            check("and the system on that disk reaches the shell",
+            check("and the system on that disk comes up",
                   "Multiboot OK (Multiboot 2)" in out)
         finally:
             q2.close()
