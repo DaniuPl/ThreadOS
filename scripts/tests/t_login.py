@@ -44,10 +44,13 @@ def wait_hint(q, text, timeout=20):
 
 
 def setup_title(q):
+    """The wizard's heading, at its pen in the 480x438 card centred on
+    the screen - looked for across the screen it would start in the
+    dimmed aurora beside a card narrower than the screen"""
     w, h, at = q.screen_raw()
     y = (h - 438) // 2
-    return q.find_ui(80, w - 80, y + 34, px=20, face="bold",
-                     screen=(w, h, at))
+    return q.read_ui((w - 480) // 2 + 20, y + 34, width=440, px=20,
+                     face="bold", screen=(w, h, at))
 
 
 def wait_setup(q, timeout=30):
@@ -72,9 +75,13 @@ def create_profile(q, login, display, password, light=False):
     if password:
         q.type_line(password, enter=False)
     q.sendkey("tab")
+    # The confirmation is a field of its own whether or not anything is
+    # typed into it: without this Tab an empty password left the focus
+    # there, the theme's key went into it and Enter never reached the
+    # button
     if password:
         q.type_line(password, enter=False)
-        q.sendkey("tab")
+    q.sendkey("tab")
     if light:
         q.sendkey("l")
     q.sendkey("tab")
@@ -105,7 +112,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, serial=log)
         try:
-            q.wait_serial("Starting the graphical desktop", timeout=45)
+            q.wait_serial("The desktop is starting", timeout=60)
             got = wait_setup(q)
             check("a first-run profile wizard appears before the desktop",
                   "Welcome to ThreadOS" in got)
@@ -146,7 +153,7 @@ def main():
             q = Qemu(KERNEL, INITRD, passwordless_disk,
                      serial=passwordless_log)
             try:
-                q.wait_serial("Starting the graphical desktop", timeout=45)
+                q.wait_serial("The desktop is starting", timeout=60)
                 check("passwordless setup is offered on a fresh disk",
                       "Welcome to ThreadOS" in wait_setup(q))
                 create_profile(q, "guest", "Guest Profile", "", light=True)
@@ -158,7 +165,7 @@ def main():
             q = Qemu(KERNEL, INITRD, passwordless_disk,
                      serial=passwordless_log)
             try:
-                q.wait_serial("Starting the graphical desktop", timeout=45)
+                q.wait_serial("The desktop is starting", timeout=60)
                 check("a passwordless profile signs in automatically after restart",
                       wait_unlocked(q, timeout=30, dark=False))
             finally:
@@ -170,7 +177,7 @@ def main():
 
         q = Qemu(KERNEL, INITRD, disk, serial=log)
         try:
-            q.wait_serial("Starting the graphical desktop", timeout=45)
+            q.wait_serial("The desktop is starting", timeout=60)
             got = wait_hint(q, "signs in", timeout=30)
             check("the saved profile replaces the first-run wizard after restart",
                   "signs in" in got and
