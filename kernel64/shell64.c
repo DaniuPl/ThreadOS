@@ -135,6 +135,7 @@ static void cmd_help(void)
     printk("          hardware - what is in this machine, disks, font\n");
     printk("          bt [scan|test] - Bluetooth\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
+    printk("          format [N] - the whole disk, or partition N, as TFS\n");
     printk("          install - ThreadOS onto this machine's disk\n");
     printk("            (the whole screen; 'install text [whole]' - here)\n");
 }
@@ -742,9 +743,81 @@ static void cmd_install_text(int mode, int disk)
         printk("install: nothing was written\n");
         return;
     }
-    if (!confirm_admin_action("install"))
+    /* From live media the typed word is the whole confirmation, as it
+       is in the graphical installer: the password guards the system
+       this machine already runs, and a live boot has none to guard.
+       From an installed system it is asked for again. */
+    if (install_update_allowed() && !confirm_admin_action("install"))
         return;
     install_do();
+}
+
+/* Formatting, and the asking that has to come before it.
+ *
+ * The startup path will not touch a disk that has anything on it, so
+ * this is the only way a disk with a Windows on it becomes a disk with
+ * TFS on it - and it is deliberately a thing one has to mean. The
+ * confirmation is the word, typed out: a key to press is something a
+ * person does by reflex, and a word is something they have to decide
+ * to type. */
+static void cmd_format(const char *arg)
+{
+    if (!confirm_admin_action("format"))
+        return;
+    if (!blk_present()) {
+        printk("format: there is no disk\n");
+        return;
+    }
+
+    int which = 0;                 /* 0 = the whole disk */
+    for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
+        which = which * 10 + (*p - '0');
+
+    printk("Disk: %s, %u MiB\n", blk_name(), blk_sectors() / 2048);
+    int np = part_scan();
+    if (np > 0) {
+        printk("It has %u partition(s) - a %s table:\n", (uint32_t)np,
+               part_is_gpt() ? "GPT" : "MBR");
+        for (int i = 0; i < np; i++) {
+            struct partition pt;
+            if (!part_get(i, &pt))
+                break;
+            printk("  %u: %u MiB, %s %s\n", (uint32_t)(i + 1),
+                   (uint32_t)(pt.sectors / 2048), pt.kind, pt.label);
+        }
+    }
+
+    if (which > 0) {
+        struct partition pt;
+        if (which > np || !part_get(which - 1, &pt)) {
+            printk("format: there is no partition %u\n", (uint32_t)which);
+            return;
+        }
+        printk("\nTHIS WILL ERASE PARTITION %u (%u MiB, %s %s).\n",
+               (uint32_t)which, (uint32_t)(pt.sectors / 2048), pt.kind,
+               pt.label);
+        printk("The rest of the disk and the partition table stay untouched.\n");
+    } else if (np > 0) {
+        printk("\nTHIS WILL ERASE THE WHOLE DISK - the partition table "
+               "and ALL %u partition(s) above.\n", (uint32_t)np);
+        printk("To take just one, type 'format N'.\n");
+    } else {
+        printk("\nTHIS WILL ERASE THE WHOLE DISK, with everything on it.\n");
+    }
+    printk("Type YES (in capitals) to do it: ");
+
+    char answer[8];
+    read_word(answer, (int)sizeof(answer));
+
+    if (strcmp(answer, "YES") != 0) {
+        printk("format: nothing was erased\n");
+        return;
+    }
+    if (fs_format_now(which))
+        printk("format: done - %s is a ThreadOS TFS now\n",
+               which ? "this partition" : "the whole disk");
+    else
+        printk("format: it did not work\n");
 }
 
 static void execute(const char *line);
@@ -1031,6 +1104,11 @@ static void execute(const char *line)
         gfx_command(line + sizeof("shape ") - 1);
     } else if (!strcmp(line, "disks")) {
         hwinfo_disks();
+    } else if (!strcmp(line, "format")) {
+        cmd_format("");
+    } else if (starts_with(line, "format ")) {
+        const char *which = argument(line, sizeof("format ") - 1);
+        cmd_format(which ? which : "");
     } else if (starts_with(line, "disks read")) {
         hwinfo_disk_read(line + sizeof("disks read") - 1);
     } else if (!strcmp(line, "install")) {
