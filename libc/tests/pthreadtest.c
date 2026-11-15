@@ -469,6 +469,67 @@ static void exit_test(void)
            WIFEXITED(st) ? WEXITSTATUS(st) : -1);
 }
 
+/* --- Copy-on-write, written by the kernel on another core -------------
+ *
+ * After a fork the parent and the child share their pages until one of
+ * them writes. A write by the kernel on the program's behalf - read()
+ * into a buffer - has to split the page too, and on every core: the
+ * child must keep seeing its own copy. A thread does the read once it
+ * runs on a core other than the first (where it ran shows in a '~'
+ * line). */
+
+static char cow_buf[4096] __attribute__((aligned(4096))) =
+    "the child's own copy";
+
+static void *cow_reader(void *arg)
+{
+    int fd = *(int *)arg;
+    struct timespec t0;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
+    volatile unsigned long x = 0;
+    while (sched_getcpu() == 0 && ms_since(&t0) < 3000)
+        for (int i = 0; i < 100000; i++)
+            x += i;
+    long core = sched_getcpu();
+    if (read(fd, cow_buf, 21) != 21)
+        printf("cow: the read failed\n");
+    return (void *)core;
+}
+
+static void cow_test(void)
+{
+    int fd = open("cow.txt", O_CREAT | O_TRUNC | O_WRONLY, 0644);
+    if (fd < 0 || write(fd, "the parent's own data", 21) != 21)
+        printf("cow: cannot make cow.txt\n");
+    close(fd);
+    int p[2];
+    if (pipe(p))
+        printf("cow: no pipe\n");
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid == 0) {
+        char c;
+        if (read(p[0], &c, 1) != 1)
+            _exit(1);
+        printf("cow: the child still sees '%s'\n", cow_buf);
+        fflush(stdout);
+        _exit(0);
+    }
+    fd = open("cow.txt", O_RDONLY);
+    pthread_t t;
+    void *core = NULL;
+    pthread_create(&t, NULL, cow_reader, &fd);
+    pthread_join(t, &core);
+    close(fd);
+    printf("cow: the parent read '%.21s'\n", cow_buf);
+    printf("~written on core %ld\n", (long)core);
+    fflush(stdout);
+    if (write(p[1], "x", 1) != 1)
+        printf("cow: the child was not told\n");
+    waitpid(pid, NULL, 0);
+    unlink("cow.txt");
+}
+
 int main(void)
 {
     struct timespec t0;
@@ -484,7 +545,7 @@ int main(void)
         { "queue", queue_test }, { "sem", sem_test }, { "sync", sync_test },
         { "lifetime", lifetime_test }, { "process", process_test },
         { "timed", timed_test }, { "exit", exit_test },
-        { "spread", spread_test },
+        { "spread", spread_test }, { "cow", cow_test },
     };
     for (unsigned i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
         struct timespec t;

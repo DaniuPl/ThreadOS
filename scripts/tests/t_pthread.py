@@ -113,6 +113,13 @@ def one_machine(work, want, cpus):
               f"({tagged.get('cores')})", tagged.get("cores") == str(cpus))
         ran = re.match(r"on (\d+)", tagged.get("ran", ""))
         ran = int(ran.group(1)) if ran else 0
+        cow = re.match(r"on core (\d+)", tagged.get("written", ""))
+        if cpus > 1:
+            # (the cow lines themselves are compared with glibc's; this is
+            # that the kernel's write happened where it can go wrong)
+            check(f"{cpus} core(s): the copy-on-write read ran on a core "
+                  f"other than the first ({tagged.get('written')})",
+                  cow is not None and cow.group(1) != "0")
         check(f"{cpus} core(s): four computing threads ran on "
               f"{'more than one core' if cpus > 1 else 'the one core'} "
               f"(sched_getcpu saw {ran})",

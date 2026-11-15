@@ -19,6 +19,7 @@
 
 #define CR4_PAE   (1 << 5)
 #define CR0_PG    (1 << 31)
+#define CR0_WP    (1 << 16)
 #define CR0_PE    (1 << 0)
 #define MSR_EFER  0xC0000080
 #define EFER_LME  (1 << 8)
@@ -88,8 +89,13 @@ ap_protected:
     /* Turning paging on switches the processor into long mode - but
        only a far jump to a 64-bit descriptor makes it start executing
        code as 64-bit */
+    /* Write protection (WP) together with paging, as the boot core has
+       it (boot64.S): without it the kernel on this core writes straight
+       through a read-only page - a copy-on-write page shared by two
+       processes after a fork is then changed for both, instead of being
+       split. Every core runs kernel code for ring 3 programs now. */
     movl %cr0, %eax
-    orl $CR0_PG, %eax
+    orl $(CR0_PG | CR0_WP), %eax
     movl %eax, %cr0
 
     ljmpl $0x18, $OFF(ap_long)

@@ -7056,3 +7056,19 @@ works and is checked by `make test`.
       late answers. And sizes in bytes had two spaces before the "B".
       Qemu() no longer passes -kernel to a UEFI machine that boots its
       own disk, which the Multiboot 2 kernel made QEMU refuse.
+
+- [x] **Copy-on-write on every core** (boot64/ap64.S,
+      libc/tests/pthreadtest.c, scripts/tests/t_pthread.py)
+      The boot core turned on CR0.WP with paging; the other cores turned
+      on paging alone. Without WP the kernel writes straight through a
+      read-only page, so a write the kernel made for a program on one of
+      those cores - read() into a buffer, a futex word, a thread's tid -
+      landed in a copy-on-write page still shared with another process
+      after a fork, and changed it for both. It mattered little while
+      programs ran on the boot core; threads now run on every core.
+      Found by the agent moving the 32-bit tests, confirmed here.
+
+      The test: after a fork, a thread of the parent waits until it runs
+      on a core other than the first and read()s into a page the child
+      still shares; the child must still see its own copy, as on glibc.
+      With the old ap64.S the child saw the parent's data.
