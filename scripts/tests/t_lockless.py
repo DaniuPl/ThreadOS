@@ -47,7 +47,12 @@ PATTERN = re.compile(r"\[syscalls\] (child|parent ): cores (\d+), "
 
 def measure(q, cmd_text, label):
     """One run: (mask_together, longest_time) or None."""
-    out = q.command(cmd_text, "done", timeout=300)
+    # 'run' is over when the shell says the exit code - waiting only for
+    # the program's own last line would leave the shell's line to land
+    # in the next command's output. 'runw' gives the prompt back at
+    # once, so its end is the program's own last line.
+    out = q.command(cmd_text, "exit code" if cmd_text.startswith("run ")
+                    else "[syscalls] done", timeout=300)
     proc = [(int(m.group(2)), int(m.group(3)), int(m.group(4)),
              int(m.group(5))) for m in PATTERN.finditer(out)]
 
