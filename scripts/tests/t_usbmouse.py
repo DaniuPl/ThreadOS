@@ -27,6 +27,7 @@ groups in parallel.
 import os
 import re
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -34,12 +35,31 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 
+def line_of(said, start):
+    """The line of 'hardware' that starts with the given word"""
+    return next((l.strip() for l in said.splitlines()
+                 if l.startswith(start)), "no line")
+
+
 def main():
+    logs = [tempfile.mktemp(suffix=".log") for _ in range(4)]
+    try:
+        return machines(logs)
+    finally:
+        for f in logs:
+            if os.path.exists(f):
+                os.unlink(f)
+
+
+def machines(logs):
     # --- a mouse on the bus every newer board has --------------------
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
-             usbmouse="xhci")
+             usbmouse="xhci", serial=logs[0])
     try:
-        boot = q.wait_for("ThreadOS shell", timeout=60)
+        # The drivers report what they find from threads of their own,
+        # which may come after the prompt
+        q.wait_serial("thread64>", timeout=60)
+        boot = q.wait_serial("A USB mouse", timeout=30)
         check("the kernel found the USB mouse and says where ('%s')"
               % (re.search(r"A USB mouse[^\n]*", boot).group(0)
                  if re.search(r"A USB mouse[^\n]*", boot) else "none"),
@@ -54,19 +74,15 @@ def main():
     # nothing on the PS/2 port or one whose touchpad is on a bus we do
     # not speak, and only the machine can say which.
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
-             usbmouse="xhci")
+             usbmouse="xhci", serial=logs[1])
     try:
-        q.wait_for("ThreadOS shell", timeout=60)
-        q.type_line("hardware")
-        time.sleep(3)
-        said = q.screen()
+        q.wait_serial("thread64>", timeout=60)
+        q.wait_serial("A USB mouse", timeout=30)
+        said = q.command("hardware", "thread64>", timeout=30)
         check("'hardware' talks about the 8042 controller and the PS/2 mouse ('%s')"
-              % next((l.strip() for l in said.splitlines()
-                      if l.startswith("PS/2:")), "no line"),
+              % line_of(said, "PS/2:"),
               "PS/2:" in said and "the 8042 controller is there" in said)
-        check("and about what it found on USB ('%s')"
-              % next((l.strip() for l in said.splitlines()
-                      if l.startswith("USB:")), "no line"),
+        check("and about what it found on USB ('%s')" % line_of(said, "USB:"),
               "USB:" in said and "mouse yes" in said)
         check("and it lists the PCI devices, so a foreign machine will describe itself",
               "class" in said and "graphics" in said)
@@ -80,23 +96,25 @@ def main():
     # mouse and looking at the screen says everything: whatever moved
     # that cursor came over USB, because there is no other road.
     q = Qemu(KERNEL, INITRD, usbkbd="xhci", usbmouse="xhci",
-             no_i8042=True)
+             no_i8042=True, serial=logs[2])
     try:
         check("a machine with no 8042 comes up and draws the desktop",
               q.wait_desktop(timeout=60))
 
-        # The pointer starts in the middle of the mode the compositor
-        # set up; from there it is moved to a place nothing else draws
-        # on, and the white cursor has to be there.
-        q.mouse_move(-110, -60)
-        check("the pointer is where the USB mouse took it (~50,41)",
-              q.wait_pixel(50, 41, (255, 255, 255)))
+        # The pointer is pushed into the corner and from there moved to
+        # a place nothing else draws on - the middle of the aurora, away
+        # from the bar, the dock and the shortcuts down the left - and
+        # the white cursor has to be there.
+        q.mouse_home()
+        q.mouse_move(300, 200)
+        check("the pointer is where the USB mouse took it (~300,201)",
+              q.wait_pixel(300, 201, (255, 255, 255)))
 
         q.mouse_move(150, 80)
-        check("and it keeps following it (~200,121)",
-              q.wait_pixel(200, 121, (255, 255, 255)))
-        check("and the old place was painted over with the background (~50,41)",
-              q.wait_background(50, 41, tol=0))
+        check("and it keeps following it (~450,281)",
+              q.wait_pixel(450, 281, (255, 255, 255)))
+        check("and the old place was painted over with the background (~300,201)",
+              q.wait_background(300, 201, tol=0))
 
         # The Windows key on a USB keyboard is a modifier bit in the
         # report, not a key - and it opens the menu all the same
@@ -113,15 +131,13 @@ def main():
     # mouse it does not have. Typed on the USB keyboard, because there
     # is no other.
     q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci",
-             usbmouse="xhci", no_i8042=True)
+             usbmouse="xhci", no_i8042=True, serial=logs[3])
     try:
-        q.wait_for("ThreadOS shell", timeout=60)
-        q.type_line("hardware")
-        time.sleep(3)
-        said = q.screen()
+        q.wait_serial("thread64>", timeout=60)
+        q.wait_serial("A USB keyboard", timeout=30)
+        said = q.command("hardware", "thread64>", timeout=30)
         check("a machine with no 8042 says so outright instead of faking PS/2 ('%s')"
-              % next((l.strip() for l in said.splitlines()
-                      if l.startswith("PS/2:")), "no line"),
+              % line_of(said, "PS/2:"),
               "NO 8042 controller" in said)
     finally:
         q.close()
