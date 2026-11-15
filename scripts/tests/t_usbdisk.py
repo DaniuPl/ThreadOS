@@ -300,12 +300,13 @@ def install_to_stick():
                             "Type ERASE", timeout=60)
             check("the plan is about the stick, not the machine's disk",
                   "USB" in out or ("disk %d" % usbno) in out)
-            # Wiping a disk is an administrator's act, and the session
-            # signed in above is one - so it asks for the password again
-            asked = q.command("ERASE", "admin password:", timeout=40)
-            check("wiping the stick asks for the admin password first",
-                  "install: admin password:" in asked)
-            out = q.command("thread", "Done", timeout=300)
+            # A machine started from removable media (EFI/BOOT/BOOTX64.EFI)
+            # is a live boot: the typed word is the whole confirmation, as
+            # in the graphical installer - the password guards the system
+            # a machine already runs, and a live boot has none to guard
+            out = q.command("ERASE", "Done", timeout=300)
+            check("from live media wiping the stick asks for no password "
+                  "beyond the typed word", "admin password" not in out)
             check("installing onto the stick runs to the end",
                   "partition table (GPT) - done" in out
                   and "EFI partition (FAT32) - done" in out

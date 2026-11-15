@@ -149,13 +149,13 @@ def main():
             # Now install onto the second, wiping it - and the first
             # one must come out of it untouched
             q.command("install text whole 2", "Type ERASE", timeout=40)
-            # Wiping a disk is an administrator's act, and the session
-            # signed in above is one - so it asks for the password
-            # again rather than taking the sign-in on trust
-            asked = q.command("ERASE", "admin password:", timeout=40)
-            check("wiping a disk asks for the admin password first",
-                  "install: admin password:" in asked)
-            out = q.command("thread", "Done", timeout=240)
+            # A machine started from removable media (EFI/BOOT/BOOTX64.EFI)
+            # is a live boot: the typed word is the whole confirmation, as
+            # in the graphical installer - the password guards the system
+            # a machine already runs, and a live boot has none to guard
+            out = q.command("ERASE", "Done", timeout=240)
+            check("from live media wiping a disk asks for no password "
+                  "beyond the typed word", "admin password" not in out)
             check("installing onto the named disk runs to the end",
                   "partition table (GPT) - done" in out
                   and "/EFI/BOOT/BOOTX64.EFI - done" in out)
