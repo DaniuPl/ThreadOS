@@ -28,6 +28,7 @@ groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -50,7 +51,15 @@ def read_rows(q, ox, oy, cols, rows):
 
 
 def spins(rows):
-    return sum(1 for r in rows if "spin" in r and "/>" not in r)
+    """How many lines of spin's output the window shows - its own
+    marker, not the command line that started it"""
+    return sum(1 for r in rows if "[spin] tick" in r)
+
+
+def typed_seq3(rows):
+    """Is 'seq 3' on a line after a prompt - a directory and '>', or '#'
+    for an administrator, which the desktop's session is"""
+    return any(re.match(r"/\S*[>#] seq 3$", r.rstrip()) for r in rows)
 
 
 def main():
@@ -123,14 +132,17 @@ def main():
 
             # --- and the terminal takes the next command ---------------
             q.type_line("seq 3")
-            time.sleep(3)
             rows = read_rows(q, **geom)
+            end = time.time() + 10
+            while time.time() < end and not (typed_seq3(rows) and "3" in rows):
+                time.sleep(0.5)
+                rows = read_rows(q, **geom)
             check("after the program is killed the terminal takes the next command",
-                  "/> seq 3" in "\n".join(rows))
+                  typed_seq3(rows))
             check("and shows ITS output, not the leftovers of the last one",
                   "1" in rows and "2" in rows and "3" in rows)
             check("nothing of the old program is left in the window",
-                  spins(rows) == 0 or "/> seq 3" in "\n".join(rows[-8:]))
+                  spins(rows) == 0 or typed_seq3(rows[-8:]))
         finally:
             q.close()
     finally:

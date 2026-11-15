@@ -93,6 +93,26 @@ def files_click(q, wx, wy, x, y):
     q.mouse_click()
 
 
+def files_into(q, wx, wy, folder):
+    """Into a folder on the file manager's list: picked, then 'Open' -
+    once the list shows it, and until the window says it went there.
+    (Not a double click: two clicks have to land within half a second,
+    which a busy host does not always allow.)"""
+    end = time.time() + 10
+    listed = []
+    while time.time() < end and folder not in listed:
+        listed = files_listed(q, wx, wy)
+        time.sleep(0.3)
+    if folder not in listed:
+        return
+    files_click(q, wx, wy, GFILES_ROW_X, gfiles_row_y(listed.index(folder)))
+    time.sleep(1)
+    files_click(q, wx, wy, *gfiles_button("open"))
+    while time.time() < end and \
+            not q.window_title(wx, wy).endswith("/" + folder):
+        time.sleep(0.3)
+
+
 def row_text(at, r, cols=48, wx=WX, wy=WY):
     """One line of the page, read in the lettering it is drawn in: a grid
     of cells right of the line numbers (ptest.read_cells)"""
@@ -226,6 +246,10 @@ def sixty_four():
             fx, fy = 118, 78              # the next slot of the cascade
             q.launch_dock("gfiles")              # the "Files" tile
             time.sleep(5)
+            # Files from the dock shows the whole disk; the editor saved
+            # in the account's home, two folders down
+            for folder in ("home", "admin"):
+                files_into(q, fx, fy, folder)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
@@ -567,9 +591,15 @@ def main():
             # to a text file means opening it in the editor.
             q.sendkey("alt-f4")
             time.sleep(2.5)
-            # The editor is closed; launch the file manager.
-            q.launch_dock("gfiles", n_w=0)            # the "Files" tile
-            time.sleep(4)
+            # The editor is closed; the file manager opened on the
+            # account's home, where the editor saved - the Home shortcut
+            # on the desktop, which no window covers now
+            q.open_shortcut("Home")
+            listed = []
+            end = time.time() + 10
+            while time.time() < end and "note" not in listed:
+                time.sleep(0.5)
+                listed = files_listed(q)
             q.mouse_goto(600, 430)
             time.sleep(1.5)
             w, h, at = q.screen_raw()

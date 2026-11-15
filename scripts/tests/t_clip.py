@@ -152,11 +152,17 @@ def main():
     try:
         q2 = Qemu(KERNEL, INITRD, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ThreadOS shell", timeout=40)
-            typed(q2, "echo " + WORD)
+            # GRUB hands even a text boot a framebuffer, and the console
+            # draws itself on it: it is read from there (screen_fbcon),
+            # and the prompt is waited for on the serial port
+            q2.wait_serial("thread64>", timeout=60)
+            # A command whose answer is not the line itself: what comes
+            # back proves it RAN, not merely that it was pasted
+            line = "dns 10.0.2.77"
+            typed(q2, line)
             q2.sendkey("ctrl-insert")      # copy the whole line
             time.sleep(0.5)
-            for _ in range(len("echo " + WORD)):
+            for _ in range(len(line)):
                 q2.sendkey("backspace")
                 time.sleep(0.05)
 
@@ -167,13 +173,13 @@ def main():
             time.sleep(1.5)
             q2.sendkey("shift-insert")
             time.sleep(1)
-            screen = q2.screen()
+            screen = q2.wait_fbcon(line, timeout=10)
             check("the pasted line appeared on the SECOND console",
-                  "echo " + WORD in screen)
+                  "console 2" in screen and line in screen)
             q2.sendkey("ret")
-            out = q2.wait_for(WORD, timeout=20)
+            out = q2.wait_fbcon("DNS server set to", timeout=20)
             check("and it ran as if it had been typed",
-                  WORD in out)
+                  "DNS server set to 10.0.2.77" in out)
         finally:
             q2.close()
     finally:

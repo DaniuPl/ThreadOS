@@ -73,7 +73,7 @@ def main():
             said = q.serial()[seen:]
             check("the screen says the mode is in colour ('%s')"
                   % said.replace("\n", " ")[:70],
-                  "true colour" in said and "640x480" in said)
+                  "true colour" in said and "%dx%d" % q.size() in said)
 
             # --- nothing moves, nothing goes to the card ----------------
             # The compositor redraws the whole frame thirty times a
@@ -116,11 +116,8 @@ def main():
 
             q.click_desktop()             # the keys back to the shell
             time.sleep(1)
-            seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /gradient.jpg foto.jpg"
-                        % http_port)
-            time.sleep(6)
-            got = q.serial()[seen:]
+            got = q.command("run httpget 10.0.2.2 %d /gradient.jpg foto.jpg"
+                            % http_port, "has ended", timeout=30)
             check("the machine fetches a picture off the network",
                   "HTTP 200" in got and "has ended (code 0)" in got)
 

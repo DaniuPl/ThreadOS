@@ -108,6 +108,60 @@ static int split(char *text)
     return n;
 }
 
+/* '> file' and '>> file': what the command prints goes into a file.
+ *
+ * The CHILD opens the file and puts it under descriptor one just before
+ * it becomes the command - the shell's own words ("done, code 0") stay
+ * on the screen and out of the file. Appending needs no seek: the
+ * kernel writes a redirected stdout at the end of its file (SYS64_WRITE
+ * in kernel64/syscall64.c), so '>>' is an open that does not empty the
+ * file first, and '>' one that does. */
+static char *redirect;            /* the file after '>', or 0 */
+static int appending;
+
+static void cut_redirect(char *text)
+{
+    redirect = 0;
+    appending = 0;
+    for (int i = 0; text[i]; i++) {
+        if (text[i] != '>')
+            continue;
+        /* 'echo a > f' writes "a", not "a " */
+        for (int k = i; k > 0 && text[k - 1] == ' '; k--)
+            text[k - 1] = '\0';
+        text[i] = '\0';
+        char *f = text + i + 1;
+        if (*f == '>') {
+            appending = 1;
+            f++;
+        }
+        while (*f == ' ')
+            f++;
+        char *e = f;
+        while (*e && *e != ' ')
+            e++;
+        *e = '\0';
+        redirect = f;
+        return;
+    }
+}
+
+/* In a child, before it becomes the command: stdout into the file.
+   Returns -1 when the file cannot be opened. */
+static int into_file(void)
+{
+    if (!redirect)
+        return 0;
+    int fd = (int)sys_open(redirect, appending ? 1 : 1 | 2);
+    if (fd < 0) {
+        print("ush64: I cannot write to that file\n");
+        return -1;
+    }
+    sys_dup2(fd, FD_STDOUT);
+    sys_close(fd);
+    return 0;
+}
+
 /* Two programs joined by a pipe.
  *
  * The shell creates the pipe, hands its ends out to two children and -
@@ -170,6 +224,8 @@ static void run_pipe(char *left, char *right)
         sys_dup2(fd[0], FD_STDIN);    /* the input comes from the pipe */
         sys_close(fd[0]);
         sys_close(fd[1]);
+        if (into_file() < 0)
+            sys_exit(127);
         sys_exec(argv2[0], argv2);
         sys_exit(127);
     }
@@ -194,6 +250,8 @@ static void run(const char *name)
         return;
     }
     if (child == 0) {
+        if (into_file() < 0)
+            sys_exit(127);
         sys_exec(name, argv);
         /* exec returns only when it failed */
         print("ush64: there is no such program\n");
@@ -208,12 +266,18 @@ static void run(const char *name)
 
 static void execute(void)
 {
+    cut_redirect(line);
     if (!line[0])
         return;
+    if (redirect && !redirect[0]) {
+        print("ush64: a file name goes after '>'\n");
+        return;
+    }
 
     if (equal(line, "help")) {
         print("ush64: help, echo <text>, pid, exit, "
-              "or the name of a program from the initrd\n");
+              "or the name of a program from the initrd;\n"
+              "  a | b joins two, > file and >> file write into one\n");
     } else if (equal(line, "pid")) {
         /* We learn the process number from what fork tells the parent -
            just like every other program */
@@ -222,8 +286,20 @@ static void execute(void)
         print("ush64: pa!\n");
         sys_exit(0);
     } else if (starts_with(line, "echo ")) {
-        print(line + 5);
-        print("\n");
+        /* Built in, so there is no program to hand the file to: a
+           child of its own says it into the file */
+        int64_t child = redirect ? sys_fork() : 0;
+        if (child == 0) {
+            if (into_file() < 0)
+                sys_exit(1);
+            print(line + 5);
+            print("\n");
+            if (redirect)
+                sys_exit(0);
+        } else if (child > 0) {
+            int code = 0;
+            sys_wait(&code);
+        }
     } else {
         /* A bar splits the line into two programs - everything before it
            writes to what reads everything after it */

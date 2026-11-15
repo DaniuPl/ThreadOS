@@ -26,6 +26,7 @@ groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -51,14 +52,41 @@ def pager(at, w):
             for d in range(4)]
 
 
+def lit(q):
+    """The pager as it is now. The bar hides when nobody uses it, so
+    the pointer brings it back first - well left of the cells, so
+    that it does not cover one."""
+    q.reveal_bar(q.size()[0] // 3)
+    w, h, at = q.screen_raw()
+    return pager(at, w)
+
+
 def pager_x(w, d):
     return bar_desk_x(d) + DESK_CELL // 2
 
 
+def click_cell(q, d):
+    """A click on desktop d's cell on the bar: the pointer at the top
+    edge first, where the hidden bar comes out"""
+    x = pager_x(q.size()[0], d)
+    q.reveal_bar(x)
+    q.mouse_goto(x, BAR_MID)
+    time.sleep(0.5)
+    q.mouse_click()
+
+
+def a_prompt(rows):
+    """Is the last row a bare prompt: a directory and '>', or '#' for an
+    administrator - and the desktop's session is one"""
+    return bool(rows) and re.match(r"/\S*[>#]$", rows[-1].rstrip()) is not None
+
+
 def clock_here(at):
-    """Is the clock's window on the screen? Where its title bar would be
-    is the bare aurora when it is not."""
-    return at(WX + 40, WY + 4) != aurora_px(WX + 40, WY + 4)
+    """Is the clock's window on the screen? The middle of its content is
+    the bare aurora when it is not - lower down than the desktop's
+    shortcuts, which its title bar would cross."""
+    x, y = WX + 1 + GCLOCK_W // 2, WY + CONTENT_DY + GCLOCK_H // 2
+    return at(x, y) != aurora_px(x, y)
 
 
 def read_clock(q, tries=8):
@@ -92,12 +120,10 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
+            check("the top bar shows four desktops, the first one lit",
+                  lit(q) == [True, False, False, False])
             q.mouse_goto(600, 430)
             time.sleep(1)
-
-            w, h, at = q.screen_raw()
-            check("the top bar shows four desktops, the first one lit",
-                  pager(at, w) == [True, False, False, False])
 
             # --- the clock, on the first desktop ------------------------
             q.launch_menu("gclock")                # the "Clock" tile
@@ -114,9 +140,9 @@ def main():
             # --- away, to the second ------------------------------------
             q.sendkey("ctrl-alt-right")
             time.sleep(2)
-            w, h, at = q.screen_raw()
             check("Ctrl+Alt+arrow moves to the second desktop",
-                  pager(at, w) == [False, True, False, False])
+                  lit(q) == [False, True, False, False])
+            w, h, at = q.screen_raw()
             check("the clock is not here - not on the screen",
                   not clock_here(at))
             check("nor in the dock",
@@ -131,21 +157,23 @@ def main():
             check("a new window opens where you are looking",
                   q.dock_windows() == 1)
             tx, ty = cascade(3, TERM_W + 2, TERM_H + TITLE_H + 2)
-            check("and it is a terminal (its prompt: %s)"
-                  % q.term_rows(tx + 1, ty + CONTENT_DY)[-1:],
-                  q.term_rows(tx + 1, ty + CONTENT_DY)[-1:] == ["/>"])
+            rows = q.term_rows(tx + 1, ty + CONTENT_DY)
+            check("and it is a terminal (its prompt: %s)" % rows[-1:],
+                  a_prompt(rows))
 
             # --- back to the first --------------------------------------
             time.sleep(4)
             q.sendkey("ctrl-alt-left")
             time.sleep(2)
-            w, h, at = q.screen_raw()
             check("and back to the first",
-                  pager(at, w) == [True, False, False, False])
+                  lit(q) == [True, False, False, False])
+            q.mouse_goto(600, 430)
+            time.sleep(1)
+            w, h, at = q.screen_raw()
             check("the clock waited where it was left",
                   q.dock_windows() == 1 and clock_here(at))
             check("and the terminal stayed on the second",
-                  q.term_rows(tx + 1, ty + CONTENT_DY)[-1:] != ["/>"])
+                  not a_prompt(q.term_rows(tx + 1, ty + CONTENT_DY)))
 
             # The heart of it: the program was RUNNING all that time
             second = read_clock(q)
@@ -157,9 +185,8 @@ def main():
             # --- taking a window along ----------------------------------
             q.sendkey("ctrl-alt-shift-right")
             time.sleep(2)
-            w, h, at = q.screen_raw()
             check("Ctrl+Alt+Shift+arrow takes the window along",
-                  pager(at, w) == [False, True, False, False])
+                  lit(q) == [False, True, False, False])
             check("the clock is where we are - together with the terminal",
                   q.dock_windows() == 2)
             # The terminal opened here first, so it lies over the clock;
@@ -178,28 +205,23 @@ def main():
                   seconds(third) > seconds(second))
 
             # --- and the switch is clickable ----------------------------
-            q.mouse_goto(pager_x(w, 3), BAR_MID)
-            time.sleep(0.5)
-            q.mouse_click()
+            click_cell(q, 3)
             time.sleep(1.5)
+            check("a click on a cell in the bar moves to the fourth desktop",
+                  lit(q) == [False, False, False, True])
             q.mouse_goto(600, 430)
             time.sleep(1)
             w, h, at = q.screen_raw()
-            check("a click on a cell in the bar moves to the fourth desktop",
-                  pager(at, w) == [False, False, False, True])
             check("and there is nothing there - an empty desktop",
                   q.dock_windows() == 0 and not clock_here(at))
 
-            q.mouse_goto(pager_x(w, 0), BAR_MID)
-            time.sleep(0.5)
-            q.mouse_click()
+            # The clock went along to the second desktop, so that is
+            # where both windows are now
+            click_cell(q, 1)
             time.sleep(1.5)
-            q.mouse_goto(600, 430)
-            time.sleep(1)
-            w, h, at = q.screen_raw()
-            check("and the first desktop has its clock back",
-                  pager(at, w) == [True, False, False, False] and
-                  q.dock_windows() == 1)
+            check("and the second desktop has both its windows back",
+                  lit(q) == [False, True, False, False] and
+                  q.dock_windows() == 2)
         finally:
             q.close()
     finally:

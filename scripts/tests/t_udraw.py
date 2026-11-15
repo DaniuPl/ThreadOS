@@ -178,7 +178,9 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
-            q.type_line("run udtest")
+            # 'runw' does not wait for the program to end, and the shell
+            # is wanted again below while udtest keeps its window open
+            q.type_line("runw udtest")
             time.sleep(4)
             q.mouse_goto(600, 300)
             time.sleep(1.5)
@@ -198,9 +200,7 @@ def main():
             # --- a switch of the theme reaches the program -------------
             q.click_desktop()             # the keys back to the shell
             time.sleep(1)
-            q.type_line("sudo set theme light")
-            time.sleep(1)
-            q.type_line("thread")
+            q.sudo("set theme light", "saved")
             got = []
             for _ in range(20):
                 time.sleep(0.5)

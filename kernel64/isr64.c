@@ -124,6 +124,11 @@ static int demand_page_nolock(uint64_t addr)
     return 1;
 }
 
+int isr64_demand_page(uint64_t addr)
+{
+    return demand_page_nolock(addr);
+}
+
 /* How many page faults were served without the big kernel lock, and
    how many had to take it. Nothing depends on these; they are here so
    that the question "is the lock really not being taken" has an answer

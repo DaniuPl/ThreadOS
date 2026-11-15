@@ -114,7 +114,7 @@ def click_project_row(q, row):
     time.sleep(1)
 
 
-def open_code(q, is64=False):
+def open_code(q):
     q.launch_dock("gcode")
     check("Code opens from the dock", wait_code(q))
 
@@ -176,24 +176,23 @@ def open_code(q, is64=False):
     check("Enter opens the first matching project file",
           "#define VALUE 7" in code_row(q, 0))
 
-    if not is64:
-        q.mouse_goto(CX + SIDE_W + 55, CY + HEADER_H + 10)
-        time.sleep(0.3)
-        q.mouse_click()
-        time.sleep(0.5)
-        q.sendkey("end")
-        q.sendkey("ret")
-        q.type_line("return 0;", enter=False)
-        time.sleep(1)
-        check("Enter indents the next line inside a C block",
-              code_row(q, 1).startswith("    return 0;"))
-        q.sendkey("ctrl-s")
-        time.sleep(1)
-        shot = q.screen_raw()
-        status_y = CY + ui_font_baseline_in(11, CODE_H - STATUS_H, STATUS_H)
-        status = q.read_ui(CX + 10, status_y, CODE_W - 20, px=11,
-                           screen=shot)
-        check("Ctrl+S saves the edited source", "saved" in status)
+    q.mouse_goto(CX + SIDE_W + 55, CY + HEADER_H + 10)
+    time.sleep(0.3)
+    q.mouse_click()
+    time.sleep(0.5)
+    q.sendkey("end")
+    q.sendkey("ret")
+    q.type_line("return 0;", enter=False)
+    time.sleep(1)
+    check("Enter indents the next line inside a C block",
+          code_row(q, 1).startswith("    return 0;"))
+    q.sendkey("ctrl-s")
+    time.sleep(1)
+    shot = q.screen_raw()
+    status_y = CY + ui_font_baseline_in(11, CODE_H - STATUS_H, STATUS_H)
+    status = q.read_ui(CX + 10, status_y, CODE_W - 20, px=11,
+                       screen=shot)
+    check("Ctrl+S saves the edited source", "saved" in status)
 
     windows_before = q.dock_windows()
     q.mouse_goto(CX + CODE_W - 50, CY + 15)
@@ -216,18 +215,14 @@ def open_code(q, is64=False):
     # ush64 has no pwd builtin. uls64 lists the working directory, but its
     # output is taller than the panel, so only the tail stays visible: the
     # project-only files and the exit line prove where it ran.
-    q.type_line("uls64" if is64 else "pwd")
+    q.type_line("uls64")
     deadline = time.time() + 10
     rows = terminal_rows(q)
 
     def ran_in_project(rows):
-        if is64:
-            text = "\n".join(rows)
-            return (".code-term.out" in text and "uls64: entries" in text and
-                    "ush64: done, code 0" in text)
-        return (any(row.startswith("ush:") and row.rstrip().endswith("pwd")
-                    for row in rows) and
-                any(row.strip().startswith(expected_path) for row in rows))
+        text = "\n".join(rows)
+        return (".code-term.out" in text and "uls64: entries" in text and
+                "ush64: done, code 0" in text)
 
     while time.time() < deadline and not ran_in_project(rows):
         time.sleep(0.25)
@@ -250,14 +245,15 @@ def open_code(q, is64=False):
     q.sendkey("esc")
 
 
-def test32():
+def test_boot():
+    """The desktop the machine starts with"""
     disk = tempfile.mktemp(suffix=".img")
     slog = tempfile.mktemp(suffix=".log")
     with open(disk, "wb") as fh:
         fh.truncate(16 * 1024 * 1024)
     q = Qemu(KERNEL, INITRD, disk=disk, serial=slog)
     try:
-        check("the 32-bit desktop starts", q.wait_desktop(timeout=40))
+        check("the desktop starts", q.wait_desktop(timeout=40))
         q.mouse_home()
         open_code(q)
     finally:
@@ -267,7 +263,9 @@ def test32():
                 os.unlink(path)
 
 
-def test64():
+def test_shell():
+    """The desktop started from the kernel's shell, on the screen the
+    loader left - the way it was started before it was the default"""
     if KERNEL64 is None or not os.path.exists(KERNEL64):
         print("SKIPPED (64): no 64-bit image")
         return
@@ -307,7 +305,7 @@ def test64():
             q.wait_serial("The desktop is starting", timeout=30)
             check("the 64-bit desktop starts", q.wait_desktop(timeout=40))
             q.mouse_home()
-            open_code(q, is64=True)
+            open_code(q)
         finally:
             q.close()
     finally:
@@ -319,8 +317,8 @@ def test64():
 
 def main():
     print("--- ThreadCode project workspace ---")
-    test32()
-    test64()
+    test_boot()
+    test_shell()
     return summary()
 
 

@@ -40,6 +40,25 @@ from ptest import check, summary
 WALL_SIZE = 4 + 2 + 2 + 160 * 120 * 3      # "TWL2", size, RGB
 
 
+def sign_in(q, timeout=60):
+    """Signs in on the sign-in screen once it is up. wait_desktop() finds
+    that screen by its hint read against the aurora, and here the
+    wallpaper is behind it - so it is found by its clock instead: large,
+    white, a third of the way down, which no wallpaper here is."""
+    end = time.time() + timeout
+    while time.time() < end:
+        w, h, at = q.screen_raw()
+        if w >= 640:
+            white = sum(1 for y in range(h // 3 - LOCK_TIME_PX // 2, h // 3, 2)
+                        for x in range(w // 2 - 100, w // 2 + 100, 2)
+                        if min(at(x, y)) > 250)
+            if white > 100:
+                q.type_line("thread")
+                return True
+        time.sleep(0.5)
+    return False
+
+
 def row_colours(at, y, x_from=200, x_to=600, step=8):
     return {at(x, y) for x in range(x_from, x_to, step)}
 
@@ -53,7 +72,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ThreadOS shell", timeout=40)
+            q.wait_serial("thread64>", timeout=60)
 
             # --- the picture is made by a program in ring 3 ----------
             out = q.command("run mkwall wallpaper.img 1 2", "ended",
@@ -76,17 +95,31 @@ def main():
             check("and the second pattern - the blend - came out too",
                   "is ready" in out and "(code 0)" in out)
 
-            q.type_line("sudo set wallpaper wallpaper.img")
-            time.sleep(1)
-            saved = q.command("thread", "saved", timeout=30)
+            saved = q.sudo("set wallpaper wallpaper.img", "saved")
             check("the setting was saved", "wallpaper = wallpaper.img" in saved)
 
             # --- and the desktop puts it up -------------------------
             q.type_line("desktop")
-            time.sleep(6)
+            # Started from the console, the desktop picks a mode of its
+            # own - measured, not assumed
+            # (the desktop is not the aurora now: it is there when its
+            # dock is - the first picture, a folder, white a little below
+            # its middle)
+            def dock_up(at, w, h):
+                g = dock_geom(w=w, h=h)
+                tx, ty = g["tiles"][0]
+                return min(at(tx + g["tile"] // 2,
+                              ty + g["tile"] // 2 + 3)) > 200
+            check("the sign-in screen came up over the wallpaper",
+                  sign_in(q))
+            check("the desktop came up", q.wait_desktop(ready=dock_up))
+            sw, sh = q.size()
             q.mouse_home()
+            # A window over the picture, to see it is still the window
+            q.launch_menu("gclock")
             q.mouse_goto(560, 400)
-            time.sleep(2)
+            q.wait_focus(94, 54, timeout=10)
+            time.sleep(1)
 
             log = q.serial()
             check("the kernel read the wallpaper and says which",
@@ -116,11 +149,18 @@ def main():
             check("the wallpaper has more colours than a palette of 192 could carry "
                   "(%d different)" % len(blend), len(blend) > 400)
 
-            # A window drawn on top of the picture is still the window,
-            # and the dock is still the dock
+            # A window drawn on top of the picture is still the window -
+            # its title bar the theme's, along its length - and the dock
+            # is still the dock: its first picture (a folder) white in
+            # the middle
+            title = theme("dark")["title_bg"]
             check("a window on the wallpaper still has its own colour",
-                  near(at(130, 120), theme("dark")["win_bg"], 3))
-            check("and the dock its own", min(at(*dock_tile(0))) > 200)
+                  all(near(at(94 + dx, 54 + 4), title, 4)
+                      for dx in range(70, 120, 8)))
+            g = dock_geom(n_w=1, w=sw, h=sh)      # (with the clock's tile)
+            tx, ty = g["tiles"][0]
+            check("and the dock its own",
+                  min(at(tx + g["tile"] // 2, ty + g["tile"] // 2 + 3)) > 200)
         finally:
             q.close()
 
@@ -129,12 +169,10 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ThreadOS shell", timeout=40)
-            q2.type_line("sudo set wallpaper nosuchfile.img")
-            time.sleep(1)
-            q2.command("thread", "saved", timeout=30)
+            q2.wait_serial("thread64>", timeout=60)
+            q2.sudo("set wallpaper nosuchfile.img", "saved")
             q2.type_line("desktop")
-            time.sleep(6)
+            check("the desktop came up again", q2.wait_desktop(timeout=40))
             q2.mouse_home()
             q2.mouse_goto(560, 400)
             time.sleep(2)
@@ -143,7 +181,8 @@ def main():
             # Back to the aurora, to the last bit
             spots = [(600, 300), (400, 200), (500, 380)]
             check("a missing file does not break the desktop - the aurora is "
-                  "back", all(at(x, y) == aurora_px(x, y) for x, y in spots))
+                  "back", all(at(x, y) == aurora_px(x, y, w, h)
+                              for x, y in spots))
         finally:
             q2.close()
             if os.path.exists(slog2):

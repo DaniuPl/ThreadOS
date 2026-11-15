@@ -58,6 +58,55 @@ def status(q, vx=VX, vy=VY):
     return q.gimg_status(vx + 1, vy + CONTENT_DY, VW, VH)
 
 
+def view(q, name):
+    """The viewer started from the shell on a file, and what its status
+    line says once it has said something about the file"""
+    q.click_desktop()                   # the keys to the shell
+    q.type_line("run gimg " + name)
+    said = ""
+    end = time.time() + 20
+    while time.time() < end:
+        time.sleep(1)
+        q.mouse_goto(560, 430)
+        said = status(q)
+        if "loaded" in said or "not" in said:
+            break
+    return said
+
+
+def close_viewer(q):
+    """The shell waits for the program it ran, so the viewer is closed
+    before the shell is asked for anything again"""
+    seen = q.serial().count("[gimg] done")
+    q.click(*light_xy(VX, VY, 0))
+    end = time.time() + 15
+    while time.time() < end and q.serial().count("[gimg] done") == seen:
+        time.sleep(0.3)
+
+
+def fetch(q, port, path, name):
+    """httpget from the test's own server, and what it said"""
+    q.click_desktop()
+    return q.command("run httpget 10.0.2.2 %d /%s %s" % (port, path, name),
+                     "[httpget] done", timeout=30)
+
+
+def quarters(at):
+    """The middle of each quarter of the 64x48 picture in the viewer"""
+    return tuple(at(CX + x, CY + y)
+                 for x, y in ((16, 12), (48, 12), (16, 36), (48, 36)))
+
+
+def saturated(at):
+    """Red, green, blue and white, each the colour it is and nothing
+    in between"""
+    reds, greens, blues, whites = quarters(at)
+    return (reds[0] > 200 and reds[1] < 60 and
+            greens[1] > 200 and greens[0] < 60 and
+            blues[2] > 200 and blues[0] < 60 and
+            all(v > 200 for v in whites))
+
+
 def main():
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
@@ -78,181 +127,134 @@ def main():
             time.sleep(1.5)
 
             # What the picture will have to repeat: the dock, which does
-            # not change while nothing is clicked - unlike the clocks
+            # not change while nothing is clicked - unlike the clocks.
+            # The viewer shows a screen that does not fit its window at
+            # every step-th pixel each way (gimg.c: the least step that
+            # fits), so the places remembered are on that grid.
+            sw, sh = q.size()
+            room_h = VH - GIMG_STATUS_H - 2
+            step = 1
+            while sw // step > VW or sh // step > room_h:
+                step += 1
             w, h, at = q.screen_raw()
-            g = dock_geom(n_w=3)
+            g = dock_geom(n_w=1, w=sw, h=sh)
             spots = [(x, y) for y in range(g["y"] + 2, g["y"] + g["h"] - 2, 4)
                      for x in range(g["x"] + 2, g["x"] + g["w"] - 2, 6)]
-            spots = [(x - x % 2, y - y % 2) for x, y in spots]
+            spots = sorted({(x - x % step, y - y % step) for x, y in spots})
             before = {p: at(*p) for p in spots}
             check("the dock is on the screen (%d places in it remembered)"
                   % len(spots), len(set(before.values())) > 50)
 
             # --- Print Screen -------------------------------------------
             q.sendkey("print")
-            time.sleep(4)
             q.click_desktop()
-            time.sleep(1)
-            seen = len(q.serial())
-            q.type_line("fls")
-            time.sleep(2)
-            listing = q.serial()[seen:]
-            m = re.search(r"shot1\.psc\s+\((\d+) B\)", listing)
+            listing = ""
+            m = None
+            end = time.time() + 20          # writing to the disk takes a while
+            while time.time() < end and not m:
+                time.sleep(1)
+                listing = q.command("fls", "Used:", timeout=10)
+                m = re.search(r"shot1\.psc\s+\((\d+) B\)", listing)
             check("Print Screen wrote a file to the disk ('%s')"
                   % (m.group(0) if m else listing[-60:].replace("\n", " ")),
                   m is not None)
             if not m:
                 return summary()
-            # 640*480 pixels of three bytes + "TSC2" + two sizes
+            # Three bytes a pixel of the screen, after "TSC2" and two sizes
             check("and it has exactly as many bytes as the screen in colours "
-                  "(%s)" % m.group(1),
-                  int(m.group(1)) == 640 * 480 * 3 + 4 + 2 + 2)
+                  "(%s for %dx%d)" % (m.group(1), sw, sh),
+                  int(m.group(1)) == sw * sh * 3 + 4 + 2 + 2)
 
             # --- and the viewer puts it back on the screen --------------
-            q.type_line("run gimg shot1.psc")
-            time.sleep(6)
-            q.mouse_goto(560, 430)
-            time.sleep(2)
-            w, h, at = q.screen_raw()
-
-            said = status(q)
+            said = view(q, "shot1.psc")
             check("the viewer says what it loaded ('%s')" % said,
-                  "640x480" in said and "loaded" in said)
-            check("and that it shows every other pixel, because the whole screen "
-                  "does not fit in a window on this screen", "step 2" in said)
+                  "%dx%d" % (sw, sh) in said and "loaded" in said)
+            check("and that it shows every %d. pixel, because the whole "
+                  "screen does not fit in a window on this screen" % step,
+                  step > 1 and "step %d" % step in said)
 
             # The picture IS the screen: the dock, inside the window, at
-            # half the size (every second pixel each way) and in exactly
-            # the colours it had. The viewer draws the picture a row at
-            # a time - four hundred and eighty rows through as many
-            # calls - so the screen is looked at again until it stops
-            # filling up.
+            # a step-th of the size and in exactly the colours it had.
+            # The viewer draws the picture a row at a time - hundreds of
+            # rows through as many calls - so the screen is looked at
+            # again until it stops filling up.
             #
-            # Sixty readings rather than twenty-five. Four hundred and
-            # eighty system calls take as long as the machine gives
-            # them, and the machine is four QEMUs sharing a host that is
-            # also running the rest of the suite. Waiting longer for the
-            # same answer is patience, lowering the answer would be
-            # something else.
+            # Sixty readings rather than twenty-five. Hundreds of system
+            # calls take as long as the machine gives them, and the
+            # machine is four QEMUs sharing a host that is also running
+            # the rest of the suite. Waiting longer for the same answer
+            # is patience, lowering the answer would be something else.
             same = 0
             for _ in range(60):
                 w, h, at = q.screen_raw()
                 same = sum(1 for (x, y), c in before.items()
-                           if at(CX + x // 2, CY + y // 2) == c)
+                           if at(CX + x // step, CY + y // step) == c)
                 if same == len(before):
                     break
                 time.sleep(1)
             check("the picture in the window really is the screen - the dock "
                   "is there, every remembered pixel in its colour (%d of %d)"
                   % (same, len(before)), same == len(before))
+            close_viewer(q)
 
             # --- the counter, and what is not a picture -----------------
             q.click_desktop()
             time.sleep(1)
             q.sendkey("print")
-            time.sleep(4)
-            seen = len(q.serial())
-            q.type_line("fls")
-            time.sleep(2)
-            listing = q.serial()[seen:]
+            listing = ""
+            end = time.time() + 20
+            while time.time() < end and "shot2.psc" not in listing:
+                time.sleep(1)
+                listing = q.command("fls", "Used:", timeout=10)
             check("the second shot gets the next number",
                   "shot2.psc" in listing and "shot1.psc" in listing)
 
-            q.type_line("run gimg swap.sys")
-            time.sleep(5)
-            q.mouse_goto(560, 430)
-            time.sleep(2)
-            w, h, at = q.screen_raw()
-            # The viewer for a file that is not a picture opens in the
-            # next slot again - the same place, because the previous
-            # one is still there
-            # The second viewer opens in the next slot of the cascade -
-            # the first one is still standing where it was
-            sx4, sy4 = cascade(4, VW + 2, VH + TITLE_H + 2)
-            said = status(q, vx=sx4, vy=sy4)
+            # (a text file of the account's own, long enough for the
+            # viewer to look at its first bytes and judge)
+            q.command("write words.txt these are words and nothing but "
+                      "words, a picture of nothing", "written", timeout=20)
+            said = view(q, "words.txt")
             check("a file that is not a picture is refused with "
                   "a word of explanation ('%s')" % said,
                   "is not a picture" in said)
+            close_viewer(q)
 
             # --- a picture from the outside world -----------------------
             # No floppy, no shared folder - but a network. The machine
-            # fetches the file itself and then shows it.
-            q.click_desktop()
-            time.sleep(1)
-            seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /squares.bmp picture.bmp"
-                        % http_port)
-            time.sleep(6)
-            got = q.serial()[seen:]
+            # fetches the file itself and then shows it - in the place
+            # the closed viewers stood in, the next free slot of the
+            # cascade.
+            got = fetch(q, http_port, "squares.bmp", "picture.bmp")
             check("the machine fetches a picture off the network onto the disk",
                   "HTTP 200" in got and "has ended (code 0)" in got)
 
-            q.type_line("run gimg picture.bmp")
-            time.sleep(6)
-            q.mouse_goto(600, 200)
-            time.sleep(2)
+            said = view(q, "picture.bmp")
             w, h, at = q.screen_raw()
-
-            # The third viewer, the third slot of the cascade
-            vx, vy = cascade(5, VW + 2, VH + TITLE_H + 2)
-            said = status(q, vx=vx, vy=vy)
             check("the viewer loaded the BMP ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 
             # The four quarters, in the four colours the file has -
             # each of them exactly in the palette, so 'nearly' is not
             # good enough here
-            cx, cy = vx + 1, vy + CONTENT_DY
-            def hue(x, y):
-                return at(cx + x, cy + y)
-            reds = hue(16, 12)
-            greens = hue(48, 12)
-            blues = hue(16, 36)
-            whites = hue(48, 36)
             check("and four quarters in four colours came out of it "
-                  "(%s %s %s %s)" % (reds, greens, blues, whites),
-                  reds[0] > 200 and reds[1] < 60 and
-                  greens[1] > 200 and greens[0] < 60 and
-                  blues[2] > 200 and blues[0] < 60 and
-                  all(v > 200 for v in whites))
+                  "(%s)" % (quarters(at),), saturated(at))
+            close_viewer(q)
 
             # --- and the same picture as a PNG --------------------------
             # Chunks, a deflate stream and a filter byte per row: three
             # things that all have to be right, and the four exact
             # colours say whether they were.
-            q.click_desktop()
-            time.sleep(1)
-            seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /squares.png picture.png"
-                        % http_port)
-            time.sleep(6)
-            got = q.serial()[seen:]
+            got = fetch(q, http_port, "squares.png", "picture.png")
             check("the machine fetches a PNG off the network",
                   "HTTP 200" in got and "has ended (code 0)" in got)
 
-            q.type_line("run gimg picture.png")
-            time.sleep(7)
-            q.mouse_goto(600, 200)
-            time.sleep(2)
+            said = view(q, "picture.png")
             w, h, at = q.screen_raw()
-            # (the sixth slot would run under the dock, so the cascade walks
-            # back up - kernel/desktop.c)
-            vx, vy = cascade(6, VW + 2, VH + TITLE_H + 2)
-            said = status(q, vx=vx, vy=vy)
             check("the viewer unpacked the PNG ('%s')" % said,
                   "64x48" in said and "loaded" in said)
-
-            cx, cy = vx + 1, vy + CONTENT_DY
-            reds = at(cx + 16, cy + 12)
-            greens = at(cx + 48, cy + 12)
-            blues = at(cx + 16, cy + 36)
-            whites = at(cx + 48, cy + 36)
-            check("and the same four colours came out of it "
-                  "(%s %s %s %s)" % (reds, greens, blues, whites),
-                  reds[0] > 200 and reds[1] < 60 and
-                  greens[1] > 200 and greens[0] < 60 and
-                  blues[2] > 200 and blues[0] < 60 and
-                  all(v > 200 for v in whites))
+            check("and the same four colours came out of it (%s)"
+                  % (quarters(at),), saturated(at))
+            close_viewer(q)
 
             # --- and as a JPEG, which is what a camera writes ------------
             # A different kind of work again: Huffman codes, a cosine
@@ -260,23 +262,12 @@ def main():
             # resolution and put back. The file comes from an outside
             # encoder, so this is our arithmetic reading somebody
             # else's picture.
-            q.click_desktop()
-            time.sleep(1)
-            seen = len(q.serial())
-            q.type_line("run httpget 10.0.2.2 %d /squares.jpg picture.jpg"
-                        % http_port)
-            time.sleep(6)
-            got = q.serial()[seen:]
+            got = fetch(q, http_port, "squares.jpg", "picture.jpg")
             check("the machine fetches a JPEG off the network",
                   "HTTP 200" in got and "has ended (code 0)" in got)
 
-            q.type_line("run gimg picture.jpg")
-            time.sleep(7)
-            q.mouse_goto(600, 200)
-            time.sleep(2)
+            said = view(q, "picture.jpg")
             w, h, at = q.screen_raw()
-            vx, vy = cascade(7, VW + 2, VH + TITLE_H + 2)
-            said = status(q, vx=vx, vy=vy)
             check("the viewer took the JPEG apart into pixels ('%s')" % said,
                   "64x48" in said and "loaded" in said)
 
@@ -284,17 +275,8 @@ def main():
             # quarters - but they still have to be the right four, and
             # a decoder that got the transform wrong gives grey mush
             # rather than four saturated fields.
-            cx, cy = vx + 1, vy + CONTENT_DY
-            reds = at(cx + 16, cy + 12)
-            greens = at(cx + 48, cy + 12)
-            blues = at(cx + 16, cy + 36)
-            whites = at(cx + 48, cy + 36)
-            check("and the same four colours came out of it "
-                  "(%s %s %s %s)" % (reds, greens, blues, whites),
-                  reds[0] > 200 and reds[1] < 60 and
-                  greens[1] > 200 and greens[0] < 60 and
-                  blues[2] > 200 and blues[0] < 60 and
-                  all(v > 200 for v in whites))
+            check("and the same four colours came out of it (%s)"
+                  % (quarters(at),), saturated(at))
         finally:
             q.close()
     finally:

@@ -27,6 +27,7 @@ groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -113,8 +114,11 @@ def main():
             # The terminal's lines, read in the lettering they are drawn in
             text = q.term_rows(x2 + 1, y2 + CONTENT_DY, screen=(w, h, at))
             body = "\n".join(text)
+            # The prompt is the directory and '>' or, for an
+            # administrator, '#' - the account the desktop signed in
+            # with is one, and it starts in its home directory
             check("what was typed after Alt+Tab reached the terminal",
-                  "/> date" in body)
+                  any(re.match(r"/\S*[>#] date$", r.rstrip()) for r in text))
             check("and the terminal ran it", "2030-06-13" in body)
 
             # --- round the wheel ----------------------------------------

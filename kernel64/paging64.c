@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include "paging64.h"
+#include "isr64.h"
 #include "../kernel/include/tlb.h"
 #include "../kernel/include/spinlock.h"
 #include "../kernel/include/pmm.h"
@@ -324,13 +325,38 @@ uint64_t paging64_unmap(uint64_t virt)
     return phys;
 }
 
+/* Is the page visible to ring 3? Access rights are the intersection
+   over all four levels, so the USER bit has to be on each of them -
+   exactly as the processor checks it. */
+static int user_page(uint64_t *top, uint64_t va)
+{
+    uint64_t e = top[(va >> 39) & 0x1FF];
+    if (!(e & PTE_PRESENT) || !(e & PG_USER))
+        return 0;
+    e = table_at(e)[(va >> 30) & 0x1FF];
+    if (!(e & PTE_PRESENT) || !(e & PG_USER))
+        return 0;
+    e = table_at(e)[(va >> 21) & 0x1FF];
+    if (!(e & PTE_PRESENT) || !(e & PG_USER))
+        return 0;
+    if (e & PTE_HUGE)
+        return 1;
+    e = table_at(e)[(va >> 12) & 0x1FF];
+    return (e & PTE_PRESENT) && (e & PG_USER);
+}
+
 /* Is the whole range visible to ring 3?
  *
  * The kernel has no right to believe a pointer supplied by a program:
  * a process could slip in the address of its own page tables or of
- * kernel memory and have them printed out for it. Access rights are
- * the intersection over all four levels, so the USER bit has to be on
- * each of them - exactly as the processor checks it. */
+ * kernel memory and have them printed out for it.
+ *
+ * A page of the heap, the stack or anonymous memory that the program
+ * has not touched yet does not exist until it is touched - and that is
+ * no error: ring 3 touching it takes a page fault that makes it. A
+ * system call about to write into such a page (a read into a buffer
+ * fresh from malloc) makes it the same way, or a correct program would
+ * be told its own memory is not its own. */
 int paging64_user_range(uint64_t virt, uint64_t len)
 {
     uint64_t *top = root_now();
@@ -339,22 +365,10 @@ int paging64_user_range(uint64_t virt, uint64_t len)
     if (virt + len < virt)                   /* the counter wrapped around */
         return 0;
 
-    for (uint64_t va = virt & ~0xFFFULL; va < virt + len; va += 4096) {
-        uint64_t e = top[(va >> 39) & 0x1FF];
-        if (!(e & PTE_PRESENT) || !(e & PG_USER))
+    for (uint64_t va = virt & ~0xFFFULL; va < virt + len; va += 4096)
+        if (!user_page(top, va) &&
+            !(isr64_demand_page(va) && user_page(top, va)))
             return 0;
-        e = table_at(e)[(va >> 30) & 0x1FF];
-        if (!(e & PTE_PRESENT) || !(e & PG_USER))
-            return 0;
-        e = table_at(e)[(va >> 21) & 0x1FF];
-        if (!(e & PTE_PRESENT) || !(e & PG_USER))
-            return 0;
-        if (e & PTE_HUGE)
-            continue;
-        e = table_at(e)[(va >> 12) & 0x1FF];
-        if (!(e & PTE_PRESENT) || !(e & PG_USER))
-            return 0;
-    }
     return 1;
 }
 

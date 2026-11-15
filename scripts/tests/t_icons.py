@@ -23,7 +23,7 @@ What is checked: the file is really read (the kernel says so and the
 dock has as many programs as the file has lines, with the names and
 pictures the file gave them), the tiles still WORK (clicking one starts
 its program), and a machine whose file says nothing usable keeps the
-nine it was born with - a dock with nothing in it is a machine with
+programs it was born with - a dock with nothing in it is a machine with
 nothing to click, and no broken line should be able to do that.
 
 Run on its own or through scripts/run_tests.py, which starts all the
@@ -31,6 +31,7 @@ groups in parallel.
 """
 
 import os
+import re
 import sys
 import tempfile
 import time
@@ -47,17 +48,27 @@ def picture_of(at, g, k):
                  for i in range(3, t - 3))
 
 
+def dock_captions():
+    """The names of the programs in a dock nobody configured, in order
+    (kernel/desktop.c's icons[])"""
+    full = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)))), "kernel", "desktop.c")
+    with open(full) as fh:
+        body = re.search(r"icons\[ICON_MAX\] = \{(.*?)\n\};", fh.read(),
+                         re.S).group(1)
+    return re.findall(r'\{"([^"]+)", ', body)
+
+
 def write_list(q, lines):
     """Builds the file with the ring 3 shell - '>' for the first line
     and '>>' for the rest, exactly as a person would."""
-    q.type_line("run sh")
-    time.sleep(2)
+    q.type_line("run ush64")
+    q.wait_serial("ush64$", timeout=20)
     for i, line in enumerate(lines):
-        q.type_line("echo %s %s %d" % (line[0], line[1], line[2]) +
-                    (" > " if i == 0 else " >> ") + "desktop.icons")
-        time.sleep(1.5)
-    q.type_line("exit")
-    time.sleep(1.5)
+        q.command("echo %s %s %d" % (line[0], line[1], line[2]) +
+                  (" > " if i == 0 else " >> ") + "desktop.icons",
+                  "ush64$", timeout=15)
+    q.command("exit", "[ush64] done", timeout=15)
 
 
 def main():
@@ -72,7 +83,7 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_for("ThreadOS shell", timeout=40)
+            q.wait_serial("thread64>", timeout=60)
             write_list(q, wanted)
 
             shown = q.command("cat desktop.icons", "gsettings", timeout=30)
@@ -81,7 +92,10 @@ def main():
                       "%s %s %d" % (app, label, art) in shown)
 
             q.type_line("desktop")
-            time.sleep(6)
+            # Started from the console, the desktop picks a mode of its
+            # own - measured, not assumed
+            check("the desktop came up", q.wait_desktop(timeout=40))
+            sw, sh = q.size()
             q.mouse_home()
             q.mouse_goto(560, 300)
             time.sleep(2)
@@ -100,7 +114,7 @@ def main():
             q.mouse_goto(560, 300)
             time.sleep(1.5)
 
-            g = dock_geom(n_l=3)
+            g = dock_geom(n_l=3, w=sw, h=sh)
             w, h, at = q.screen_raw()
             pics = [picture_of(at, g, k) for k in range(3)]
             check("and each has a different picture",
@@ -108,11 +122,17 @@ def main():
                   pics[0] != pics[2])
 
             # The tiles still do what they are for
-            q.click(*dock_tile(0, n_l=3))
-            time.sleep(4)
-            log = q.serial()
-            check("a click on a tile from the file starts its program",
-                  "exec 'gterm'" in log)
+            q.click(*dock_tile(0, n_l=3, w=sw, h=sh))
+            q.mouse_goto(560, 300)
+            title = ""
+            end = time.time() + 15
+            while time.time() < end and not title.startswith("Terminal"):
+                time.sleep(0.5)
+                title = q.window_title(94, 54)
+            check("a click on a tile from the file starts its program "
+                  "('%s', %d window in the dock)"
+                  % (title, q.dock_windows(n_l=3)),
+                  title.startswith("Terminal") and q.dock_windows(n_l=3) == 1)
         finally:
             q.close()
 
@@ -121,22 +141,25 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_for("ThreadOS shell", timeout=40)
+            q2.wait_serial("thread64>", timeout=60)
             # A file with nothing in it but a comment: the lines that
             # do not parse are passed over, and what is left is nothing
-            q2.command("write desktop.icons #only-a-comment", "wrote",
+            q2.command("write desktop.icons #only-a-comment", "written",
                        timeout=30)
             q2.type_line("desktop")
-            time.sleep(6)
+            check("the desktop came up again", q2.wait_desktop(timeout=40))
             q2.mouse_home()
             q2.mouse_goto(560, 300)
             time.sleep(2)
 
-            check("the dock comes back to its nine programs",
-                  q2.dock_windows() == 0)
-            first = q2.dock_hint(0)
-            check("and the first of them is the usual one ('%s')" % first,
-                  first == "App")
+            check("the dock comes back to its own programs, no windows "
+                  "among them", q2.dock_windows() == 0)
+            # The first and the last tile where a dock of all of them
+            # has them, with the names they were born with
+            usual = dock_captions()
+            ends = (q2.dock_hint(0), q2.dock_hint(DOCK_N - 1))
+            check("and they are the usual ones, all %d of them (%s)"
+                  % (DOCK_N, ends), ends == (usual[0], usual[-1]))
         finally:
             q2.close()
             if os.path.exists(slog2):

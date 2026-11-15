@@ -54,6 +54,13 @@ DISK_SIZE = 16 * 1024 * 1024
 RTC_BASE = "2030-06-13T12:34:56"
 RTC_DATE = "2030-06-13"
 
+# The desktop's screen when a test does not ask for another: GRUB's own
+# mode, which it hands the kernel with 'gfxpayload=keep' (boot_disc).
+# It used to be the 32-bit kernel's 640x480; every default below that
+# places something on the screen is for this size, and a test that
+# boots another one passes its w and h.
+SCREEN_W, SCREEN_H = 800, 600
+
 def _menu_items():
     """The launch menu's entries, straight out of kernel/desktop.c"""
     full = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
@@ -972,7 +979,7 @@ def _tdiv(a, b):
     return q if (a >= 0) == (b >= 0) else -q
 
 
-def aurora_px(x, y, w=640, h=480, dark=True):
+def aurora_px(x, y, w=SCREEN_W, h=SCREEN_H, dark=True):
     """One pixel of the aurora, by the arithmetic kernel/aurora.c spells
     out - whole numbers, in the same order, so the very same value."""
     t = "DARK" if dark else "LIGHT"
@@ -1066,8 +1073,7 @@ def frost_ref(x, y, w, h, blur, tint, a, sw, sh, dark=True):
 _BAR_GLASS = {}
 
 
-def bar_glass(dark=True, w=SCREEN_W if "SCREEN_W" in globals() else 640,
-              h=480):
+def bar_glass(dark=True, w=SCREEN_W, h=SCREEN_H):
     """The menu bar's glass as kernel/desktop.c draws it once: the strip
     of the aurora under it, blurred, then the theme's tint laid over -
     as rows of (r, g, b), BAR_H of them. Exact, so a pixel of the bar
@@ -1115,9 +1121,8 @@ def ui_baseline_in(top, height):
     return ui_font_baseline_in(UI_PX, top, height)
 
 
-# --- where things are on a 640 x 480 desktop (kernel/desktop.c) ---------
+# --- where things are on the desktop (kernel/desktop.c) -----------------
 
-SCREEN_W, SCREEN_H = 640, 480
 MAX_DOCK_WINDOWS = 12           # MAX_WIN in kernel/desktop.c
 def _dock_apps():
     """The programs a dock nobody configured holds, in order, by the name
@@ -1919,10 +1924,11 @@ class Qemu:
         cmd = [qemu,
                "-display", "none", "-no-reboot",
                # The screen tells no resolution of its own (no EDID):
-               # the desktop then starts at 640x480, the size every
-               # click and every reading in these tests is laid out
-               # for. The tests of the panel's own resolution turn it
-               # back on with a size of their choosing (edid=).
+               # the desktop then starts in GRUB's mode, SCREEN_W x
+               # SCREEN_H, the size every click and every reading in
+               # these tests is laid out for. The tests of the panel's
+               # own resolution turn it back on with a size of their
+               # choosing (edid=).
                # The card is the standard VGA in its usual slot either
                # way - only what it says about the screen differs.
                "-vga", "none", "-device",
@@ -2167,12 +2173,18 @@ class Qemu:
     # of the dark theme, which is what a machine nobody configured has
     DESK_BG = aurora_px(600, 300)
 
-    def wait_desktop(self, timeout=25):
+    def wait_desktop(self, timeout=60, ready=None):
         """Waits until the compositor draws the desktop. In graphics mode
         the VGA text buffer (0xB8000) stops being a window onto what can
         be seen, so we look for readiness in pixels rather than in
         text. Fresh disks stop at profile setup; the shared desktop
-        fixtures create a known administrator before continuing."""
+        fixtures create a known administrator before continuing. (Which
+        takes its time - the password is hashed, the home made - on a
+        host running four machines at once: a minute by default.)
+
+        The desktop is there when a place nothing stands on is the bare
+        aurora; a test that put something else behind the desktop - a
+        wallpaper - says what to look for instead: ready(at, w, h)."""
         deadline = time.time() + timeout
         login_sent = False
         setup_sent = False
@@ -2180,10 +2192,21 @@ class Qemu:
             try:
                 w, h, at = self.screen_raw()
                 if not setup_sent and w >= 640:
-                    setup_y = (h - 438) // 2
-                    title = self.read_ui(
-                        (w - 480) // 2 + 20, setup_y + 34, width=440,
-                        px=20, face="bold", screen=(w, h, at))
+                    # The first-run card, 480x438 in the middle of the
+                    # logical screen - drawn larger on a dense panel, as
+                    # the sign-in screen below is
+                    title = ""
+                    for k in (16, 24, 32):
+                        lw, lh = w * 16 // k, h * 16 // k
+                        if k != 16 and lw < 640:
+                            continue
+                        title = self.read_ui(
+                            ((lw - 480) // 2 + 20) * k // 16,
+                            ((lh - 438) // 2 + 34) * k // 16,
+                            width=440 * k // 16, px=(20 * k + 8) // 16,
+                            face="bold", screen=(w, h, at))
+                        if "Welcome" in title:
+                            break
                     if "Welcome to ThreadOS" in title:
                         self.type_line("admin", enter=False)
                         self.sendkey("tab")
@@ -2197,21 +2220,34 @@ class Qemu:
                         self.sendkey("ret")
                         setup_sent = True
                 want = aurora_px(600, 300, w, h) if w >= 640 else self.DESK_BG
-                if w >= 640 and all(abs(at(600, 300)[i] - want[i]) <= 25
-                                    for i in range(3)):
+                if w >= 640 and (ready(at, w, h) if ready else
+                                 all(abs(at(600, 300)[i] - want[i]) <= 25
+                                     for i in range(3))):
                     self._size = (w, h)
                     return True
                 if not login_sent and w >= 640:
-                    fy = h * 2 // 3 - LOCK_FIELD_H
                     under = lambda x, y: gfx_mix(
                         (0, 0, 0), aurora_px(x, y, w, h), 90)
-                    hint = self.find_ui(
-                        80, w - 80, fy + LOCK_FIELD_H + 22, px=UI_PX,
-                        fg=(0xD8, 0xD8, 0xDC), under=under,
-                        screen=(w, h, at))
-                    if "signs in" in hint:
-                        self.type_line("thread")
-                        login_sent = True
+                    # The sign-in screen is laid out in logical pixels
+                    # and drawn at the panel's: on a dense panel the
+                    # hint under the field is one and a half or two
+                    # times larger, and lower (k in sixteenths, as in
+                    # kernel/desktop.c's P())
+                    for k in (16, 24, 32):
+                        lw, lh = w * 16 // k, h * 16 // k
+                        if k != 16 and lw < 640:
+                            continue
+                        fy = lh * 2 // 3 - LOCK_FIELD_H
+                        hint = self.find_ui(
+                            80 * k // 16, w - 80 * k // 16,
+                            (fy + LOCK_FIELD_H + 22) * k // 16,
+                            px=(UI_PX * k + 8) // 16,
+                            fg=(0xD8, 0xD8, 0xDC), under=under,
+                            screen=(w, h, at))
+                        if "signs in" in hint:
+                            self.type_line("thread")
+                            login_sent = True
+                            break
             except Exception:
                 pass
             time.sleep(0.3)
@@ -2239,8 +2275,11 @@ class Qemu:
     def mouse_home(self):
         """Pushes the cursor into the top left corner (the compositor holds
         it within the screen's bounds) and zeroes the tracked position -
-        a calibration before clicking on particular places."""
-        self.mouse_move(-800, -600)
+        a calibration before clicking on particular places. The push is
+        as long as the screen is wide and tall: from the middle of a
+        1920x1080 panel, 800 to the left is not the edge."""
+        w, h = self.size()
+        self.mouse_move(-max(w, 800), -max(h, 600))
         self.mx, self.my = 0, 0
 
     def mouse_button(self, down, button="left"):
@@ -2273,6 +2312,18 @@ class Qemu:
     def mouse_click(self):
         self.mouse_button(True)
         self.mouse_button(False)
+
+    def double_click(self):
+        """Two clicks close enough together to be one double click. The
+        desktop counts them within 0.6 s and Files within 0.5 s, and two
+        mouse_click()s spend 0.8 s - on a busy host the second can come
+        too late. Each state still lasts a few frames, so that the
+        desktop, which looks at the buttons once a frame, sees it."""
+        for down in (True, False, True, False):
+            self.cmd({"execute": "input-send-event", "arguments": {"events": [
+                {"type": "btn", "data": {"button": "left", "down": down}}]}})
+            time.sleep(0.12)
+        time.sleep(0.2)
 
     def mouse_right_click(self):
         self.mouse_button(True, "right")
@@ -2323,6 +2374,32 @@ class Qemu:
         self.click(self.size()[0] - 8, 34)
         time.sleep(0.3)
 
+    def reveal_bar(self, x=None):
+        """The bar hides after three seconds nobody uses it, and the
+        pointer at the top edge brings it back - for as long as it
+        stays there (bar_visible() in kernel/desktop.c). The pointer is
+        left at (x, 1): the middle of the bar by default, where nothing
+        a test reads is drawn."""
+        if x is None:
+            x = self.size()[0] // 2
+        self.mouse_goto(x, 1)
+        # A frame or two for the compositor to draw it again
+        time.sleep(0.5)
+
+    # The shortcuts on a desktop nobody rearranged, in the order
+    # desktop_icon_default_rect() lays them out in kernel/desktop.c
+    SHORTCUTS = ("Home", "Files", "Trash")
+
+    def open_shortcut(self, name):
+        """A double click on one of the desktop's shortcuts - Home opens
+        the account's home in Files, Files its Desktop folder, Trash its
+        Trash - where a desktop nobody rearranged has it, and with no
+        window over it"""
+        i = self.SHORTCUTS.index(name)
+        self.mouse_goto(10 + i * 88 + 38, BAR_H + 8 + 34)
+        time.sleep(0.4)
+        self.double_click()
+
     def open_menu(self):
         """A click on the mark at the left end of the bar"""
         self.mouse_goto(LOGO_XY[0], 1)
@@ -2330,9 +2407,9 @@ class Qemu:
         self.click(*LOGO_XY)
         time.sleep(0.6)
 
-    # The size of the screen the desktop draws on: 640x480 under the
-    # 32-bit kernel, what the loader set (800x600 in QEMU) under the
-    # 64-bit one. Measured the first time something is placed by it.
+    # The size of the screen the desktop draws on: what the loader set
+    # (SCREEN_W x SCREEN_H in QEMU, unless the test gave the screen an
+    # EDID). Measured the first time something is placed by it.
     _size = None
 
     def size(self):
@@ -3188,6 +3265,29 @@ class Qemu:
             fresh = self.serial()[start:]
             if text in fresh:
                 return fresh
+            time.sleep(0.3)
+        return self.serial()[start:]
+
+    def sudo(self, cmd, text=None, timeout=30, password="thread"):
+        """'sudo cmd' at the kernel's shell, and what arrived on the port
+        after it - until 'text' did, when it is given. The shell asks
+        for the password only when it is not already the administrator's
+        (the shell behind a desktop signed in as one is), so the
+        password is typed only when asked for: typed unasked it would
+        be a command of its own."""
+        start = len(self.serial())
+        self.type_line("sudo " + cmd)
+        end = time.time() + timeout
+        asked = False
+        while time.time() < end:
+            fresh = self.serial()[start:]
+            if not asked and "password: " in fresh:
+                asked = True
+                self.type_line(password)
+            elif text is not None and text in fresh:
+                return fresh
+            elif text is None and "\nthread64" in fresh:
+                return fresh           # the prompt is back: it is done
             time.sleep(0.3)
         return self.serial()[start:]
 

@@ -52,6 +52,10 @@ def dot_of(at, j, n_w=2):
     return at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
 
 
+# Where the second window's title bar stands out right of the terminal
+SECOND_X = 94 + TERM_W + 2 + 30
+
+
 def main():
     slog = tempfile.mktemp(suffix=".log")
     dark, light = theme("dark"), theme("light")
@@ -75,9 +79,13 @@ def main():
 
             check("the desktop starts without placeholder windows",
                   q.dock_windows() == 0)
+            # The terminal, then a window wider and not as tall - the file
+            # manager, slot 3 of the cascade - so that each keeps a piece
+            # of its title bar to be clicked whichever is on top, and the
+            # terminal's shadow stays in sight below
             q.launch_dock("gterm")
             time.sleep(3)
-            q.launch_menu("gclock")
+            q.launch_dock("gfiles", n_w=1)
             time.sleep(3)
 
             # --- application windows and their shadows -----------------
@@ -100,7 +108,9 @@ def main():
             check("its title bar is the focused colour",
                   near(at(150, 58), dark["title_bg"], 3))
 
-            q.click(280, 70)             # second window's title bar
+            # The second window's title bar, right of its name and of
+            # the terminal under it
+            q.click(SECOND_X, 70)
             q.mouse_goto(600, 300)
             time.sleep(1)
             w, h, at = q.screen_raw()
@@ -113,7 +123,7 @@ def main():
                   near(dot_of(at, 0), dark["dot"], 50))
 
             # --- a tile in the dock has a picture on it ----------------
-            g = dock_geom()
+            g = dock_geom(n_w=2)
 
             def tile(k):
                 tx, ty = g["tiles"][k]
@@ -128,20 +138,28 @@ def main():
             check("a tile's corners are round", at(tx, ty) != at(tx + 4, ty + 4))
 
             # --- the theme is a setting, and it is followed live --------
-            bar_before = at(300, 12)
-            q.type_line("sudo set theme light")
-            time.sleep(1)
-            q.type_line("thread")
-            time.sleep(3)
-            q.mouse_goto(600, 300)
-            time.sleep(1)
+            # (the bar hides when it is not used: the pointer on the top
+            # edge brings it out, right of where it is read)
+            q.reveal_bar(500)
+            bar_before = q.screen_raw()[2](300, 12)
+            # The shell takes the keys when no window has them; then the
+            # file manager gets the focus back, so that both kinds of
+            # title bar are on the screen
+            q.click_desktop()
+            q.sudo("set theme light", "saved")
+            q.click(SECOND_X, 70)
+            q.reveal_bar(500)
+            # (the aurora is painted again for the light theme, which
+            # takes the desktop a moment)
+            q.wait_pixel(300, 12, bar_glass(False)[12][300], tol=1,
+                         timeout=10)
             w, h, at = q.screen_raw()
             check("the light theme repaints the bar - the light glass, worked "
                   "out from the light aurora (%s, was %s)"
                   % (at(300, 12), bar_before),
                   near(at(300, 12), bar_glass(False)[12][300], 1))
-            check("and the background", at(550, 250) ==
-                  aurora_px(550, 250, dark=False))
+            check("and the background", at(700, 450) ==
+                  aurora_px(700, 450, dark=False))
             check("and the windows (%s)" % (at(150, 63),),
                   near(at(150, 58), light["title_off"], 3) and
                   near(at(150, 70), light["title_bg"], 3))

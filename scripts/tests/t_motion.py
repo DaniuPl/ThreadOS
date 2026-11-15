@@ -65,10 +65,7 @@ def stats(q):
 def set_motion(q, n):
     q.click_desktop()             # the keys to the shell
     time.sleep(0.5)
-    q.type_line("sudo set motion %d" % n)
-    time.sleep(1)
-    q.type_line("thread")
-    time.sleep(1.5)
+    q.sudo("set motion %d" % n, "saved")
 
 
 def differ(a, b, w, h, y0, y1):
@@ -138,7 +135,7 @@ def main():
             w, h, mid = q.screen_raw()
             time.sleep(4)
             w, h, end = q.screen_raw()
-            d = dock_geom(n_w=3)
+            d = dock_geom(n_w=1)
             moving = differ(mid, end, w, h, BAR_H, d["y"] - 20)
             check("a minimised window is seen on its way down (%d pixels "
                   "still to go)" % moving, moving > 500)
@@ -147,7 +144,7 @@ def main():
 
             # --- and with no motion at all --------------------------------
             set_motion(q, 0)
-            q.mouse_goto(*dock_window(2, 3))     # its tile brings it back
+            q.mouse_goto(*dock_window(0, 1))     # its tile brings it back
             time.sleep(0.4)
             q.mouse_click()
             q.mouse_goto(600, 300)

@@ -233,22 +233,24 @@ def main():
                   not near(at(card_x(1) - 3, ring[1]), dark["accent"], 40))
 
             # --- choosing: the light theme ----------------------------------
+            # The session is the administrator's (wait_desktop signs in
+            # with the account the first-run profile made), and its
+            # programs hold the admin's rights: the change is written
+            # at once, with no password asked for
             q.click(card_x(1) + CARD_W // 2, CY + CARD_Y + CARD_H // 2)
-            q.mouse_goto(620, 300)
-            time.sleep(1)
-            said = status(q, dark)
-            check("a change asks for the admin password ('%s')" % said,
-                  said.startswith("Admin password"))
-            password(q)
-            q.mouse_goto(620, 300)
-            time.sleep(2)
+            q.reveal_bar(620)
+            # (the aurora is painted again for the light theme, which at
+            # this size takes the desktop a few seconds)
+            glass = bar_glass(False)[12][300]
+            q.wait_pixel(300, 12, glass, tol=1, timeout=12)
+            q.wait_pixel(CX + W0 - 3, CY + H0 - 40, light["win_bg"], tol=3,
+                         timeout=5)
             w, h, at = q.screen_raw()
             said = status(q, light)
-            check("with it the change is written ('%s')" % said,
-                  said == "Saved")
-            check("the desktop is light at once - the bar's glass (%s)"
-                  % (at(300, 12),),
-                  near(at(300, 12), bar_glass(False)[12][300], 1))
+            check("an administrator's change is written at once ('%s')"
+                  % said, said == "Saved")
+            check("the desktop is light - the bar's glass (%s)"
+                  % (at(300, 12),), near(at(300, 12), glass, 1))
             check("and the window follows the theme it chose",
                   near(at(CX + W0 - 3, CY + H0 - 40), light["win_bg"], 3))
             check("and now the light theme is the one marked",
@@ -256,10 +258,9 @@ def main():
 
             # --- a background ---------------------------------------------
             q.click(sw_x(3) + SW_W // 2, CY + SW_Y + SW_H // 2)
-            time.sleep(1)
-            password(q)
             q.mouse_goto(620, 300)
-            time.sleep(2)
+            q.wait_pixel(600, 250, slope(bgs[3], 250, q.size()[1]), tol=0,
+                         timeout=12)
             w, h, at = q.screen_raw()
             check("the green background replaces the aurora (%s at the "
                   "right, the slope gives %s)" % (at(600, 250),
@@ -269,14 +270,15 @@ def main():
             # --- how windows move -------------------------------------------
             q.click(mo_x(0) + MO_W // 2, CY + MO_Y + MO_H // 2)
             time.sleep(1)
-            password(q)
+            # The shell that started the picker waits for it to end
+            # before it takes another command - so it is closed first
+            q.click(*light_xy(WX, WY, 0))
+            q.wait_serial("process 'gappear' has ended", timeout=15)
             q.click_desktop()
             time.sleep(0.5)
-            seen = len(q.serial())
-            q.type_line("set")
-            time.sleep(1.5)
+            said = q.command("set", "motion =", timeout=15)
             check("'Still' writes motion 0",
-                  re.search(r"motion = 0\b", q.serial()[seen:]) is not None)
+                  re.search(r"motion = 0\b", said) is not None)
         finally:
             q.close()
     finally:

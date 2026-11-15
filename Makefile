@@ -158,7 +158,9 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/heap64.elf $(BUILD)/user64/fpu64test.elf \
                $(BUILD)/user64/uls64.elf $(BUILD)/user64/uupper64.elf \
                $(BUILD)/user64/unet64.elf \
-               $(BUILD)/user64/guiapp64.elf \
+               $(BUILD)/user64/guiapp64.elf $(BUILD)/user64/gdeaf.elf \
+               $(BUILD)/user64/seq.elf $(BUILD)/user64/spin.elf \
+               $(BUILD)/user64/mkwall.elf \
                $(BUILD)/user64/swaptest64.elf \
                $(BUILD)/user64/shmwrite64.elf \
                $(BUILD)/user64/shmread64.elf \
@@ -763,7 +765,9 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    ifconfig=$(BUILD)/user64/ifconfig.elf \
 	    uupper64=$(BUILD)/user64/uupper64.elf \
 	    unet64=$(BUILD)/user64/unet64.elf \
-	    guiapp=$(BUILD)/user64/guiapp64.elf \
+	    guiapp=$(BUILD)/user64/guiapp64.elf gdeaf=$(BUILD)/user64/gdeaf.elf \
+	    seq=$(BUILD)/user64/seq.elf spin=$(BUILD)/user64/spin.elf \
+	    mkwall=$(BUILD)/user64/mkwall.elf \
 	    swaptest64=$(BUILD)/user64/swaptest64.elf \
 	    shmwrite64=$(BUILD)/user64/shmwrite64.elf \
 	    shmread64=$(BUILD)/user64/shmread64.elf \

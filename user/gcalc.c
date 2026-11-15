@@ -367,9 +367,11 @@ static void draw(int win, int cw, int ch)
         ud_text_right(win, cw - PAD - 4, EXPR_BASE, expr, l.dim, UD_SANS, 14);
     char shown[ENTRY_MAX + 1];
     const char *big = entry;
+    /* Where the number would have been, so the eye finds it there -
+       and against the window's own width, which may not be W0 */
     if (failed) {
-        ud_text_mid_l(win, 10, 8, W0 - 20, DISP_H, "Error", l.danger,
-                      UD_BOLD, DISP_PX);
+        ud_text_right_l(win, cw - PAD - 4, DISP_BASE, "Error", l.danger,
+                        UD_SANS, DISP_PX);
         big = (const char *)0;
     }
     if (!failed && ulocale_decimal_comma()) {

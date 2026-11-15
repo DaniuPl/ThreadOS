@@ -59,8 +59,9 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
-            q.mouse_goto(320, 300)
-            time.sleep(1.5)
+            # The bar hides when nobody uses it: the pointer on its top
+            # edge brings it out, clear of what is read on it
+            q.reveal_bar(320)
 
             w, h, at = q.screen_raw()
             lx, sx = bar_load_x(w), bar_show_x(w)
@@ -89,6 +90,7 @@ def main():
             # too early counts something that is about to disappear, and
             # then the number after starting a program looks unchanged.
             def hint_now():
+                q.reveal_bar(lx + 20)
                 q.mouse_goto(lx + 20, BAR_MID)
                 time.sleep(2)
                 text = q.read_hint(BAR_H + 4)
@@ -142,8 +144,8 @@ def main():
             q.mouse_goto(320, 300)
             time.sleep(1.5)
             before = q.dock_windows()
-            check("two windows stand on the screen (%d in the dock with the "
-                  "kernel's)" % before, before == 4)
+            check("two windows stand on the screen (%d in the dock)"
+                  % before, before == 2)
 
             # The settings window is at slot 3 (106,66); minimise it by
             # hand - its yellow light. It has to STAY minimised through
@@ -158,12 +160,9 @@ def main():
             check("a window minimised by hand goes from the screen",
                   not is_win(at(300, 200)))
 
-            q.mouse_goto(sx + SHOW_W // 2, BAR_MID)
-            time.sleep(0.5)
-            q.mouse_click()
+            bar_click(q, sx + SHOW_W // 2)
             time.sleep(2)
-            q.mouse_goto(320, 300)
-            time.sleep(1.5)
+            q.reveal_bar(320)
             w, h, at = q.screen_raw()
             check("'show desktop' hides the other windows",
                   not any(all(c < 60 for c in at(x, 200))
@@ -173,9 +172,7 @@ def main():
             check("and the button itself is lit",
                   is_accent(at(sx + 3, BAR_MID)))
 
-            q.mouse_goto(sx + SHOW_W // 2, BAR_MID)
-            time.sleep(0.5)
-            q.mouse_click()
+            bar_click(q, sx + SHOW_W // 2)
             time.sleep(2)
             q.mouse_goto(320, 300)
             time.sleep(1.5)
@@ -198,6 +195,13 @@ def main():
     return summary()
 
 
+def bar_click(q, x):
+    """A click on the bar at x: the pointer at the top edge first, where
+    the hidden bar comes out, then down onto the bar"""
+    q.reveal_bar(x)
+    q.click(x, BAR_MID)
+
+
 def frame_of(src, slot):
     w, h = define(src, "W0"), define(src, "H0")
     x, y = cascade(slot, w + 2, h + TITLE_H + 2)
@@ -211,28 +215,28 @@ def shortcuts():
         try:
             check("(shortcuts) the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
-            q.click(bar_clock_x() + BAR_CLOCK_W // 2, BAR_H // 2)
+            bar_click(q, bar_clock_x() + BAR_CLOCK_W // 2)
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1)
-            x, y, w = frame_of("user/gcal.c", 0)
+            x, y, w = frame_of("user/gcal.c", 2)
             got = q.window_title(x, y, w)
             check("a click on the date opens the calendar ('%s')" % got,
                   got == "Calendar")
             check("with its tile in the dock", q.dock_windows() == 1)
             q.click_desktop()
             time.sleep(0.5)
-            q.click(bar_clock_x() + BAR_CLOCK_W // 2, BAR_H // 2)
+            bar_click(q, bar_clock_x() + BAR_CLOCK_W // 2)
             time.sleep(3)
             q.mouse_goto(600, 400)
             time.sleep(1)
             check("a second click brings that one up, not another (%d "
                   "windows)" % q.dock_windows(), q.dock_windows() == 1)
-            q.click(bar_load_x() + LOAD_W // 2, BAR_H // 2)
+            bar_click(q, bar_load_x() + LOAD_W // 2)
             time.sleep(4)
             q.mouse_goto(600, 400)
             time.sleep(1)
-            x, y, w = frame_of("user/gtasks.c", 1)
+            x, y, w = frame_of("user/gtasks.c", 3)
             got = q.window_title(x, y, w)
             check("a click on the meter opens the task manager ('%s')" % got,
                   got == "Tasks")

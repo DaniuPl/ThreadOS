@@ -197,6 +197,27 @@ def calendar(q):
 P = "user/gpaint.c"
 
 
+def paint_card(q):
+    """(title, line) of the notification card about the wallpaper - the
+    cards stack from the top, and the one Save put up may still be
+    there above or below it"""
+    scr = q.screen_raw()
+    nx = scr[0] - NOTE_RIGHT - NOTE_W
+    first = ("", "")
+    for i in range(NOTE_SHOWN):
+        y = NOTE_TOP + i * (NOTE_H + NOTE_GAP)
+        said = (q.read_ui(nx + NOTE_TEXT_X, y + NOTE_TITLE_Y, 200,
+                          px=NOTE_PX, face="bold", fg=DARK["menu_text"],
+                          screen=scr),
+                q.read_ui(nx + NOTE_TEXT_X, y + NOTE_BODY_Y, 220,
+                          px=NOTE_PX, fg=DARK["menu_text"], screen=scr))
+        if i == 0:
+            first = said
+        if "wallpaper" in said[1]:
+            return said
+    return first
+
+
 def paint(q):
     cw, ch, cx, cy = frame(P)
     tool_h = define(P, "TOOL_H")
@@ -245,13 +266,14 @@ def paint(q):
     check("Save says so in a notification (%s)" % (said,),
           said[0] == "Paint" and "drawing.bmp" in said[1])
 
+    # The session is an administrator's, so the wallpaper is set with
+    # no password asked for (gpaint's wallpaper_click)
     wall_x = define(P, "WALL_X") + define(P, "WALL_W") // 2
     q.click(cx + wall_x, cy + define(P, "BTN_Y") + define(P, "BTN_H") // 2)
-    q.type_line("thread")
     wall_note = ("", "")
     for _ in range(12):
         time.sleep(0.5)
-        wall_note = card(q, 0)
+        wall_note = paint_card(q)
         if wall_note[0] == "Paint" and "wallpaper" in wall_note[1]:
             break
     check("Paint can apply the drawing as the desktop wallpaper (%s)"

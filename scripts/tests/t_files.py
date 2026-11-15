@@ -123,16 +123,20 @@ def main():
                   "('%s')" % desk_label, "desk.txt" in desk_label)
 
             # Something to look at: a file whose length we know, and a
-            # directory to walk into
-            q.type_line("write report.txt " + TEXT)
-            time.sleep(1)
-            q.type_line("run mkdir documents")
-            time.sleep(2)
+            # directory to walk into - at the root of the disk, where
+            # Files from the dock opens. The shell starts in the
+            # account's home, and the account is the administrator, to
+            # whom the root is open.
+            q.type_line("cd /")
+            check("the shell writes a file at the root",
+                  "written" in q.command("write report.txt " + TEXT,
+                                         "written", timeout=20))
+            check("and makes a directory there",
+                  "created" in q.command("mkdir documents", "created",
+                                         timeout=20))
             # A setting written down puts system.cfg beside swap.sys in
             # the root - two files the list should not offer
-            q.type_line("sudo set hidden 0")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
+            q.sudo("set hidden 0", "saved")
             on_disk = q.command("fls", "swap.sys", timeout=10)
 
             q.launch_dock("gfiles")                   # the "Files" tile
@@ -251,13 +255,29 @@ def main():
             check("Trash opens at its own path",
                   title_at(q, TX, TY) == "Files: /home/admin/.Trash")
             trash_rows = rows_at(q, TX, TY)
+            trash_names = [name for name, _ in trash_rows]
             check("the removed item is listed in Trash",
-                  "report.txt" in [name for name, _ in trash_rows])
-            click(q, TX + NAME_X + NAME_W // 2, TY + BTN_Y, wait=2)
+                  "report.txt" in trash_names)
+            # Picked, then Restore - which stands where Rename does
+            if "report.txt" in trash_names:
+                click(q, TX + 1 + GFILES_ROW_X,
+                      TY + CONTENT_DY + gfiles_row_y(
+                          trash_names.index("report.txt")))
+            click(q, TX + 1 + NAME_X + NAME_W // 2,
+                  TY + CONTENT_DY + BTN_Y, wait=2)
+            # The Trash window stands over the first one; closed, it
+            # uncovers it - and the shell that started it, which waits
+            # for it, takes commands again
+            q.click(*light_xy(TX, TY, 0))
+            q.wait_serial("[gfiles] done", timeout=15)
             q.mouse_goto(600, 380)
-            time.sleep(2)
-            check("Restore puts it back in its original folder",
-                  "report.txt" in [name for name, _ in rows(q)])
+            back = []
+            end = time.time() + 10
+            while time.time() < end and "report.txt" not in back:
+                time.sleep(0.5)
+                back = [name for name, _ in rows(q)]
+            check("Restore puts it back in its original folder (%s)"
+                  % ", ".join(back), "report.txt" in back)
 
             # --- a new name, asked for in the same status line ----------
             # The blocks do not move when a file is renamed, so this is
@@ -310,9 +330,7 @@ def main():
             q.mouse_goto(500, 380)
             q.mouse_click()                    # the desktop takes the keys
             time.sleep(1)
-            q.type_line("sudo set hidden 1")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
+            q.sudo("set hidden 1", "saved")
             names = []
             end = time.time() + 15
             while time.time() < end and "swap.sys" not in names:
@@ -323,22 +341,23 @@ def main():
                   "swap.sys" in names and "system.cfg" in names)
 
             q.click_desktop()
-            q.type_line("write Files keep-this-name")
-            time.sleep(1)
-            q.type_line("sudo set language pl")
-            time.sleep(1)
-            q.command("thread", "saved", timeout=30)
-            time.sleep(2)
+            q.command("write Files keep-this-name", "written", timeout=20)
+            q.sudo("set language pl", "saved")
+            end = time.time() + 10
+            while time.time() < end and title(q) != "Pliki: /":
+                time.sleep(0.5)
             localized_rows = [name for name, _ in rows(q)]
             check("Polish localizes the file-manager window title",
                   title(q) == "Pliki: /")
             check("localized UI does not translate a file name",
                   "Files" in localized_rows)
             shot = q.screen_raw()
-            open_label = q.read_ui(
-                CX + EDIT_X,
+            # (centred in the button, so looked for between its round
+            # ends; and in Polish, so with its letters)
+            open_label = q.find_ui(
+                CX + EDIT_X + 6, CX + EDIT_X + EDIT_W - 6,
                 CY + ui_font_baseline_in(UD_PX, BTN_Y - BTN_H // 2, BTN_H),
-                EDIT_W, px=UD_PX,
+                px=UD_PX, charset=UiFont.CHARSET + "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ",
                 fg=theme("dark")["accent_text"], screen=shot)
             check("the file manager localizes its Open button ('%s')"
                   % open_label, open_label == "Otwórz")

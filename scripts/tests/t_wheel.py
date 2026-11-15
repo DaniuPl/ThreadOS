@@ -65,22 +65,21 @@ def main():
             # QEMU's PS/2 mouse sends it only to a guest that asked, so
             # this and the scrolling below are the two halves of one
             # question.
-            seen = len(q.serial())
-            q.type_line("mouse")
-            time.sleep(2)
-            said = q.serial()[seen:]
+            # (the kernel says what it got from the mouse as it starts)
+            said = [l for l in q.serial().splitlines() if "mouse" in l]
             check("the machine negotiated a wheel ('%s')"
-                  % said.replace("\n", " ")[:60],
-                  "wheel=yes" in said)
+                  % (said[:1] or [""])[0][:70],
+                  any("wheel: yes" in l for l in said))
 
             # --- a list longer than the window -------------------------
             # Named so that the order is the order they were made in,
             # and so that a name read from the screen says which one it
             # is without counting.
+            # (at the root of the disk, where Files from the dock opens;
+            # the shell starts in the account's home)
+            q.type_line("cd /")
             for i in range(FILES):
-                q.type_line("write file%02d.txt x" % i)
-                time.sleep(0.35)
-            time.sleep(1)
+                q.command("write file%02d.txt x" % i, "written", timeout=10)
 
             q.launch_dock("gfiles")                # the "Files" tile
             time.sleep(4)

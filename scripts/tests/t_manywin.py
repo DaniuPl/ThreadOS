@@ -78,9 +78,11 @@ def main():
             n = q.dock_windows()
             check("nine windows at once have their tiles in the dock "
                   "(there are %d)" % n, n == 9)
+            # Seventeen tiles still fit the screen's width at the size
+            # asked for; it is at twelve windows that they have to shrink
             fits, t9 = tiles_inside(9)
-            check("sixteen tiles: they got smaller (%d px) so the dock "
-                  "still fits on the screen" % t9, fits and t9 < DOCK_TILE_M)
+            check("seventeen tiles fit on the screen (%d px each)" % t9,
+                  fits and t9 <= DOCK_TILE_M)
 
             # --- a click on the LAST tile -------------------------------
             # If the drawing and the click computed the size differently,
@@ -93,9 +95,10 @@ def main():
             # The window that tile belongs to came to the top, so its
             # title bar is on the screen with its lights on. A window
             # the cascade had pushed off the edge would have none.
-            # (the clock, the last one opened: slot 8 of the cascade,
-            # or as far back up it as a window that size needs to fit)
-            sx, sy = cascade(8, GCLOCK_W + 2, GCLOCK_H + TITLE_H + 2)
+            # (the clock, the ninth window opened: the cascade starts the
+            # first one two steps in, so slot 10 - or as far back up it
+            # as a window that size needs to fit)
+            sx, sy = cascade(10, GCLOCK_W + 2, GCLOCK_H + TITLE_H + 2)
             check("a window called up from the dock has its title bar on "
                   "the screen, with the focus", q.has_focus(sx, sy))
 
@@ -113,8 +116,8 @@ def main():
             check("twelve windows at once have tiles in the dock (there are "
                   "%d)" % n, n == 12)
             fits, t12 = tiles_inside(12)
-            check("and the dock still fits on the screen (%d px tiles)" % t12,
-                  fits and t12 < t9)
+            check("and the dock still fits on the screen: its tiles got "
+                  "smaller (%d px)" % t12, fits and t12 < t9)
 
             # The last tile - the one whose place depends entirely on the
             # shared size - still answers a click

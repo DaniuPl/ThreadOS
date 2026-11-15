@@ -981,6 +981,14 @@ static void let_go_of_fds(void)
 void task64_exit_code(int code)
 {
     say_gone();
+    /* A program that ends by itself says so, with its code: a window
+       closed from the desktop has no shell waiting for it to report
+       the end, and "ended" and "was killed" are different outcomes to
+       whoever reads the log. Its C library's threads are part of it,
+       and a kernel thread is no program. */
+    if (current->space && !current->lib_thread)
+        printk("[kernel] process '%s' has ended (code %d)\n",
+               current->name, code);
     irq_save();
     hda_stream_abort(current->id);
     let_go_of_fds();

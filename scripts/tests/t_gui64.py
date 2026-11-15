@@ -281,9 +281,11 @@ def main():
             check("Updates opens its own settings page ('%s')" % head,
                   head == "Updates")
             shot = q.screen_raw()
+            # (inside the button, past its round ends: the window's
+            # ground in their corners would be taken for ink)
             check("Updates offers a release check",
-                  q.find_ui(scx + GSET_PANE_X,
-                            scx + GSET_PANE_X + 152,
+                  q.find_ui(scx + GSET_PANE_X + 8,
+                            scx + GSET_PANE_X + 152 - 8,
                             scy + ui_font_baseline_in(
                                 UD_PX, GSET_PANE_Y0 + GSET_INFO_H + 6,
                                 GSET_CHIP_H),
@@ -354,16 +356,18 @@ def main():
             tx, ty = body_text(3)
             # The prompt on the last line of the window, read in the
             # terminal's own lettering
+            # ('>' for an ordinary account, '#' for an administrator -
+            # and the desktop's session is one)
             rows = []
             end = time.time() + 20
             while time.time() < end:
                 rows = q2.term_rows(tx, ty)
-                if rows and rows[-1].endswith(">"):
+                if rows and rows[-1].endswith((">", "#")):
                     break
                 time.sleep(0.5)
             check("the 'Term' tile starts the terminal in a window "
                   "(its prompt: %s)" % rows[-1:], bool(rows) and
-                  rows[-1].endswith(">"))
+                  rows[-1].startswith("/") and rows[-1].endswith((">", "#")))
 
             # The terminal's window has focus right after it appears - we
             # type a command and watch whether its output appears in the

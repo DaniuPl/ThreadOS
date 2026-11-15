@@ -125,11 +125,19 @@ def context_entry(q, mx, my, i):
     return max(readings, key=len)
 
 
-def context_place(mx, my):
+def context_place(mx, my, w=SCREEN_W, h=SCREEN_H):
     hgt = 2 * MENU_PAD + 3 * MENU_ROW
-    x = min(mx, SCREEN_W - MENU_W)
-    y = min(my, work_bottom() - hgt)
+    x = min(mx, w - MENU_W)
+    y = min(my, work_bottom(h=h) - hgt)
     return max(x, 0), max(y, BAR_H)
+
+
+def dock_shows(at, n_w):
+    """The dock's first picture - the folder, white a little below its
+    middle - where the layout puts it with n_w windows in the dock"""
+    g = dock_geom(n_w=n_w)
+    tx, ty = g["tiles"][0]
+    return min(at(tx + g["tile"] // 2, ty + g["tile"] // 2 + 3)) > 200
 
 
 def sixty_four():
@@ -189,29 +197,32 @@ def sixty_four():
 
             opened = q.dock_windows()
             check("(64) the clock came up from its tile (%d windows in the dock)"
-                  % opened, opened == 3)
+                  % opened, opened == 1)
 
             # Closing a window is not instant, and how long it takes
             # is not ours to guess: with the whole suite running the
             # same three seconds are sometimes not enough. So we look
             # until the button is gone, and only then give up.
             q.sendkey("alt-f4")
-            left = 3
+            left = 1
             for _ in range(10):
                 time.sleep(1.5)
                 left = q.dock_windows()
-                if left == 2:
+                if left == 0:
                     break
             check("(64) Alt+F4 gets through the long-mode driver and "
-                  "closes the window (%d windows)" % left, left == 2)
+                  "closes the window (%d windows)" % left, left == 0)
 
+            # The right button on the desktop: its menu, under the
+            # pointer (where it fits on this screen)
             q.mouse_goto(500, 40)
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1.5)
-            got = menu_entry(q, 500, 40, 1)
+            w, h = q.size()
+            got = context_entry(q, *context_place(500, 40, w, h), 0)
             check("(64) the right button opens the menu under the pointer "
-                  "('%s')" % got, got == "Clock")
+                  "('%s')" % got, got == "New Folder")
         finally:
             q.close()
     finally:
@@ -242,8 +253,8 @@ def main():
             w, h, at = q.screen_raw()
             check("the settings stand on the screen", is_win(at(*P_APP)))
             before = q.dock_windows()
-            check("and they have their tile in the dock (%d with the kernel's "
-                  "windows)" % before, before == 1)
+            check("and they have their tile in the dock (%d windows)"
+                  % before, before == 1)
 
             q.sendkey("alt-f4")
             time.sleep(3)
@@ -264,8 +275,8 @@ def main():
             q.sendkey("alt-f4")
             time.sleep(2)
             w, h, at = q.screen_raw()
-            check("Alt+F4 with no focus closes nothing - the kernel's windows "
-                  "stand where they stood", q.dock_windows() == after)
+            check("Alt+F4 with no focus closes nothing - the dock holds what "
+                  "it held", q.dock_windows() == after)
 
             # --- two clicks on the title bar ----------------------------
             # Every system does this, and a person who has used one
@@ -290,7 +301,7 @@ def main():
             check("two clicks on the title bar open the window to the whole "
                   "screen", is_win(at(20, 300)) and is_win(at(w - 4, 300)))
             check("but not over the dock",
-                  min(at(*dock_tile(0, n_w=q.dock_windows()))) > 200)
+                  dock_shows(at, q.dock_windows()))
 
             q.mouse_goto(200, BAR_H + 4)
             time.sleep(0.4)
@@ -316,8 +327,9 @@ def main():
             time.sleep(0.5)
             q.mouse_right_click()
             time.sleep(1)
-            # onto the first entry
-            q.mouse_goto(MX + 60, MY + MENU_PAD + MENU_ROW // 2)
+            # onto the first entry - right of its name, which the pointer
+            # would otherwise cover
+            q.mouse_goto(MX + MENU_W - 40, MY + MENU_PAD + MENU_ROW // 2)
             time.sleep(1)
             w, h, at = q.screen_raw()
 
@@ -328,9 +340,9 @@ def main():
                   context_entry(q, MX, MY, 2) == "Refresh")
             e0 = MY + MENU_PAD + MENU_ROW // 2
             check("the entry under the pointer is highlighted",
-                  is_accent(at(MX + MENU_W - 16, e0)))
+                  is_accent(at(MX + MENU_W - 12, e0)))
             check("and a further one is not",
-                  not is_accent(at(MX + MENU_W - 16, e0 + 2 * MENU_ROW)))
+                  not is_accent(at(MX + MENU_W - 12, e0 + 2 * MENU_ROW)))
             # The start menu remains separate and closed.
             check("and nothing hangs from the mark on the bar",
                   menu_entry(q, MENU_X0, MENU_Y, 0) == "")

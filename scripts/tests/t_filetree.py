@@ -124,15 +124,20 @@ def main():
             q.mouse_home()
 
             # A file whose length we know, a folder with a folder and a
-            # file in it
-            q.type_line("write report.txt " + TEXT)
-            time.sleep(1)
-            q.type_line("run mkdir documents")
-            time.sleep(2)
-            q.type_line("run mkdir documents/inner")
-            time.sleep(2)
-            q.type_line("run cp report.txt documents/inside.txt")
-            time.sleep(2)
+            # file in it - at the root of the disk, where Files from the
+            # dock opens. The shell behind the desktop starts in the
+            # account's home; the account is the administrator, to whom
+            # the root is open.
+            q.type_line("cd /")
+            made = [q.command(cmd, said, timeout=20)
+                    for cmd, said in (("write report.txt " + TEXT, "written"),
+                                      ("mkdir documents", "created"),
+                                      ("mkdir documents/inner", "created"),
+                                      ("cp report.txt documents/inside.txt",
+                                       "-> 'documents/inside.txt'"))]
+            check("the shell made the files and folders to look at",
+                  "written" in made[0] and "created" in made[1] and
+                  "created" in made[2] and "inside.txt' (" in made[3])
 
             q.launch_dock("gfiles")                   # the "Files" tile
             time.sleep(4)
@@ -238,27 +243,32 @@ def main():
                   sorted(names(q)) == ["report-copy.txt", "report.txt"])
 
             # --- a folder with something in it --------------------------
+            # Removing moves to Trash, where it can be had back from, so
+            # a folder that is not empty goes the same way as any other
+            # - asked about first. (Only Trash itself refuses to delete
+            # such a folder for good.) 'Keep' leaves it where it is.
             tree_click(q, "Disk")
             look(q)
             pick(q, "documents")
             x, y = gfiles_button("remove")
             click(q, CX + x, CY + y, wait=2)
             look(q)
-            said = q.gfiles_status(CX, CY)
-            check("a folder with something in it is not removed, and it "
-                  "says why ('%s')" % said, "not empty" in said)
-            check("and it is still there", "documents" in names(q))
+            asked = q.ug_question(CX, CY, GFILES_H)
+            check("a folder with something in it is asked about before it "
+                  "goes to Trash ('%s')" % asked,
+                  "folder" in asked and "documents" in asked and
+                  "Trash" in asked)
+            no = ug_modal(GFILES_H)["no"]
+            click(q, CX + no[0], CY + no[1], wait=2)
+            look(q)
+            check("and 'Keep' leaves it there", "documents" in names(q))
 
             # --- confirmed by something that is not this program --------
             q.mouse_goto(*AWAY)
             q.mouse_click()                    # the desktop takes the keys
             time.sleep(1)
-            seen = len(q.serial())
-            q.type_line("cat archive/report.txt")
-            time.sleep(2)
-            q.type_line("fls")
-            time.sleep(2)
-            after = q.serial()[seen:]
+            after = (q.command("cat archive/report.txt", TEXT, timeout=15) +
+                     q.command("fls", "archive", timeout=15))
             check("the kernel's shell reads the copy in the new folder",
                   TEXT in after)
             check("and lists the folder made in the window",

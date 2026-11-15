@@ -263,10 +263,26 @@ static int art_of_app(const char *app)
     return ART_LETTER;
 }
 
+/* Programs with a name on the desktop but no picture of their own -
+   a tile with their first letter stands for them (ART_LETTER) */
+static const struct { const char *app, *label; } lettered_apps[] = {
+    { "gusers", "Accounts" },
+};
+
+/* Looked up by the program's name, not through art_of_app(): its answer
+   for a program it does not know is ART_LETTER, which is also the
+   index of the Code program's own entry - and the accounts program was
+   in the menu as a second "Code". */
 static const char *label_of_app(const char *app)
 {
-    int k = art_of_app(app);
-    return k < KNOWN_N ? known_apps[k].label : app;
+    for (int k = 0; k < KNOWN_N; k++)
+        if (!strcmp(app, known_apps[k].app))
+            return known_apps[k].label;
+    for (int k = 0; k < (int)(sizeof(lettered_apps) /
+                              sizeof(lettered_apps[0])); k++)
+        if (!strcmp(app, lettered_apps[k].app))
+            return lettered_apps[k].label;
+    return app;
 }
 
 #define ICON_N icon_n
@@ -470,7 +486,11 @@ struct wevent {
 
 struct window {
     int x, y, w, h;
-    char title[24];
+    /* As long as a program may ask for (SYS64_WIN_TITLE takes 63): a
+       file manager names the folder it shows, and a home's folders are
+       longer than the 23 letters this used to hold. What does not fit
+       the title bar is cut with an ellipsis where it is drawn. */
+    char title[64];
     int used;
     int owner;             /* the owning process's pid; -1 = a kernel window */
     uint8_t *content;      /* the application's content buffer (NULL = a kernel window) */
@@ -4362,6 +4382,22 @@ static void found_add(int kind, int index, int art, const char *name,
         found_n++;
 }
 
+/* Where the search looks for files: the signed-in account's home,
+   where its files are kept - the root holds the system's. With no
+   home to go to (no disk, or a guest) it is the root. 'path' gets the
+   directory's name, for opening what is found there by its whole
+   path: a program started from here does not stand in it. */
+static int search_files_dir(char *path, int cap)
+{
+    int dir = FS_ROOT;
+    if (!desktop_home_path(path, cap) || fs_chdir(FS_ROOT, path, &dir) < 0) {
+        dir = FS_ROOT;
+        path[0] = '/';
+        path[1] = '\0';
+    }
+    return dir;
+}
+
 static void search_refresh(void)
 {
     if (found_gen == search_gen)
@@ -4398,11 +4434,12 @@ static void search_refresh(void)
         if (s)
             found_add(FIND_SETTING, i, art_of_app("gsettings"), n, s, scores);
     }
-    char name[64];
+    char name[64], where[64];
     uint32_t size;
     int dir;
-    for (int i = 0; i < 64 && fs_readdir(FS_ROOT, i, name, &size, &dir); i++) {
-        if (dir)
+    int at = search_files_dir(where, sizeof(where));
+    for (int i = 0; i < 64 && fs_readdir(at, i, name, &size, &dir); i++) {
+        if (dir || name[0] == '.')
             continue;
         int s = match(name, q, qn);
         if (s)
@@ -4525,12 +4562,15 @@ static void search_go(int i)
                     ends_with_ci(f.name, ".webm");
         const char *app = picture ? "gimg" : media ? "gmedia" : "gedit";
         const char *with = picture ? "gimg " : media ? "gmedia " : "gedit ";
-        char cmd[96];
+        char where[64], path[160], cmd[192];
+        search_files_dir(where, sizeof(where));
+        if (!path_append(path, sizeof(path), where, f.name))
+            return;
         int n = 0;
         for (int k = 0; with[k]; k++)
             cmd[n++] = with[k];
-        for (int k = 0; f.name[k] && n < (int)sizeof(cmd) - 1; k++)
-            cmd[n++] = f.name[k];
+        for (int k = 0; path[k] && n < (int)sizeof(cmd) - 1; k++)
+            cmd[n++] = path[k];
         cmd[n] = '\0';
         int art = art_of_app(app);
         remember_launch(exec_spawn(cmd), -1, art);
@@ -4917,7 +4957,11 @@ static void save_screenshot(void)
     name[p++] = 'c';
     name[p] = '\0';
 
-    int slot = fs_open(FS_ROOT, name, 1);
+    /* Into the signed-in account's home, with its other files - where
+       Files' Home and the search find it - rather than among the
+       system's in the root */
+    char home[64];
+    int slot = fs_open(search_files_dir(home, sizeof(home)), name, 1);
     if (slot < 0) {
         kfree(row);
         return;
@@ -6446,11 +6490,16 @@ static void desktop_thread(void *arg)
     /* The resolution: the panel's own (its EDID says which), unless the
        'resolution' setting names one - "1024x768". Without either,
        640x480; without a framebuffer at all, mode 13h (320x200). Where
-       the loader set the mode, it stays what the loader set. */
+       the loader set the mode, it stays what the loader set - unless
+       the setting names one and the card can be told (the Bochs/QEMU
+       interface). */
     int rw, rh;
     resolution_wanted(&rw, &rh);
     if (video_init_vesa(rw, rh) < 0)
         video_init();
+    else if (rw && rh)
+        video_set_mode(rw, rh);    /* over a loader's mode, where the card
+                                      lets another be set (kernel/video.c) */
 
     /* The palette, for the programs' windows and for a screen of 256
        colours. What each entry means has not changed since the first

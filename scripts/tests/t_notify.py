@@ -27,7 +27,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, _kernel_define
 
 DARK = theme("dark")
 
@@ -88,12 +88,24 @@ def typed(q):
 
 
 def search(q, text):
+    """Ctrl+Space, and the text typed once the search is up - the keys
+    go to it only from then on - and until it shows what was typed (or
+    a few seconds, for a test that wants to see it not do so)"""
     q.sendkey("ctrl-spc")
-    time.sleep(0.6)
+    x, y = search_x() + SEARCH_W // 2, SEARCH_Y + SEARCH_FIELD_H // 2
+    end = time.time() + 8
+    while time.time() < end:
+        w, h, at = q.screen_raw()
+        if at(x, y) != aurora_px(x, y):
+            break
+        time.sleep(0.3)
     for c in text:
         q.sendkey({" ": "spc", ".": "dot"}.get(c, c))
         time.sleep(0.15)
-    time.sleep(1)
+    end = time.time() + 5
+    while time.time() < end and typed(q) != text:
+        time.sleep(0.3)
+    time.sleep(0.5)
 
 
 def main():
@@ -107,14 +119,21 @@ def main():
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
             q.mouse_goto(300, 300)
-            q.type_line("write notes.txt a line to find")
-            time.sleep(1)
+            # A file in the account's home, where the shell behind the
+            # desktop stands
+            q.command("write notes.txt a line to find", "written",
+                      timeout=20)
 
             # --- notifications --------------------------------------------
-            # A program's first: it comes from ring 3
-            q.type_line("run udtest")
-            time.sleep(3)
-            got = card(q, 0)
+            # A program's first: it comes from ring 3. ('runw', which
+            # does not wait for the program to end: the shell is wanted
+            # again below, and udtest keeps its window open.)
+            q.type_line("runw udtest")
+            got = ("", "")
+            end = time.time() + 15
+            while time.time() < end and got[0] != "udtest":
+                time.sleep(0.5)
+                got = card(q, 0)
             check("a program's notification is a card at the top right, from "
                   "ring 3 (%s)" % (got,), got == ("udtest", "drawn and measured"))
 
@@ -136,18 +155,27 @@ def main():
             time.sleep(0.5)
             check("a click sends a card away, and the one under it moves up "
                   "(%s)" % (card(q, 0),), card(q, 0) == ("Shell", "First"))
-            time.sleep(6)
-            w, h, at = q.screen_raw()
-            bare = sum(1 for x in range(note_x(), note_x() + NOTE_W, 4)
-                       for y in range(note_y(0), note_y(0) + NOTE_H, 4)
-                       if at(x, y) == aurora_px(x, y))
+            # A card lives five seconds' worth of frames - on a desktop
+            # slowed down by a busy host that is longer, so it is
+            # watched until it goes rather than looked for once
+            points = (NOTE_W // 4) * (NOTE_H // 4)
+            bare = 0
+            end = time.time() + 20
+            while time.time() < end and bare != points:
+                time.sleep(1)
+                w, h, at = q.screen_raw()
+                bare = sum(1 for x in range(note_x(), note_x() + NOTE_W, 4)
+                           for y in range(note_y(0), note_y(0) + NOTE_H, 4)
+                           if at(x, y) == aurora_px(x, y))
             check("after five seconds they go by themselves (%d of %d points "
-                  "the bare background)" % (bare, (NOTE_W // 4) * (NOTE_H // 4)),
-                  bare == (NOTE_W // 4) * (NOTE_H // 4))
+                  "the bare background)" % (bare, points), bare == points)
 
             q.sendkey("print")              # Print Screen
             got = ("", "")
-            for _ in range(16):             # writing to the disk takes a while
+            # Writing the whole screen to the disk takes a while, and
+            # the desktop draws nothing in the meantime
+            end = time.time() + 40
+            while time.time() < end:
                 time.sleep(0.5)
                 got = card(q, 0)
                 if got[0]:
@@ -209,13 +237,22 @@ def main():
             before = q.dock_windows()
             search(q, "notes")
             rows = found(q)
-            check("a file at the top of the disk is found (%s)" % rows,
+            check("a file in the account's home is found (%s)" % rows,
                   ("notes.txt", "File", True) in rows)
             q.sendkey("ret")
             time.sleep(4)
             check("and taking it opens it in a window of its own",
                   q.dock_windows() == before + 1)
-            check("in the editor", "exec 'gedit'" in q.serial())
+            # The editor, by the name on its window - and it was given
+            # the file's whole path: a program started from the desktop
+            # does not stand in the home
+            ex, ey = cascade(4, _kernel_define("user/gedit.c", "W0") + 2,
+                             _kernel_define("user/gedit.c", "H0") +
+                             TITLE_H + 2)
+            title = q.window_title(ex, ey)
+            check("in the editor ('%s')" % title, title.startswith("Editor"))
+            check("and the editor has that file open ('%s')" % title,
+                  "notes.txt" in title)
         finally:
             q.close()
     finally:

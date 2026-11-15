@@ -51,6 +51,9 @@ static const int sizes[3] = { 2, 5, 10 };   /* the tip's radius */
 
 static uint32_t canvas[CW * CH];
 
+/* A notification's card has one line of about 216 pixels for the text
+   (draw_notes() in kernel/desktop.c) and cuts what is longer, so what
+   is said here is said short enough to be read whole */
 static void notify(const char *english, const char *polish)
 {
     sys_notify(ulocale_language_polish() ? "Rysowanie" : "Paint",
@@ -170,8 +173,8 @@ static void apply_wallpaper(void)
 {
     int fd = (int)sys_open(WALL_FILE, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        notify("Could not create wallpaper.twl in the system root.",
-               "Nie można utworzyć wallpaper.twl w katalogu głównym systemu.");
+        notify("Could not create /wallpaper.twl.",
+               "Nie można utworzyć pliku tapety.");
         return;
     }
 
@@ -200,11 +203,11 @@ static void apply_wallpaper(void)
 
     int32_t rc = sys_cfg_set("wallpaper", "wallpaper.twl");
     if (rc == 0)
-        notify("The drawing is now the desktop wallpaper.",
+        notify("It is now the desktop wallpaper.",
                "Rysunek jest teraz tapetą pulpitu.");
     else
-        notify("The wallpaper was saved, but Settings could not apply it.",
-               "Tapeta została zapisana, ale nie udało się jej ustawić.");
+        notify("Saved, but not set as wallpaper.",
+               "Zapisano, lecz nie ustawiono.");
 }
 
 static void wallpaper_click(void)
@@ -256,8 +259,8 @@ static void save(void)
 {
     int fd = (int)sys_open(FILE_NAME, O_WRITE | O_CREATE | O_TRUNC);
     if (fd < 0) {
-        notify("The drawing cannot be written - no disk?",
-               "Nie można zapisać rysunku — brakuje dysku?");
+        notify("Not written - is there a disk?",
+               "Nie można zapisać - brak dysku?");
         return;
     }
     uint32_t row = (uint32_t)(CW * 3 + 3) & ~3u;
