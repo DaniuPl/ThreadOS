@@ -29,24 +29,27 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 
-def under(x, y):
-    """What the lock's letters stand on: the aurora, darkened"""
-    return gfx_mix((0, 0, 0), aurora_px(x, y), 90)
+def under_for(w, h):
+    """What the lock's letters stand on: the aurora, darkened - the
+    aurora of the screen's own size, which GRUB makes 800x600"""
+    return lambda x, y: gfx_mix((0, 0, 0), aurora_px(x, y, w, h), 90)
 
 
 def lock_time(q):
     """The big time in the middle of the lock, 'HH:MM'"""
-    return q.find_ui(SCREEN_W // 2 - 120, SCREEN_W // 2 + 120,
-                     SCREEN_H // 3, charset="0123456789:", px=LOCK_TIME_PX,
-                     face="bold", fg=(255, 255, 255), under=under)
+    w, h = q.size()
+    return q.find_ui(w // 2 - 120, w // 2 + 120, h // 3,
+                     charset="0123456789:", px=LOCK_TIME_PX, face="bold",
+                     fg=(255, 255, 255), under=under_for(w, h))
 
 
 def lock_says(q):
-    fy = SCREEN_H * 2 // 3 - LOCK_FIELD_H
+    w, h = q.size()
+    fy = h * 2 // 3 - LOCK_FIELD_H
     best = ""
     for fg in ((0xD8, 0xD8, 0xDC), (0xFF, 0x69, 0x61)):
-        got = q.find_ui(80, SCREEN_W - 80, fy + LOCK_FIELD_H + 22, px=UI_PX,
-                        fg=fg, under=under)
+        got = q.find_ui(80, w - 80, fy + LOCK_FIELD_H + 22, px=UI_PX,
+                        fg=fg, under=under_for(w, h))
         if len(got) > len(best):
             best = got
     return best
