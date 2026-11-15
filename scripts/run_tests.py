@@ -26,7 +26,7 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tests")
 # first anyway, so that they are not left alone at the end
 GROUPS = [
     "boot", "bootsplash", "shell", "process", "signals",
-    "http32", "mouse", "tfs", "foreigndisk", "k64core", "k64proc",
+    "http", "mouse", "tfs", "foreigndisk", "k64core", "k64proc",
     "k64shell", "k64disk", "usbmouse",
     "tls64", "net", "net64", "e1000", "virtio", "nvme", "xhci", "ehci", "ttf", "shapes", "sem", "disk",
     "swap64", "shm64", "mmap", "mmapwrite", "dynlink", "smp", "locks",
