@@ -7,9 +7,10 @@
  * of constructors and destructors, whose bounds musl finds by these
  * symbols.
  *
- * No thread-local storage: musl's start-up would look for it in the
- * program headers, which ThreadOS does not pass on, so a program that
- * has some fails to link rather than quietly sharing it.
+ * Thread-local storage: musl's start-up looks for its template in the
+ * program headers, which ThreadOS does not pass on. The symbols at the
+ * end describe it instead, and the start-up code (crt/crt1.c) turns
+ * them into the one program header musl looks at.
  */
 
 ENTRY(_start)
@@ -49,5 +50,10 @@ SECTIONS
     /DISCARD/ : { *(.note*) *(.comment) *(.eh_frame*) }
 }
 
-ASSERT(SIZEOF(.tdata) + SIZEOF(.tbss) == 0,
-       "thread-local variables are not supported (see libc/libc64.ld)")
+/* Addresses and sizes as absolute symbols: the C code reads their
+   addresses. The template is .tdata; .tbss after it is zeros. */
+PROVIDE_HIDDEN(__tls_image  = ADDR(.tdata));
+PROVIDE_HIDDEN(__tls_filesz = SIZEOF(.tdata));
+PROVIDE_HIDDEN(__tls_memsz  = SIZEOF(.tbss) == 0 ? SIZEOF(.tdata)
+                              : ADDR(.tbss) + SIZEOF(.tbss) - ADDR(.tdata));
+PROVIDE_HIDDEN(__tls_align  = MAX(ALIGNOF(.tdata), ALIGNOF(.tbss)));

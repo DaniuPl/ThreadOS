@@ -6722,3 +6722,72 @@ works and is checked by `make test`.
       QEMU test that uses it on ThreadOS (plus a fuzz harness for parsers
       of untrusted input). The kernel still takes only freestanding code.
       This is a rule change with no code, so there is no test.
+
+- [x] **POSIX threads for musl programs** (kernel64/futex64.c,
+      kernel64/task64.c, kernel64/proc64.c, kernel64/syscall64.c,
+      boot64/syscall64.S, kernel64/kmain64.c, libc/overlay/,
+      libc/libc64.ld, libc/tests/pthreadtest.c, scripts/tests/t_pthread.py)
+      musl's pthread_create answered ENOSYS, and almost every library
+      worth bringing in (now that rule 6 allows it) starts a thread
+      or at least takes a lock. The 64-bit kernel had threads
+      (SYS64_THREAD), but not what a C library needs around them:
+
+      * SYS64_CLONE starts a thread on the library's own stack and
+        thread pointer, writes its number where musl wants it, and
+        remembers a word to clear when the thread ends (Linux's
+        clear_child_tid; pthread_join and musl's thread list lock wait
+        on it). The kernel no longer hands out a stack per thread, so a
+        thread created and joined a thousand times costs nothing a
+        thousand times. Such threads may run on any core.
+      * SYS64_FUTEX: wait, wake and requeue on a word of the program's
+        memory, keyed by address space and address. A waiter files
+        itself and looks at the word under one lock, and task64_block
+        refuses to sleep once task64_wake (or a signal) has marked the
+        task, so a wake between the look and the sleep is not lost.
+      * Threads form a group named after the first one (tgid).
+        SYS64_EXIT_GROUP (exit()) ends every thread of the program,
+        whichever called it; a sleeping one wakes, a computing one is
+        stopped at its next interrupt, and the parent gets the code. A
+        program whose thread faults dies whole. A library's thread
+        leaves no exit record, so wait() in the parent only sees
+        processes, and Ctrl+C goes to the program, not to one of its
+        threads. (Threads made by SYS64_THREAD are still waited for like
+        children: threads, prio and tlbtest64 do exactly that.)
+      * Threads share one descriptor table instead of each having a
+        copy: a file one thread opens is there for the others. The copy
+        was also a bug - a thread ending closed its copies of the pipe
+        ends, taking the process's references with them.
+      * enter_ring3_64 loaded FS with a selector, which clears the FS
+        base; it now keeps the base the scheduler put there, so a new
+        thread starts with its thread pointer.
+      * Thread-local variables: libc64.ld describes .tdata and .tbss in
+        symbols, and crt1.c turns them into the one program header musl
+        looks for. They used to be refused at link time.
+      * In the syscall layer, what musl keeps for the whole program (free
+        mmap ranges, signal handlers) is behind a lock; a detached
+        thread's stack is reused only once its thread is gone; getpid is
+        the program's, gettid the thread's; sysconf counts the cores
+        (SYS64_NCORES) and sched_getcpu works.
+
+      Two scheduler faults showed up on the way and slowed everything on
+      the boot core, not just threads. The boot thread, once the boot
+      was over, sat in a hlt loop but was still a ready task: whenever
+      its turn came, the boot core stood still until the next tick while
+      other tasks waited. It now sleeps for good (idle is the idle
+      task's job). And a task yielding while nothing else was ready
+      gave its core to the idle task, which halts until the next tick,
+      so sched_yield() cost ten milliseconds. pthreadtest took 33 s on
+      one core before these two fixes and 0.8 s after.
+
+      The test: pthreadtest is plain C, built on the host against glibc
+      too, and the two outputs must match line for line - a mutex
+      under contention from eight threads, atomics, join values,
+      __thread variables, a bounded queue on condition variables,
+      semaphores taking turns, pthread_once, a barrier, a read-write
+      lock, 40 detached threads and 300 created and joined one after
+      another, a descriptor shared both ways, getpid in a thread, a
+      timed wait, and exit(5) from a thread while others spin and
+      sleep. It runs on four cores (the threads are seen on more than
+      one) and on one; afterwards no thread is left, including one main
+      never joined. With exit() ending only the calling thread, or with
+      SYS64_EXIT_GROUP not ending the others, the test fails.

@@ -64,6 +64,16 @@ uint64_t proc64_mmap(uint64_t size);
    stack. Returns its task number or -1. */
 int proc64_thread(uint64_t entry, uint64_t arg);
 
+/* SYS64_CLONE: a thread on the caller's own stack and thread pointer */
+struct clone64 {
+    uint64_t entry;       /* where it starts, in ring 3 */
+    uint64_t stack;       /* its RSP at that instruction */
+    uint64_t tls;         /* its FS base (0 = none) */
+    uint64_t parent_tid;  /* where to write its number (0 = nowhere) */
+    uint64_t clear_tid;   /* zeroed and woken when it ends (0 = nothing) */
+};
+int proc64_clone(const struct clone64 *c);
+
 uint64_t proc64_shm(int key, uint64_t size);
 
 /* Maps a file from disk into the process's memory (read-only, the

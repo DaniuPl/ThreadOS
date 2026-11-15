@@ -34,6 +34,7 @@
 #include "../kernel/include/pit.h"
 #include "../kernel/include/isr.h"
 #include "proc64.h"
+#include "futex64.h"
 #include "signal64.h"
 #include "keyboard64.h"
 #include "../kernel/include/fs.h"
@@ -270,6 +271,8 @@ static int lockless(uint64_t nr)
 {
     switch (nr) {
     case SYS64_GETPID:   /* own number, a single task field */
+    case SYS64_GETTGID:  /* the same */
+    case SYS64_NCORES:   /* a counter set once, at boot */
     case SYS64_TICKS:    /* the timer interrupt counter, a single word */
     case SYS64_RING:     /* own code selector from the interrupt frame */
     case SYS64_CORE:    /* a question to our own local APIC */
@@ -938,6 +941,44 @@ static void handle(struct regs *r)
         return;
     case SYS64_GETPID:
         r->rax = (uint64_t)(int64_t)task64_current_id();
+        return;
+    case SYS64_GETTGID:
+        r->rax = (uint64_t)(int64_t)task64_tgid();
+        return;
+    case SYS64_NCORES:
+        r->rax = (uint64_t)(smp_started() + 1);   /* the boot core, and those woken */
+        return;
+    case SYS64_CLONE: {
+        struct clone64 c;
+        if (!paging64_user_range(a1, sizeof(c))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memcpy(&c, (const void *)(uintptr_t)a1, sizeof(c));
+        r->rax = (uint64_t)(int64_t)proc64_clone(&c);
+        return;
+    }
+    case SYS64_FUTEX:
+        if (a2 == FUTEX64_OP_WAIT)
+            r->rax = (uint64_t)(int64_t)futex64_wait(a1, (uint32_t)a3,
+                                                     (uint32_t)a4);
+        else if (a2 == FUTEX64_OP_WAKE)
+            r->rax = (uint64_t)(int64_t)futex64_wake(
+                paging64_current_space(), a1, (int)(a3 > 0x7FFFFFFF ? 0x7FFFFFFF : a3));
+        else if (a2 == FUTEX64_OP_REQUEUE)
+            r->rax = (uint64_t)(int64_t)futex64_requeue(
+                a1, (int)(a3 & 0x7FFFFFFF), (int)((a3 >> 32) & 0x7FFFFFFF), a4);
+        else
+            r->rax = (uint64_t)(int64_t)-FUTEX64_EINVAL;
+        return;
+    case SYS64_EXIT_GROUP:
+        auth_forget_current();
+        user_status = (int)a1;
+        user_exited = 1;
+        user_exits++;
+        if (a1)
+            user_failures++;
+        task64_exit_group((int)a1);    /* does not return */
         return;
     case SYS64_TIME: {
         struct rtc_time t;

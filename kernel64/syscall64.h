@@ -158,6 +158,31 @@
 #define SYS64_UPDATE_ROLLBACK 82 /* restore the previous installed system */
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
+/* --- Threads the way a C library makes them (see kernel64/futex64.h) ---
+ *
+ * SYS64_CLONE      a1=&struct clone64 (proc64.h) -> the thread's number / -1
+ * SYS64_FUTEX      a1=address, a2=FUTEX64_OP_*, then
+ *                    WAIT:    a3=the value expected, a4=ms (0 = no limit)
+ *                    WAKE:    a3=how many
+ *                    REQUEUE: a3=how many to wake | how many to move << 32,
+ *                             a4=the word they move to
+ *                  -> 0 / how many woke, or minus a Linux errno
+ * SYS64_EXIT_GROUP a1=code: every thread of the program ends
+ * SYS64_GETTGID    -> the program's number (the first thread's), where
+ *                  SYS64_GETPID gives the calling thread's own
+ * SYS64_NCORES     -> how many cores are running (how many threads it
+ *                  makes sense to compute with)
+ */
+#define SYS64_CLONE      83
+#define SYS64_FUTEX      84
+#define SYS64_EXIT_GROUP 85
+#define SYS64_GETTGID    86
+#define SYS64_NCORES     87
+
+#define FUTEX64_OP_WAIT    0
+#define FUTEX64_OP_WAKE    1
+#define FUTEX64_OP_REQUEUE 3
+
 /* Numbers taken since forever: keyboard, console, errors */
 #define FD_STDIN   0
 #define FD_STDOUT  1

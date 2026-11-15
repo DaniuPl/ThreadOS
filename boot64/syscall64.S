@@ -124,11 +124,28 @@ return_to_user_64_frame:
 .global enter_ring3_64
 .type enter_ring3_64, @function
 enter_ring3_64:
+    movq %rdx, %r8               /* argc and argv: rdmsr needs rdx, rcx */
+    movq %rcx, %r9
+
+    /* Loading a selector into FS clears its base, and a thread made by
+       SYS64_CLONE starts with the base its C library gave it (the
+       scheduler has already put it in the MSR) - so it is read before
+       and written back after */
+    movl $0xC0000100, %ecx       /* MSR_FS_BASE */
+    rdmsr
+    movl %eax, %r10d
+    movl %edx, %r11d
+
     movq $0x1B, %rax             /* user data, RPL 3 */
     movw %ax, %ds
     movw %ax, %es
     movw %ax, %fs
     movw %ax, %gs
+
+    movl $0xC0000100, %ecx
+    movl %r10d, %eax
+    movl %r11d, %edx
+    wrmsr
 
     pushq $0x1B                  /* ss */
     pushq %rsi                   /* rsp */
@@ -136,8 +153,8 @@ enter_ring3_64:
     pushq $0x23                  /* cs: user code, RPL 3 */
     pushq %rdi                   /* rip */
 
-    movq %rdx, %rdi              /* argc */
-    movq %rcx, %rsi              /* argv */
+    movq %r8, %rdi               /* argc */
+    movq %r9, %rsi               /* argv */
 
     /* The remaining registers go to zero. The program has no reason to
        see what the kernel left in them - and what it leaves there are

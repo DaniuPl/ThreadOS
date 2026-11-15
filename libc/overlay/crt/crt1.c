@@ -7,6 +7,10 @@
  * other - so that layout is built here, on this function's stack, and
  * handed on. The stack frame lives as long as the program does:
  * __libc_start_main never returns, it ends in exit.
+ *
+ * Of the program headers musl wants only the one for thread-local
+ * storage, so that is the one made here, from what the linker script
+ * (libc/libc64.ld) says about .tdata and .tbss.
  */
 
 #include <features.h>
@@ -19,13 +23,22 @@ weak void _fini();
 int __libc_start_main(int (*)(), int, char **,
 	void (*)(), void(*)(), void(*)());
 
+extern char __tls_image[], __tls_filesz[], __tls_memsz[], __tls_align[];
+
 #define ARGS_MAX 64
 
 __attribute__((__used__))
 void _start_c(long argc, char **argv)
 {
 	/* argv, its NULL, an empty environment, then the auxiliary vector */
-	char *block[ARGS_MAX + 1 + 1 + 6];
+	char *block[ARGS_MAX + 1 + 1 + 12];
+	Elf64_Phdr tls = {
+		.p_type = PT_TLS,
+		.p_vaddr = (unsigned long)__tls_image,
+		.p_filesz = (unsigned long)__tls_filesz,
+		.p_memsz = (unsigned long)__tls_memsz,
+		.p_align = (unsigned long)__tls_align,
+	};
 	unsigned char random[16];
 	int n = 0;
 
@@ -51,7 +64,13 @@ void _start_c(long argc, char **argv)
 	long *aux = (long *)&block[n];
 	aux[0] = AT_PAGESZ; aux[1] = 4096;
 	aux[2] = AT_RANDOM; aux[3] = (long)random;
-	aux[4] = AT_NULL;   aux[5] = 0;
+	int k = 4;
+	if (tls.p_memsz) {
+		aux[k++] = AT_PHDR;  aux[k++] = (long)&tls;
+		aux[k++] = AT_PHNUM; aux[k++] = 1;
+		aux[k++] = AT_PHENT; aux[k++] = sizeof(tls);
+	}
+	aux[k++] = AT_NULL;  aux[k++] = 0;
 
 	__libc_start_main(main, (int)argc, block, _init, _fini, 0);
 }

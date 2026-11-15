@@ -29,9 +29,13 @@
  *   clocks   the CMOS clock has seconds and the timer has hundredths;
  *            the wall clock is the first plus the second since then
  *
- * What there is no way to build - threads, sockets, poll - answers
- * ENOSYS, rather than a Linux number falling on some unrelated
- * ThreadOS call.
+ *   threads  SYS64_CLONE, SYS64_FUTEX and SYS64_EXIT_GROUP are close
+ *            to Linux's own; what this file keeps for the whole
+ *            program (free mmap ranges, signal handlers) is behind a
+ *            lock of its own, because threads now come here at once
+ *
+ * What there is no way to build - sockets, poll - answers ENOSYS,
+ * rather than a Linux number falling on some unrelated ThreadOS call.
  */
 
 #include <errno.h>
@@ -82,6 +86,15 @@
 #define T_RENAME    55
 #define T_FDINFO    74
 #define T_SET_FS    75
+#define T_FUTEX     84
+#define T_EXIT_GROUP 85
+#define T_GETTGID   86
+#define T_NCORES    87
+#define T_CORE      42
+
+#define T_FUTEX_WAIT    0
+#define T_FUTEX_WAKE    1
+#define T_FUTEX_REQUEUE 3
 
 #define T_OPEN_CREATE 1
 #define T_OPEN_TRUNC  2
@@ -104,6 +117,23 @@ static long tos(long n, long a1, long a2, long a3, long a4)
 		: "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
 		: "rcx", "r11", "memory");
 	return ret;
+}
+
+/* What this file keeps for the whole program, threads included, is
+   changed under this lock. It is held for a few instructions, never
+   across a call that waits, so a thread that finds it taken only gives
+   up its turn and looks again. */
+static volatile int shim_lock;
+
+static void lock(void)
+{
+	while (__atomic_exchange_n(&shim_lock, 1, __ATOMIC_ACQUIRE))
+		tos(T_SLEEP, 0, 0, 0, 0);
+}
+
+static void unlock(void)
+{
+	__atomic_store_n(&shim_lock, 0, __ATOMIC_RELEASE);
 }
 
 struct fdinfo { int kind; unsigned size, pos; };
@@ -672,17 +702,46 @@ static void hole_add(unsigned long at, unsigned long len)
 	/* (with no room left the range is simply forgotten) */
 }
 
-static long do_mmap(unsigned long addr, unsigned long len, int prot,
-                    int flags, int fd, long off)
+/* The stacks of detached threads that ended themselves (__unmapself):
+   each is free once its thread is gone, and not a moment sooner, since
+   the thread stands on it while it files it */
+#define LATER 64
+static struct { unsigned long at, len; long tid; } later[LATER];
+static int nlater;
+
+static void collect_later(void)
 {
-	(void)addr; (void)prot; (void)off; (void)fd;
-	if (!len)
-		return -EINVAL;
-	if (!(flags & MAP_ANONYMOUS))
-		return -ENODEV;
-	if (flags & MAP_FIXED)
-		return -ENOMEM;
-	len = (len + 4095) & ~4095UL;
+	for (int i = 0; i < nlater; ) {
+		/* -3 = still running; a thread leaves no exit record, so
+		   anything else means it is gone */
+		if (tos(T_TRYWAIT, later[i].tid, 0, 0, 0) != -3) {
+			hole_add(later[i].at, later[i].len);
+			later[i] = later[--nlater];
+		} else {
+			i++;
+		}
+	}
+}
+
+__attribute__((__visibility__("hidden"), __noreturn__))
+void __tos_unmapself(void *base, size_t len)
+{
+	lock();
+	if (nlater < LATER) {
+		later[nlater].at = (unsigned long)base;
+		later[nlater].len = (len + 4095) & ~4095UL;
+		later[nlater].tid = tos(T_GETPID, 0, 0, 0, 0);
+		nlater++;
+	}
+	/* (with no room the stack is simply never reused) */
+	unlock();
+	for (;;)
+		tos(T_EXIT, 0, 0, 0, 0);
+}
+
+static long do_mmap_locked(unsigned long len)
+{
+	collect_later();
 	int best = -1;
 	for (int i = 0; i < nholes; i++)
 		if (holes[i].len >= len && (best < 0 || holes[i].len < holes[best].len))
@@ -700,14 +759,80 @@ static long do_mmap(unsigned long addr, unsigned long len, int prot,
 	return at <= 0 ? -ENOMEM : at;
 }
 
+static long do_mmap(unsigned long addr, unsigned long len, int prot,
+                    int flags, int fd, long off)
+{
+	(void)addr; (void)prot; (void)off; (void)fd;
+	if (!len)
+		return -EINVAL;
+	if (!(flags & MAP_ANONYMOUS))
+		return -ENODEV;
+	if (flags & MAP_FIXED)
+		return -ENOMEM;
+	len = (len + 4095) & ~4095UL;
+	lock();
+	long r = do_mmap_locked(len);
+	unlock();
+	return r;
+}
+
 static long do_munmap(unsigned long addr, unsigned long len)
 {
 	if (addr & 4095)
 		return -EINVAL;
 	len = (len + 4095) & ~4095UL;
-	if (len)
+	if (len) {
+		lock();
 		hole_add(addr, len);
+		unlock();
+	}
 	return 0;
+}
+
+/* --- Futexes ------------------------------------------------------- */
+
+static long do_futex(int *addr, int op, int val, const struct timespec *to,
+                     int *addr2, int val3)
+{
+	(void)val3;
+	/* FUTEX_PRIVATE_FLAG changes nothing: every futex here is the
+	   program's own. FUTEX_CLOCK_REALTIME only matters to the
+	   absolute waits musl does not use. */
+	op &= ~(128 | 256);
+	switch (op) {
+	case 0: {                        /* FUTEX_WAIT, relative timeout */
+		long ms = 0;
+		if (to) {
+			touch(to, sizeof(*to));
+			if (to->tv_sec < 0 || to->tv_nsec < 0 ||
+			    to->tv_nsec >= 1000000000L)
+				return -EINVAL;
+			if (!to->tv_sec && !to->tv_nsec)
+				return -ETIMEDOUT;
+			if (to->tv_sec > 0x7FFFFFFF / 1000 - 1)
+				ms = 0;          /* longer than the kernel counts: forever */
+			else {
+				ms = to->tv_sec * 1000 + (to->tv_nsec + 999999) / 1000000;
+				if (!ms)
+					ms = 1;
+			}
+		}
+		touch(addr, 4);
+		return tos(T_FUTEX, (long)addr, T_FUTEX_WAIT, (unsigned)val, ms);
+	}
+	case 1:                          /* FUTEX_WAKE */
+		return tos(T_FUTEX, (long)addr, T_FUTEX_WAKE, val < 0 ? 0x7FFFFFFF : val, 0);
+	case 3: {                        /* FUTEX_REQUEUE: the timeout is a count */
+		long move = (long)to;
+		if (val < 0 || move < 0)
+			return -EINVAL;
+		if (move > 0x7FFFFFFF)
+			move = 0x7FFFFFFF;
+		return tos(T_FUTEX, (long)addr, T_FUTEX_REQUEUE,
+		           (long)(unsigned)val | move << 32, (long)addr2);
+	}
+	}
+	return -ENOSYS;
 }
 
 /* --- Time ---------------------------------------------------------- */
@@ -845,7 +970,7 @@ static void on_signal(int sig)
 		if (sig == SIGCHLD || sig == SIGWINCH || sig == SIGURG ||
 		    sig == SIGCONT)
 			return;
-		tos(T_EXIT, 128 + sig, 0, 0, 0);
+		tos(T_EXIT_GROUP, 128 + sig, 0, 0, 0);
 	}
 	h(sig);
 }
@@ -863,14 +988,18 @@ static long do_sigaction(int sig, const struct k_sigaction *act,
 		return 0;
 	if (sig == SIGKILL || sig == SIGSTOP)
 		return -EINVAL;
+	lock();
 	actions[sig] = *act;
 	if (!handler_installed && act->handler != SIG_DFL) {
 		/* The return from it is musl's own __restore_rt, which says
-		   SYS64_SIGRETURN (src/signal/x86_64/restore.s) */
+		   SYS64_SIGRETURN (src/signal/x86_64/restore.s). A thread
+		   created later gets the kernel's handler with the rest of
+		   the process. */
 		tos(T_SIGNAL, 0, (long)on_signal,
 		    (long)(act->restorer ? act->restorer : 0), 0);
 		handler_installed = 1;
 	}
+	unlock();
 	return 0;
 }
 
@@ -947,19 +1076,21 @@ static long do_prlimit(int res, const struct rlimit *fresh, struct rlimit *old)
 	return 0;
 }
 
-static unsigned long fs_now;
-
 static long do_arch_prctl(int code, unsigned long addr)
 {
 	if (code == 0x1002) {            /* ARCH_SET_FS */
 		touch((void *)addr, 8);
 		if (tos(T_SET_FS, addr, 0, 0, 0) < 0)
 			return -EPERM;
-		fs_now = addr;
 		return 0;
 	}
 	if (code == 0x1003) {            /* ARCH_GET_FS */
-		*(unsigned long *)addr = fs_now;
+		/* Each thread has its own; musl's thread block starts with
+		   a pointer to itself, so the base is what FS:0 holds */
+		unsigned long fs;
+		__asm__ ("mov %%fs:0,%0" : "=r"(fs));
+		touch((void *)addr, 8);
+		*(unsigned long *)addr = fs;
 		return 0;
 	}
 	return -EINVAL;
@@ -970,7 +1101,6 @@ static long do_arch_prctl(int code, unsigned long addr)
 __attribute__((__visibility__("hidden")))
 long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 {
-	(void)f;
 	switch (n) {
 	case SYS_read:       return do_read(a, (void *)b, c);
 	case SYS_write:      return do_write(a, (const void *)b, c);
@@ -1108,13 +1238,18 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		memset((void *)b, 0, sizeof(struct rusage));
 		return 0;
 
-	case SYS_exit:
-	case SYS_exit_group:
-		tos(T_EXIT, a, 0, 0, 0);
-		for (;;);
+	case SYS_exit:               /* this thread */
+		for (;;)
+			tos(T_EXIT, a, 0, 0, 0);
+	case SYS_exit_group:         /* the whole program */
+		for (;;)
+			tos(T_EXIT_GROUP, a, 0, 0, 0);
 	case SYS_getpid:
+		return tos(T_GETTGID, 0, 0, 0, 0);
 	case SYS_gettid:
 	case SYS_set_tid_address:
+		/* the main thread's clear_tid is never needed: when it
+		   ends, so does the program */
 		return tos(T_GETPID, 0, 0, 0, 0);
 	case SYS_getppid:    return 1;
 	case SYS_getuid:
@@ -1124,7 +1259,7 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		return tos(T_LEVEL, 0, 0, 0, 0) == 0 ? 0 : 1000;
 	case SYS_getpgid:
 	case SYS_getsid:
-	case SYS_getpgrp:    return tos(T_GETPID, 0, 0, 0, 0);
+	case SYS_getpgrp:    return tos(T_GETTGID, 0, 0, 0, 0);
 	case SYS_setpgid:
 	case SYS_setsid:     return 0;
 	case SYS_fork:
@@ -1163,9 +1298,32 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_getrlimit:  return do_prlimit(a, 0, (struct rlimit *)b);
 	case SYS_setrlimit:  return 0;
 	case SYS_getrandom:  return do_getrandom((unsigned char *)a, b);
+	case SYS_getcpu:
+		if (a) {
+			touch((void *)a, sizeof(unsigned));
+			*(unsigned *)a = tos(T_CORE, 0, 0, 0, 0);
+		}
+		if (b) {
+			touch((void *)b, sizeof(unsigned));
+			*(unsigned *)b = 0;
+		}
+		return 0;
+	case SYS_sched_getaffinity: {
+		/* Every thread may run on every core: what sysconf counts
+		   as the processors online */
+		long n = tos(T_NCORES, 0, 0, 0, 0);
+		size_t bytes = (n + 63) / 64 * 8;
+		if (n < 1 || (size_t)b < bytes)
+			return -EINVAL;
+		touch((void *)c, bytes);
+		memset((void *)c, 0, bytes);
+		for (long i = 0; i < n; i++)
+			((unsigned long *)c)[i / 64] |= 1UL << (i % 64);
+		return bytes;
+	}
 	case SYS_futex:
-		/* One thread: nobody to wait for, nobody to wake */
-		return (b & 127) == 0 ? -EAGAIN : 0;
+		return do_futex((int *)a, b, c, (const struct timespec *)d,
+		                (int *)e, f);
 	}
 	return -ENOSYS;
 }

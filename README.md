@@ -61,7 +61,9 @@ compilation catches width and pointer-size bugs in the shared code.
 that use them link against `libthread.so`, which the kernel maps into
 every process once. On the 64-bit side, programs can also be built
 against musl (`libc/`, with upstream musl in `third_party/musl`). `js`
-(QuickJS) is built this way.
+(QuickJS) is built this way. Such programs have POSIX threads: mutexes,
+condition variables, semaphores, thread-local variables, and threads that
+run on every core (`libc/tests/pthreadtest.c`).
 C++ programs use the host compiler's libstdc++ on top of musl, without
 exceptions (`libc/cxx/`). The first is litehtml (`third_party/litehtml`),
 an HTML/CSS layout engine, which lays pages out on ThreadOS exactly as

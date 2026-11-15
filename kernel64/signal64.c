@@ -40,6 +40,9 @@ void signal64_deliver(struct regs *r)
 
     /* Without a handler of its own the default reaction is left. SIGKILL
        has no other by design - which is why it cannot be caught. */
+    /* Another thread's exit(): no news worth a line on the console */
+    if (sig == SIGKILL && task64_group_exiting())
+        task64_kill_current("the program ended");
     if (!handler || sig == SIGKILL) {
         printk("[kernel] task %d got signal %d\n",
                task64_current_id(), sig);

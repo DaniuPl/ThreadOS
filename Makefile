@@ -375,7 +375,7 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/gdt64.o $(BUILD)/64/syscall64.o \
           $(BUILD)/64/elf64.o $(BUILD)/64/proc64.o \
           $(BUILD)/64/keyboard64.o $(BUILD)/64/shell64.o \
-          $(BUILD)/64/signal64.o $(BUILD)/64/fpu64.o \
+          $(BUILD)/64/signal64.o $(BUILD)/64/fpu64.o $(BUILD)/64/futex64.o \
           $(BUILD)/64/pipe64.o $(BUILD)/64/compat64.o $(BUILD)/64/efirt.o \
           $(BUILD)/64/syscall64_stub.o \
           $(BUILD)/64/ap64.o \
@@ -638,6 +638,11 @@ $(BUILD)/user64/libctest.elf: libc/tests/libctest.c $(LIBC64) libc/libc64.ld \
 	    -Wno-format-truncation -c $< -o $(BUILD)/libc64/libctest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/libctest.o) -o $@
 
+$(BUILD)/user64/pthreadtest.elf: libc/tests/pthreadtest.c $(LIBC64) libc/libc64.ld \
+                                 | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/pthreadtest.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/pthreadtest.o) -o $@
+
 # --- JavaScript: QuickJS ----------------------------------------------
 #
 # Fabrice Bellard's engine (third_party/quickjs, upstream 2026-06-04),
@@ -671,6 +676,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 	$(call LIBC64_LINK,$(BUILD)/libc64/js.o $(QJS_OBJS)) -o $@
 
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
+               $(BUILD)/user64/pthreadtest.elf \
                $(BUILD)/user64/update.elf
 
 # --- C++, and litehtml ------------------------------------------------
@@ -911,6 +917,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    mutex=$(BUILD)/user64/mutex.elf prodcons=$(BUILD)/user64/prodcons.elf \
 	    syscalls=$(BUILD)/user64/syscalls.elf \
 	    libctest=$(BUILD)/user64/libctest.elf \
+	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)

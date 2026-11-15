@@ -1,9 +1,10 @@
 /* Kernel threads in long mode
  *
- * The list is circular, and the main thread - the one that came
- * straight from the boot - never sleeps and plays the part of the idle
- * thread. Thanks to that the scheduler always has somebody to pick and
- * need not know the case "nobody is ready".
+ * The list is circular, and every core has an idle task that never
+ * sleeps. Thanks to that the scheduler always has somebody to pick and
+ * need not know the case "nobody is ready". (The main thread, the one
+ * that came straight from the boot, goes to sleep for good once the
+ * boot is over - see the end of kmain64.c.)
  *
  * Finished threads stay on the list as zombies and disappear at the
  * next switch - we never clean up the one on whose stack we are
@@ -31,8 +32,12 @@
 #include "../kernel/include/string.h"
 #include "../kernel/include/io.h"
 #include "../kernel/include/hda.h"
+#include "futex64.h"
 
 #define STACK_SIZE 16384
+
+/* switch_to's "sleep, unless task64_wake came first" */
+#define SWITCH_BLOCK 100
 #define NAME_MAX   16
 
 /* Open file descriptors.
@@ -55,6 +60,15 @@ struct fd_entry {
     uint32_t pos;                /* where this particular reader stands */
 };
 
+/* The table lives apart from the task because threads share it: a file
+   one thread opens is there for the others, as a C program expects, and
+   a pipe end counts once for the process, not once per thread holding a
+   copy. The last task to let go of it closes what is left. */
+struct fd_table {
+    int refs;
+    struct fd_entry fds[FD_MAX];
+};
+
 enum task_state { TASK_READY, TASK_RUNNING, TASK_SLEEPING, TASK_ZOMBIE };
 
 struct task64 {
@@ -71,7 +85,8 @@ struct task64 {
     int sig_pending;             /* a signal awaiting delivery */
     uint64_t sig_handler;        /* the program's handler (0 = kill) */
     uint64_t sig_restorer;       /* the return from the handler into the kernel */
-    struct fd_entry fds[FD_MAX];
+    struct fd_entry *fds;        /* = table->fds */
+    struct fd_table *table;
     void *fpu;                   /* the floating-point register state */
     uint64_t fsbase;             /* the FS segment base: a C library's thread pointer */
     uint64_t brk_base;           /* the start of the heap (past the program image) */
@@ -106,6 +121,27 @@ struct task64 {
     int nolock;
     int idle_for_core;
     char name[NAME_MAX];
+    /* Threads of one program form a group named after its first task.
+       tgid == id is that first task: the one its parent waits for. */
+    int tgid;
+    /* Where to write zero, and whom to wake, when this thread ends: a C
+       library's way of learning that a thread is really gone (Linux's
+       clear_child_tid). 0 = nowhere. */
+    uint64_t clear_tid;
+    /* A thread a C library made (SYS64_CLONE). Its library joins it
+       through clear_tid, so it is nobody's child: it leaves no exit
+       record and wait() does not see it. A thread made by SYS64_THREAD
+       is still waited for like a child, as the programs written for
+       that call expect. */
+    int lib_thread;
+    /* Another thread ended the group: on the way out, die with this
+       code rather than as killed */
+    int group_exit;
+    int group_code;
+    /* Set by task64_wake. A task about to block looks at it under the
+       task list lock, so a wake that came just before the sleep is not
+       lost. */
+    int woken;
     void *raw;                   /* what kmalloc gave, before aligning */
     struct task64 *next;
 };
@@ -149,6 +185,20 @@ static void task_free(struct task64 *t)
 {
     if (t)
         kfree(t->raw);
+}
+
+/* A task's own, empty descriptor table */
+static int table_new(struct task64 *t)
+{
+    struct fd_table *ft = kmalloc(sizeof(*ft));
+    if (!ft)
+        return -1;
+    ft->refs = 1;
+    for (int i = 0; i < FD_MAX; i++)
+        ft->fds[i].kind = FDK_FREE;
+    t->table = ft;
+    t->fds = ft->fds;
+    return 0;
 }
 
 /* One cache line per core.
@@ -240,8 +290,7 @@ void scheduler64_init(void)
     main_task->sig_pending = 0;
     main_task->sig_handler = 0;
     main_task->sig_restorer = 0;
-    for (int i = 0; i < FD_MAX; i++)
-        main_task->fds[i].kind = FDK_FREE;
+    table_new(main_task);
     main_task->brk_base = main_task->brk = 0;
     main_task->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
@@ -255,6 +304,7 @@ void scheduler64_init(void)
     main_task->anycore = 0;
     main_task->nolock = 0;
     main_task->idle_for_core = -1;
+    main_task->tgid = main_task->id;
     main_task->next = main_task;
     cores[0].running = main_task;
 
@@ -293,8 +343,11 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->sig_pending = 0;
     t->sig_handler = 0;
     t->sig_restorer = 0;
-    for (int i = 0; i < FD_MAX; i++)
-        t->fds[i].kind = FDK_FREE;
+    if (table_new(t) < 0) {
+        kfree(t->stack);
+        task_free(t);
+        return NULL;
+    }
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
@@ -323,6 +376,7 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
                  ? current->uid : user_shell_uid();
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
+    t->tgid = t->id;
     t->anycore = 0;            /* until somebody says otherwise */
     t->nolock = 0;
     t->idle_for_core = -1;
@@ -347,8 +401,9 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
 
 /* A thread of the current process: the SAME address space, its own
    kernel stack, and everything else the process has - the working
-   directory, the console, the descriptors it inherits from the parent.
-   The space is freed by whichever of them ends last.
+   directory, the console, the descriptor table (shared, not copied),
+   the signal handler. The space is freed by whichever of them ends
+   last.
 
    The right to run on any core comes along: a thread is the same
    program, and since a changed mapping now reaches the other cores
@@ -370,8 +425,13 @@ struct task64 *task64_create_thread(const char *name, void (*entry)(void *),
     t->uid = current->uid;
     t->vc = current->vc;
     t->anycore = current->anycore;
-    for (int i = 0; i < FD_MAX; i++)
-        t->fds[i] = current->fds[i];
+    t->tgid = current->tgid;
+    t->sig_handler = current->sig_handler;
+    t->sig_restorer = current->sig_restorer;
+    kfree(t->table);             /* the empty one task64_create made */
+    t->table = current->table;
+    t->fds = current->table->fds;
+    t->table->refs++;
     irq_restore(flags);
     return t;
 }
@@ -422,6 +482,12 @@ static uint32_t exit_next;
 
 static void record_exit(struct task64 *t, int code)
 {
+    /* A C library's thread is part of its program, not a child of it:
+       the parent waits for the program, and a thread's exit filling one
+       of these slots would also push out a child's record that is still
+       to be collected */
+    if (t->lib_thread)
+        return;
     for (int i = 0; i < EXIT_SLOTS; i++) {
         if (!finished[i].used) {
             finished[i].used = 1;
@@ -446,7 +512,8 @@ static int has_children(int id)
 {
     struct task64 *t = current;
     do {
-        if (t != current && t->parent == id && t->state != TASK_ZOMBIE)
+        if (t != current && t->parent == id && !t->lib_thread &&
+            t->state != TASK_ZOMBIE)
             return 1;
         t = t->next;
     } while (t != current);
@@ -507,7 +574,9 @@ int task64_foreground(int root)
         struct task64 *t = current;
         int found = 0;
         do {
-            if (t->parent == best && t->id > best &&
+            /* a library's thread is not a descendant: Ctrl+C goes to
+               its program */
+            if (t->parent == best && t->id > best && !t->lib_thread &&
                 t->state != TASK_ZOMBIE) {
                 best = t->id;
                 found = 1;
@@ -688,6 +757,11 @@ static void switch_to(int new_state)
        together with picking the next one: setting it earlier would
        leave a window in which the task is marked as sleeping while its
        stack is still in use. */
+    /* Decided under the lock that task64_wake takes too, so a wake that
+       came after the waiter queued itself and before it got here turns
+       the sleep into a mere yield */
+    if (new_state == SWITCH_BLOCK)
+        new_state = cores[nr].running->woken ? -1 : TASK_SLEEPING;
     if (new_state >= 0)
         cores[nr].running->state = (enum task_state)new_state;
     reap_zombies();
@@ -698,6 +772,13 @@ static void switch_to(int new_state)
        ourselves. The idle thread makes the case "there is nobody and
        we cannot" simply not arise. */
     if (!next)
+        next = cores[nr].running;
+    /* A task giving up its turn while it could go on does not hand the
+       core to the idle task: that one only halts until the next tick,
+       and a thread yielding in a loop (sched_yield, a lock it spins on)
+       would wait ten milliseconds every time for nothing */
+    if (new_state < 0 && next == cores[nr].idle &&
+        cores[nr].running->state == TASK_RUNNING)
         next = cores[nr].running;
 
     if (next == cores[nr].running) {
@@ -768,8 +849,10 @@ void task_core_enter(int nr)
     t->sig_pending = 0;
     t->sig_handler = 0;
     t->sig_restorer = 0;
-    for (int i = 0; i < FD_MAX; i++)
-        t->fds[i].kind = FDK_FREE;
+    if (table_new(t) < 0) {
+        task_free(t);
+        return;
+    }
     t->brk_base = t->brk = 0;
     t->mmap = USER64_MMAP_BASE;
     for (int i = 0; i < MMAP_FILES; i++)
@@ -793,6 +876,7 @@ void task_core_enter(int nr)
     t->anycore = 0;
     t->nolock = 1;         /* an idle task does not take the lock */
     t->idle_for_core = nr;
+    t->tgid = t->id;
     set_name(t, "idle");
     /* the core's number goes right after the name, wherever it ends -
        a fixed index is a trap for whoever renames the task */
@@ -827,17 +911,79 @@ void task64_yield(void)
 
 void task64_sleep(uint32_t ms)
 {
+    if (!ms) {                   /* a sleep of nothing is giving up the turn */
+        task64_yield();
+        return;
+    }
     irqflags_t flags = irq_save();
     current->wake_at = pit_ticks() + (ms + 9) / 10;   /* one tick = 10 ms */
     switch_to(TASK_SLEEPING);
     irq_restore(flags);
 }
 
+/* What every way out of a thread does before anything else: tell the
+   C library it is gone (clear_tid), while the address space is still
+   there and interrupts are still on - the word may be on a page that
+   went out to disk, and fetching it back needs the disk's interrupt. */
+static void say_gone(void)
+{
+    uint64_t at = current->clear_tid;
+    if (!at || !current->space)
+        return;
+    current->clear_tid = 0;
+    if (!paging64_user_range(at, 4) &&
+        !(paging64_swap_in(current->space, at) && paging64_user_range(at, 4)))
+        return;
+    *(volatile uint32_t *)(uintptr_t)at = 0;
+    futex64_wake(current->space, at, 1);
+}
+
+/* The other threads of this one's program end too. They are told to the
+   way a signal is, so whichever is sleeping in the kernel wakes and
+   whichever is computing in ring 3 is stopped at its next interrupt;
+   on its way out each takes 'code' with it (task64_kill_current). */
+static void end_group(int code)
+{
+    spin_lock(&lock);
+    struct task64 *t = current;
+    do {
+        if (t != current && t->tgid == current->tgid && t->space &&
+            t->state != TASK_ZOMBIE) {
+            t->group_exit = 1;
+            t->group_code = code;
+            t->sig_pending = SIGKILL;
+            t->woken = 1;
+            if (t->state == TASK_SLEEPING)
+                t->state = TASK_READY;
+        }
+        t = t->next;
+    } while (t != current);
+    spin_unlock(&lock);
+}
+
+/* The descriptor table goes with the last thread holding it. Counted
+   down here, at the exit, and not when the zombie is reaped: two
+   threads ending one after the other would each see the other still
+   holding it, and nobody would close the pipes. */
+static void let_go_of_fds(void)
+{
+    struct fd_table *ft = current->table;
+    if (!ft)
+        return;
+    if (ft->refs == 1)
+        task64_fd_close_all();
+    current->table = NULL;
+    current->fds = NULL;
+    if (--ft->refs == 0)
+        kfree(ft);
+}
+
 void task64_exit_code(int code)
 {
+    say_gone();
     irq_save();
     hda_stream_abort(current->id);
-    task64_fd_close_all();
+    let_go_of_fds();
     /* Write back to disk what the process wrote into a writable
        mapping and did not manage to write back itself - this has to
        happen NOW, while its address space is still alive */
@@ -852,19 +998,66 @@ void task64_exit_code(int code)
 
 void task64_exit(void)
 {
-    irq_save();
-    hda_stream_abort(current->id);
-    task64_fd_close_all();
-    /* Write back to disk what the process wrote into a writable
-       mapping and did not manage to write back itself - this has to
-       happen NOW, while its address space is still alive */
-    proc64_msync();
-    task64_mmap_release();
-    drop_space(current);
-    record_exit(current, 0);
-    switch_to(TASK_ZOMBIE);
-    for (;;)                              /* a zombie will not be picked */
-        __asm__ volatile("hlt");
+    task64_exit_code(0);
+}
+
+/* exit() in a C program: the whole program ends, whichever of its
+   threads called it, and its parent learns 'code' */
+void task64_exit_group(int code)
+{
+    irqflags_t flags = irq_save();
+    end_group(code);
+    irq_restore(flags);
+    task64_exit_code(code);
+}
+
+int task64_group_exiting(void)
+{
+    return current && current->group_exit;
+}
+
+/* Sleeps until task64_wake, a signal, or 'ticks' timer ticks (0 = no
+   limit). The caller has already put itself where a waker will find it,
+   after task64_block_prepare. */
+void task64_block_prepare(void)
+{
+    current->woken = 0;
+}
+
+void task64_block(uint32_t ticks)
+{
+    irqflags_t flags = irq_save();
+    current->wake_at = ticks ? pit_ticks() + ticks : 0xFFFFFFFFu;
+    switch_to(SWITCH_BLOCK);
+    irq_restore(flags);
+}
+
+void task64_wake(struct task64 *t)
+{
+    irqflags_t flags = spin_lock_irq(&lock);
+    t->woken = 1;
+    if (t->state == TASK_SLEEPING)
+        t->state = TASK_READY;
+    spin_unlock_irq(&lock, flags);
+}
+
+struct task64 *task64_self(void) { return current; }
+int task64_tgid(void) { return current ? current->tgid : -1; }
+
+/* What a new thread is given besides its entry point: where its C
+   library wants zero written when it ends, and its thread pointer */
+void task64_thread_setup(struct task64 *t, uint64_t clear_tid, uint64_t fs)
+{
+    irqflags_t flags = irq_save();
+    t->clear_tid = clear_tid;
+    t->fsbase = fs;
+    t->lib_thread = 1;
+    /* A program starts threads to compute side by side, and its first
+       thread may well be one the shell keeps on the boot core: the
+       threads go wherever there is a free core. Their kernel side is
+       under the big lock like any other. */
+    t->anycore = 1;
+    irq_restore(flags);
 }
 
 /* Kills the current task with a given reason. Does not return.
@@ -874,11 +1067,18 @@ void task64_exit(void)
  * to say: the task did not finish by itself, it was stopped. */
 void task64_kill_current(const char *why)
 {
+    /* Ended by another thread's exit(): a normal end, with its code */
+    if (current->group_exit)
+        task64_exit_code(current->group_code);
+    say_gone();
     irq_save();
     printk("[kernel] task %d (%s) killed: %s\n",
            current->id, current->name, why);
+    /* A program dies whole, as on Linux: its other threads would go on
+       in memory that a faulting thread may have left half-written */
+    end_group(-1);
     hda_stream_abort(current->id);
-    task64_fd_close_all();
+    let_go_of_fds();
     drop_space(current);
     record_exit(current, -1);          /* killed, that is not of its own death */
     switch_to(TASK_ZOMBIE);
@@ -898,12 +1098,15 @@ void task64_kill_current(const char *why)
  * only moment at which its frame can be replaced. */
 int task64_signal(int id, int sig)
 {
-    irqflags_t flags = irq_save();
+    /* Under the task list lock, like task64_wake: a task going to sleep
+       in task64_block decides there whether something woke it */
+    irqflags_t flags = spin_lock_irq(&lock);
     struct task64 *t = current;
     int found = 0;
     do {
         if (t->id == id && t->state != TASK_ZOMBIE) {
             t->sig_pending = sig;
+            t->woken = 1;
             if (t->state == TASK_SLEEPING)
                 t->state = TASK_READY;      /* a signal interrupts the wait */
             found = 1;
@@ -911,7 +1114,7 @@ int task64_signal(int id, int sig)
         }
         t = t->next;
     } while (t != current);
-    irq_restore(flags);
+    spin_unlock_irq(&lock, flags);
     return found;
 }
 
@@ -1451,8 +1654,9 @@ int task64_fd_dup2(int old, int fresh_one)
     return fresh_one;
 }
 
-/* Closes everything the task held - called when it ends. Without this
-   a pipe would never see the end of its writers. */
+/* Closes everything in the task's table - called when the last task
+   holding the table ends. Without this a pipe would never see the end
+   of its writers. */
 void task64_fd_close_all(void)
 {
     for (int i = 0; i < FD_MAX; i++)

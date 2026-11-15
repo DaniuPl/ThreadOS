@@ -692,12 +692,20 @@ void kmain64(uint32_t magic, uint32_t info_addr)
         shell64_start();
     }
 
-    /* From this moment on the main thread becomes the idle thread - the
-       work is taken over by the shell, which waits for keys. Such a
-       thread must not hold the big kernel lock: a core sitting on hlt
-       with the lock in hand would close the kernel off to everyone
-       else. */
+    /* From this moment on the work is the shell's, which waits for keys,
+       and the main thread has nothing left to do. It does not hold the
+       big kernel lock: a core sitting on hlt with the lock in hand would
+       close the kernel off to everyone else.
+
+       It goes to sleep for good rather than halting in a loop. A thread
+       that halts is still one the scheduler takes in its turn, and every
+       time it did, the boot core stood still until the next tick while
+       other tasks were ready: a thread woken from a futex waited ten
+       milliseconds for nothing. Halting when there is nothing to run is
+       the idle task's job (task64.c). */
     biglock_leave();
-    for (;;)
-        __asm__ volatile("hlt");
+    for (;;) {
+        task64_block_prepare();      /* a stray signal must not turn this */
+        task64_block(0);             /* into a loop that never sleeps */
+    }
 }

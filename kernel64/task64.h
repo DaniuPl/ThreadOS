@@ -37,6 +37,28 @@ void task64_yield(void);
 void task64_sleep(uint32_t ms);
 void task64_exit(void);
 void task64_exit_code(int code);    /* the same, but with an exit code for the parent */
+/* Ends every thread of the current program, this one last; the parent
+   gets 'code'. Does not return. */
+void task64_exit_group(int code);
+/* Was the current thread ended by another one's task64_exit_group */
+int task64_group_exiting(void);
+/* The current program's number: the id of its first thread */
+int task64_tgid(void);
+
+/* Sleeping until somebody wakes this task in particular (futexes).
+   A waiter calls task64_block_prepare, puts itself where its waker
+   looks, then task64_block; a task64_wake in between is not lost.
+   task64_block also returns on a signal, or after 'ticks' timer ticks
+   unless that is 0. */
+void task64_block_prepare(void);
+void task64_block(uint32_t ticks);
+void task64_wake(struct task64 *t);
+struct task64 *task64_self(void);
+
+/* A thread's C library: where to write zero (and wake a futex waiter)
+   when the thread ends, and its FS base from its first instruction.
+   Such a thread may run on any core. */
+void task64_thread_setup(struct task64 *t, uint64_t clear_tid, uint64_t fs);
 
 /* Waits for any of our own children to end. Returns its number and
    writes out the exit code; -1 = there is nothing to wait for. */

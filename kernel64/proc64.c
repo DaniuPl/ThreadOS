@@ -437,6 +437,23 @@ static void thread64_trampoline(void *a)
     enter_ring3_64(ts.entry, ts.ustack_top, ts.arg, 0);
 }
 
+static struct task64 *start_thread(uint64_t entry, uint64_t arg,
+                                   uint64_t ustack_top)
+{
+    struct thread64_start *ts = kmalloc(sizeof(*ts));
+    if (!ts)
+        return 0;
+    ts->entry = entry;
+    ts->arg = arg;
+    ts->ustack_top = ustack_top;
+
+    struct task64 *t = task64_create_thread("thread", thread64_trampoline,
+                                            ts, paging64_current_space());
+    if (!t)
+        kfree(ts);
+    return t;
+}
+
 int proc64_thread(uint64_t entry, uint64_t arg)
 {
     uint64_t space = paging64_current_space();
@@ -447,11 +464,6 @@ int proc64_thread(uint64_t entry, uint64_t arg)
     if (!stack)
         return -1;
 
-    struct thread64_start *ts = kmalloc(sizeof(*ts));
-    if (!ts)
-        return -1;
-    ts->entry = entry;
-    ts->arg = arg;
     /* Aligned to sixteen bytes, minus eight - and the minus eight is
        the whole point. A thread starts at an ordinary C function, and
        the compiler treats it like any other: it assumes the stack looks
@@ -460,14 +472,37 @@ int proc64_thread(uint64_t entry, uint64_t arg)
        when it does not hold, the first movaps writing sixteen bytes
        ends in a general protection fault. The program's own stack is
        laid out the same way and for the same reason. */
-    ts->ustack_top = ((stack + THREAD_STACK - 16) & ~0xFULL) - 8;
+    struct task64 *t = start_thread(entry, arg,
+                                    ((stack + THREAD_STACK - 16) & ~0xFULL) - 8);
+    return t ? task64_id(t) : -1;
+}
 
-    struct task64 *t = task64_create_thread("thread", thread64_trampoline,
-                                            ts, space);
-    if (!t) {
-        kfree(ts);
+/* A thread the way a C library makes one (SYS64_CLONE). The library
+   has its stack and thread block ready, so the kernel hands out
+   neither: a thread created and joined a thousand times costs no
+   memory a thousand times. */
+int proc64_clone(const struct clone64 *c)
+{
+    if (!task64_mmap_next() || !paging64_current_space())
         return -1;
-    }
+    /* Ring 3 code, as with SYS64_THREAD. The stack and the thread
+       pointer are not checked further: ring 3 is the only one using
+       them, and a bad one ends in the thread's own page fault. */
+    if (!paging64_user_range(c->entry, 1) || !c->stack ||
+        (c->tls && !paging64_user_range(c->tls, 8)) ||
+        (c->clear_tid && (c->clear_tid & 3)))
+        return -1;
+    if (c->parent_tid && !paging64_user_range(c->parent_tid, 4))
+        return -1;
+
+    struct task64 *t = start_thread(c->entry, 0, c->stack);
+    if (!t)
+        return -1;
+    task64_thread_setup(t, c->clear_tid, c->tls);
+    /* Written before the thread runs: it cannot, until this call gives
+       the big kernel lock back */
+    if (c->parent_tid)
+        *(volatile int32_t *)(uintptr_t)c->parent_tid = task64_id(t);
     return task64_id(t);
 }
 
