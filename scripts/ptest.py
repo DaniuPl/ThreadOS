@@ -2205,16 +2205,28 @@ class Qemu:
                     self._size = (w, h)
                     return True
                 if not login_sent and w >= 640:
-                    fy = h * 2 // 3 - LOCK_FIELD_H
                     under = lambda x, y: gfx_mix(
                         (0, 0, 0), aurora_px(x, y, w, h), 90)
-                    hint = self.find_ui(
-                        80, w - 80, fy + LOCK_FIELD_H + 22, px=UI_PX,
-                        fg=(0xD8, 0xD8, 0xDC), under=under,
-                        screen=(w, h, at))
-                    if "signs in" in hint:
-                        self.type_line("thread")
-                        login_sent = True
+                    # The sign-in screen is laid out in logical pixels
+                    # and drawn at the panel's: on a dense panel the
+                    # hint under the field is one and a half or two
+                    # times larger, and lower (k in sixteenths, as in
+                    # kernel/desktop.c's P())
+                    for k in (16, 24, 32):
+                        lw, lh = w * 16 // k, h * 16 // k
+                        if k != 16 and lw < 640:
+                            continue
+                        fy = lh * 2 // 3 - LOCK_FIELD_H
+                        hint = self.find_ui(
+                            80 * k // 16, w - 80 * k // 16,
+                            (fy + LOCK_FIELD_H + 22) * k // 16,
+                            px=(UI_PX * k + 8) // 16,
+                            fg=(0xD8, 0xD8, 0xDC), under=under,
+                            screen=(w, h, at))
+                        if "signs in" in hint:
+                            self.type_line("thread")
+                            login_sent = True
+                            break
             except Exception:
                 pass
             time.sleep(0.3)
@@ -2242,8 +2254,11 @@ class Qemu:
     def mouse_home(self):
         """Pushes the cursor into the top left corner (the compositor holds
         it within the screen's bounds) and zeroes the tracked position -
-        a calibration before clicking on particular places."""
-        self.mouse_move(-800, -600)
+        a calibration before clicking on particular places. The push is
+        as long as the screen is wide and tall: from the middle of a
+        1920x1080 panel, 800 to the left is not the edge."""
+        w, h = self.size()
+        self.mouse_move(-max(w, 800), -max(h, 600))
         self.mx, self.my = 0, 0
 
     def mouse_button(self, down, button="left"):
@@ -2337,6 +2352,21 @@ class Qemu:
         self.mouse_goto(x, 1)
         # A frame or two for the compositor to draw it again
         time.sleep(0.5)
+
+    # The shortcuts on a desktop nobody rearranged, in the order
+    # desktop_icon_default_rect() lays them out in kernel/desktop.c
+    SHORTCUTS = ("Home", "Files", "Trash")
+
+    def open_shortcut(self, name):
+        """A double click on one of the desktop's shortcuts - Home opens
+        the account's home in Files, Files its Desktop folder, Trash its
+        Trash - where a desktop nobody rearranged has it, and with no
+        window over it"""
+        i = self.SHORTCUTS.index(name)
+        self.mouse_goto(10 + i * 88 + 38, BAR_H + 8 + 34)
+        time.sleep(0.4)
+        self.mouse_click()
+        self.mouse_click()
 
     def open_menu(self):
         """A click on the mark at the left end of the bar"""
@@ -3202,6 +3232,29 @@ class Qemu:
             fresh = self.serial()[start:]
             if text in fresh:
                 return fresh
+            time.sleep(0.3)
+        return self.serial()[start:]
+
+    def sudo(self, cmd, text=None, timeout=30, password="thread"):
+        """'sudo cmd' at the kernel's shell, and what arrived on the port
+        after it - until 'text' did, when it is given. The shell asks
+        for the password only when it is not already the administrator's
+        (the shell behind a desktop signed in as one is), so the
+        password is typed only when asked for: typed unasked it would
+        be a command of its own."""
+        start = len(self.serial())
+        self.type_line("sudo " + cmd)
+        end = time.time() + timeout
+        asked = False
+        while time.time() < end:
+            fresh = self.serial()[start:]
+            if not asked and "password: " in fresh:
+                asked = True
+                self.type_line(password)
+            elif text is not None and text in fresh:
+                return fresh
+            elif text is None and "\nthread64" in fresh:
+                return fresh           # the prompt is back: it is done
             time.sleep(0.3)
         return self.serial()[start:]
 
