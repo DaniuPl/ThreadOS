@@ -263,10 +263,26 @@ static int art_of_app(const char *app)
     return ART_LETTER;
 }
 
+/* Programs with a name on the desktop but no picture of their own -
+   a tile with their first letter stands for them (ART_LETTER) */
+static const struct { const char *app, *label; } lettered_apps[] = {
+    { "gusers", "Accounts" },
+};
+
+/* Looked up by the program's name, not through art_of_app(): its answer
+   for a program it does not know is ART_LETTER, which is also the
+   index of the Code program's own entry - and the accounts program was
+   in the menu as a second "Code". */
 static const char *label_of_app(const char *app)
 {
-    int k = art_of_app(app);
-    return k < KNOWN_N ? known_apps[k].label : app;
+    for (int k = 0; k < KNOWN_N; k++)
+        if (!strcmp(app, known_apps[k].app))
+            return known_apps[k].label;
+    for (int k = 0; k < (int)(sizeof(lettered_apps) /
+                              sizeof(lettered_apps[0])); k++)
+        if (!strcmp(app, lettered_apps[k].app))
+            return lettered_apps[k].label;
+    return app;
 }
 
 #define ICON_N icon_n
@@ -470,7 +486,11 @@ struct wevent {
 
 struct window {
     int x, y, w, h;
-    char title[24];
+    /* As long as a program may ask for (SYS64_WIN_TITLE takes 63): a
+       file manager names the folder it shows, and a home's folders are
+       longer than the 23 letters this used to hold. What does not fit
+       the title bar is cut with an ellipsis where it is drawn. */
+    char title[64];
     int used;
     int owner;             /* the owning process's pid; -1 = a kernel window */
     uint8_t *content;      /* the application's content buffer (NULL = a kernel window) */
