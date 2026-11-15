@@ -6490,11 +6490,16 @@ static void desktop_thread(void *arg)
     /* The resolution: the panel's own (its EDID says which), unless the
        'resolution' setting names one - "1024x768". Without either,
        640x480; without a framebuffer at all, mode 13h (320x200). Where
-       the loader set the mode, it stays what the loader set. */
+       the loader set the mode, it stays what the loader set - unless
+       the setting names one and the card can be told (the Bochs/QEMU
+       interface). */
     int rw, rh;
     resolution_wanted(&rw, &rh);
     if (video_init_vesa(rw, rh) < 0)
         video_init();
+    else if (rw && rh)
+        video_set_mode(rw, rh);    /* over a loader's mode, where the card
+                                      lets another be set (kernel/video.c) */
 
     /* The palette, for the programs' windows and for a screen of 256
        colours. What each entry means has not changed since the first

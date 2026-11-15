@@ -308,7 +308,7 @@ int video_parse_edid(const uint8_t *e, int *w, int *h, int *mm_w, int *mm_h)
 static void read_edid(void)
 {
     struct pci_dev d;
-    if (pci_find_device(0x1234, 0x1111, &d) < 0)
+    if (!pci_find_device(0x1234, 0x1111, &d))
         return;                            /* not the standard VGA */
     uint32_t bar2 = d.bar[2];
     if (!bar2 || (bar2 & 1))
@@ -439,11 +439,34 @@ static void drop_buffers(void)
     shadow_valid = 0;
 }
 
+static int lfb_from_loader;
+static uint32_t lfb_addr, lfb_bytes;
+
+/* The loader set the mode, but on the standard VGA of a virtual machine:
+   the Bochs/QEMU interface can set another one all the same, and on
+   that card the buffer the loader handed over is the one the interface
+   draws into. On any other card a mode the loader set stays what it
+   is - nothing else here knows how to change it. */
+static uint32_t dispi_under_loader(void)
+{
+    struct pci_dev d;
+    if (!lfb_from_loader || !pci_find_device(0x1234, 0x1111, &d))
+        return 0;
+    uint32_t bar0 = d.bar[0] & 0xFFFFFFF0u;
+    if (!bar0 || (d.bar[0] & 1) || bar0 != lfb_addr)
+        return 0;
+    if (!edid_w)
+        read_edid();                /* for the panel's own mode */
+    return bar0;
+}
+
 /* Another mode while the screen runs - where the mode is ours to set
-   (the Bochs/QEMU interface); a mode the loader set stays what it is.
-   1 = changed, 0 = it already was, -1 = it cannot be. */
+   (the Bochs/QEMU interface). 1 = changed, 0 = it already was, -1 = it
+   cannot be. */
 int video_set_mode(int w, int h)
 {
+    if (!dispi_lfb)
+        dispi_lfb = dispi_under_loader();
     if (!dispi_lfb)
         return -1;
     int nw = w > 0 && h > 0 ? w : (edid_w ? edid_w : 640);
@@ -465,9 +488,6 @@ int video_set_mode(int w, int h)
  * and it is the only road under UEFI, where there is no VGA text mode
  * at all.
  */
-static int lfb_from_loader;
-static uint32_t lfb_addr, lfb_bytes;
-
 int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
 {
     if (fbcon_set_framebuffer(addr, pitch, w, h, bpp) < 0)
