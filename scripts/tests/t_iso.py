@@ -31,12 +31,12 @@ def main():
             os.makedirs(isodir + "/boot/grub")
             shutil.copy(KERNEL, isodir + "/boot/threados.bin")
             shutil.copy(INITRD, isodir + "/boot/initrd.img")
-            # A menu of our own: with no countdown and straight into text
-            # mode, so that the screen can be read
+            # A menu of our own: with no countdown, and to the shell -
+            # the kernel starts its desktop only when told 'desktop'
             with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                 fh.write("set timeout=0\nset default=0\n"
                          'menuentry "ThreadOS" {\n'
-                         "    multiboot2 /boot/threados.bin nodesktop\n"
+                         "    multiboot2 /boot/threados.bin\n"
                          "    module2 /boot/initrd.img\n}\n")
             made = subprocess.run(["grub-mkrescue", "-o", iso, isodir],
                                   stdout=subprocess.DEVNULL,
@@ -54,17 +54,17 @@ def main():
                                     q21.wait_serial("Physical memory",
                                                     timeout=20)) is not None)
                     check("the initrd arrived as a Multiboot 2 module",
-                          re.search(r"initrd: \d+ files",
+                          re.search(r"initrd: \d+ file\(s\) from the loader",
                                     q21.wait_serial("initrd:", timeout=20))
                           is not None)
                     check("the pointer to the ACPI tables handed over by GRUB",
                           "ACPI: tables from" in q21.wait_serial("ACPI:",
                                                                 timeout=20))
-                    q21.wait_serial("ThreadOS shell", timeout=30)
-                    q21.type_line("uptime")
+                    q21.wait_serial("thread64>", timeout=30)
                     check("the system from the disc answers commands",
-                          "uptime:" in q21.wait_serial("timer ticks",
-                                                       timeout=20))
+                          re.search(r"Uptime: \d+ s \(\d+ ticks",
+                                    q21.command("uptime", "ticks of",
+                                                timeout=20)) is not None)
 
                     # The console drawn on the framebuffer from GRUB: VGA
                     # text mode does not work here at all, so every lit
@@ -78,11 +78,14 @@ def main():
                               if at(x, y) != (0, 0, 0))
                     check(f"the console is drawn on the framebuffer "
                           f"({lit} pixels)", lit > 3000)
-                    green = sum(1 for y in range(y0, y0 + 200)
-                                for x in range(x0, x0 + 640)
-                                if at(x, y) == (85, 255, 85))
+                    # The prompt wears text colour 11 (the 'color'
+                    # setting's default), the boot's [ OK ] lines having
+                    # scrolled out of the block by now
+                    cyan = sum(1 for y in range(y0, y0 + 200)
+                               for x in range(x0, x0 + 640)
+                               if at(x, y) == (85, 255, 255))
                     check("the text mode colours given back in RGB "
-                          f"(a light green [ OK ]: {green})", green > 100)
+                          f"(the prompt's light cyan: {cyan})", cyan > 100)
                     outside = sum(1 for y in range(0, min(40, y0))
                                   for x in range(0, w, 4)
                                   if at(x, y) != (0, 0, 0))
@@ -98,16 +101,19 @@ def main():
                 with open(isodir + "/boot/grub/grub.cfg", "w") as fh:
                     fh.write("set timeout=0\nset default=0\n"
                              'menuentry "ThreadOS" {\n'
-                             "    multiboot2 /boot/threados.bin\n"
+                             "    multiboot2 /boot/threados.bin desktop\n"
                              "    module2 /boot/initrd.img\n}\n")
                 iso2 = tempfile.mktemp(suffix=".iso")
+                slog2 = tempfile.mktemp(suffix=".log")
                 try:
                     subprocess.run(["grub-mkrescue", "-o", iso2, isodir],
                                    stdout=subprocess.DEVNULL,
                                    stderr=subprocess.DEVNULL)
-                    q22 = Qemu(KERNEL, INITRD, cdrom=iso2)
+                    q22 = Qemu(KERNEL, INITRD, cdrom=iso2, serial=slog2)
                     try:
-                        time.sleep(22)
+                        # Past the sign-in, which covers the aurora with
+                        # its own darkening
+                        q22.wait_desktop(timeout=60)
                         w, h, at = q22.screen_raw()
                         teal, total = aurora_samples(at, w, h)
                         check(f"the desktop draws on the loader's buffer "
@@ -127,7 +133,9 @@ def main():
                         # compositor's business, and on a loaded host it
                         # is later than here. We look until the text is
                         # covered, rather than assuming three seconds.
-                        q22.type_line("mem")
+                        said = q22.command("mem", "Memory:", timeout=20)
+                        check("the shell behind the desktop printed something "
+                              "while it ran", "KiB RAM" in said)
                         after = 0
                         want = teal - total // 100
                         for _ in range(10):
@@ -143,8 +151,9 @@ def main():
                     finally:
                         q22.close()
                 finally:
-                    if os.path.exists(iso2):
-                        os.unlink(iso2)
+                    for f in (iso2, slog2):
+                        if os.path.exists(f):
+                            os.unlink(f)
         finally:
             shutil.rmtree(isodir, ignore_errors=True)
             if os.path.exists(iso):
