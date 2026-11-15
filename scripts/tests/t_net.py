@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: a TCP server in ring 3 and the graphical browser.
+"""ThreadOS smoke test: the simple graphical browser (gweb) - the network,
+a window and the disk in one road.
 
 Run on its own or through scripts/run_tests.py, which starts all the
 groups in parallel.
@@ -19,36 +20,9 @@ from ptest import check, summary, DNS_HINT
 
 
 def main():
-    # --- ThreadOS as a TCP server (a passive open, a separate boot) ---
-    print("--- the network: a TCP server in ring 3 ---")
-    srv_port = 5555
-    q_srv = Qemu(KERNEL, INITRD, hostfwd_port=srv_port, append=TEXT_MODE)
-    try:
-        q_srv.wait_for("ThreadOS shell")
-        q_srv.wait_for("[net] DHCP", timeout=20)
-        q_srv.type_line("run tcpserv")
-        view = q_srv.wait_for("listening on port 5555", timeout=15)
-        check("ring 3 listens on a TCP port",
-              "listening on port 5555" in view)
-
-        # The host's real stack connects (through QEMU's hostfwd)
-        sock = socket.create_connection(("127.0.0.1", srv_port), timeout=15)
-        sock.settimeout(15)
-        greeting = sock.recv(200)
-        check("the host connected and got a greeting from ThreadOS",
-              b"ThreadOS TCP ready" in greeting)
-
-        sock.sendall(b"hello from the host\n")
-        echoed = sock.recv(200)
-        check("the host's data came back echoed by the ring 3 server",
-              b"hello from the host" in echoed)
-        sock.close()
-
-        seen = q_srv.wait_for("from the client", timeout=15)
-        check("the server saw the client's data",
-              "from the client: hello from the host" in seen)
-    finally:
-        q_srv.close()
+    # A TCP server in ring 3 used to open this group; on the 64-bit
+    # kernel that is t_socket's, where the host connects to a server
+    # in the guest through the C library's sockets.
 
     # --- The browser in a desktop window (network -> GUI -> disk) ---
     print("--- the desktop: the browser (gweb) ---")
@@ -167,20 +141,25 @@ def main():
         dns_stop()
 
     # The same disk in text mode: content from the world survived the
-# restart
-    q_web2 = Qemu(KERNEL, INITRD, wdisk, append=TEXT_MODE)
+    # restart. The browser ran in the signed-in profile and saved the
+    # page in its home, which the text shell's guest cannot read - so
+    # it signs in as that profile first.
+    slog2 = tempfile.mktemp(suffix=".log")
+    q_web2 = Qemu(KERNEL, INITRD, wdisk, append=TEXT_MODE, serial=slog2)
     try:
-        q_web2.wait_for("ThreadOS shell")
-        q_web2.type_line("cat page.htm")
-        saved = q_web2.wait_for("The second page", timeout=10)
+        q_web2.wait_serial("thread64>", timeout=60)
+        q_web2.command("login admin", "password:", timeout=20)
+        q_web2.command("thread", "logged in as admin", timeout=20)
+        saved = q_web2.command("cat page.htm", "The second page", timeout=20)
         check("the clicked link fetched the second page (it shows on the disk)",
               "The link worked" in saved)
         check("the page the browser saved survived the restart",
               "<html><body><h1>The second page</h1>" in saved)
     finally:
         q_web2.close()
-        if os.path.exists(wdisk):
-            os.unlink(wdisk)
+        for f in (wdisk, slog2):
+            if os.path.exists(f):
+                os.unlink(f)
 
     return summary()
 

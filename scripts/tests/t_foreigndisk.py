@@ -22,8 +22,8 @@ one is being restrained from:
   sizes and the names they carry
   a genuinely blank disk is still formatted, because that is a disk
   nobody loses anything by
-  and 'format' does it on purpose - but only for somebody who types
-  the whole word
+  and 'format' does it on purpose - but only for an admin, and only
+  for somebody who types the whole word
   'formatuj N' takes ONE partition: the table and the neighbours come
   out of it untouched, and after a restart the system finds its
   filesystem where it left it - which is what installing next to
@@ -43,6 +43,24 @@ from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, make_gpt_disk, gpt_intact,
                    neighbours_intact)
 
+PROMPT = "thread64>"
+
+
+def boot(disk, slog):
+    """The text shell on this disk, and what the kernel said on the way
+    to it"""
+    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
+    return q, q.wait_serial(PROMPT, timeout=60)
+
+
+def sudo(q, command, until, timeout=30):
+    """'sudo <command>' and the admin password on the line the shell
+    asks for it: formatting changes the machine, and the shell starts
+    as nobody in particular. What came after the password, up to
+    'until'."""
+    q.command("sudo " + command, "password:", timeout=20)
+    return q.command("thread", until, timeout=timeout)
+
 
 def main():
     disk = tempfile.mktemp(suffix=".img")
@@ -52,19 +70,16 @@ def main():
     try:
         check("the test image really has a GPT", gpt_intact(disk))
 
-        q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
+        q, said = boot(disk, slog)
         try:
-            boot = q.wait_for("ThreadOS shell", timeout=40)
             check("the kernel says there is something on the disk and does not touch it",
-                  "there IS something on the disk" in boot)
+                  "there IS something on the disk" in said)
             check("and it hints what to do if it is to be ours after all",
-                  "format" in boot)
+                  "type 'format'" in said)
 
             # What it can read. Not the point of the group, but the
             # thing that makes the restraint useful rather than blind.
-            q.type_line("hardware")
-            time.sleep(3)
-            said = q.screen()
+            said = q.command("hardware", PROMPT, timeout=30)
             check("it reads the GPT and the number of partitions ('%s')"
                   % next((l.strip() for l in said.splitlines()
                           if "table," in l), "no line"),
@@ -91,12 +106,12 @@ def main():
     with open(blank, "wb") as f:
         f.truncate(16 * 1024 * 1024)
     try:
-        q = Qemu(KERNEL, INITRD, blank, append=TEXT_MODE, serial=slog2)
+        q, said = boot(blank, slog2)
         try:
-            boot = q.wait_for("ThreadOS shell", timeout=40)
             check("an empty disk is formatted as it always was",
-                  "formatted" in boot)
-            check("and there is no talk of a refusal there", "there IS something on the disk" not in boot)
+                  "an empty disk formatted" in said)
+            check("and there is no talk of a refusal there",
+                  "there IS something on the disk" not in said)
         finally:
             q.close()
     finally:
@@ -113,23 +128,19 @@ def main():
     slog4 = tempfile.mktemp(suffix=".log")
     make_gpt_disk(disk3, 800)
     try:
-        q = Qemu(KERNEL, INITRD, disk3, append=TEXT_MODE, serial=slog4)
+        q, _ = boot(disk3, slog4)
         try:
-            q.wait_for("ThreadOS shell", timeout=40)
-            q.type_line("format 3")
-            time.sleep(2)
-            said = q.screen()
+            said = sudo(q, "format 3", "Type YES")
             check("'format 3' says it will erase THAT partition, not the disk",
                   "ERASE PARTITION 3" in said and
                   "partition table stay untouched" in said)
-            q.type_line("YES")
-            time.sleep(4)
-            said = q.screen()
+            said = q.command("YES", "format:", timeout=30)
             check("and it creates a TFS on it",
                   "this partition is a ThreadOS TFS now" in said)
 
-            q.type_line("write proof.txt installed-beside-windows")
-            time.sleep(2)
+            said = q.command("write proof.txt installed-beside-windows",
+                             "write:", timeout=20)
+            check("and a file goes onto it", "written" in said)
         finally:
             q.close()
 
@@ -139,13 +150,13 @@ def main():
               neighbours_intact(disk3))
 
         # And the system finds it again on the next boot
-        q = Qemu(KERNEL, INITRD, disk3, append=TEXT_MODE, serial=slog4)
+        os.unlink(slog4)
+        q, said = boot(disk3, slog4)
         try:
-            boot = q.wait_for("ThreadOS shell", timeout=40)
             check("after the restart the kernel finds the TFS in the partition ('%s')"
-                  % next((l.strip() for l in boot.splitlines()
+                  % next((l.strip() for l in said.splitlines()
                           if "in partition" in l), "no line"),
-                  "TFS: in partition 3" in boot)
+                  "TFS: in partition 3" in said)
             out = q.command("cat proof.txt", "installed", timeout=20)
             check("and the file written before the restart is there",
                   "installed-beside-windows" in out)
@@ -163,15 +174,15 @@ def main():
     slog3 = tempfile.mktemp(suffix=".log")
     make_gpt_disk(disk2, 800)
     try:
-        q = Qemu(KERNEL, INITRD, disk2, append=TEXT_MODE, serial=slog3)
+        q, _ = boot(disk2, slog3)
         try:
-            q.wait_for("ThreadOS shell", timeout=40)
+            out = q.command("format", "format:", timeout=20)
+            check("a plain user is not let near it",
+                  "admin access required" in out)
 
-            q.type_line("format")
-            time.sleep(2)
-            q.type_line("yes")            # not the word that is asked for
-            time.sleep(3)
-            said = q.screen()
+            said = sudo(q, "format", "Type YES")
+            # not the word that is asked for
+            said += q.command("yes", "format:", timeout=30)
             check("'format' warns what it will erase ('%s')"
                   % next((l.strip() for l in said.splitlines()
                           if "ERASE" in l), "no line"),
@@ -183,14 +194,11 @@ def main():
         check("and the table is still in place", gpt_intact(disk2))
 
         # And now the word itself
-        q = Qemu(KERNEL, INITRD, disk2, append=TEXT_MODE, serial=slog3)
+        os.unlink(slog3)
+        q, _ = boot(disk2, slog3)
         try:
-            q.wait_for("ThreadOS shell", timeout=40)
-            q.type_line("format")
-            time.sleep(2)
-            q.type_line("YES")
-            time.sleep(4)
-            said = q.screen()
+            sudo(q, "format", "Type YES")
+            said = q.command("YES", "format:", timeout=30)
             check("and a typed YES formats the disk",
                   "the whole disk is a ThreadOS TFS now" in said)
         finally:

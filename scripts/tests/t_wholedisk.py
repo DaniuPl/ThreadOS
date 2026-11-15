@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, no64, make_gpt_disk, mtools_ok, fat_format,
                    fat_mkdirs, fat_put, fat_get, fat_dir, fat_kind, gpt_read,
-                   GUID_ESP4, GUID_TFS4)
+                   GUID_ESP4, GUID_TFS4, TfsImage)
 
 ESP_START = 2048
 ESP_SECTORS = 204800
@@ -37,7 +37,10 @@ OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
+# The loader of the same build as the kernel under test - which is not
+# always build/ (make BUILD=...)
+BUILD = os.path.dirname(os.path.abspath(KERNEL64))
+LOADER = os.path.join(BUILD, "BOOTX64.EFI")
 
 
 def blob(path):
@@ -57,8 +60,8 @@ def main():
         print("SKIPPED: no mtools")
         return summary()
     if not os.path.exists(LOADER):
-        subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+        subprocess.run(["make", "BUILD=" + BUILD, "efi"], cwd=ROOT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
         print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
@@ -103,6 +106,10 @@ def main():
                  uefi=(OVMF_CODE, nvram))
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
+            # threadboot starts the desktop, and its shell takes the
+            # keys no window wants once somebody has signed in
+            check("the stick's system reaches its desktop",
+                  q.wait_desktop(timeout=60))
 
             out = q.command("install text whole", "Type ERASE",
                             timeout=40)
@@ -203,16 +210,30 @@ def main():
             check("the firmware picks our loader out of the table we "
                   "made ourselves", "threadboot" in out)
             out = q2.wait_serial("The 64-bit system is ready", timeout=120)
-            check("and the system on that disk reaches the shell",
+            check("and the system on that disk comes up",
                   "Multiboot OK (Multiboot 2)" in out)
             check("and the TFS on our partition is ready to use",
                   "TFS" in out and "OUT OF REACH" not in out.split(
                       "Settings:")[0].split("Disk ")[-1])
-            out = q2.command("fls", "thread64>", timeout=20)
-            check("and files can be kept on it",
-                  "there is no" not in out.lower() or "swap" in out.lower())
+            # A fresh filesystem: the first-run wizard makes the profile,
+            # and the shell behind the desktop works in its home
+            check("and it starts at its desktop, past the first-run wizard",
+                  q2.wait_desktop(timeout=90))
+            out = q2.command("write kept.txt on-our-partition", "write:",
+                             timeout=20)
+            check("and a file can be kept on it", "written" in out)
         finally:
             q2.close()
+
+        # ...and is there, read off the partition by the host
+        if len(parts) == 2:
+            try:
+                kept = TfsImage(target, parts[1][1]).read(
+                    "/home/admin/kept.txt")
+            except ValueError:
+                kept = None
+            check("the file lies in our partition's TFS, as the host reads "
+                  "it (%r)" % kept, kept == b"on-our-partition\n")
     finally:
         shutil.rmtree(esp, ignore_errors=True)
         for f in (target, slog, slog2, nvram):

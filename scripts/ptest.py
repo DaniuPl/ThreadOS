@@ -2048,7 +2048,10 @@ class Qemu:
             # Booting as from a real board: the kernel is loaded by GRUB, not by
 # QEMU
             cmd += ["-cdrom", cdrom, "-boot", "d"]
-        elif not esp:
+        elif not esp and not uefi:
+            # Under UEFI firmware with no disc and no stick the machine
+            # boots off its disk, the way an installed one does - and
+            # QEMU refuses -kernel for a 64-bit ELF in any case
             cmd += ["-kernel", kernel]
             if append:
                 cmd += ["-append", append]
@@ -2948,7 +2951,7 @@ class Qemu:
 
     def read_ui_lines(self, x0, x1, baselines, px=None,
                       faces=("sans", "bold"), screen=None, gap=14,
-                      colours=None):
+                      colours=None, charset=None):
         """A page of TrueType text - what a program wrote into its
         window through user/udraw.h - one line per baseline, the lines
         joined with newlines.
@@ -2993,7 +2996,8 @@ class Qemu:
                 got = ""
                 for f in faces:
                     one = self.find_ui(x0 + a, x0 + b + 8, base, px=px,
-                                       face=f, screen=screen, colours=colours)
+                                       face=f, screen=screen, colours=colours,
+                                       charset=charset)
                     if len(one) > len(got):
                         got = one
                 if got:
@@ -3209,6 +3213,14 @@ class Qemu:
         if self in _LIVE:
             _LIVE.remove(self)
         self.proc.kill()
+        # Until it has really gone it holds the locks on its disk
+        # images, and the next machine started on the same disk is
+        # refused ("Failed to get write lock") - on a busy host that
+        # takes a moment after the kill
+        try:
+            self.proc.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            pass
         for p in (self.qmp_path, self.dump_path):
             if os.path.exists(p):
                 os.unlink(p)

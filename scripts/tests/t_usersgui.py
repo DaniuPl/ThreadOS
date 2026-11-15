@@ -59,6 +59,19 @@ def window_says(q, cx, cy, want, tries=8):
     return False
 
 
+def wait_read(read, want, timeout=30):
+    """Reads until the reading is what is wanted, or the time is up, and
+    hands back the last reading. An account change hashes a password
+    twice over (PBKDF2, four thousand rounds each), which on a busy
+    host takes far longer than any fixed pause would allow."""
+    deadline = time.time() + timeout
+    got = read()
+    while got != want and time.time() < deadline:
+        time.sleep(0.5)
+        got = read()
+    return got
+
+
 def typed(q, text):
     for ch in text:
         q.sendkey(q.KEYNAMES.get(ch, ch))
@@ -76,6 +89,9 @@ def main():
         q = Qemu(KERNEL, INITRD, disk, serial=slog)
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
+            # Where windows open depends on the screen's size: GRUB
+            # gives the desktop 800x600
+            W, H = q.size()
             q.mouse_home()
 
             # --- the terminal ------------------------------------------
@@ -113,9 +129,9 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1.5)
 
-            # Slot 3 of the cascade - which on this screen is back at
-            # the start. A background asked for under Appearance.
-            sx, sy = cascade(3, GSET_W + 2, GSET_H + TITLE_H + 2)
+            # Slot 3 of the cascade. A background asked for under
+            # Appearance.
+            sx, sy = cascade(3, GSET_W + 2, GSET_H + TITLE_H + 2, w=W, h=H)
             SX, SY = sx + 1, sy + CONTENT_DY
             q.click(SX + gset_section("Appearance")[0],
                     SY + gset_section("Appearance")[1])
@@ -137,11 +153,17 @@ def main():
 
             # Account management is a desktop app shipped in both initrds.
             q.launch_menu("gusers")
-            time.sleep(2)
             ux, uy = cascade(4, USERS_W + 2,
-                             USERS_H + TITLE_H + 2)
+                             USERS_H + TITLE_H + 2, w=W, h=H)
+            # Waited for, not slept on: on a busy host the program takes
+            # longer than two seconds to put its window up
+            title = ""
+            deadline = time.time() + 20
+            while title != "User Accounts" and time.time() < deadline:
+                time.sleep(0.5)
+                title = q.window_title(ux, uy, USERS_W + 2)
             check("the account manager opens from the desktop menu",
-                  q.window_title(ux, uy, USERS_W + 2) == "User Accounts")
+                  title == "User Accounts")
             ucx, ucy = ux + 1, uy + CONTENT_DY
             q.click(ucx + 300, ucy + 105)
             typed(q, "guiuser")
@@ -152,40 +174,64 @@ def main():
             q.click(ucx + 300, ucy + 261)
             typed(q, "thread")
             q.click(ucx + 72, ucy + USERS_H - 28)
-            time.sleep(2)
             row_base = ucy + ui_font_baseline_in(UD_PX, 118, 18)
-            second_account = q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
-            check("the 32-bit account manager creates an account through the syscall",
+
+            def second_row():
+                return q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
+            second_account = wait_read(second_row, "guiuser")
+            check("the account manager creates an account through the syscall",
                   second_account == "guiuser")
 
             q.click(ucx + 50, ucy + 124)
             q.click(ucx + 300, ucy + 261)
             typed(q, "thread")
             q.click(ucx + 316, ucy + USERS_H - 28)
-            time.sleep(1)
-            role = q.read_ui(ucx + 160, row_base, 55, px=UD_PX)
-            check("the account manager changes a user's role",
+            # The role is set flush right against x=215 (user/gusers.c),
+            # so where it starts depends on the word; the band reaches
+            # to the end of the row's highlight, not to the last pixel
+            # of the word, or the last glyph is read cut off
+            role = wait_read(lambda: q.find_ui(ucx + 150, ucx + 224, row_base,
+                                               px=UD_PX,
+                                               fg=theme("dark")["app_dim"]),
+                             "admin")
+            check("the account manager changes a user's role ('%s')" % role,
                   role == "admin")
 
+            status_base = ucy + ui_font_baseline_in(
+                UD_PX, USERS_H - 70, 20)
+
+            def status_line():
+                # In the quiet colour (look.dim): told rather than
+                # guessed, since a guess from the start of the line can
+                # land on an edge pixel and lose the rest of it
+                return q.read_ui(ucx + 16, status_base, 220, px=UD_PX,
+                                 fg=theme("dark")["app_dim"])
+            # The role change has just left "Account updated" on the
+            # status line. A mismatch first, so that the same words after
+            # the reset are the reset's own.
             q.click(ucx + 300, ucy + 157)
             typed(q, "resetpass")
             q.click(ucx + 300, ucy + 209)
-            typed(q, "resetpass")
+            typed(q, "resetpasx")
             q.click(ucx + 300, ucy + 261)
             typed(q, "thread")
             q.click(ucx + 194, ucy + USERS_H - 28)
-            time.sleep(1)
-            status_base = ucy + ui_font_baseline_in(
-                UD_PX, USERS_H - 70, 20)
-            status = q.read_ui(ucx + 16, status_base, 220, px=UD_PX)
-            check("the account manager resets a password after admin reauthentication",
+            status = wait_read(status_line, "Passwords do not match")
+            check("the account manager refuses new passwords that differ "
+                  "('%s')" % status, status == "Passwords do not match")
+            q.click(ucx + 300, ucy + 209)
+            q.sendkey("backspace")
+            typed(q, "s")
+            q.click(ucx + 194, ucy + USERS_H - 28)
+            status = wait_read(status_line, "Account updated")
+            check("the account manager resets a password after admin "
+                  "reauthentication ('%s')" % status,
                   status == "Account updated")
 
             q.click(ucx + 300, ucy + 261)
             typed(q, "thread")
             q.click(ucx + 438, ucy + USERS_H - 28)
-            time.sleep(1)
-            second_account = q.read_ui(ucx + 24, row_base, 100, px=UD_PX)
+            second_account = wait_read(second_row, "")
             check("the account manager removes the selected account",
                   second_account == "")
         finally:

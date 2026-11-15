@@ -554,11 +554,15 @@ static int can_read(int slot)
     if (can_access(slot))
         return 1;
     /* Machine settings and icons are public; account hashes and swap data
-       stay private even though they are also system-owned files. */
+       stay private even though they are also system-owned files. So is
+       the key updates are checked against: it is a public key, and
+       'update check' run by anybody has to check with the one the
+       admin chose rather than fall back to the built-in one. */
     return slot >= 0 && inode_type(&inodes[slot]) == FS_TYPE_FILE &&
            inodes[slot].parent == FS_ROOT &&
            (!strcmp(inodes[slot].name, "system.cfg") ||
-            !strcmp(inodes[slot].name, "icons.pos"));
+            !strcmp(inodes[slot].name, "icons.pos") ||
+            !strcmp(inodes[slot].name, "update.key"));
 }
 
 static int parent_of(int slot)

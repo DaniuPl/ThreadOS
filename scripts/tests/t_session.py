@@ -34,10 +34,18 @@ from ptest import *          # noqa: F401,F403
 from ptest import check, summary
 
 DARK = theme("dark")
-AX, AY = (SCREEN_W - ASK_W) // 2, (SCREEN_H - ASK_H) // 2
-BTN_Y = AY + ASK_H - ASK_PAD - ASK_BTN_H
-DO_X = AX + ASK_W - ASK_PAD - ASK_BTN_W
-NO_X = DO_X - ASK_BTN_GAP - ASK_BTN_W
+
+
+def lay_out(q):
+    """Where the question card and its buttons are: in the middle of the
+    screen the machine really has - GRUB gives the desktop 800x600, not
+    the 640x480 these were once worked out for"""
+    global W, H, AX, AY, BTN_Y, DO_X, NO_X
+    W, H = q.size()
+    AX, AY = (W - ASK_W) // 2, (H - ASK_H) // 2
+    BTN_Y = AY + ASK_H - ASK_PAD - ASK_BTN_H
+    DO_X = AX + ASK_W - ASK_PAD - ASK_BTN_W
+    NO_X = DO_X - ASK_BTN_GAP - ASK_BTN_W
 
 
 def entry(q, name):
@@ -55,7 +63,7 @@ def entry(q, name):
 def pick(q, name):
     q.open_menu()
     q.click(MENU_X0 + 60, session_y(name))
-    q.mouse_goto(SCREEN_W // 2, AY - 40)
+    q.mouse_goto(W // 2, AY - 40)
     time.sleep(1)
 
 
@@ -74,12 +82,12 @@ def question(q):
 
 
 def under(x, y):
-    return gfx_mix((0, 0, 0), aurora_px(x, y), 90)
+    return gfx_mix((0, 0, 0), aurora_px(x, y, W, H), 90)
 
 
 def lock_says(q):
-    fy = SCREEN_H * 2 // 3 - LOCK_FIELD_H
-    return q.find_ui(80, SCREEN_W - 80, fy + LOCK_FIELD_H + 22, px=UI_PX,
+    fy = H * 2 // 3 - LOCK_FIELD_H
+    return q.find_ui(80, W - 80, fy + LOCK_FIELD_H + 22, px=UI_PX,
                      fg=(0xD8, 0xD8, 0xDC), under=under)
 
 
@@ -87,7 +95,7 @@ def lock_profile(q):
     w, h, at = q.screen_raw()
     fy = h * 2 // 3 - LOCK_FIELD_H
     return q.find_ui(80, w - 80, fy - 70, px=15, face="bold",
-                     fg=(0xFF, 0xFF, 0xFF), screen=(w, h, at))
+                     fg=(0xFF, 0xFF, 0xFF), under=under, screen=(w, h, at))
 
 
 def typed(q, text):
@@ -100,10 +108,14 @@ def desktop_unlocked(q):
     return lock_says(q) == ""
 
 
-def session(slog):
-    q = Qemu(KERNEL, INITRD, serial=slog)
+def session(slog, disk):
+    # A disk, so that the profile is one the first-run wizard saves
+    # (wait_desktop names it Test Admin) rather than the built-in admin
+    # a diskless machine signs in as
+    q = Qemu(KERNEL, INITRD, disk, serial=slog)
     try:
         check("the desktop came up", q.wait_desktop(timeout=40))
+        lay_out(q)
         q.mouse_home()
         q.open_menu()
         q.mouse_goto(400, 300)
@@ -169,8 +181,9 @@ def session(slog):
         check("and Esc closes it, having done nothing",
               not near(at(MENU_X0 + 8, session_y("Shut Down...")),
                        DARK["accent"], 6) and q.proc.poll() is None)
-        # (the program started from the keys goes again)
-        q.click(*dock_tile(DOCK_N + 2, n_w=3))
+        # (the program started from the keys goes again - the only
+        # window there is)
+        q.click(*dock_window(0, 1, w=W, h=H))
         time.sleep(0.5)
         q.sendkey("alt-f4")
         time.sleep(2)
@@ -178,8 +191,8 @@ def session(slog):
         # The loudness keys a laptop has on Fn: a card above the dock
         # says how loud it is now, and the setting keeps it
         def loudness():
-            g = dock_geom()
-            x = (SCREEN_W - VOL_W) // 2
+            g = dock_geom(w=W, h=H)
+            x = (W - VOL_W) // 2
             y = g["y"] - VOL_DY - VOL_H
             return q.read_ui(x + VOL_BAR_X + VOL_BAR_W + 12,
                              ui_font_baseline_in(MENU_PX, y, VOL_H), 60,
@@ -202,14 +215,19 @@ def session(slog):
         said = loudness()
         check("and Volume Down brings the sound back, a step lower ('%s')"
               % said, said == "85%")
-        time.sleep(2)
+        # A second and a half of frames - counted in frames, so on a
+        # busy host it is longer than that in seconds: waited for, not
+        # assumed
+        deadline = time.time() + 10
+        while loudness() != "" and time.time() < deadline:
+            time.sleep(0.5)
         check("the card goes after a moment", loudness() == "")
 
         # About: what the machine is, said on a card - against what the
-        # test knows it started (one 32-bit processor, a 640x480 screen,
-        # the memory QEMU was given)
+        # test knows it started (one processor, the screen GRUB set, the
+        # memory QEMU was given)
         pick(q, "About ThreadOS")
-        ay = (SCREEN_H - ABOUT_H) // 2
+        ay = (H - ABOUT_H) // 2
         tx = AX + ASK_PAD + 40 + 14
         scr = q.screen_raw()
         about = [q.read_ui(tx, ay + ASK_TITLE_Y, 260, px=15, face="bold",
@@ -219,9 +237,9 @@ def session(slog):
                   for i in range(4)]
         check("About ThreadOS says what the machine is (%s)" % (about,),
               about[0] == "ThreadOS" and
-              about[1] == "32-bit kernel, 1 processor" and
+              about[1] == "64-bit kernel, 1 processor" and
               re.match(r"Memory: \d+ MiB, \d+ MiB free$", about[2]) and
-              about[3] == "Screen: 640x480 at 100%" and
+              about[3] == "Screen: %dx%d at 100%%" % (W, H) and
               about[4].startswith("Up for "))
         q.sendkey("ret")
         time.sleep(1)
@@ -240,7 +258,7 @@ def session(slog):
             check("'%s' asks first: %s" % (name, got),
                   got == (want, act, "Cancel"))
             q.click(NO_X + ASK_BTN_W // 2, BTN_Y + ASK_BTN_H // 2)
-            q.mouse_goto(SCREEN_W // 2, AY - 40)
+            q.mouse_goto(W // 2, AY - 40)
             time.sleep(1)
             check("and Cancel leaves everything as it was ('%s' gone, the "
                   "window there)" % question(q)[0],
@@ -251,7 +269,7 @@ def session(slog):
         pick(q, "Shut Down...")
         q.click(AX + 30, AY + ASK_H - 20)
         q.click(40, 420)
-        q.mouse_goto(SCREEN_W // 2, AY - 40)
+        q.mouse_goto(W // 2, AY - 40)
         time.sleep(1)
         check("a click beside the buttons answers nothing ('%s' still asked)"
               % question(q)[0],
@@ -289,9 +307,10 @@ def session(slog):
         time.sleep(2)
         said = lock_says(q)
         check("Enter logs out, and the lock says it is a log in ('%s')"
-              % said, "to log in" in said and not desktop_unlocked(q))
-        check("the logged-out screen shows the saved profile name",
-              lock_profile(q) == "Test Admin")
+              % said, "Enter signs in" in said and not desktop_unlocked(q))
+        name = lock_profile(q)
+        check("the logged-out screen shows the saved profile name ('%s')"
+              % name, name == "Test Admin")
         typed(q, "thread\n")
         time.sleep(2)
         q.mouse_goto(600, 300)
@@ -319,6 +338,7 @@ def shutdown(slog):
     q = Qemu(KERNEL, INITRD, serial=slog)
     try:
         check("the desktop came up again", q.wait_desktop(timeout=40))
+        lay_out(q)
         q.mouse_home()
         pick(q, "Shut Down...")
         seen = len(q.serial())
@@ -333,11 +353,14 @@ def shutdown(slog):
 def main():
     slog = tempfile.mktemp(suffix=".log")
     slog2 = tempfile.mktemp(suffix=".log")
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as fh:
+        fh.truncate(DISK_SIZE)
     try:
-        session(slog)
+        session(slog, disk)
         shutdown(slog2)
     finally:
-        for f in (slog, slog2):
+        for f in (slog, slog2, disk):
             if os.path.exists(f):
                 os.unlink(f)
     return summary()

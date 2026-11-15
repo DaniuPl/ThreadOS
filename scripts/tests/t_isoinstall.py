@@ -15,8 +15,8 @@ Checked from outside, on the disc 'make iso64' really builds:
   for byte
 
   started under UEFI firmware (OVMF), with somebody else's disk behind
-  an AHCI controller, 'install text' writes the three files - read back
-  off the image by mtools and compared with the build's own - and
+  an AHCI controller, 'sudo install text' writes the three files - read
+  back off the image by mtools and compared with the build's own - and
   leaves the other system's loader alone
 
   that disk then boots on its own, through threadboot, with no disc
@@ -45,8 +45,11 @@ OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-ISO = os.path.join(ROOT, "build", "threados64.iso")
-LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
+# The disc and the loader of the same build as the kernel under test -
+# which is not always build/ (make BUILD=...)
+BUILD = os.path.dirname(os.path.abspath(KERNEL64))
+ISO = os.path.join(BUILD, "threados64.iso")
+LOADER = os.path.join(BUILD, "BOOTX64.EFI")
 FOREIGN_BOOTMGR = b"MZ-this-is-somebody-elses-bootmgfw-" * 300
 
 
@@ -84,6 +87,15 @@ def remaster(iso, work, default):
     r = subprocess.run(["grub-mkrescue", "-o", out, tree],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return out if r.returncode == 0 else None
+
+
+def install_text(q):
+    """'install text' from the disc's shell entry, which starts as
+    nobody in particular: installing is an admin's, so through sudo and
+    the admin password. What came after the password, up to the
+    question."""
+    q.command("sudo install text", "password:", timeout=30)
+    return q.command("thread", "Type YES", timeout=30)
 
 
 def make_target(path, taken=False):
@@ -176,7 +188,7 @@ def main():
                  qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
-            out = q.command("install text", "Type YES", timeout=30)
+            out = install_text(q)
             check("the installer started from GRUB has something to install "
                   "and says what it would write",
                   "/EFI/ThreadOS/threados64.bin" in out
@@ -262,7 +274,7 @@ def boot_menu(work, shell_iso, register_iso, nvram):
              qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
     try:
         q.wait_serial("The 64-bit system is ready", timeout=120)
-        q.command("install text", "Type YES", timeout=30)
+        install_text(q)
         out = q.command("YES", "Done", timeout=90)
         made = re.search(r"boot menu as Boot([0-9A-F]{4}) \(last", out)
         check("the installer adds ThreadOS to the firmware's boot menu "
