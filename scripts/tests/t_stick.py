@@ -32,7 +32,10 @@ OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
 OVMF_VARS = "/usr/share/OVMF/OVMF_VARS_4M.fd"
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
-LOADER = os.path.join(ROOT, "build", "BOOTX64.EFI")
+# The loader of the same build as the kernel under test - which is not
+# always build/ (make BUILD=...)
+BUILD = os.path.dirname(os.path.abspath(KERNEL64))
+LOADER = os.path.join(BUILD, "BOOTX64.EFI")
 MKSTICK = os.path.join(ROOT, "scripts", "mkstick.py")
 
 
@@ -53,8 +56,8 @@ def main():
         print("SKIPPED: no mtools")
         return summary()
     if not os.path.exists(LOADER):
-        subprocess.run(["make", "efi"], cwd=ROOT, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL)
+        subprocess.run(["make", "BUILD=" + BUILD, "efi"], cwd=ROOT,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if not os.path.exists(LOADER):
         print("SKIPPED: no build/BOOTX64.EFI (apt install clang lld)")
         return summary()
@@ -121,11 +124,15 @@ def main():
                   "(%d B)" % len(want_kernel),
                   "kernel: %d B" % len(want_kernel) in out)
             out = q.wait_serial("The 64-bit system is ready", timeout=120)
-            check("and the system on the stick reaches the shell",
+            check("and the system on the stick comes up",
                   "Multiboot OK (Multiboot 2)" in out)
+            # threadboot starts the desktop; the shell behind it takes
+            # the keys no window wants once somebody has signed in
+            check("and reaches its desktop", q.wait_desktop(timeout=60))
 
             # --- the two commands one types first on a strange machine
-            out = q.command("hardware", "PCI:", timeout=30)
+            # (the signed-in profile is an admin: its prompt ends in #)
+            out = q.command("hardware", "64# ", timeout=30)
             check("'hardware' is in the 64-bit kernel - that is the one that will go there",
                   "Unknown command" not in out)
             check("and it says what screen the loader gave",
@@ -135,7 +142,7 @@ def main():
             check("and what it sees on the PCI bus",
                   "PCI:" in out and "class" in out)
 
-            out = q.command("disks", "disk 1", timeout=30)
+            out = q.command("disks", "64# ", timeout=30)
             check("'disks' lists the machine's disks",
                   "disk 1:" in out and "in use" in out)
             check("and says what is on the one it uses",
