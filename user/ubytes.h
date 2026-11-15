@@ -45,10 +45,7 @@ static int format_bytes(uint64_t bytes, char *out, int size)
 
     while (n && used < size - 1)
         out[used++] = digits[--n];
-    if (unit == 0) {
-        if (used < size - 1)
-            out[used++] = ' ';
-    } else if (tenths % 10 && used < size - 1) {
+    if (unit > 0 && tenths % 10 && used < size - 1) {
         out[used++] = ulocale_decimal_comma() ? ',' : '.';
         if (used < size - 1)
             out[used++] = (char)('0' + tenths % 10);
