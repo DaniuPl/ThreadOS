@@ -88,6 +88,24 @@ def main():
         try:
             check("the desktop came up", q.wait_desktop(timeout=40))
             q.mouse_home()
+
+            # The desktop signed in as the administrator the first-run
+            # profile made, whose programs may change settings without
+            # asking. What is checked below is the window asking for the
+            # admin's password, so the session becomes an ordinary
+            # account's - made, and signed into, from the shell behind
+            # the desktop, which the session follows.
+            q.click_desktop()
+            q.command("useradd tester", "admin password:", timeout=20)
+            q.command("thread", "new account password:", timeout=20)
+            q.command("testerpw", "again:", timeout=20)
+            out = q.command("testerpw", "account", timeout=20)
+            check("an ordinary account is made", "account created" in out)
+            q.command("login tester", "password:", timeout=20)
+            out = q.command("testerpw", "logged in as", timeout=20)
+            check("and the session is that account's now",
+                  "logged in as tester" in out)
+
             q.launch_dock("gsettings")                # the "Settings" tile
             time.sleep(3)
             q.mouse_goto(*AWAY)
@@ -170,20 +188,22 @@ def main():
 
             # --- About, against the shell's 'mem' -------------------------
             q.click_desktop()
-            out = q.command("mem", "RAM detected", timeout=15)
-            m = re.search(r"RAM detected: (\d+) KiB", out)
+            out = q.command("mem", "KiB RAM", timeout=15)
+            m = re.search(r"Memory: (\d+) KiB RAM", out)
             head = section(q, "About")
             shot = q.screen_raw()
-            about = [q.gset_info(CX, CY, i, screen=shot) for i in range(6)]
+            # System, kernel, version, memory, in use, running for, and
+            # who is signed in
+            about = [q.gset_info(CX, CY, i, screen=shot) for i in range(7)]
             check("About names the system and its kernel (%s)"
                   % ", ".join(about[:2]),
                   head == "About" and about[0] == "ThreadOS" and
-                  about[1].startswith("32-bit"))
+                  about[1].startswith("64-bit"))
             check("its memory is what the shell's 'mem' says (%s, %s KiB)"
-                  % (about[2], m.group(1) if m else "?"),
-                  m is not None and about[2] == m.group(1) + " KiB")
-            check("and the session is a plain user's ('%s')" % about[5],
-                  about[5] == "user")
+                  % (about[3], m.group(1) if m else "?"),
+                  m is not None and about[3] == m.group(1) + " KiB")
+            check("and the session is a plain user's ('%s')" % about[6],
+                  about[6] == "user")
 
             # --- regional date, time and number formats ------------------
             head = section(q, "Region")
@@ -216,6 +236,7 @@ def main():
             shot = q.screen_raw()
             label = q.read_ui(CX + GSET_PANE_X, label_baseline, 160,
                              px=UD_PX, fg=theme("dark")["app_text"],
+                             charset=UiFont.CHARSET + "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ",
                              screen=shot)
             win_title = q.window_title(WX, WY)
             check("the language control saves Polish and translates settings "
