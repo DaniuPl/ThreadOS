@@ -27,6 +27,12 @@ held against FreeType by t_ttf).
   against the sheet's address; and one font file named by two families
   is fetched once
 
+  shaping (HarfBuzz) and CFF outlines (FreeType): a font with CFF
+  outlines, a kerning pair and a ligature, all of known size - at 20 px
+  "AV" is set 6 px tighter than its advances, "fi" is one 16 px
+  rectangle instead of two with a gap, and the layout measures both
+  runs so
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -93,9 +99,49 @@ def make_font(name, glyphs, flavor=None):
     return out.getvalue()
 
 
-def line(cls, family, colour, text, weight=400):
-    return (f"<p style='margin:0;font:{weight} 40px {family},sans-serif;"
-            f"color:rgb{colour};line-height:36px'><span>{text}</span>"
+def make_cff_font(name):
+    """CFF rectangles 500 units wide on an advance of 600 ('A', 'V'), 300
+    on 400 ('f', 'i') and 800 on 900 (the 'f_i' ligature), all 700 high
+    from 50 units in; a kerning pair A V of -300"""
+    from fontTools.pens.t2CharStringPen import T2CharStringPen
+    from fontTools.feaLib.builder import addOpenTypeFeaturesFromString
+    widths = {".notdef": 500, "A": 600, "V": 600, "f": 400, "i": 400,
+              "f_i": 900}
+    fb = FontBuilder(1000, isTTF=False)
+    fb.setupGlyphOrder(list(widths))
+    fb.setupCharacterMap({ord("A"): "A", ord("V"): "V", ord("f"): "f",
+                          ord("i"): "i"})
+    charstrings = {}
+    for g, w in widths.items():
+        pen = T2CharStringPen(w, None)
+        if g != ".notdef":
+            pen.moveTo((50, 0))
+            pen.lineTo((50, 700))
+            pen.lineTo((w - 50, 700))
+            pen.lineTo((w - 50, 0))
+            pen.closePath()
+        charstrings[g] = pen.getCharString()
+    fb.setupCFF(name, {"FullName": name}, charstrings, {})
+    fb.setupHorizontalMetrics({g: (w, 50) for g, w in widths.items()})
+    fb.setupHorizontalHeader(ascent=800, descent=-200)
+    fb.setupNameTable({"familyName": name, "styleName": "Regular"})
+    fb.setupOS2(sTypoAscender=800, sTypoDescender=-200, usWinAscent=800,
+                usWinDescent=200)
+    fb.setupPost()
+    addOpenTypeFeaturesFromString(fb.font, """
+        languagesystem DFLT dflt;
+        languagesystem latn dflt;
+        feature liga { sub f i by f_i; } liga;
+        feature kern { pos A V -300; } kern;
+    """)
+    out = io.BytesIO()
+    fb.font.save(out)
+    return out.getvalue()
+
+
+def line(cls, family, colour, text, weight=400, px=40, lh=36):
+    return (f"<p style='margin:0;font:{weight} {px}px {family},sans-serif;"
+            f"color:rgb{colour};line-height:{lh}px'><span>{text}</span>"
             f"<span style='display:inline-block;width:6px;height:10px;"
             f"background:rgb{BLUE}' class={cls}></span></p>")
 
@@ -109,6 +155,7 @@ def fonts(e):
     SERVED["/f/probe.ttf"] = make_font("Probe", regular)
     SERVED["/f/probe.woff"] = make_font("Probe", regular, "woff")
     SERVED["/f/bold.ttf"] = make_font("Probe", {"a": (700, 600, 700)})
+    SERVED["/f/shaped.otf"] = make_cff_font("Shaped")
     have_w2 = brotliref.install()
     if have_w2:
         SERVED["/f/probe.woff2"] = woff2_of(SERVED["/f/probe.ttf"])
@@ -124,11 +171,14 @@ def fonts(e):
         "@font-face{font-family:ProbeB;font-weight:700;src:url(/f/bold.ttf)}"
         "@font-face{font-family:Probe2;src:url(/f/probe.woff2) format('woff2')}"
         "@font-face{font-family:Real2;src:url(/f/dejavu.woff2) format('woff2')}"
+        "@font-face{font-family:Shaped;src:url(/f/shaped.otf) format('opentype')}"
         "</style></head><body style='margin:0'>" +
         line("t", "ProbeT", RED, "aab") + line("w", "ProbeW", GREEN, "aab") +
         line("r", "ProbeB", ORANGE, "a") + line("b", "ProbeB", PURPLE, "a", 700) +
         line("x", '"ProbeX"', RED, "b") + line("2", "Probe2", GREEN, "aab") +
         line("d", "Real2", ORANGE, REAL_TEXT) +
+        line("k", "Shaped", RED, "AV", px=20, lh=18) +
+        line("l", "Shaped", GREEN, "fi", px=20, lh=18) +
         "</body></html>").encode()
 
     r0 = len(ptest.REQUESTS)
@@ -139,7 +189,8 @@ def fonts(e):
         rows = {}
         for name, colour, top in [("t", RED, 0), ("w", GREEN, 36), ("r", ORANGE, 72),
                                   ("b", PURPLE, 108), ("x", RED, 144), ("2", GREEN, 180),
-                                  ("d", ORANGE, 216)]:
+                                  ("d", ORANGE, 216), ("k", RED, 252),
+                                  ("l", GREEN, 270)]:
             rows[name] = pixels(q, pg[0], pg[1] + top, pg[2], pg[1] + top + 36, colour)[0]
         if all(v for k, v in rows.items() if have_w2 or k not in "2d"):
             break
@@ -148,8 +199,8 @@ def fonts(e):
     def rel(box):
         return box and (box[0] - pg[0], box[2] - box[0] + 1, box[3] - box[1] + 1)
 
-    def marker(top):
-        box = pixels(q, pg[0], pg[1] + top, pg[2], pg[1] + top + 36, BLUE)[0]
+    def marker(top, lh=36):
+        box = pixels(q, pg[0], pg[1] + top, pg[2], pg[1] + top + lh, BLUE)[0]
         return box and box[0] - pg[0]
 
     t = rel(rows["t"])
@@ -169,6 +220,23 @@ def fonts(e):
           f"({x}); probe.ttf, named by three families, fetched once "
           f"({asked.count('/f/probe.ttf')})",
           x == (0, 36, 28) and asked.count("/f/probe.ttf") == 1)
+
+    # Shaping, at 20 px (the page's view ends soon below): A is drawn
+    # 1..10 and V, kerned 300 units (6 px) back, 7..16 - one box of 16;
+    # untouched the box would be 22 wide and the marker at 24. The
+    # ligature: one rectangle 1..16 where f and i would be 1..6 and 9..14
+    # with a gap, and the marker at 18, not 16.
+    k, lg = rel(rows["k"]), rel(rows["l"])
+    check(f"CFF outlines are drawn, and HarfBuzz kerns 'AV' 6 px tighter: "
+          f"one box from 1 to 16 ({k}), what follows at 18 "
+          f"({marker(252, 18)})",
+          k == (1, 16, 14) and marker(252, 18) == 18)
+    gap = lg and any(not pixels(q, pg[0] + x, pg[1] + 270, pg[0] + x + 1,
+                                pg[1] + 270 + 18, GREEN)[0]
+                     for x in range(1, 17))
+    check(f"and sets 'fi' as its ligature: one rectangle 1..16 with no gap "
+          f"({lg}, a gap: {gap}), what follows at 18 ({marker(270, 18)})",
+          lg == (1, 16, 14) and not gap and marker(270, 18) == 18)
 
     if not have_w2:
         check("libbrotli is here to make WOFF2 fonts with (it is not: skipped)", True)

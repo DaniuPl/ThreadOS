@@ -13,6 +13,8 @@ as code of our own around it (`apps/js`).
 | `ffmpeg-9.0.tar.xz` | FFmpeg demuxers and audio/video decoders | 9.0 | LGPL-2.1-or-later (`COPYING.LGPLv2.1`) | https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz |
 | `zlib-1.4.tar.xz` | zlib, deflate compression | 1.4 | zlib (`LICENSE` in the archive) | https://zlib.net/zlib-1.4.tar.xz (SHA-256 `4f11c512053d7bab8d9e9b89bde3575add3e4c50a383b42ef6cb837035fc5a7c`, as zlib.net lists it; the GitHub release is the same file) |
 | `curl-8.23.0.tar.xz` | curl and libcurl, a URL transfer library | 8.23.0 | curl (MIT-style, `COPYING` in the archive) | https://curl.se/download/curl-8.23.0.tar.xz (SHA-256 `8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5`; the GitHub release is the same file) |
+| `freetype-2.15.0.tar.xz` | FreeType, a font engine | 2.15.0 | FreeType License (BSD-style, `LICENSE.TXT` and `docs/FTL.TXT` in the archive) | https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz (SHA-256 `93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5`; the SourceForge copy is the same file) |
+| `harfbuzz/` | HarfBuzz, a text shaping engine | 15.1.0 | Old MIT (`COPYING`) | https://github.com/harfbuzz/harfbuzz/releases/download/15.1.0/harfbuzz-15.1.0.tar.xz (SHA-256 `0fc7c565443a5f4be7da65ac5ee5bd737d9b158dc908708b7689a0a5796b0c8d`) |
 | `sqlite-amalgamation-3540100.zip` | SQLite, an SQL database engine, and its command-line shell | 3.54.1 | Public domain (the header of `sqlite3.c`) | https://www.sqlite.org/2026/sqlite-amalgamation-3540100.zip (SHA3-256 `92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30`, as sqlite.org lists it) |
 
 Trimmed, not modified:
@@ -38,6 +40,12 @@ Trimmed, not modified:
   transfers with zlib, no TLS yet, no IPv6, no Unix sockets, the
   resolver in the calling thread. Only libcurl and the `curl` tool are
   built.
+- **FreeType**: the archive is kept intact. The build compiles the
+  modules `apps/fonts/ftmodule.h` names (TrueType, CFF, the hinters, the
+  anti-aliasing renderer, WOFF through zlib), not FreeType's own list.
+- **HarfBuzz**: only `src/`, `COPYING` and `README.md` of the release are
+  kept: the archive is 20 MB, most of it test fonts, documentation and
+  tools. The sources are unchanged; the build compiles `src/harfbuzz.cc`.
 - **SQLite**: the amalgamation archive is kept intact and unpacked into
   the build directory (`scripts/unzipflat.py`). It is built thread-safe,
   without loadable extensions and without memory-mapped I/O, with the

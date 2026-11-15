@@ -45,7 +45,10 @@ extern "C" {
 #include "uwoff.h"
 #include "uwoff2.h"
 extern "C" {
-#include "../../kernel/include/ttf.h"
+#include <ft2build.h>
+#include FT_FREETYPE_H
+#include <hb.h>
+#include <hb-ft.h>
 }
 #include "ujpeg.h"
 #include "ugif.h"
@@ -106,7 +109,7 @@ struct font {
     int face, px;
     int ascent, descent;
     bool underline, strike;
-    const ttf_font* web = nullptr;     // a page's own (@font-face), or none
+    struct loaded_font* web = nullptr; // a page's own (@font-face), or none
 };
 
 static uint32_t rgb(const web_color& c)
@@ -437,10 +440,10 @@ static std::map<std::string, picture> pictures;
 //
 // litehtml knows nothing of @font-face; the rules are picked out of the
 // page's style sheets here, as they are read (scan_font_faces). A font a
-// rule names is fetched the first time a box asks for its family, and
-// drawn with the kernel's TrueType rasteriser, built into the browser
-// (kernel/ttf.c) - TrueType outlines, as a .ttf, an .otf of them or
-// a WOFF or a WOFF2.
+// rule names is fetched the first time a box asks for its family, drawn
+// with FreeType and shaped with HarfBuzz (third_party/): TrueType or
+// CFF outlines, as a .ttf, an .otf or a WOFF or a WOFF2, with the
+// font's own kerning and ligatures.
 
 struct font_face {
     std::string family;                // lower case, no quotes
@@ -451,10 +454,34 @@ struct font_face {
 static std::vector<font_face> faces;
 
 struct loaded_font {
-    std::string data;                  // the sfnt, which 'f' points into
-    ttf_font f;
+    std::string data;                  // the sfnt, which 'face' reads from
+    FT_Face face = nullptr;
+    hb_font_t* hb = nullptr;
+    int px = 0;                        // the size 'face' and 'hb' are set to
     bool ok = false;
 };
+
+static FT_Library ft_library()
+{
+    static FT_Library lib = nullptr;
+    if (!lib && FT_Init_FreeType(&lib))
+        lib = nullptr;
+    return lib;
+}
+
+// The same outlines as the kernel's own rasteriser drew them before
+// FreeType came: unhinted, so a glyph is where its outline says and the
+// widths do not round to whole pixels a glyph at a time
+static const FT_Int32 LOAD_FLAGS = FT_LOAD_NO_HINTING;
+
+static void use_px(loaded_font* f, int px)
+{
+    if (f->px == px)
+        return;
+    FT_Set_Pixel_Sizes(f->face, 0, px);
+    hb_ft_font_changed(f->hb);
+    f->px = px;
+}
 static std::map<std::string, std::unique_ptr<loaded_font>> loaded_fonts;
 
 static std::string css_lower_trim(std::string s)
@@ -559,7 +586,7 @@ static bool get_url(const std::string& where, std::string& out, const char* file
 
 // The font for a family at a weight and slant, fetched and opened the
 // first time; null when the page has none for it or it will not open
-static const ttf_font* web_font(const std::string& family, int weight, bool italic)
+static loaded_font* web_font(const std::string& family, int weight, bool italic)
 {
     const font_face* best = nullptr;
     int best_score = 1 << 30;
@@ -596,39 +623,67 @@ static const ttf_font* web_font(const std::string& family, int weight, bool ital
             } else {
                 slot->data = data;
             }
-            const char* why = nullptr;
-            slot->ok = !slot->data.empty() &&
-                       ttf_open(&slot->f, slot->data.data(), (uint32_t)slot->data.size(), &why) == 0;
-            std::printf("[web] font %s: %s\n", best->url.c_str(), slot->ok ? "opened" : why ? why : "not read");
+            int e = slot->data.empty() || !ft_library()
+                        ? -1
+                        : FT_New_Memory_Face(ft_library(),
+                                             (const FT_Byte*)slot->data.data(),
+                                             (FT_Long)slot->data.size(), 0,
+                                             &slot->face);
+            if (!e && !FT_IS_SCALABLE(slot->face)) {
+                FT_Done_Face(slot->face);
+                e = -2;
+            }
+            if (!e) {
+                slot->hb = hb_ft_font_create_referenced(slot->face);
+                hb_ft_font_set_load_flags(slot->hb, LOAD_FLAGS);
+                slot->ok = true;
+            }
+            std::printf("[web] font %s: %s\n", best->url.c_str(),
+                        slot->ok ? "opened" : e > 0 ? "not a font FreeType reads" : "not read");
             std::fflush(stdout);
         }
     }
-    return slot->ok ? &slot->f : nullptr;
+    return slot->ok ? slot.get() : nullptr;
 }
 
-static uint32_t utf8_next(const char* s, size_t& i)
+// A run of text shaped by HarfBuzz: the glyphs, in order, and where
+struct shaped_glyph {
+    unsigned glyph;
+    int32_t x_advance, x_offset, y_offset;   // 1/64 px
+};
+
+static void shape(loaded_font* f, const char* text, int px,
+                  std::vector<shaped_glyph>& out)
 {
-    unsigned char c = (unsigned char)s[i++];
-    if (c < 0x80)
-        return c;
-    int extra = c >= 0xF0 ? 3 : c >= 0xE0 ? 2 : c >= 0xC0 ? 1 : 0;
-    uint32_t cp = c & (0x3F >> extra);
-    for (int k = 0; k < extra && (s[i] & 0xC0) == 0x80; k++)
-        cp = cp << 6 | ((unsigned char)s[i++] & 0x3F);
-    return cp;
+    use_px(f, px);
+    out.clear();
+    hb_buffer_t* buf = hb_buffer_create();
+    hb_buffer_add_utf8(buf, text, -1, 0, -1);
+    hb_buffer_guess_segment_properties(buf);
+    hb_shape(f->hb, buf, nullptr, 0);
+    unsigned n;
+    hb_glyph_info_t* info = hb_buffer_get_glyph_infos(buf, &n);
+    hb_glyph_position_t* pos = hb_buffer_get_glyph_positions(buf, &n);
+    for (unsigned i = 0; i < n; i++)
+        out.push_back({info[i].codepoint, pos[i].x_advance, pos[i].x_offset,
+                       pos[i].y_offset});
+    hb_buffer_destroy(buf);
 }
 
-// A string's width in a web font at px, in 1/64 of a pixel
-static int64_t web_width(const ttf_font* f, const char* text, int px)
+// A string's width in a web font at px, in 1/64 of a pixel: the shaped
+// advances, so kerning and ligatures are in it as they are on screen
+static int64_t web_width(loaded_font* f, const char* text, int px)
 {
+    static std::vector<shaped_glyph> run;
+    shape(f, text, px, run);
     int64_t w = 0;
-    for (size_t i = 0; text[i];)
-        w += ttf_advance(f, ttf_glyph(f, utf8_next(text, i)), px);
+    for (const auto& g : run)
+        w += g.x_advance;
     return w;
 }
 
 struct glyph_key {
-    const ttf_font* f;
+    const loaded_font* f;
     int glyph, px;
     bool operator<(const glyph_key& o) const
     {
@@ -641,7 +696,7 @@ struct drawn_glyph {
 };
 static std::map<glyph_key, drawn_glyph> glyph_cache;
 
-static const drawn_glyph& glyph_at(const ttf_font* f, int glyph, int px)
+static const drawn_glyph& glyph_at(loaded_font* f, int glyph, int px)
 {
     auto it = glyph_cache.find({f, glyph, px});
     if (it != glyph_cache.end())
@@ -649,14 +704,20 @@ static const drawn_glyph& glyph_at(const ttf_font* f, int glyph, int px)
     if (glyph_cache.size() > 20000)
         glyph_cache.clear();
     drawn_glyph& g = glyph_cache[{f, glyph, px}];
-    static uint8_t buf[192 * 192];
-    ttf_bitmap b;
-    if (ttf_render(f, glyph, px, &b, buf, sizeof(buf)) == 0 && b.w > 0) {
-        g.w = b.w;
-        g.h = b.h;
-        g.left = b.left;
-        g.top = b.top;
-        g.alpha.assign(buf, buf + b.w * b.h);
+    use_px(f, px);
+    if (FT_Load_Glyph(f->face, (FT_UInt)glyph, LOAD_FLAGS) == 0 &&
+        FT_Render_Glyph(f->face->glyph, FT_RENDER_MODE_NORMAL) == 0) {
+        const FT_Bitmap& b = f->face->glyph->bitmap;
+        if (b.width > 0 && b.rows > 0 && b.width <= 512 && b.rows <= 512) {
+            g.w = (int)b.width;
+            g.h = (int)b.rows;
+            g.left = f->face->glyph->bitmap_left;
+            g.top = f->face->glyph->bitmap_top;
+            g.alpha.resize((size_t)g.w * g.h);
+            for (int r = 0; r < g.h; r++)
+                std::memcpy(&g.alpha[(size_t)r * g.w],
+                            b.buffer + (ptrdiff_t)r * b.pitch, (size_t)g.w);
+        }
     }
     return g;
 }
@@ -795,10 +856,10 @@ class window_container : public document_container {
         f->ascent = (f->px * 93 + 50) / 100;
         f->descent = (f->px * 24 + 50) / 100;
         if (f->web) {
-            int32_t asc, desc, gap;
-            ttf_vmetrics(f->web, f->px, &asc, &desc, &gap);
-            f->ascent = (asc + 32) >> 6;
-            f->descent = (-desc + 32) >> 6;
+            use_px(f->web, f->px);
+            const FT_Size_Metrics& m = f->web->face->size->metrics;
+            f->ascent = (int)((m.ascender + 32) >> 6);
+            f->descent = (int)((-m.descender + 32) >> 6);
         }
         f->underline = d.decoration_line & text_decoration_line_underline;
         f->strike = d.decoration_line & text_decoration_line_line_through;
@@ -861,24 +922,27 @@ class window_container : public document_container {
     // A run in a page's own font: the glyphs' coverage laid on what is
     // under the run, a row of the run at a time from its first inked
     // pixel to its last. The pen's x right of the run, as ud_text gives.
-    int draw_web_text(const ttf_font* tf, int x, int base, const char* text,
+    int draw_web_text(loaded_font* tf, int x, int base, const char* text,
                       uint32_t colour, int px)
     {
-        int32_t asc, desc, gap;
-        ttf_vmetrics(tf, px, &asc, &desc, &gap);
-        int top = base - ((asc + 63) >> 6), h = ((asc + 63) >> 6) + ((-desc + 63) >> 6) + 1;
+        use_px(tf, px);
+        int64_t asc = tf->face->size->metrics.ascender;
+        int64_t desc = tf->face->size->metrics.descender;
+        int top = base - (int)((asc + 63) >> 6), h = (int)((asc + 63) >> 6) + (int)((-desc + 63) >> 6) + 1;
         int64_t pen = 0;
         struct placed {
             const drawn_glyph* g;
-            int x;
+            int x, dy;
         };
         std::vector<placed> glyphs;
-        for (size_t i = 0; text[i];) {
-            int gl = ttf_glyph(tf, utf8_next(text, i));
-            const drawn_glyph& g = glyph_at(tf, gl, px);
+        static std::vector<shaped_glyph> run;
+        shape(tf, text, px, run);
+        for (const auto& s : run) {
+            const drawn_glyph& g = glyph_at(tf, (int)s.glyph, px);
             if (g.w)
-                glyphs.push_back({&g, (int)((pen + 32) >> 6) + g.left});
-            pen += ttf_advance(tf, gl, px);
+                glyphs.push_back({&g, (int)((pen + s.x_offset + 32) >> 6) + g.left,
+                                  -(int)((s.y_offset + 32) >> 6)});
+            pen += s.x_advance;
         }
         int w = (int)((pen + 63) >> 6) + 2;
         if (glyphs.empty() || w <= 0 || h <= 0 || w > 8192)
@@ -887,7 +951,7 @@ class window_container : public document_container {
         std::vector<uint8_t> cov((size_t)w * h, 0);
         for (const auto& p : glyphs)
             for (int r = 0; r < p.g->h; r++) {
-                int yy = base - p.g->top + r - top;
+                int yy = base - p.g->top + p.dy + r - top;
                 if (yy < 0 || yy >= h)
                     continue;
                 for (int c = 0; c < p.g->w; c++) {

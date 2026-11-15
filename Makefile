@@ -454,6 +454,53 @@ $(CURL_TOOL): $(CURL_TREE)/Makefile
 $(BUILD)/user64/curl.elf: $(CURL_TOOL) | $(BUILD)/user64
 	strip -o $@ $<
 
+# --- FreeType and HarfBuzz ----------------------------------------------
+# FreeType draws glyphs (TrueType and CFF outlines, hinted or not) and
+# HarfBuzz shapes text: which glyph for which letters, and where, with
+# the font's kerning and ligatures. FreeType is its release archive,
+# built from the modules apps/fonts/ftmodule.h names, WOFF through our
+# zlib; HarfBuzz is its src/ directory (trimmed, see third_party/README),
+# built through its one-file harfbuzz.cc with the FreeType glue.
+FT_TAR  := third_party/freetype-2.15.0.tar.xz
+FT_TREE := $(BUILD)/freetype
+FT_SRC  := base/ftsystem base/ftinit base/ftdebug base/ftbase base/ftbbox \
+           base/ftbitmap base/ftglyph base/ftmm base/ftsynth \
+           truetype/truetype sfnt/sfnt cff/cff psaux/psaux \
+           pshinter/pshinter psnames/psnames smooth/smooth autofit/autofit \
+           gzip/ftgzip
+FT_A    := $(FT_TREE)/libfreetype.a
+FT_CFLAGS := -DFT2_BUILD_LIBRARY -DFT_CONFIG_MODULES_H="<ftmodule.h>" \
+             -DFT_CONFIG_OPTION_SYSTEM_ZLIB -Iapps/fonts \
+             -I$(FT_TREE)/include -I$(ZLIB_TREE)
+HB_DIR  := third_party/harfbuzz
+HB_O    := $(BUILD)/harfbuzz/harfbuzz.o
+
+$(FT_TREE)/include/ft2build.h: $(FT_TAR)
+	rm -rf $(FT_TREE) && mkdir -p $(FT_TREE)
+	tar -xf $< -C $(FT_TREE) --strip-components=1
+	touch $@
+
+$(FT_TREE)/%.o: $(FT_TREE)/include/ft2build.h apps/fonts/ftmodule.h \
+                $(ZLIB_A) $(LIBC64)
+	@mkdir -p $(dir $@)
+	$(CC) $(LIBC64_CFLAGS) -w $(FT_CFLAGS) -c $(FT_TREE)/src/$*.c -o $@
+
+$(FT_A): $(patsubst %,$(FT_TREE)/%.o,$(FT_SRC))
+	rm -f $@ && ar rcs $@ $^
+
+$(HB_O): $(wildcard $(HB_DIR)/src/*.cc $(HB_DIR)/src/*.hh $(HB_DIR)/src/*.h) \
+         $(FT_TREE)/include/ft2build.h $(LIBC64)
+	mkdir -p $(dir $@)
+	$(CXX) $(CXX64_FLAGS) -w -fno-rtti -DHAVE_FREETYPE=1 \
+	    -I$(FT_TREE)/include -c $(HB_DIR)/src/harfbuzz.cc -o $@
+
+$(BUILD)/user64/fonttest.elf: libc/tests/fonttest.c $(FT_A) $(HB_O) $(ZLIB_A) \
+                              $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
+                              | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -I$(FT_TREE)/include -I$(HB_DIR)/src -Wall -Wextra \
+	    -c $< -o $(BUILD)/libc64/fonttest.o
+	$(call CXX64_LINK,$(BUILD)/libc64/fonttest.o $(HB_O) $(FT_A) $(ZLIB_A)) -o $@
+
 # --- SQLite -----------------------------------------------------------
 # The amalgamation exactly as sqlite.org publishes it, unpacked into the
 # build directory. Thread-safe, now that musl has threads (and PRAGMA
@@ -518,7 +565,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
-               $(BUILD)/user64/curl.elf \
+               $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
                $(BUILD)/user64/update.elf
 
 # --- C++, and litehtml ------------------------------------------------
@@ -634,12 +681,6 @@ $(BUILD)/litehtml/webjs.o: apps/browser/webjs.cpp apps/browser/webjs.h \
                            $(QJS_HDRS) $(LH_HDRS) $(LIBC64) | $(BUILD)/litehtml
 	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Ithird_party/quickjs -c $< -o $@
 
-# The kernel's TrueType reader and rasteriser, built into the browser
-# too: a page's own fonts are drawn there
-$(BUILD)/litehtml/ttf-prog.o: kernel/ttf.c kernel/include/ttf.h $(LIBC64) \
-                              | $(BUILD)/litehtml
-	$(CC) $(LIBC64_CFLAGS) -Wall -DTTF_IN_PROGRAM -c $< -o $@
-
 # Brotli's fixed data, from the RFC's (third_party/brotli-rfc7932): WOFF2
 $(BUILD)/gen/ubrotlidata.h: scripts/mkbrotlidata.py $(wildcard third_party/brotli-rfc7932/*)
 	@mkdir -p $(BUILD)/gen
@@ -647,15 +688,15 @@ $(BUILD)/gen/ubrotlidata.h: scripts/mkbrotlidata.py $(wildcard third_party/brotl
 
 $(BUILD)/user64/web.elf: apps/browser/web.cpp apps/browser/webjs.h $(LH_OBJS) \
                          $(BUILD)/litehtml/webjs.o $(QJS_OBJS) \
-                         $(BUILD)/litehtml/ttf-prog.o user/uwoff.h \
+                         $(FT_A) $(HB_O) $(ZLIB_A) user/uwoff.h \
                          user/uwoff2.h user/ubrotli.h $(BUILD)/gen/ubrotlidata.h \
                          $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
                          user/udraw.h user64/usys64.h user64/compat64.h \
                          | $(BUILD)/user64
-	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Iuser -Iuser64 -I$(BUILD)/gen -c $< \
-	    -o $(BUILD)/litehtml/web.o
+	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -Iuser -Iuser64 -I$(BUILD)/gen \
+	    -I$(FT_TREE)/include -I$(HB_DIR)/src -c $< -o $(BUILD)/litehtml/web.o
 	$(call CXX64_LINK,$(BUILD)/litehtml/web.o $(BUILD)/litehtml/webjs.o \
-	    $(BUILD)/litehtml/ttf-prog.o $(LH_OBJS) $(QJS_OBJS)) -o $@
+	    $(LH_OBJS) $(QJS_OBJS) $(HB_O) $(FT_A) $(ZLIB_A)) -o $@
 
 USER64_ELFS += $(BUILD)/user64/web.elf
 
@@ -764,6 +805,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    nettest=$(BUILD)/user64/nettest.elf \
 	    zlibtest=$(BUILD)/user64/zlibtest.elf \
 	    curl=$(BUILD)/user64/curl.elf \
+	    fonttest=$(BUILD)/user64/fonttest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)

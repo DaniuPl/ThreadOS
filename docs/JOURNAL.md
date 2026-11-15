@@ -6936,3 +6936,24 @@ works and is checked by `make test`.
       image), a gzip answer inflated, a redirect, a POST, a chunked
       answer, HEAD, a 404 turned into exit code 22 by -f, a name through
       the system's DNS, and -w.
+
+- [x] **FreeType and HarfBuzz, and the browser's page fonts on them**
+      (third_party/, apps/fonts/ftmodule.h, Makefile, apps/browser/web.cpp,
+      kernel/ttf.c, libc/tests/fonttest.c, scripts/tests/t_fonts.py,
+      scripts/tests/t_webfont.py)
+      FreeType 2.15.0 and HarfBuzz 15.1.0 are built against musl, and the
+      browser's @font-face fonts go through them instead of the kernel's
+      TrueType rasteriser built into it: HarfBuzz shapes each run with the
+      font's own kerning (GPOS) and ligatures (GSUB), and FreeType draws
+      the glyphs, unhinted as before. CFF outlines (.otf), which the
+      kernel's rasteriser does not read, now draw. The browser no longer
+      carries kernel/ttf.c; the kernel still draws the desktop with it.
+
+      The tests: fonttest shapes five texts (kerning, ligatures, Polish
+      letters, combining marks) in the system's whole DejaVu Sans and in
+      a CFF font made with fontTools, and sums the pixels of every glyph,
+      unhinted and hinted - exactly what the same program with the same
+      two libraries prints on the host. In the browser, a CFF font with a
+      kerning pair and a ligature of known sizes: "AV" is set 6 px tighter
+      at 20 px and "fi" is one rectangle with no gap, as the screen shows
+      and the layout measures; every earlier @font-face check still holds.
