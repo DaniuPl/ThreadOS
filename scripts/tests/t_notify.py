@@ -3,12 +3,14 @@
 
 Two things the desktop offers that are not windows.
 
-A notification is a card at the top right: a title and a line, for
-five seconds, newest on top. The shell sends one ('notify'), a program
-sends one (sys_notify), the desktop sends one when it saves a picture of
-the screen. The test reads the cards in the lettering they are written
-in, sees the newest on top, sees a click send one away, and sees them go
-by themselves.
+A notification is the island at the top growing into it: who sent it,
+a title and a line, for five seconds - the newest shown, the others
+waiting behind it, the island saying how many. The shell sends one
+('notify'), a program sends one (sys_notify), the desktop sends one
+when it saves a picture of the screen. The test reads them in the
+lettering they are written in, sees the newest shown with "+1" for the
+one behind it, sees a click send it away and the older one come out,
+and sees them go by themselves.
 
 The search is Ctrl+Space: a field under the bar, and what is typed is
 looked for among the programs, the windows, the settings and the files
@@ -33,23 +35,7 @@ DARK = theme("dark")
 
 
 def note_x(w=SCREEN_W):
-    return w - NOTE_RIGHT - NOTE_W
-
-
-def note_y(i):
-    return NOTE_TOP + i * (NOTE_H + NOTE_GAP)
-
-
-def card(q, i):
-    """(title, line) of the i-th card from the top"""
-    scr = q.screen_raw()
-    x, y = note_x(), note_y(i)
-    title = q.read_ui(x + NOTE_TEXT_X, y + NOTE_TITLE_Y, NOTE_W - 60,
-                      px=NOTE_PX, face="bold", fg=DARK["menu_text"],
-                      screen=scr)
-    line = q.read_ui(x + NOTE_TEXT_X, y + NOTE_BODY_Y, NOTE_W - 60,
-                     px=NOTE_PX, fg=DARK["menu_text"], screen=scr)
-    return title, line
+    return (w - ISL_NOTE_W) // 2
 
 
 def search_x(w=SCREEN_W):
@@ -133,42 +119,63 @@ def main():
             end = time.time() + 15
             while time.time() < end and got[0] != "udtest":
                 time.sleep(0.5)
-                got = card(q, 0)
-            check("a program's notification is a card at the top right, from "
-                  "ring 3 (%s)" % (got,), got == ("udtest", "drawn and measured"))
+                got = island_note(q)
+            check("a program's notification is in the island, from ring 3 "
+                  "(%s)" % (got,), got == ("udtest", "drawn and measured"))
 
-            # Two from the shell, the newest on top. (Short: typing is a
-            # tenth of a second a key, and the cards live five seconds.)
+            # Two from the shell, the newest shown. (Short: typing is a
+            # tenth of a second a key, and a note lives five seconds.)
+            # The program's has had its time first.
             q.click_desktop()             # the keys back to the shell
+            end = time.time() + 15
+            while time.time() < end and island_note(q) != ("", ""):
+                time.sleep(0.5)
             time.sleep(0.5)
             q.type_line("notify First")
             q.type_line("notify Second")
-            time.sleep(1)
-            got, older = card(q, 0), card(q, 1)
-            check("the shell's, the newest on top (%s)" % (got,),
+            end = time.time() + 10
+            got = island_note(q)
+            while time.time() < end and got != ("Shell", "Second"):
+                time.sleep(0.3)
+                got = island_note(q)
+            more = island_more(q)
+            check("the shell's, the newest shown (%s)" % (got,),
                   got == ("Shell", "Second"))
-            check("with the older one under it (%s)" % (older,),
-                  older == ("Shell", "First"))
+            check("with '+1' for the older one behind it ('%s')" % more,
+                  more == "+1")
 
-            q.click(note_x() + NOTE_W // 2, note_y(0) + NOTE_H // 2)
+            q.click(SCREEN_W // 2, ISL_TOP + ISL_NOTE_H // 2)
             q.mouse_goto(300, 300)
-            time.sleep(0.5)
-            check("a click sends a card away, and the one under it moves up "
-                  "(%s)" % (card(q, 0),), card(q, 0) == ("Shell", "First"))
-            # A card lives five seconds' worth of frames - on a desktop
-            # slowed down by a busy host that is longer, so it is
-            # watched until it goes rather than looked for once
-            points = (NOTE_W // 4) * (NOTE_H // 4)
+            end = time.time() + 5
+            got = island_note(q)
+            while time.time() < end and got != ("Shell", "First"):
+                time.sleep(0.3)
+                got = island_note(q)
+            more = island_more(q)
+            check("a click sends it away, and the one behind it comes out "
+                  "(%s), with nothing more behind ('%s')" % (got, more),
+                  got == ("Shell", "First") and more == "")
+            # A note lives five seconds' worth of frames from when it is
+            # shown - on a desktop slowed down by a busy host that is
+            # longer, so it is watched until it goes rather than looked
+            # for once. Where the island was, the wallpaper comes back
+            # (from its middle rightwards: udtest's window and the
+            # screen's icons reach its left end)
+            x0, x1 = SCREEN_W // 2 - 60, SCREEN_W // 2 + 160
+            y0, y1 = ISL_TOP, ISL_TOP + ISL_NOTE_H
+            points = ((x1 - x0) // 4) * ((y1 - y0) // 4)
             bare = 0
-            end = time.time() + 20
+            t0 = time.time()
+            end = t0 + 20
             while time.time() < end and bare != points:
                 time.sleep(1)
                 w, h, at = q.screen_raw()
-                bare = sum(1 for x in range(note_x(), note_x() + NOTE_W, 4)
-                           for y in range(note_y(0), note_y(0) + NOTE_H, 4)
+                bare = sum(1 for x in range(x0, x1 - 3, 4)
+                           for y in range(y0, y1 - 3, 4)
                            if at(x, y) == aurora_px(x, y))
-            check("after five seconds they go by themselves (%d of %d points "
-                  "the bare background)" % (bare, points), bare == points)
+            check("after five seconds it goes by itself, and the island "
+                  "with it (%d of %d points the bare background)"
+                  % (bare, points), bare == points)
 
             q.sendkey("print")              # Print Screen
             got = ("", "")
@@ -177,7 +184,7 @@ def main():
             end = time.time() + 40
             while time.time() < end:
                 time.sleep(0.5)
-                got = card(q, 0)
+                got = island_note(q)
                 if got[0]:
                     break
             check("a picture of the screen says it was saved (%s)" % (got,),

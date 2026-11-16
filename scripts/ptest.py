@@ -1177,6 +1177,28 @@ def island_name(q, w=SCREEN_W, screen=None):
                      screen=screen)
 
 
+ISL_DIM = (0xB4, 0xB4, 0xB4)
+
+
+def island_note(q, w=SCREEN_W, screen=None):
+    """(title, line) of the notification the island shows, ('', '')
+    when it shows none"""
+    scr = screen or q.screen_raw()
+    x = (w - ISL_NOTE_W) // 2 + ISL_NOTE_TEXT_X
+    room = ISL_NOTE_W - ISL_NOTE_TEXT_X - ISL_MORE_RIGHT
+    return (q.read_ui(x, ISL_TOP + ISL_NOTE_TITLE_Y, room - 30,
+                      px=ISL_NOTE_PX, face="bold", fg=ISL_FG, screen=scr),
+            q.read_ui(x, ISL_TOP + ISL_NOTE_BODY_Y, room, px=ISL_NOTE_PX,
+                      fg=ISL_DIM, screen=scr))
+
+
+def island_more(q, w=SCREEN_W, screen=None):
+    """'+N' when N more notifications wait behind the shown one"""
+    x1 = (w + ISL_NOTE_W) // 2 - ISL_MORE_RIGHT
+    return q.find_ui(x1 - 40, x1, ISL_TOP + ISL_NOTE_TITLE_Y,
+                     px=ISL_NOTE_PX, face="bold", fg=ISL_DIM, screen=screen)
+
+
 def island_level_x(i, w=SCREEN_W):
     lev_w = HDA_LEVELS * ISL_LEV_W + (HDA_LEVELS - 1) * ISL_LEV_GAP
     return ((w - ISL_PLAY_W) // 2 + ISL_PLAY_W - ISL_LEV_RIGHT - lev_w +

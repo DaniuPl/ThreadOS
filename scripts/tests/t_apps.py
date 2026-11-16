@@ -198,24 +198,9 @@ P = "user/gpaint.c"
 
 
 def paint_card(q):
-    """(title, line) of the notification card about the wallpaper - the
-    cards stack from the top, and the one Save put up may still be
-    there above or below it"""
-    scr = q.screen_raw()
-    nx = scr[0] - NOTE_RIGHT - NOTE_W
-    first = ("", "")
-    for i in range(NOTE_SHOWN):
-        y = NOTE_TOP + i * (NOTE_H + NOTE_GAP)
-        said = (q.read_ui(nx + NOTE_TEXT_X, y + NOTE_TITLE_Y, 200,
-                          px=NOTE_PX, face="bold", fg=DARK["menu_text"],
-                          screen=scr),
-                q.read_ui(nx + NOTE_TEXT_X, y + NOTE_BODY_Y, 220,
-                          px=NOTE_PX, fg=DARK["menu_text"], screen=scr))
-        if i == 0:
-            first = said
-        if "wallpaper" in said[1]:
-            return said
-    return first
+    """(title, line) of the notification the island shows - the newest:
+    the one about the wallpaper comes after the one Save put up"""
+    return island_note(q, w=q.screen_raw()[0])
 
 
 def paint(q):
@@ -252,15 +237,9 @@ def paint(q):
     # The card slides in; with the whole suite running, writing the file
     # and the slide may take longer than a moment - so it is looked for
     # until it has settled, not at one guessed instant
-    nx = SCREEN_W - NOTE_RIGHT - NOTE_W
     for _ in range(12):
         time.sleep(0.5)
-        scr = q.screen_raw()
-        said = (q.read_ui(nx + NOTE_TEXT_X, NOTE_TOP + NOTE_TITLE_Y, 200,
-                          px=NOTE_PX, face="bold", fg=DARK["menu_text"],
-                          screen=scr),
-                q.read_ui(nx + NOTE_TEXT_X, NOTE_TOP + NOTE_BODY_Y, 220,
-                          px=NOTE_PX, fg=DARK["menu_text"], screen=scr))
+        said = island_note(q)
         if said[0] == "Paint" and "drawing.bmp" in said[1]:
             break
     check("Save says so in a notification (%s)" % (said,),

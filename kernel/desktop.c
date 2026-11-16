@@ -2272,7 +2272,6 @@ static int ask_no_x(void) { return ask_do_x() - ASK_BTN_GAP - ASK_BTN_W; }
 static void search_click(int mx, int my);
 static void search_close(void);
 static int search_key(char c);
-static int note_at(int x, int y);
 static int island_press(int mx, int my);
 static int island_wheel(int mx, int my, int notches);
 static void island_pointer(int mx, int my, int pressed);
@@ -2596,21 +2595,12 @@ static void handle_input(int mx, int my, int buttons)
     }
     prev_right = right;
 
-    /* The search, the island and the notifications are above
-       everything else, and take a click before anything under them
-       can */
+    /* The search and the menus are above everything else, and take a
+       click before anything under them can - the island too, which
+       comes after them */
     island_pointer(mx, my, pressed);
-    if (pressed && !prev_pressed && island_press(mx, my)) {
-        prev_pressed = pressed;
-        return;
-    }
     if (pressed && !prev_pressed && search_open) {
         search_click(mx, my);
-        prev_pressed = pressed;
-        return;
-    }
-    if (pressed && !prev_pressed && note_at(mx, my) >= 0) {
-        note_drop(note_at(mx, my));
         prev_pressed = pressed;
         return;
     }
@@ -2624,6 +2614,12 @@ static void handle_input(int mx, int my, int buttons)
         } else {
             context_open = 0;
         }
+        prev_pressed = pressed;
+        return;
+    }
+
+    /* Under the menus and the search, over everything else */
+    if (pressed && !prev_pressed && !context_open && island_press(mx, my)) {
         prev_pressed = pressed;
         return;
     }
@@ -4204,22 +4200,26 @@ static void draw_dock(void)
 /* --- Notifications ----------------------------------------------------------
  *
  * Something happened that is worth a glance, and nobody asked: a picture
- * was saved, a program has news. A card slides in at the top right,
- * stays five seconds and goes; a click sends it away sooner. At most
- * four are shown, the newest on top - a fifth pushes the oldest out.
+ * was saved, a program has news. The island at the top grows into the
+ * newest one - who sent it, its title and a line - for five seconds; a
+ * click sends it away sooner. The older ones wait behind it, the island
+ * saying how many. One that was covered within two seconds of coming
+ * gets its five seconds again when its turn comes - it has not been
+ * read; one that had been on the screen longer goes on growing old
+ * behind the newer one. At most four wait - a fifth pushes the oldest
+ * out.
  *
  * desktop_notify() is called from anywhere - a system call on another
- * core, the keyboard's interrupt - so the cards are handed over under a
+ * core, the keyboard's interrupt - so the notes are handed over under a
  * lock and the desktop thread alone draws them.
  */
 #define NOTE_LIFE  (5 * FRAME_HZ)
-#define NOTE_SLIDE 8                     /* frames to come in */
-#define NOTE_FADE  12                    /* frames to go */
 
 struct note {
     char title[40];
     char body[80];
-    uint32_t born;                       /* the frame it came in on */
+    uint32_t shown;                      /* the frame the island first
+                                            showed it on; 0 = not yet */
 };
 static struct note notes[NOTE_SHOWN];    /* [0] is the newest */
 static int note_n;
@@ -4242,7 +4242,11 @@ void desktop_notify(const char *title, const char *body)
         notes[i] = notes[i - 1];
     copy_cut(notes[0].title, title, sizeof(notes[0].title));
     copy_cut(notes[0].body, body, sizeof(notes[0].body));
-    notes[0].born = frames;
+    notes[0].shown = 0;
+    /* the one it covers, if it was hardly seen, starts again when it
+       comes back */
+    if (note_n > 1 && notes[1].shown && frames - notes[1].shown < 2 * FRAME_HZ)
+        notes[1].shown = 0;
     spin_unlock_irq(&note_lock, fl);
 }
 
@@ -4257,59 +4261,32 @@ static void note_drop(int i)
     spin_unlock_irq(&note_lock, fl);
 }
 
-static int note_x(void) { return video_w() - NOTE_RIGHT - NOTE_W; }
-static int note_y(int i) { return NOTE_TOP + i * (NOTE_H + NOTE_GAP); }
-
-/* Which card is under the point, or -1 */
-static int note_at(int x, int y)
+/* The newest note, for the island to show (0 = none); its five seconds
+   start the first frame it is on the screen */
+static int note_head(struct note *out, int *behind, int showing)
 {
-    for (int i = 0; i < note_n; i++)
-        if (in_rect(x, y, note_x(), note_y(i), NOTE_W, NOTE_H))
-            return i;
-    return -1;
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    int have = note_n > 0;
+    if (have) {
+        if (showing && !notes[0].shown)
+            notes[0].shown = frames ? frames : 1;
+        *out = notes[0];
+        *behind = note_n - 1;
+    }
+    spin_unlock_irq(&note_lock, fl);
+    return have;
 }
 
-static void draw_notes(void)
+/* Called every frame: the ones shown long enough go */
+static void note_age(void)
 {
-    /* The old ones go first: a card past its time is not drawn */
-    for (int i = note_n - 1; i >= 0; i--)
-        if (frames - notes[i].born >= NOTE_LIFE)
+    for (int i = NOTE_SHOWN - 1; i >= 0; i--) {
+        irqflags_t fl = spin_lock_irq(&note_lock);
+        int old = i < note_n && notes[i].shown &&
+                  frames - notes[i].shown >= NOTE_LIFE;
+        spin_unlock_irq(&note_lock, fl);
+        if (old)
             note_drop(i);
-
-    uint32_t m = config_get_num("motion", 1);
-    for (int i = 0; i < note_n; i++) {
-        struct note n = notes[i];
-        uint32_t age = frames - n.born;
-        int x = note_x(), y = note_y(i), a = 255;
-        if (m && age < NOTE_SLIDE) {     /* in from the right, slowing */
-            int u = (int)(NOTE_SLIDE - age);
-            x += (NOTE_W + NOTE_RIGHT) * u * u / (NOTE_SLIDE * NOTE_SLIDE);
-        }
-        if (m && age + NOTE_FADE > NOTE_LIFE)
-            a = 255 * (int)(NOTE_LIFE - age) / NOTE_FADE;
-        gfx_shadow(x, y, NOTE_W, NOTE_H, NOTE_R, 14,
-                   (theme_dark ? 150 : 90) * a / 255, 4);
-        gfx_frost(x, y, NOTE_W, NOTE_H, NOTE_R, 10, L.menu_bg,
-                  L.menu_a * a / 255);
-        gfx_rring16(x * 16, y * 16, NOTE_W * 16, NOTE_H * 16, NOTE_R * 16,
-                    16, L.win_line, 200 * a / 255);
-        if (a < 160)
-            continue;                    /* going: the glass alone */
-        int iy = y + (NOTE_H - NOTE_ICON) / 2;
-        gfx_rrect(x + 12, iy, NOTE_ICON, NOTE_ICON, 7, L.accent, 255);
-        char first[2] = { n.title[0] ? n.title[0] : '!', 0 };
-        int fw = ui_font_width(UI_BOLD, 15, first);
-        ui_font_text(UI_BOLD, 15, x + 12 + (NOTE_ICON - fw) / 2,
-                     ui_font_baseline_in(15, iy, NOTE_ICON), first,
-                     L.accent_text);
-        char cut[sizeof(n.body) + 4];
-        int room = NOTE_W - NOTE_TEXT_X - 12;
-        ui_font_text(UI_BOLD, NOTE_PX, x + NOTE_TEXT_X, y + NOTE_TITLE_Y,
-                     fit_text(n.title, UI_BOLD, NOTE_PX, room, cut,
-                              sizeof(cut)), L.menu_text);
-        ui_font_text(UI_SANS, NOTE_PX, x + NOTE_TEXT_X, y + NOTE_BODY_Y,
-                     fit_text(n.body, UI_SANS, NOTE_PX, room, cut,
-                              sizeof(cut)), L.menu_text);
     }
 }
 
@@ -5207,9 +5184,12 @@ static int cat_num(char *d, int at, uint32_t v);
 
 #define ISL_BG    0x000000
 #define ISL_FG    0xFFFFFF
+#define ISL_DIM   0xB4B4B4              /* a notification's line, "+2" */
 #define ISL_SHOW  (3 * FRAME_HZ / 2)    /* how long a change of loudness stays */
 
-enum { ISL_NONE, ISL_PLAYING, ISL_VOLUME };
+/* What it shows, in the order they take it: the loudness someone is
+   changing, then news, then what is playing */
+enum { ISL_NONE, ISL_PLAYING, ISL_NOTE, ISL_VOLUME };
 
 static int isl_w16, isl_h16;            /* the size now, sixteenths */
 static int isl_vw16, isl_vh16;          /* and how fast it changes */
@@ -5240,21 +5220,28 @@ static void speaker(int cx, int cy, int muted, int v, uint32_t c)
     }
 }
 
+static void island_size(int kind, int *w, int *h)
+{
+    switch (kind) {
+    case ISL_VOLUME: *w = ISL_VOL_W;  *h = ISL_VOL_H;  break;
+    case ISL_NOTE:   *w = ISL_NOTE_W; *h = ISL_NOTE_H; break;
+    case ISL_PLAYING: *w = ISL_PLAY_W; *h = ISL_PLAY_H; break;
+    default:         *w = *h = ISL_PLAY_H;   /* shrinking to a dot, and gone */
+    }
+}
+
 /* What it should be showing, and at what size */
 static int island_want(int *w, int *h)
 {
-    if ((int32_t)(vol_until - frames) > 0 || isl_drag) {
-        *w = ISL_VOL_W;
-        *h = ISL_VOL_H;
-        return ISL_VOLUME;
-    }
-    if (hda_stream_who() >= 0) {
-        *w = ISL_PLAY_W;
-        *h = ISL_PLAY_H;
-        return ISL_PLAYING;
-    }
-    *w = *h = ISL_PLAY_H;               /* shrinking to a dot, and gone */
-    return ISL_NONE;
+    int kind = ISL_NONE;
+    if ((int32_t)(vol_until - frames) > 0 || isl_drag)
+        kind = ISL_VOLUME;
+    else if (note_n > 0)
+        kind = ISL_NOTE;
+    else if (hda_stream_who() >= 0)
+        kind = ISL_PLAYING;
+    island_size(kind, w, h);
+    return kind;
 }
 
 static void island_rect(int *x, int *y, int *w, int *h)
@@ -5290,6 +5277,8 @@ static void spring(int *pos, int *vel, int target)
 /* Once a frame, before it is drawn */
 static void island_step(void)
 {
+    note_age();
+
     /* Whoever changed the loudness - a key, Settings, the shell - the
        island says so */
     int v = hda_volume(), m = hda_muted();
@@ -5369,13 +5358,51 @@ static void draw_island(void)
 
     /* The contents only once the size has (nearly) come: a slider
        squeezed into a growing capsule would be drawn over its ends */
-    int tw, th;
-    island_want(&tw, &th);
-    int dw = w - (isl_kind == ISL_VOLUME ? ISL_VOL_W : ISL_PLAY_W);
-    int dh = h - (isl_kind == ISL_VOLUME ? ISL_VOL_H : ISL_PLAY_H);
+    int kw, kh;
+    island_size(isl_kind, &kw, &kh);
+    int dw = w - kw, dh = h - kh;
     if (dw < -2 || dw > 6 || dh < -2 || dh > 3 || a < 255)
         return;
-    x = (video_w() - (isl_kind == ISL_VOLUME ? ISL_VOL_W : ISL_PLAY_W)) / 2;
+    x = (video_w() - kw) / 2;
+
+    if (isl_kind == ISL_NOTE) {
+        struct note n;
+        int behind = 0;
+        if (!note_head(&n, &behind, 1))
+            return;
+        /* Who it is from: the sender's initial, on the accent */
+        int iy = y + (ISL_NOTE_H - ISL_NOTE_ICON) / 2;
+        gfx_rrect(x + ISL_NOTE_ICON_X, iy, ISL_NOTE_ICON, ISL_NOTE_ICON, 8,
+                  L.accent, 255);
+        char first[2] = { n.title[0] ? n.title[0] : '!', 0 };
+        int fw = ui_font_width(UI_BOLD, 15, first);
+        ui_font_text(UI_BOLD, 15, x + ISL_NOTE_ICON_X + (ISL_NOTE_ICON - fw) / 2,
+                     ui_font_baseline_in(15, iy, ISL_NOTE_ICON), first,
+                     L.accent_text);
+        /* "+2": more behind it, at the right end */
+        char more[8] = "";
+        int mw = 0;
+        if (behind > 0) {
+            more[0] = '+';
+            cat_num(more, 1, (uint32_t)behind);
+            mw = ui_font_width(UI_BOLD, ISL_NOTE_PX, more);
+            ui_font_text(UI_BOLD, ISL_NOTE_PX, x + ISL_NOTE_W - ISL_MORE_RIGHT - mw,
+                         y + ISL_NOTE_TITLE_Y, more, ISL_DIM);
+        }
+        char cut[sizeof(n.body) + 4];
+        int room = ISL_NOTE_W - ISL_NOTE_TEXT_X - ISL_MORE_RIGHT -
+                   (mw ? mw + 8 : 0);
+        ui_font_text(UI_BOLD, ISL_NOTE_PX, x + ISL_NOTE_TEXT_X,
+                     y + ISL_NOTE_TITLE_Y,
+                     fit_text(n.title, UI_BOLD, ISL_NOTE_PX, room, cut,
+                              sizeof(cut)), ISL_FG);
+        room = ISL_NOTE_W - ISL_NOTE_TEXT_X - ISL_MORE_RIGHT;
+        ui_font_text(UI_SANS, ISL_NOTE_PX, x + ISL_NOTE_TEXT_X,
+                     y + ISL_NOTE_BODY_Y,
+                     fit_text(n.body, UI_SANS, ISL_NOTE_PX, room, cut,
+                              sizeof(cut)), ISL_DIM);
+        return;
+    }
 
     if (isl_kind == ISL_VOLUME) {
         int muted = hda_muted(), v = hda_volume();
@@ -5444,6 +5471,10 @@ static int island_press(int mx, int my)
 {
     if (!island_hit(mx, my))
         return 0;
+    if (isl_kind == ISL_NOTE) {           /* read: away with it */
+        note_drop(0);
+        return 1;
+    }
     if (isl_kind != ISL_VOLUME) {        /* what is playing -> how loud */
         vol_until = frames + ISL_SHOW;
         return 1;
@@ -6824,12 +6855,11 @@ static void desktop_thread(void *arg)
         if (bar_visible())
             draw_bar();
         draw_dock();
+        draw_island();             /* passing things, under what is asked for */
         draw_tmenu();
         draw_menu();
         draw_context_menu();
-        draw_notes();
         draw_search();
-        draw_island();
         draw_status_card();
         draw_ask();
         /* What was just saved stays on the screen for a moment - the

@@ -7276,3 +7276,23 @@ works and is checked by `make test`.
       protocol and read all three endpoints; reports from both of the
       keyboard's interfaces sent together both count. `make fuzz` puts
       kernel/hid.c through damaged descriptors and reports.
+
+- [x] **Notifications in the island** (kernel/desktop.c,
+      kernel/include/look.h, scripts/ptest.py, scripts/tests/t_notify.py,
+      scripts/tests/t_apps.py, scripts/tests/t_island.py)
+      The cards at the top right are gone; a notification is the island
+      growing into it - the sender's initial on the accent, the title,
+      a line - for five seconds, a click sending it away sooner. The
+      newest is shown and the others wait behind it, the island saying
+      "+N". A note covered within two seconds of coming gets its five
+      seconds again when its turn comes; one that had been on the screen
+      longer goes on growing old behind the newer one. The loudness
+      takes the island first (someone is changing it right now), then
+      news, then what is playing. The island lies under the menus and
+      the search, which are drawn over it and take a click first.
+
+      t_notify reads the newest notification and its "+1" off the
+      island, sees a click bring the older one out, and the wallpaper
+      come back when it has gone; t_island sees a loudness key take a
+      notification's place and give it back; t_apps reads Paint's notes
+      from the island.

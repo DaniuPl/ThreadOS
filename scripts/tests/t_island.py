@@ -9,7 +9,9 @@ shrinks away after (kernel/desktop.c). Two things go on there:
   anywhere else, here the kernel shell's 'volume' command. Every time
   the island's number and the length of its filled slider are read off
   the screen, and the kernel itself is asked ('volume' on the serial
-  port) whether the loudness really is what the island says
+  port) whether the loudness really is what the island says. A
+  notification on the island gives way to a loudness key and comes
+  back after it (t_notify has the rest of notifications)
 
   what is playing: gmedia plays a WAV made here - four seconds of a
   sine at 24000 of 32767, then three of silence. While it plays the
@@ -149,6 +151,20 @@ def loudness_part(q):
     check(f"and another brings the sound back ('{got}')",
           got == "75%" and kernel_volume(q) == (75, False))
     q.mouse_goto(400, 400)
+
+    # News waits for the loudness: a notification shown, a key pressed,
+    # and the notification back once the loudness has gone
+    wait_for(lambda: island_shown(q), False, timeout=15)
+    q.command("notify Waiting", "thread64")
+    got = wait_for(lambda: island_note(q), ("Shell", "Waiting"))
+    check(f"a notification grows the island ({got})",
+          got == ("Shell", "Waiting"))
+    q.sendkey("volumedown")
+    got = wait_for(said, "70%")
+    check(f"a loudness key takes the island over ('{got}')", got == "70%")
+    got = wait_for(lambda: island_note(q), ("Shell", "Waiting"), timeout=10)
+    check(f"and the notification comes back after it ({got})",
+          got == ("Shell", "Waiting"))
 
 
 def tone_wav():

@@ -130,19 +130,17 @@
 #define ABOUT_LINE_Y 66      /* its first line of facts */
 #define ABOUT_LINE_DY 20
 
-/* --- notifications: cards at the top right, newest on top ------------- */
-#define NOTE_W       280
-#define NOTE_H       56
-#define NOTE_R       12
-#define NOTE_GAP     8
-#define NOTE_TOP     (BAR_H + 10)
-#define NOTE_RIGHT   10
-#define NOTE_ICON    28
-#define NOTE_TEXT_X  52      /* the text, from the card's left edge */
-#define NOTE_TITLE_Y 23      /* the title's baseline, from its top */
-#define NOTE_BODY_Y  41      /* the line under it */
-#define NOTE_PX      12
-#define NOTE_SHOWN   4       /* at most this many at once */
+/* --- notifications: in the island, the newest shown, the rest behind -- */
+#define NOTE_SHOWN   4       /* at most this many waiting at once */
+#define ISL_NOTE_W   340     /* the capsule a notification makes */
+#define ISL_NOTE_H   52
+#define ISL_NOTE_ICON 30     /* the sender's initial, on the accent */
+#define ISL_NOTE_ICON_X 12
+#define ISL_NOTE_TEXT_X 54   /* the title and the line, from the left end */
+#define ISL_NOTE_TITLE_Y 22  /* the title's baseline, from the top */
+#define ISL_NOTE_BODY_Y 40   /* the line's */
+#define ISL_NOTE_PX  13
+#define ISL_MORE_RIGHT 18    /* "+2" (more behind it) ends this far from the right end */
 
 /* --- the search: a field and what matches, under the bar ----------------- */
 #define SEARCH_W       460
