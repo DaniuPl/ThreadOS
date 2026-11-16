@@ -81,9 +81,16 @@ void uvc_print(void);
 /* Pictures, one mode at a time (stage two). start: 0; -1 no such mode
    or no camera; -2 no room on the bus; -3 the camera said no; -4 no
    memory; -5 a bulk camera (it streams in a later stage); -6 busy. */
-int uvc_start(int mode);
+int uvc_start(int mode, int owner);
 void uvc_stop(void);
 int uvc_streaming(void);
+/* The program streaming (its tgid), -1 for none - or for the shell's
+   'camera grab' - and, for the end of a program, a stop that does not
+   wait: the stream's own thread stops it */
+int uvc_owner(void);
+void uvc_release(int tgid);
+struct cam_info;
+void uvc_info(struct cam_info *out);
 /* The newest whole frame, if it is newer than *seq: its bytes (valid
    until the next call) and its length, *seq updated; 0 when nothing
    newer has come */

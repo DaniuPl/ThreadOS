@@ -27,6 +27,11 @@ are a pattern that changes every frame; MJPEG frames are JPEGs Pillow
 writes, of a colour that changes every frame. The CRC-32 of every frame
 it finished sending is kept, for a test to find what the driver handed
 out among them.
+
+still=True sends the same picture every frame - YUY2 colour bars, an
+MJPEG of four coloured quarters - for a test that compares what is on
+the screen with it; strip_dht=True leaves the Huffman tables out of the
+JPEGs, as a webcam does (the standard ones are meant).
 """
 
 import struct
@@ -71,8 +76,9 @@ class UvcCamera:
     ep0_size = 64
 
     def __init__(self, bulk=False, vendor=0x0C45, product=0x6366,
-                 name="ThreadOS test camera"):
+                 name="ThreadOS test camera", still=False, strip_dht=False):
         self.bulk = bulk
+        self.still, self.strip_dht = still, strip_dht
         self.redir = None
         self.committed = None          # (format, frame) of the COMMIT
         self.cur, self.off, self.fid, self.count = None, 0, 0, 0
@@ -209,6 +215,12 @@ class UvcCamera:
         f, _, w, h, _, _ = mode
         n = self.count
         self.count += 1
+        if self.still:
+            key = (f, w, h)
+            if key not in self.jpegs:
+                self.jpegs[key] = yuy2_bars(w, h) if f == 2 else \
+                    self.jpeg_quarters(w, h)
+            return self.jpegs[key]
         if f == 2:                    # YUY2: a pattern of its own each time
             return bytes((x * 7 + (x >> 9) * 3 + n * 29) & 0xFF
                          for x in range(w * h * 2))
@@ -221,6 +233,11 @@ class UvcCamera:
             pic.save(b, "JPEG", quality=80)
             self.jpegs[key] = b.getvalue()
         return self.jpegs[key]
+
+    def jpeg_quarters(self, w, h):
+        """A JPEG of four coloured quarters - without its DHT if asked"""
+        data = quarters_jpeg(w, h)
+        return strip_dht(data) if self.strip_dht else data
 
     def iso_packet(self, ep):
         alt = self.redir.alts.get(1, 0) if self.redir else 0
@@ -273,3 +290,54 @@ class UvcCamera:
             else:
                 lines.append(head + ", no alternate carries it")
         return lines
+
+
+QUARTERS = [(220, 40, 50), (40, 190, 70), (40, 80, 220), (240, 200, 40)]
+# Colour bars as Y, U, V: eight of them across the picture
+BARS = [(180, 128, 128), (162, 44, 142), (131, 156, 44), (112, 72, 58),
+        (84, 184, 198), (65, 100, 212), (35, 212, 114), (16, 128, 128)]
+
+
+def quarters_jpeg(w, h):
+    import io
+    from PIL import Image
+    pic = Image.new("RGB", (w, h))
+    for i, c in enumerate(QUARTERS):
+        x0, y0 = (i % 2) * (w // 2), (i // 2) * (h // 2)
+        pic.paste(c, (x0, y0, x0 + w // 2, y0 + h // 2))
+    b = io.BytesIO()
+    pic.save(b, "JPEG", quality=90, optimize=False)
+    return b.getvalue()
+
+
+def strip_dht(data):
+    """The JPEG with its Huffman table segments taken out"""
+    out, i = bytearray(data[:2]), 2
+    while i + 4 <= len(data) and data[i] == 0xFF:
+        m = data[i + 1]
+        n = (data[i + 2] << 8) | data[i + 3]
+        if m == 0xDA:
+            out += data[i:]
+            return bytes(out)
+        if m != 0xC4:
+            out += data[i:i + 2 + n]
+        i += 2 + n
+    return bytes(out)
+
+
+def yuy2_bars(w, h):
+    """Eight vertical bars, each a Y, U, V of its own"""
+    row = bytearray()
+    for x in range(0, w, 2):
+        y_, u, v = BARS[x * 8 // w]
+        row += bytes([y_, u, y_, v])
+    return bytes(row) * h
+
+
+def yuy2_rgb(yy, u, v):
+    """BT.601 limited range in integers - what the Camera app does"""
+    c, d, e = yy - 16, u - 128, v - 128
+    cl = lambda x: max(0, min(255, x))
+    return (cl((298 * c + 409 * e + 128) >> 8),
+            cl((298 * c - 100 * d - 208 * e + 128) >> 8),
+            cl((298 * c + 516 * d + 128) >> 8))

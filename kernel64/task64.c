@@ -32,6 +32,7 @@
 #include "../kernel/include/string.h"
 #include "../kernel/include/io.h"
 #include "../kernel/include/hda.h"
+#include "../kernel/include/uvc.h"
 #include "futex64.h"
 
 #define STACK_SIZE 16384
@@ -1016,8 +1017,12 @@ static void let_go_of_fds(void)
     struct fd_table *ft = current->table;
     if (!ft)
         return;
-    if (ft->refs == 1)
+    if (ft->refs == 1) {
         task64_fd_close_all();
+        /* The program is gone with its last thread: so is its hold on
+           the camera (asked only - the stream's thread stops it) */
+        uvc_release(current->tgid);
+    }
     current->table = NULL;
     current->fds = NULL;
     if (--ft->refs == 0)

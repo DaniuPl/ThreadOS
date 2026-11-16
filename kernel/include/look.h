@@ -50,6 +50,12 @@
 #define STAT_PAD     12
 #define STAT_LINES   8
 #define STAT_SCAN_S  5       /* how long Bluetooth listens for devices */
+/* "The camera is on": a green dot left of Bluetooth while a picture is
+   being taken - drawn by the desktop from the driver's own state, so a
+   program cannot hide it */
+#define CAM_DOT_W    12      /* its place on the bar */
+#define CAM_DOT_D    8       /* the dot */
+#define CAM_DOT_RGB  0x30D158
 
 /* --- windows ----------------------------------------------------------- */
 /* The title bar. Twenty two pixels: the lights are eleven across and

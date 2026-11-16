@@ -35,20 +35,51 @@ and a second camera that streams over a bulk endpoint, with no
 alternates, is listed with 'bulk' for every mode (and says it streams
 in a later stage).
 
+Then the Camera app on the desktop, with a camera whose MJPEG frames
+leave their Huffman tables out, as a webcam's do:
+
+  while it is open the bar has a green dot, and only then
+
+  its preview of the MJPEG mode shows the four quarters of the picture
+  as Pillow decodes the JPEG - which needed the standard tables
+
+  the shutter keeps a photo in the home's Gallery folder: the frame the
+  camera sent with the standard tables put back, which Pillow opens to
+  the very same pixels as the original
+
+  the mode button goes to YUY2 176x144, shown at its own size in the
+  BT.601 colours of its bars, and a photo of it is a PNG of exactly
+  those colours
+
+  closing the window turns the camera off - the dot goes, the stream
+  stops - and so does killing the program
+
 Run on its own or through scripts/run_tests.py.
 """
 
+import io
 import os
 import re
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import ptest                 # noqa: E402
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary
+from ptest import check, summary, _kernel_define
+
+_C = "user64/gcamera.c"
+CAM_W0 = _kernel_define(_C, "W0")
+CAM_H0 = _kernel_define(_C, "H0")
+STRIP_H = _kernel_define(_C, "STRIP_H")
+SHUTTER_D = _kernel_define(_C, "SHUTTER_D")
+MODE_W = _kernel_define(_C, "MODE_W")
+DOT_RGB = (0x30, 0xD1, 0x58)            # CAM_DOT_RGB, kernel/include/look.h
 
 from usbredir import Redir   # noqa: E402
-from usbcam import UvcCamera, MODES  # noqa: E402
+from usbcam import (UvcCamera, MODES, BARS, quarters_jpeg,  # noqa: E402
+                    strip_dht, yuy2_rgb)
 
 
 def machine(bulk):
@@ -167,9 +198,193 @@ def grab(q, cam, mode, n):
           ("start_iso", 0x81) in later and ("stop_iso", 0x81) in later)
 
 
+def app_machine():
+    print("--- the Camera app: the dot, the preview, photos ---")
+    from PIL import Image
+    cam = UvcCamera(still=True, strip_dht=True)
+    r = Redir(cam)
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as fh:
+        fh.truncate(16 * 1024 * 1024)
+    slog = tempfile.mktemp(suffix=".log")
+    port, stop_http = start_http_server()
+    try:
+        q = Qemu(KERNEL, INITRD, disk, serial=slog,
+                 devices=["-device", "qemu-xhci,id=xhci", *r.qemu_args(0)])
+        try:
+            check("the desktop came up", q.wait_desktop())
+            W, H = q.size()
+            q.mouse_home()
+
+            def dot():
+                _, _, at = q.screen_raw()
+                return any(at(x, BAR_H // 2) == DOT_RGB
+                           for x in range(W // 3, W))
+
+            def wait_dot(want, timeout=10):
+                end = time.time() + timeout
+                got = dot()
+                while got != want and time.time() < end:
+                    time.sleep(0.3)
+                    got = dot()
+                return got
+
+            check("no green dot on the bar before", not dot())
+            q.launch_menu("gcamera")
+            q.mouse_goto(W - 10, H // 2)
+            wx = wy = None
+            end = time.time() + 15
+            while time.time() < end and wx is None:
+                time.sleep(0.5)
+                for slot in range(8):
+                    x, y = cascade(slot, CAM_W0 + 2, CAM_H0 + TITLE_H + 2,
+                                   w=W, h=H)
+                    if q.window_title(x, y, CAM_W0 + 2) == "Camera":
+                        wx, wy = x, y
+                        break
+            check("the Camera opens from the menu", wx is not None)
+            if wx is None:
+                return
+            cx, cy = wx + 1, wy + CONTENT_DY
+            check("and the green dot is on the bar while it is open",
+                  wait_dot(True))
+
+            # MJPEG 640x480, shown at half size in the middle
+            ph = CAM_H0 - STRIP_H
+            ox, oy = cx + (CAM_W0 - 320) // 2, cy + (ph - 240) // 2
+            ref = Image.open(io.BytesIO(quarters_jpeg(640, 480))) \
+                .convert("RGB")
+            pts = [(80 + (i % 2) * 160, 60 + (i // 2) * 120)
+                   for i in range(4)]
+            want = [ref.getpixel((2 * x, 2 * y)) for x, y in pts]
+            got = []
+            end = time.time() + 15
+            while time.time() < end:
+                _, _, at = q.screen_raw()
+                got = [at(ox + x, oy + y) for x, y in pts]
+                if all(max(abs(a - b) for a, b in zip(g, w)) <= 6
+                       for g, w in zip(got, want)):
+                    break
+                time.sleep(0.5)
+            check("the MJPEG preview, which has no Huffman tables of its "
+                  "own: the quarters as Pillow decodes them (%s / %s)"
+                  % (got, want),
+                  all(max(abs(a - b) for a, b in zip(g, w)) <= 6
+                      for g, w in zip(got, want)))
+
+            def shutter_and_fetch(name):
+                q.mouse_goto(cx + CAM_W0 // 2, cy + 40)
+                q.sendkey("spc")
+                time.sleep(1)
+                q.mouse_goto(W - 10, H // 2)
+                q.click_desktop()
+                listing = ""
+                end = time.time() + 15
+                while time.time() < end and name not in listing:
+                    q.command("cd /home/admin/Gallery")
+                    listing = q.command("fls", "Used:", timeout=10)
+                    time.sleep(0.5)
+                ptest.POSTED.clear()
+                q.command("run curl -s --data-binary @/home/admin/Gallery/%s "
+                          "http://10.0.2.2:%d/up" % (name, port),
+                          "has ended", timeout=30)
+                body = next((b for p_, b in ptest.POSTED if p_ == "/up"),
+                            None)
+                return name in listing, body
+
+            listed, body = shutter_and_fetch("Photo-1.jpg")
+            frame = cam.jpegs.get((1, 640, 480))
+            ok = False
+            if body and frame:
+                try:
+                    saved = Image.open(io.BytesIO(body)).convert("RGB")
+                    ok = saved.tobytes() == ref.tobytes()
+                except Exception:
+                    ok = False
+            check("the shutter keeps Photo-1.jpg in the Gallery folder (%s)"
+                  % listed, listed)
+            check("the frame itself with the standard tables put back: "
+                  "without them it is the camera's bytes (%s), and Pillow "
+                  "opens it to the original's pixels (%s)"
+                  % (body is not None and strip_dht(body) == frame, ok),
+                  body is not None and strip_dht(body) == frame and
+                  b"\xff\xc4" in body and ok)
+
+            # The mode button, four times: YUY2 176x144
+            q.mouse_goto(cx + CAM_W0 // 2, cy + 40)
+            for _ in range(4):
+                q.click(cx + 8 + MODE_W // 2, cy + CAM_H0 - STRIP_H // 2)
+                time.sleep(1.5)
+            ox, oy = cx + (CAM_W0 - 176) // 2, cy + (ph - 144) // 2
+            want = [yuy2_rgb(*b) for b in BARS]
+            xs = [k * 176 // 8 + 11 for k in range(8)]
+            got = []
+            end = time.time() + 15
+            while time.time() < end:
+                _, _, at = q.screen_raw()
+                got = [at(ox + x, oy + 72) for x in xs]
+                if got == want:
+                    break
+                time.sleep(0.5)
+            check("the mode button: YUY2 176x144 at its own size, its bars "
+                  "in their BT.601 colours (%s)" % (got == want,), got == want)
+            listed, body = shutter_and_fetch("Photo-2.png")
+            exact = False
+            if body:
+                try:
+                    pic = Image.open(io.BytesIO(body)).convert("RGB")
+                    exact = pic.size == (176, 144) and all(
+                        pic.getpixel((x, y)) ==
+                        yuy2_rgb(*BARS[(x - x % 2) * 8 // 176])
+                        for y in (0, 71, 143) for x in range(176))
+                except Exception:
+                    exact = False
+            check("its photo, Photo-2.png, those very colours, every pixel "
+                  "(%s, %s)" % (listed, exact), listed and exact)
+
+            # Closing turns it off
+            q.click(*light_xy(wx, wy, 0))
+            q.mouse_goto(W - 10, H // 2)
+            gone = not wait_dot(False)
+            check("closed, the camera is off: no dot (%s), the stream stopped"
+                  ", alternate 0" % gone, gone and
+                  cam.requests and ("stop_iso", 0x81) in cam.requests and
+                  [x for x in cam.requests if x[0] == "set_alt"][-1] ==
+                  ("set_alt", 1, 0))
+
+            # ... and so does a program that is killed
+            q.launch_menu("gcamera")
+            q.mouse_goto(W - 10, H // 2)
+            check("opened again, the dot again", wait_dot(True, 20))
+            q.click_desktop()
+            out = q.command("ps", "NAME", timeout=10)
+            time.sleep(0.5)
+            out = q.serial()[q.serial().rfind("NAME"):]
+            pid = next((m.group(1) for m in re.finditer(
+                r"^\s*(\d+)\s+\S+\s+gcamera", out, re.M)), None)
+            stops = cam.requests.count(("stop_iso", 0x81))
+            if pid:
+                q.command("kill %s" % pid, "kill:", timeout=10)
+            q.mouse_goto(W - 10, H // 2)
+            gone = not wait_dot(False, 15)
+            check("killed (pid %s), the camera is off all the same: no dot "
+                  "(%s), the stream stopped" % (pid, gone),
+                  pid and gone and
+                  cam.requests.count(("stop_iso", 0x81)) > stops)
+        finally:
+            q.close()
+    finally:
+        stop_http()
+        r.close()
+        for f in (disk, slog):
+            if os.path.exists(f):
+                os.unlink(f)
+
+
 def main():
     machine(bulk=False)
     machine(bulk=True)
+    app_machine()
     return summary()
 
 

@@ -21,6 +21,7 @@
  */
 
 #include "include/uvc.h"
+#include "include/cam_info.h"
 #include "include/usbhc.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -148,6 +149,8 @@ static struct uvc_desc cam;
 static uint8_t cfg_buf[UVC_CFG_MAX];
 static int present;
 static int cam_port = -1, cam_dev = -1;
+/* Streaming, its thread running, and a stop asked of that thread */
+static volatile int streaming, pump_running, stop_req;
 static uint16_t cam_vid, cam_pid;
 static const char *gave_up;
 
@@ -280,6 +283,7 @@ static void on_unplug(int port)
 {
     if (!present || port != cam_port)
         return;
+    stop_req = 1;                     /* the stream's thread tidies up */
     present = 0;
     cam_port = cam_dev = -1;
     give_up("the camera went away");
@@ -381,8 +385,7 @@ static uint8_t *fb[3];               /* fill, ready, read */
 static uint32_t fb_len[3], fb_pages, frame_max, frame_exact;
 static uint32_t ready_seq;           /* 0 = nothing ready yet */
 static int fill_bad, synced, fid = -1, after_eof;
-static volatile int streaming, pump_running;
-static int stream_mode = -1, stream_alt;
+static int stream_mode = -1, stream_alt, stream_owner = -1;
 static uint32_t n_frames, n_dropped, n_lost;
 
 static void frame_end(void)
@@ -465,13 +468,28 @@ static void payload(void *arg, const uint8_t *d, int len, int lost)
     }
 }
 
+static void frames_free(void);
+
+/* The stream's own thread: it reads, and it is also what stops the
+   stream - however the stop was asked for. A program that ends asks
+   from the middle of its exit, where nothing may wait for a USB
+   command; so the asking only sets a flag, and this does the rest. */
 static void pump(void *arg)
 {
     (void)arg;
-    while (streaming) {
+    while (!stop_req) {
         usbhc_iso_poll(cam_dev, payload, (void *)0);
         task_sleep(1);
     }
+    usbhc_iso_close(cam_dev);
+    /* Back to alternate 0: the camera stops, and its light goes out */
+    usbhc_request(cam_dev, 0x01, 0x0B, 0, cam.vs_iface);
+    irqflags_t f = spin_lock_irq(&frames_lock);
+    streaming = 0;
+    spin_unlock_irq(&frames_lock, f);
+    frames_free();
+    stream_mode = -1;
+    stream_owner = -1;
     pump_running = 0;
 }
 
@@ -486,11 +504,11 @@ static void frames_free(void)
     }
 }
 
-int uvc_start(int mode)
+int uvc_start(int mode, int owner)
 {
     if (!present || mode < 0 || mode >= cam.nmodes)
         return -1;
-    if (streaming)
+    if (streaming || pump_running)
         return -6;
     struct uvc_mode *m = &cam.modes[mode];
     if (m->alt == 0)
@@ -566,6 +584,8 @@ int uvc_start(int mode)
     n_frames = n_dropped = n_lost = 0;
     stream_mode = mode;
     stream_alt = m->alt;
+    stream_owner = owner;
+    stop_req = 0;
     streaming = pump_running = 1;
     usbhc_iso_start(cam_dev);
     task_create("uvc", pump, (void *)0);
@@ -574,16 +594,51 @@ int uvc_start(int mode)
 
 void uvc_stop(void)
 {
-    if (!streaming)
+    if (!pump_running)
         return;
-    streaming = 0;
+    stop_req = 1;
     for (int i = 0; i < 300 && pump_running; i++)
         task_sleep(1);
-    usbhc_iso_close(cam_dev);
-    /* Back to alternate 0: the camera stops, and its light goes out */
-    usbhc_request(cam_dev, 0x01, 0x0B, 0, cam.vs_iface);
-    frames_free();
-    stream_mode = -1;
+}
+
+void uvc_release(int tgid)
+{
+    if (pump_running && stream_owner == tgid && tgid >= 0)
+        stop_req = 1;
+}
+
+int uvc_owner(void)
+{
+    return streaming ? stream_owner : -1;
+}
+
+void uvc_info(struct cam_info *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->present = present;
+    out->streaming = streaming ? stream_mode : -1;
+    out->owner = uvc_owner();
+    out->frames = n_frames;
+    out->dropped = n_dropped;
+    out->lost = n_lost;
+    if (!present) {
+        const char *w = uvc_why();
+        int i = 0;
+        for (; w && w[i] && i < (int)sizeof(out->why) - 1; i++)
+            out->why[i] = w[i];
+        return;
+    }
+    hex4(out->name, cam_vid);
+    out->name[4] = ':';
+    hex4(out->name + 5, cam_pid);
+    out->nmodes = cam.nmodes < CAM_MODES ? cam.nmodes : CAM_MODES;
+    for (int k = 0; k < out->nmodes; k++) {
+        out->modes[k].fourcc = cam.modes[k].fourcc;
+        out->modes[k].w = cam.modes[k].w;
+        out->modes[k].h = cam.modes[k].h;
+        out->modes[k].interval = cam.modes[k].interval;
+        out->modes[k].alt = cam.modes[k].alt;
+    }
 }
 
 int uvc_streaming(void)
@@ -617,7 +672,7 @@ void uvc_counts(uint32_t *frames, uint32_t *dropped, uint32_t *lost)
 
 void uvc_grab(int mode, int n)
 {
-    int r = uvc_start(mode);
+    int r = uvc_start(mode, -1);
     if (r < 0) {
         static const char *const why[] = {
             "", "no such mode, or no camera", "no room on the USB bus",

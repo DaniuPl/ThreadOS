@@ -137,6 +137,7 @@ static void cmd_help(void)
     printk("          reboot, poweroff, smp, smpmem, smpthreads\n");
     printk("          runw <prog> - a program on any core\n");
     printk("          whoami, sudo <command>, logout, passwd\n");
+    printk("          kill <pid> - end a program (its number from ps)\n");
     printk("          login <account>\n");
     printk("          users, useradd [admin] <name>, userdel <name>\n");
     printk("          fat [N [disk]] - the FAT partition: fatls, fatcat,\n");
@@ -1145,6 +1146,20 @@ static void execute(const char *line)
         cmd_help();
     } else if (!strcmp(line, "ps")) {
         task64_dump();
+    } else if (starts_with(line, "kill ")) {
+        /* Ends a program by its number (from 'ps'). As the system call:
+           a plain user only their own */
+        const char *a = line + sizeof("kill ") - 1;
+        int pid = 0;
+        while (*a >= '0' && *a <= '9')
+            pid = pid * 10 + (*a++ - '0');
+        if (user_shell_level() != USER_ADMIN &&
+            task64_level_of(pid) != user_shell_level())
+            printk("kill: %d is not yours to end\n", pid);
+        else if (!task64_signal(pid, 9))
+            printk("kill: there is no process %d\n", pid);
+        else
+            printk("kill: %d ended\n", pid);
     } else if (!strcmp(line, "mem")) {
         cmd_mem();
     } else if (!strcmp(line, "ls")) {

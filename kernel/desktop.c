@@ -47,6 +47,7 @@
 #include "include/bt.h"
 #include "include/net.h"
 #include "include/netdev.h"
+#include "include/uvc.h"
 #include "../kernel64/task64.h"
 #define desktop_uid task64_uid
 #define desktop_kill_uid task64_kill_uid
@@ -105,7 +106,7 @@ struct icon {
 /* The browser is the litehtml one (apps/browser), in the initrd as
    "web"; gweb, the older one in C, is still there to be run by name */
 #define WEB_APP "web"
-#define ART_N      20
+#define ART_N      21
 #define ART_LETTER 14
 #define ART_TRASH  15
 /* Pictures drawn later than the letter and the waste bin come after
@@ -115,6 +116,7 @@ struct icon {
 #define ART_USERS  17
 #define ART_IMAGE  18
 #define ART_GALLERY 19
+#define ART_CAMERA 20
 /* The time is on the bar, so the clock is not in the dock; it and the
    demonstration program stay in the menu, with everything else */
 static struct icon icons[ICON_MAX] = {
@@ -263,6 +265,7 @@ static const struct { const char *app, *label; int art; } known_apps[] = {
     { "gcal", "Calendar", 12 }, { "gpaint", "Paint", 13 },
     { "gcode", "Code", ART_CODE }, { "gusers", "Accounts", ART_USERS },
     { "ggallery", "Gallery", ART_GALLERY },
+    { "gcamera", "Camera", ART_CAMERA },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -718,7 +721,7 @@ static const char *const context_items[] = {
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_APP,
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint", "ggallery",
-                                  "gcode"};
+                                  "gcamera", "gcode"};
 
 /* Under a line at the bottom of the same menu: not programs but what is
    done to the session and to the machine. The three that end something
@@ -786,6 +789,7 @@ static int show_x(void)  { return load_x() - BAR_ITEM_GAP - SHOW_W; }
 /* The network and Bluetooth: an icon each, left of 'show the desktop' */
 static int net_x(void)   { return show_x() - BAR_ITEM_GAP - STAT_W; }
 static int bt_x(void)    { return net_x() - BAR_ITEM_GAP - STAT_W; }
+static int cam_x(void)   { return bt_x() - BAR_ITEM_GAP - CAM_DOT_W; }
 /* Which card hangs from the bar, if one does (draw_status_card) */
 #define STAT_NONE 0
 #define STAT_NET  1
@@ -1631,6 +1635,7 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0x8FA3C8, 0x4E6290 },   /* Accounts */
         { 0x7FD3FF, 0x2D8CEB },   /* Picture */
         { 0xFFC46B, 0xFF7A45 },   /* Gallery */
+        { 0x8E8E93, 0x3A3A3C },   /* Camera */
     };
     if (art < 0 || art >= ART_N)
         art = ART_LETTER;
@@ -1778,6 +1783,14 @@ static void draw_art(int art, int x, int y, int s, char letter)
         gfx_rrect16(PX(70), PY(106), D(168), D(132), D(10), 0xFFE2B8, 255);
         gfx_disc16(PX(196), PY(140), D(18), 0xFF5E3A, 255);
         art_hill(x, y, s, 122, 168, 56, 238, 0xFF9F0A);
+        break;
+    case ART_CAMERA:                              /* a camera: body, lens */
+        gfx_rrect16(PX(44), PY(96), D(232), D(152), D(28), 0xFFFFFF, 255);
+        gfx_rrect16(PX(112), PY(72), D(80), D(40), D(12), 0xFFFFFF, 255);
+        gfx_disc16(PX(160), PY(172), D(58), 0x2C2C2E, 255);
+        gfx_disc16(PX(160), PY(172), D(38), 0x5AC8FA, 255);
+        gfx_disc16(PX(146), PY(158), D(10), 0xFFFFFF, 200);
+        gfx_disc16(PX(236), PY(124), D(10), 0x30D158, 255);
         break;
     default: {                                    /* the first letter */
         char t[2] = { letter, 0 };
@@ -4238,6 +4251,16 @@ static void draw_status_icons(void)
         in_rect(mouse_x, mouse_y, bt_x(), 0, STAT_W, BAR_H))
         hint_at(bt_x() - hint_w("Bluetooth") / 2 + STAT_W / 2, BAR_H + 4,
                 "Bluetooth");
+
+    /* The camera is on: as long as the driver streams, whoever asked */
+    if (uvc_streaming()) {
+        int cx = cam_x();
+        gfx_disc16((cx + CAM_DOT_W / 2) * 16, BAR_H / 2 * 16,
+                   CAM_DOT_D * 8, CAM_DOT_RGB, 255);
+        if (in_rect(mouse_x, mouse_y, cx, 0, CAM_DOT_W, BAR_H))
+            hint_at(cx - hint_w(locale_text("Camera in use")) / 2 +
+                    CAM_DOT_W / 2, BAR_H + 4, locale_text("Camera in use"));
+    }
 }
 
 static int stat_line(char *d, const char *a, const char *b)
@@ -4874,6 +4897,10 @@ static void draw_taskbar(void)
     /* The tray: Bluetooth and the network, then the clock */
     int gy = y + (TB_H - 16) / 2;
     draw_bt_glyph(tb_bt_x() + TB_TRAY_W / 2, gy);
+    /* The camera's dot, in a place of its own left of Bluetooth */
+    if (uvc_streaming())
+        gfx_disc16((tb_bt_x() - TB_TRAY_W / 2) * 16, (y + TB_H / 2) * 16,
+                   CAM_DOT_D * 8, CAM_DOT_RGB, 255);
     draw_net_glyph(tb_net_x() + (TB_TRAY_W - 16) / 2, gy);
     char tm[16], dt[16];
     tb_clock_text(tm, dt);

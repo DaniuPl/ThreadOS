@@ -98,6 +98,7 @@
 #define SYS64_BT 99
 #define SYS64_WIFI 100
 #define SYS64_DEVICE 101
+#define SYS64_CAMERA 102
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40

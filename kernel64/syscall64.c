@@ -51,6 +51,8 @@
 #include "../kernel/include/iwlwifi.h"
 #include "../kernel/include/wifi_info.h"
 #include "../kernel/include/devices.h"
+#include "../kernel/include/uvc.h"
+#include "../kernel/include/cam_info.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/random.h"
 
@@ -1501,6 +1503,63 @@ static void handle(struct regs *r)
         iwlwifi_info_fill(&wi);
         *(struct wifi_info *)(uintptr_t)a2 = wi;
         r->rax = 0;
+        return;
+    }
+    case SYS64_CAMERA: {
+        /* One program has the camera at a time; it is the one that may
+           take its frames and close it, and its end closes it too */
+        int me = task64_tgid();
+        if (a1 == CAM_INFO) {
+            if (!paging64_user_writable(a2, sizeof(struct cam_info))) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            static struct cam_info ci;
+            uvc_info(&ci);
+            *(struct cam_info *)(uintptr_t)a2 = ci;
+            r->rax = 0;
+        } else if (a1 == CAM_OPEN) {
+            r->rax = (uint64_t)(int64_t)uvc_start((int)a2, me);
+        } else if (a1 == CAM_FRAME) {
+            if (!paging64_user_writable(a2, sizeof(struct cam_frame))) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            struct cam_frame *cf = (struct cam_frame *)(uintptr_t)a2;
+            if (uvc_owner() != me ||
+                !paging64_user_writable(cf->buf, cf->cap)) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            uint32_t seq = cf->seq, len = 0;
+            const uint8_t *f = uvc_frame(&len, &seq);
+            if (!f) {
+                r->rax = 0;
+                return;
+            }
+            if (len > cf->cap) {
+                r->rax = (uint64_t)-2;      /* a buffer too small */
+                return;
+            }
+            memcpy((void *)(uintptr_t)cf->buf, f, len);
+            const struct uvc_desc *d = uvc_desc();
+            struct cam_info ci;
+            uvc_info(&ci);
+            cf->seq = seq;
+            cf->bytes = len;
+            if (d && ci.streaming >= 0) {
+                cf->fourcc = d->modes[ci.streaming].fourcc;
+                cf->w = d->modes[ci.streaming].w;
+                cf->h = d->modes[ci.streaming].h;
+            }
+            r->rax = len;
+        } else if (a1 == CAM_CLOSE) {
+            if (uvc_owner() == me)
+                uvc_stop();
+            r->rax = 0;
+        } else {
+            r->rax = (uint64_t)-1;
+        }
         return;
     }
     case SYS64_DEVICE: {

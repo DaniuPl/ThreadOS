@@ -8114,7 +8114,7 @@ works and is checked by `make test`.
       front; the others read the program or the desktop where they
       read the system's name.
 
-- [ ] **The camera, stage one: found, described, asked**
+- [x] **The camera, stage one: found, described, asked**
       (kernel/uvc.c, kernel/include/uvc.h, kernel/xhci.c,
       kernel64/kmain64.c, kernel64/shell64.c, scripts/usbredir.py,
       scripts/usbcam.py, scripts/tests/t_camera.py)
@@ -8142,7 +8142,7 @@ works and is checked by `make test`.
       carries - checks one 34-byte PROBE per mode and no COMMIT, and
       does it again for a camera with a bulk endpoint.
 
-- [ ] **The camera, stage two: pictures through isochronous transfers**
+- [x] **The camera, stage two: pictures through isochronous transfers**
       (kernel/xhci.c, kernel/include/xhci.h, kernel/usbhc.c,
       kernel/uvc.c, kernel64/shell64.c, scripts/usbredir.py,
       scripts/usbcam.py, scripts/tests/t_camera.py,
@@ -8170,3 +8170,32 @@ works and is checked by `make test`.
       format through QEMU's own xHCI and usb-redir and finds every
       one's CRC among the frames the camera sent, an uncompressed one
       exactly w x h x 2 bytes, with nothing dropped or lost.
+
+- [x] **The Camera app, and the dot that says the camera is on**
+      (user64/gcamera.c, kernel/uvc.c, kernel/include/cam_info.h,
+      user/ucam.h, kernel64/syscall64.c, kernel64/task64.c,
+      kernel64/shell64.c, kernel/desktop.c, kernel/include/look.h,
+      user/ujpeg.h, scripts/usbcam.py, scripts/tests/t_camera.py,
+      t_gallery.py)
+      The third stage: programs get the camera through SYS64_CAMERA -
+      its modes, one program streaming at a time, the newest frame on
+      request - and the Camera app shows it: YUY2 turned into colours
+      the BT.601 way, MJPEG through the system's JPEG decoder. Its
+      shutter keeps the frame itself in the home's Gallery folder: an
+      MJPEG frame as the JPEG it is, a YUY2 frame as a PNG, counted
+      Photo-1, Photo-2 across both. While a picture is being taken the
+      bar has a green dot left of Bluetooth (and the Windows-style tray
+      one of its own), drawn from the driver's state so no program can
+      hide it. The program's end - closing, crashing, killed - turns the
+      camera off: its exit only asks, from where nothing may wait for a
+      USB command, and the stream's own thread stops the stream, as it
+      does for every other way of stopping. A webcam's MJPEG frames
+      leave their Huffman tables out, meaning the standard ones: the
+      JPEG decoder now has those (ITU-T T.81 K.3-K.6, checked against
+      the ones libjpeg writes) and puts them into a saved photo, and it
+      reads pictures up to 1920 wide instead of 1024. The kernel shell
+      learnt 'kill <pid>'. t_camera opens the app with a made-up camera
+      whose JPEGs have no tables, sees the dot, compares the preview
+      with Pillow's decoding, takes a JPEG and a PNG and checks them
+      pixel for pixel, and sees the dot go when the window closes and
+      when the program is killed; t_gallery shows a 1280x720 JPEG.

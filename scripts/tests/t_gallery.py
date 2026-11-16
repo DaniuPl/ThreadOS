@@ -7,16 +7,18 @@ independent PNG, JPEG and GIF writer and reader - are fetched into that
 folder over the network, with a text file and a PNG that is not one,
 and what the Gallery shows is held against them:
 
-  the four pictures, and not the text file, in name order, each name
+  the five pictures, and not the text file, in name order, each name
   under its square
 
   a PNG of four coloured quarters, shrunk into its square keeping its
   shape: each quarter its own colour; a JPEG's two halves as Pillow
-  decodes them; a GIF smaller than the square, not made larger, in the
-  middle of it; the broken one says it cannot be shown
+  decodes them; a 1280x720 JPEG, wider than the decoder once took, its
+  quarters as Pillow decodes them; a GIF smaller than the square, not
+  made larger, in the middle of it; the broken one says it cannot be
+  shown
 
   a click opens one over the window at its own size, named in the bar
-  with "4 / 4"; the left arrow goes to the one before; Backspace goes
+  with "4 / 5"; the left arrow goes to the one before; Backspace goes
   back to all of them
 
   a picture put into the folder while the Gallery is open appears in
@@ -72,6 +74,13 @@ def pictures():
     b = io.BytesIO()
     dot.save(b, "GIF")
     out["dot.gif"] = b.getvalue()
+    wide = Image.new("RGB", (1280, 720))
+    for i, c in enumerate(QUAD):
+        wide.paste(c, ((i % 2) * 640, (i // 2) * 360, (i % 2) * 640 + 640,
+                       (i // 2) * 360 + 360))
+    b = io.BytesIO()
+    wide.save(b, "JPEG", quality=90)
+    out["wide.jpg"] = b.getvalue()
     out["broken.png"] = b"\x89PNG\r\n\x1a\n" + bytes(range(256)) * 4
     out["notes.txt"] = b"not a picture\n"
     return out
@@ -115,8 +124,8 @@ def main():
                                 % (port, name, home, name), "has ended",
                                 timeout=30)
                 fetched += "has ended (code 0)" in out
-            check("five files fetched into the Gallery folder (%d)" % fetched,
-                  fetched == len(files))
+            check("all %d files fetched into the Gallery folder (%d)"
+                  % (len(files), fetched), fetched == len(files))
 
             q.launch_menu("ggallery")
             q.mouse_goto(W - 10, H // 2)
@@ -154,7 +163,7 @@ def main():
                 time.sleep(0.5)
                 shot = q.screen_raw()
                 names = [name_of(i, shot) for i in range(len(want))]
-            check("the four pictures, not the text file, in name order (%s)"
+            check("the five pictures, not the text file, in name order (%s)"
                   % names, names == want)
 
             # The squares: shrunk once each, a pass at a time
@@ -177,6 +186,17 @@ def main():
             check("the JPEG's two halves as Pillow decodes them (%s %s / "
                   "%s %s)" % (left, right, ref_l, ref_r),
                   near(left, ref_l, 6) and near(right, ref_r, 6))
+            sx, sy = square(want.index("wide.jpg"))
+            th = 720 * THUMB // 1280
+            ty = sy + (THUMB - th) // 2
+            pil_wide = Image.open(io.BytesIO(files["wide.jpg"])).convert("RGB")
+            got = [at(sx + THUMB // 4 + (i % 2) * THUMB // 2,
+                      ty + th // 4 + (i // 2) * th // 2) for i in range(4)]
+            ref = [pil_wide.getpixel((320 + (i % 2) * 640, 180 + (i // 2) * 360))
+                   for i in range(4)]
+            check("a 1280x720 JPEG, its quarters as Pillow decodes them "
+                  "(%s / %s)" % (got, ref),
+                  all(near(g, r_, 6) for g, r_ in zip(got, ref)))
             sx, sy = square(want.index("dot.gif"))
             inside = at(sx + THUMB // 2, sy + THUMB // 2)
             edge_in = at(sx + (THUMB - 64) // 2 + 1, sy + THUMB // 2)
@@ -219,7 +239,9 @@ def main():
             check("a click opens it at its own size, its quarters where "
                   "they are (%s), named in the bar ('%s', '%s')"
                   % (got, seen, which),
-                  got == QUAD and "quad.png" in seen and which == "4 / 4")
+                  got == QUAD and "quad.png" in seen and
+                  which == "%d / %d" % (want.index("quad.png") + 1,
+                                        len(want)))
             q.sendkey("left")
             seen = ""
             end = time.time() + 10

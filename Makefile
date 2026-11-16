@@ -181,6 +181,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gimg.elf \
                $(BUILD)/user64/gmedia.elf \
                $(BUILD)/user64/ggallery.elf \
+               $(BUILD)/user64/gcamera.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/aestest.elf \
@@ -336,6 +337,15 @@ $(FFMPEG_STAMP): $(FFMPEG_CONFIG)
 	touch $@
 
 $(FFMPEG_LIBS): $(FFMPEG_STAMP)
+
+# The Camera: zlib for the PNGs it saves, and memory given back
+$(BUILD)/user64/gcamera.elf: user64/gcamera.c user/uapi.h user/udraw.h \
+                             user/ucam.h user/ujpeg.h user64/usys64.h \
+                             user64/compat64.h $(ZLIB_A) $(LIBC64) \
+                             libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -I$(ZLIB_TREE) -D_GNU_SOURCE \
+	    -DTHREADOS_LIBC -Wall -Wextra -c $< -o $(BUILD)/libc64/gcamera.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gcamera.o $(ZLIB_A)) -o $@
 
 # The Gallery: a folder of pictures decoded and shrunk, which needs
 # memory given back - so it is built against musl
@@ -845,6 +855,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gimg=$(BUILD)/user64/gimg.elf \
 	    gmedia=$(BUILD)/user64/gmedia.elf \
 	    ggallery=$(BUILD)/user64/ggallery.elf \
+	    gcamera=$(BUILD)/user64/gcamera.elf \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    aestest=$(BUILD)/user64/aestest.elf \
