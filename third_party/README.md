@@ -18,6 +18,7 @@ as code of our own around it (`apps/js`).
 | `freetype-2.15.0.tar.xz` | FreeType, a font engine | 2.15.0 | FreeType License (BSD-style, `LICENSE.TXT` and `docs/FTL.TXT` in the archive) | https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz (SHA-256 `93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5`; the SourceForge copy is the same file) |
 | `harfbuzz/` | HarfBuzz, a text shaping engine | 15.1.0 | Old MIT (`COPYING`) | https://github.com/harfbuzz/harfbuzz/releases/download/15.1.0/harfbuzz-15.1.0.tar.xz (SHA-256 `0fc7c565443a5f4be7da65ac5ee5bd737d9b158dc908708b7689a0a5796b0c8d`) |
 | `sqlite-amalgamation-3540100.zip` | SQLite, an SQL database engine, and its command-line shell | 3.54.1 | Public domain (the header of `sqlite3.c`) | https://www.sqlite.org/2026/sqlite-amalgamation-3540100.zip (SHA3-256 `92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30`, as sqlite.org lists it) |
+| `acpica-unix-20260408.tar.gz` | ACPICA, the interpreter of the firmware's ACPI AML | 20260408 | BSD-3-Clause, taken under that one of its three licences (Intel's own, BSD-3-Clause or GPL-2.0, the header of every file) | https://mirrors.mit.edu/libreboot/misc/acpica/acpica-unix-20260408.tar.gz (Libreboot's mirror of Intel's release archives; SHA-256 `e66ceb26d6d514ce164fe22f5a4f7ca165cc38349d7a97f41a21f19b364647a2`, as the mirror's .sha256 lists it) |
 | `iwlwifi/` | Firmware for the Intel Wireless 3160 Wi-Fi card (`iwlwifi-3160-17.ucode`), a binary the card runs itself | 17.bfb58538.0 | Intel's firmware licence: redistribution in binary form only, unmodified (`LICENCE.iwlwifi_firmware`) | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git (`intel/iwlwifi/`) |
 
 Trimmed, not modified:
@@ -71,6 +72,16 @@ Trimmed, not modified:
   AVI demuxers and the codecs used for those formats. GPL and version 3
   components are disabled; no FFmpeg programs or network protocols are
   built. The player and kernel audio stream interface are our own code.
+- **ACPICA**: the archive is kept intact and unpacked into the build
+  directory. One line is patched in (`kernel/acpica/patches/acenv.h.patch`):
+  the name of our host header, `kernel/acpica/acthreados.h`, checked
+  before ACPICA's Linux host, since the compiler says `__linux__`. Only
+  the interpreter's own components are compiled (`source/components/`:
+  dispatcher, events, executer, hardware, namespace, parser, resources,
+  tables, utilities), without `rsdump.c`, which belongs to its debugger;
+  its string functions are used under names of their own (`memcpy` ->
+  `acpi_memcpy`). The services it asks of the system are
+  `kernel/acpios.c`.
 - **iwlwifi**: not source and not built: the card will not run without
   the program its maker wrote for it, and the maker publishes it only as
   this file. It is loaded into the card, never into the kernel. The

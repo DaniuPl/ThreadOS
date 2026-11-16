@@ -103,7 +103,7 @@ SHARED64 := string serial printk locale bootsplash mb2 fbcon vga pic pit pmm hea
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
-            e1000 rtl8168 virtio_net netdev smp random hid iwlwifi
+            e1000 rtl8168 virtio_net netdev smp random hid iwlwifi acpios power
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -872,8 +872,56 @@ $(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) $(USERCTL_HE
 $(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) $(USERCTL_HEADER) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
 
-$(KERNEL64): $(OBJS64) kernel64/linker64.ld
-	$(CC) $(LDFLAGS64) $(OBJS64) -o $@
+# --- ACPICA -------------------------------------------------------------
+# The interpreter of the firmware's AML (Linux's and the BSDs'): the
+# release archive, unpacked into the build with the one line
+# kernel/acpica/patches/acenv.h.patch adds - the name of our host
+# header, kernel/acpica/acthreados.h - and compiled with the kernel's
+# flags. Its own string functions are used under names of their own
+# (memcpy -> acpi_memcpy, ...), so that they do not meet the kernel's.
+# kernel/acpios.c is what it asks of the system, kernel/power.c what we
+# ask of it.
+ACPICA_TAR   := third_party/acpica-unix-20260408.tar.gz
+ACPICA_DIR   := $(BUILD)/acpica
+ACPICA_STAMP := $(ACPICA_DIR)/.unpacked
+ACPICA_LIB   := $(ACPICA_DIR)/libacpica.a
+ACPICA_PARTS := dispatcher events executer hardware namespace parser \
+                resources tables utilities
+# rsdump.c is the debugger's: it prints resources with tables built only
+# into ACPICA's own tools
+ACPICA_CLIB  := fprintf memcmp memcpy memmove memset printf snprintf sprintf \
+                strcat strchr strcmp strcpy strlen strncat strncmp strncpy \
+                strpbrk strstr strtok strtoul tolower toupper vfprintf \
+                vprintf vsnprintf
+# Our side (acpios.c, power.c) sees ACPICA's headers as a system's - their
+# debug stubs leave parameters unused - and keeps the kernel's names
+ACPICA_OWN   := $(CFLAGS64) -D__THREADOS__ \
+                -isystem $(abspath $(ACPICA_DIR))/source/include \
+                -I$(abspath kernel/acpica)
+ACPICA_FLAGS := $(ACPICA_OWN) $(foreach f,$(ACPICA_CLIB),-D$(f)=acpi_$(f))
+
+$(ACPICA_STAMP): $(ACPICA_TAR) kernel/acpica/patches/acenv.h.patch Makefile
+	rm -rf $(ACPICA_DIR) && mkdir -p $(ACPICA_DIR)
+	tar -xzf $< -C $(ACPICA_DIR) --strip-components=1
+	sed 's/\r$$//' kernel/acpica/patches/acenv.h.patch | \
+	    patch -s -d $(ACPICA_DIR) -p1
+	touch $@
+
+$(ACPICA_LIB): $(ACPICA_STAMP) kernel/acpica/acthreados.h
+	mkdir -p $(ACPICA_DIR)/obj
+	ls $(foreach p,$(ACPICA_PARTS),$(ACPICA_DIR)/source/components/$(p)/*.c) | \
+	    grep -v -e '/rsdump\.c$$' | \
+	    xargs -P 8 -I{} sh -c '$(CC) $(ACPICA_FLAGS) -w -c {} \
+	        -o $(ACPICA_DIR)/obj/$$(basename {} .c).o'
+	ar rcs $@ $(ACPICA_DIR)/obj/*.o
+
+$(BUILD)/64/acpios.o $(BUILD)/64/power.o: \
+$(BUILD)/64/%.o: kernel/%.c $(ACPICA_STAMP) kernel/acpica/acthreados.h \
+                 $(KERNEL_HEADERS) | $(BUILD)/64
+	$(CC) $(ACPICA_OWN) -c $< -o $@
+
+$(KERNEL64): $(OBJS64) $(ACPICA_LIB) kernel64/linker64.ld
+	$(CC) $(LDFLAGS64) $(OBJS64) $(ACPICA_LIB) -o $@
 
 kernel64: $(KERNEL64) $(INITRD64)
 	@echo "Done: $(KERNEL64) (long mode, loaded by GRUB)"

@@ -7,17 +7,20 @@ saying that a person cannot add one.
 
 The list is now a file on the disk, one line per icon:
 
-    program  caption  numer-obrazka
+    program  caption  picture-number
 
 and nothing else. Plain text like everything else the system keeps: it
 can be read with 'cat' and BUILT ON THE MACHINE ITSELF, with the shell
 in the terminal and the redirections it already had -
 
-    echo gterm Terminal 4 > desktop.icons
-    echo gweb Internet 5 >> desktop.icons
+    echo gterm Terminal 4 > /desktop.icons
+    echo gweb Internet 5 >> /desktop.icons
 
 which is what this test does, because a format nobody on the machine
-can produce is a format for somebody else's machine.
+can produce is a format for somebody else's machine. It is the
+administrator's file (kernel/fs.c, system_file()): the desktop starts
+what it names for whoever clicks a tile, an administrator included, so
+the test signs in as one first.
 
 What is checked: the file is really read (the kernel says so and the
 dock has as many programs as the file has lines, with the names and
@@ -66,9 +69,15 @@ def write_list(q, lines):
     q.wait_serial("ush64$", timeout=20)
     for i, line in enumerate(lines):
         q.command("echo %s %s %d" % (line[0], line[1], line[2]) +
-                  (" > " if i == 0 else " >> ") + "desktop.icons",
+                  (" > " if i == 0 else " >> ") + "/desktop.icons",
                   "ush64$", timeout=15)
     q.command("exit", "[ush64] done", timeout=15)
+
+
+def sign_in(q):
+    q.wait_serial("thread64>", timeout=60)
+    q.command("login admin", "password:", timeout=20)
+    q.command("thread", "logged in as admin", timeout=20)
 
 
 def main():
@@ -83,10 +92,10 @@ def main():
     try:
         q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog)
         try:
-            q.wait_serial("thread64>", timeout=60)
+            sign_in(q)
             write_list(q, wanted)
 
-            shown = q.command("cat desktop.icons", "gsettings", timeout=30)
+            shown = q.command("cat /desktop.icons", "gsettings", timeout=30)
             for app, label, art in wanted:
                 check("the file has a line for '%s'" % app,
                       "%s %s %d" % (app, label, art) in shown)
@@ -141,11 +150,13 @@ def main():
         slog2 = tempfile.mktemp(suffix=".log")
         q2 = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog2)
         try:
-            q2.wait_serial("thread64>", timeout=60)
+            sign_in(q2)
             # A file with nothing in it but a comment: the lines that
             # do not parse are passed over, and what is left is nothing
-            q2.command("write desktop.icons #only-a-comment", "written",
-                       timeout=30)
+            out = q2.command("write /desktop.icons #only-a-comment",
+                             "thread64>", timeout=30)
+            check("the list is written over (%s)" % out.strip()[-40:],
+                  "written" in out)
             q2.type_line("desktop")
             check("the desktop came up again", q2.wait_desktop())
             q2.mouse_home()

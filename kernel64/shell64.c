@@ -51,6 +51,7 @@
 #include "../kernel/include/fatcmd.h"
 #include "../kernel/include/install.h"
 #include "../kernel/include/hwinfo.h"
+#include "../kernel/include/power.h"
 #include "../kernel/include/hda.h"
 #include "../kernel/include/bt.h"
 #include "../kernel/include/iwlwifi.h"
@@ -1153,6 +1154,8 @@ static void execute(const char *line)
             cmd_cat(name);
         else
             printk("cat: give a file name\n");
+    } else if (!strcmp(line, "acpi") || !strcmp(line, "battery")) {
+        power_report();
     } else if (!strcmp(line, "volume")) {
         hwinfo_volume("");
     } else if (starts_with(line, "volume ")) {

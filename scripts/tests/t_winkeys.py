@@ -298,8 +298,11 @@ def main():
             q.mouse_goto(320, 300)
             time.sleep(1.5)
             w, h, at = q.screen_raw()
+            # Read low down, under the list the settings keep down
+            # their left side - its icons are not the window's colour
+            low = work_bottom() - 30
             check("two clicks on the title bar open the window to the whole "
-                  "screen", is_win(at(20, 300)) and is_win(at(w - 4, 300)))
+                  "screen", is_win(at(20, low)) and is_win(at(w - 4, low)))
             check("but not over the dock",
                   dock_shows(at, q.dock_windows()))
 
@@ -313,7 +316,7 @@ def main():
             time.sleep(1.5)
             w, h, at = q.screen_raw()
             check("and another two clicks give it its own size back",
-                  is_win(at(*P_APP)) and not is_win(at(20, 300)))
+                  is_win(at(*P_APP)) and not is_win(at(20, low)))
 
             q.sendkey("alt-f4")                # away with it again
             time.sleep(3)

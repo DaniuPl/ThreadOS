@@ -1024,9 +1024,54 @@ static void let_go_of_fds(void)
         kfree(ft);
 }
 
+/* How the last programs ended, for whoever has to say why one is gone
+   when nobody waited for it - the installer's screen, which gives up
+   on a program that dies at once three times and has to say more than
+   that it did. Kept per program (tgid): the first word about one is
+   the cause, the threads that end after it only follow. */
+#define ENDS_KEPT 8
+static struct {
+    int tgid, code;
+    char why[40];
+    uint64_t addr;
+} ends[ENDS_KEPT];
+static unsigned ends_next;
+
+static void note_end(int code, const char *why, uint64_t addr)
+{
+    if (!current->space)
+        return;
+    for (unsigned n = 0; n < ENDS_KEPT && n < ends_next; n++)
+        if (ends[(ends_next - 1 - n) % ENDS_KEPT].tgid == current->tgid)
+            return;
+    unsigned i = ends_next++ % ENDS_KEPT;
+    ends[i].tgid = current->tgid;
+    ends[i].code = code;
+    ends[i].addr = addr;
+    int k = 0;
+    for (; why && why[k] && k < (int)sizeof(ends[i].why) - 1; k++)
+        ends[i].why[k] = why[k];
+    ends[i].why[k] = 0;
+}
+
+int task64_end_of(int id, int *code, const char **why, uint64_t *addr)
+{
+    for (unsigned n = 0; n < ENDS_KEPT && n < ends_next; n++) {
+        unsigned i = (ends_next - 1 - n) % ENDS_KEPT;
+        if (ends[i].tgid == id) {
+            *code = ends[i].code;
+            *why = ends[i].why;
+            *addr = ends[i].addr;
+            return 1;
+        }
+    }
+    return 0;
+}
+
 void task64_exit_code(int code)
 {
     say_gone();
+    note_end(code, (const char *)0, 0);
     /* A program that ends by itself says so, with its code: a window
        closed from the desktop has no shell waiting for it to report
        the end, and "ended" and "was killed" are different outcomes to
@@ -1119,7 +1164,7 @@ void task64_thread_setup(struct task64 *t, uint64_t clear_tid, uint64_t fs)
  * Called from an exception handler when a ring 3 program was at fault.
  * The only difference from task64_exit is that here there is something
  * to say: the task did not finish by itself, it was stopped. */
-void task64_kill_current(const char *why)
+static void kill_current(const char *why, uint64_t addr)
 {
     /* Ended by another thread's exit(): a normal end, with its code */
     if (current->group_exit)
@@ -1128,6 +1173,7 @@ void task64_kill_current(const char *why)
     irq_save();
     printk("[kernel] task %d (%s) killed: %s\n",
            current->id, current->name, why);
+    note_end(-1, why, addr);
     /* A program dies whole, as on Linux: its other threads would go on
        in memory that a faulting thread may have left half-written */
     end_group(-1);
@@ -1144,6 +1190,16 @@ void task64_kill_current(const char *why)
     switch_to(TASK_ZOMBIE);
     for (;;)
         __asm__ volatile("hlt");
+}
+
+void task64_kill_current(const char *why)
+{
+    kill_current(why, 0);
+}
+
+void task64_kill_fault(const char *why, uint64_t addr)
+{
+    kill_current(why, addr);
 }
 
 /* --- Signals -------------------------------------------------------

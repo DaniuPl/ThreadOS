@@ -7790,3 +7790,58 @@ works and is checked by `make test`.
       error returned, two milestones, the scenario's own three or four,
       and the rules), so they could never pass; the counts are the
       model's now, and t_iwlwifi is in GROUPS.
+
+- [x] **The installer on a stick: the names of the boot modules copied**
+      (kernel/mb2.c, kernel64/task64.c, kernel/desktop.c)
+      On a laptop booted from the stick through threadboot the installer
+      found no installation files, and its window said "The installer
+      will not start". The Multiboot 2 module tags were kept as pointers
+      into the loader's information block, whose memory is handed out
+      again once the kernel runs; the names read as rubbish by the time
+      the installer asked for "kernel" and "initrd". They are copied
+      into the kernel's own table now. And the kiosk's "will not start"
+      screen says why under it: the last try's exit code, or what
+      stopped it and where (a record of how the last programs ended,
+      task64_end_of), so that a photo of the screen is a bug report.
+      t_ginstal passes whole again.
+
+- [x] **ACPICA: the battery and the power button from the firmware's AML**
+      (third_party/acpica-unix-20260408.tar.gz, kernel/acpios.c,
+      kernel/power.c, kernel/acpica/, scripts/tests/t_power.py)
+      What a laptop knows about its battery and its buttons is AML
+      bytecode, not a table: ACPICA, the interpreter Linux and the BSDs
+      use, now runs it, in a thread of its own after the rest of the
+      start. kernel/acpios.c gives it memory, mapping, locks, semaphores
+      that sleep, a work queue, the SCI and a TSC clock. kernel/power.c
+      installs the fixed power-button event (the desktop asks "Shut down
+      the computer?"; with no desktop the machine switches off) and
+      reads the first PNP0C0A battery - _BIX or _BIF, and _BST - every
+      five seconds and when the firmware notifies. 'battery' and 'acpi'
+      in the shell print it; 'noacpica' on the command line leaves it
+      off. ACPICA's host selection first picked its Linux host (gcc says
+      __linux__), with a C library; the patch puts ours before it.
+      t_power hands QEMU two batteries written in ASL and compiled by
+      iasl (73% charging from _BIF; 25% discharging from _BIX whose last
+      full charge is unknown, so the design capacity counts) and presses
+      the power button with QMP, on the console and on the desktop.
+
+- [x] **Pictures for Code, Accounts and the picture viewer**
+      (kernel/desktop.c, scripts/tests/t_appicons.py)
+      Three programs still wore a letter: a grey C in the dock, an A in
+      the menu, a P for a picture opened from Files. They are drawn now
+      (</> on a dark ground, two people, a photograph of hills), and
+      the older browser wears the globe. The pictures take numbers after
+      the letter and the waste bin, so a desktop.icons that names
+      pictures by number means what it meant. t_appicons takes what a
+      letter looks like from the system - a program with no picture -
+      and holds the dock, the menu and the viewer's window against it.
+
+- [x] **Tests that read the Settings window where it changed**
+      (t_snap, t_winkeys, t_update, t_icons)
+      The Settings list gained Wi-Fi and Bluetooth at its top, so its
+      icons moved down onto the points t_snap and t_winkeys read the
+      window's colour at, and Updates moved from the ninth row to the
+      thirteenth; the points are under the list now and the row is
+      looked up. desktop.icons became the administrator's file, so
+      t_icons signs in as one before writing it - and its second part,
+      which passed only because the write had failed, writes for real.

@@ -391,8 +391,10 @@ def main():
                   title == "Settings")
             if title == "Settings":
                 cx, cy = wx + 1, wy + CONTENT_DY
+                # Updates is the last section, wherever the list puts it
+                updates = GSET_SECTIONS64.index("Updates")
                 q.click(cx + GSET_SIDE_W // 2,
-                        cy + GSET_SIDE_Y0 + 8 * GSET_SIDE_H +
+                        cy + GSET_SIDE_Y0 + updates * GSET_SIDE_H +
                         GSET_SIDE_H // 2)
                 q.mouse_goto(600, 600)
                 time.sleep(1.5)

@@ -32,6 +32,8 @@ int  task_kill(int pid);            /* kill a process (0/-1) */
 int  task_killed(void);             /* is the current task due to die */
 int  task_current_id(void);
 int  task_alive(int id);            /* is the task with this id still alive */
+/* how an ended program ended: its code, or -1 and why it was stopped */
+int  task_end_of(int id, int *code, const char **why, uint64_t *addr);
 int  task_count(void);
 
 /* The name a process runs under, into out (max bytes): 1, or 0 when

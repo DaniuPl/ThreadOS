@@ -336,7 +336,7 @@ static void isr64_dispatch(struct regs *r)
                    (uint32_t)r->err_code, (uint32_t)r->rip,
                    (uint32_t)user_fault_addr);
             vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
-            task64_kill_current(exception_names[r->int_no]);
+            task64_kill_fault(exception_names[r->int_no], user_fault_addr);
         }
 
         printk_screen_output(1);

@@ -71,6 +71,13 @@ struct tag_module {
 static struct multiboot_info info;
 static struct multiboot_mmap_entry mmap[MMAP_MAX];
 static struct multiboot_mod mods[MODS_MAX];
+/* The modules' names, copied: the loader's information lies in memory
+   the kernel later gives out, and a name read where the loader left it
+   is whatever was written there since - the installer, which finds the
+   loader and the kernel by name, found nothing on a machine whose
+   loader's information was reused by the time it asked */
+#define MOD_NAME_MAX 32
+static char mod_names[MODS_MAX][MOD_NAME_MAX];
 static uint32_t rsdp_addr;
 static struct mb2_framebuffer framebuffer;
 static const char *kind = "?";
@@ -168,7 +175,11 @@ const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
             if (nmods < MODS_MAX) {
                 mods[nmods].start = m->mod_start;
                 mods[nmods].end = m->mod_end;
-                mods[nmods].string = (uint32_t)(uintptr_t)m->string;
+                uint32_t room = t->size - (uint32_t)sizeof(*m) + 1, k = 0;
+                for (; k < room && k < MOD_NAME_MAX - 1 && m->string[k]; k++)
+                    mod_names[nmods][k] = m->string[k];
+                mod_names[nmods][k] = '\0';
+                mods[nmods].string = (uint32_t)(uintptr_t)mod_names[nmods];
                 mods[nmods].reserved = 0;
                 nmods++;
             }

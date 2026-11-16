@@ -49,6 +49,11 @@ int task_alive(int id)
     return task64_alive(id);
 }
 
+int task_end_of(int id, int *code, const char **why, uint64_t *addr)
+{
+    return task64_end_of(id, code, why, addr);
+}
+
 int task_current_id(void)
 {
     return task64_id_current();

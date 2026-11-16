@@ -177,8 +177,10 @@ def main():
             # --- the top: the whole screen ------------------------------
             drag(q, half + 150, BAR_H + 4, 320, 20)
             w, h, at = q.screen_raw()
+            # Read low down, under the list the settings keep down
+            # their left side - its icons are not the window's colour
             check("a window dragged to the top takes the whole screen",
-                  is_win(at(20, 300)) and is_win(at(w - 3, 300)))
+                  is_win(at(20, deck - 30)) and is_win(at(w - 3, deck - 30)))
             check("but it does not run over the dock",
                   not is_win(at(320, h - 4)))
 
@@ -202,7 +204,7 @@ def main():
             # After four drags, three snaps and a restore it is still a
             # window: a lit title bar with its own body under it
             check("the window survived four drags and still has the focus",
-                  is_win(at(x0 + 20, ty + TITLE_H + GSET_H - 30)))
+                  is_win(at(x0 + WW - 30, ty + TITLE_H + GSET_H - 30)))
 
             # --- what all of it is for: two windows side by side --------
             # The settings to the right, the terminal to the left. The
@@ -227,7 +229,7 @@ def main():
             check("and they do not overlap - the border is in the middle",
                   ptest_near(at(half - 10, deck - 30),
                              theme("dark")["app_field"], 3) and
-                  is_win(at(half + 20, 300)))
+                  is_win(at(half + 20, deck - 30)))
         finally:
             q.close()
     finally:

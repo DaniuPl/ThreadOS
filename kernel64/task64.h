@@ -98,6 +98,9 @@ void task64_rename(const char *name);
 /* Kills the current task (a program error in ring 3). Does not
    return. */
 void task64_kill_current(const char *why);
+/* The same for a processor exception, with the address it was about
+   (the page fault's, or where the program was) */
+void task64_kill_fault(const char *why, uint64_t addr);
 /* Signals. Sending merely queues a signal and wakes a sleeping task -
    it is delivered only by the return to ring 3. */
 int task64_signal(int id, int sig);
@@ -129,7 +132,11 @@ void task64_set_identity_name(const char *name, int uid, int level, int cwd);
 void task64_set_level_name(const char *name, int level);
 void task64_kill_uid(int uid);
 void task64_set_vc(int vc);
-int task64_alive(int id);            /* is the task with this number alive */
+int task64_alive(int id);
+/* How a program that has ended ended: its exit code, or -1 and why it
+   was stopped (and the address of the fault, if that was it). 0 = it
+   is not among the last few ends. */
+int task64_end_of(int id, int *code, const char **why, uint64_t *addr);            /* is the task with this number alive */
 
 /* The task's working directory - a child starts where the parent
    stood */

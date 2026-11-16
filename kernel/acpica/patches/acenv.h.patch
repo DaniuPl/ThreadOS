@@ -1,0 +1,21 @@
+ACPICA chooses its host's configuration by the compiler's and the
+system's names in acenv.h. This names ThreadOS (__THREADOS__, which the
+Makefile defines) and its header, kernel/acpica/acthreados.h - the only
+change to ACPICA. It comes first: the compiler that builds the kernel
+is a Linux one and says __linux__, which would otherwise pick ACPICA's
+Linux host - one with a C library.
+
+--- a/source/include/platform/acenv.h
++++ b/source/include/platform/acenv.h
+@@ -305,7 +305,10 @@
+ 
+ #endif
+ 
+-#if defined(_LINUX) || defined(__linux__)
++#if defined(__THREADOS__)
++#include "acthreados.h"
++
++#elif defined(_LINUX) || defined(__linux__)
+ #include "aclinux.h"
+ 
+ #elif defined(_APPLE) || defined(__APPLE__)

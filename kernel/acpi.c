@@ -136,6 +136,12 @@ static int checksum_ok(const void *p, uint32_t len)
    precedence over searching on our own, because under UEFI there is
    nowhere to search */
 static uint32_t given_rsdp;
+static uint32_t rsdp_at;            /* where it was found, for ACPICA */
+
+uint32_t acpi_rsdp(void)
+{
+    return rsdp_at;
+}
 
 void acpi_set_rsdp(uint32_t addr)
 {
@@ -204,6 +210,7 @@ static int parse_s5(const uint8_t *dsdt, uint32_t len)
 int acpi_init(void)
 {
     const struct rsdp *rsdp = find_rsdp();
+    rsdp_at = (uint32_t)(uintptr_t)rsdp;
     if (!rsdp)
         return 0;
 

@@ -117,4 +117,8 @@ void desktop_notify(const char *title, const char *body);
    until it is given. 0, or -1 when there is no desktop to lock. */
 int desktop_lock(void);
 
+/* The power button was pressed: ask whether to shut down. -1 = there is
+   no desktop to ask on. */
+int desktop_power_button(void);
+
 #endif

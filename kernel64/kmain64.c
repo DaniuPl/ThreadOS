@@ -59,6 +59,7 @@
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/desktop.h"
+#include "../kernel/include/power.h"
 #include "../kernel/include/install.h"
 
 /* Demonstration threads: two counting forever and one that ends by
@@ -566,10 +567,14 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        in bytecode - does not depend on the processor mode. The only
        thing that does is adding tables to the mapping, and that is all
        this file shows about the mode. */
-    if (acpi_init())
+    if (acpi_init()) {
         printk("[ OK ] ACPI: tables from '%s' (the 'poweroff', "
                "'reboot')\n", acpi_oem());
-    else
+        /* The firmware's AML - the power button, a battery - in a
+           thread of its own, so that no firmware holds the start up */
+        if (!boot_word(mbi, "noacpica"))
+            power_start();
+    } else
         printk("[ !! ] ACPI: no tables - we cannot switch the machine off\n");
 
     /* --- Disk --------------------------------------------------- */

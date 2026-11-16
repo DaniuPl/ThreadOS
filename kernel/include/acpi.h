@@ -25,6 +25,10 @@ void acpi_set_rsdp(uint32_t addr);
 /* Finds the ACPI tables. 1 = the computer can be turned off. */
 int acpi_init(void);
 
+/* The physical address acpi_init() found the RSDP at, 0 = none - the
+   root ACPICA starts from (kernel/acpios.c) */
+uint32_t acpi_rsdp(void);
+
 /* Any ACPI table by signature ("APIC", "HPET", ...), glued onto the
    mapping. NULL when there is no such table. Called after acpi_init. */
 const void *acpi_table(const char *signature);

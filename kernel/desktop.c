@@ -105,9 +105,15 @@ struct icon {
 /* The browser is the litehtml one (apps/browser), in the initrd as
    "web"; gweb, the older one in C, is still there to be run by name */
 #define WEB_APP "web"
-#define ART_N      16
+#define ART_N      19
 #define ART_LETTER 14
 #define ART_TRASH  15
+/* Pictures drawn later than the letter and the waste bin come after
+   them: desktop.icons names pictures by number, and a number a file
+   already uses keeps its meaning */
+#define ART_CODE   16
+#define ART_USERS  17
+#define ART_IMAGE  18
 /* The time is on the bar, so the clock is not in the dock; it and the
    demonstration program stay in the menu, with everything else */
 static struct icon icons[ICON_MAX] = {
@@ -118,7 +124,7 @@ static struct icon icons[ICON_MAX] = {
     {"Settings", "gsettings", 6, {{0}}},
     {"Editor", "gedit", 7, {{0}}},
     {"Tasks", "gtasks", 8, {{0}}},
-    {"Code", "gcode", ART_LETTER, {{0}}},
+    {"Code", "gcode", ART_CODE, {{0}}},
 };
 static int icon_n = 8;         /* how many of them there are */
 
@@ -244,14 +250,15 @@ static int desktop_read_items(void)
 /* The programs that come with the system, by the name they run under:
    the picture each wears and what a person calls it - for a program
    that is not in the dock, say one started from the menu */
-static const struct { const char *app, *label; } known_apps[] = {
-    { "guiapp", "App" }, { "gclock", "Clock" }, { "gfiles", "Files" },
-    { "gmon", "Monitor" }, { "gterm", "Term" }, { WEB_APP, "Web" },
-    { "gsettings", "Settings" }, { "gedit", "Editor" },
-    { "gtasks", "Tasks" }, { "gmikser", "Mixer" },
-    { "gappear", "Appearance" }, { "gcalc", "Calculator" },
-    { "gcal", "Calendar" }, { "gpaint", "Paint" },
-    { "gcode", "Code" },
+static const struct { const char *app, *label; int art; } known_apps[] = {
+    { "guiapp", "App", 0 }, { "gclock", "Clock", 1 },
+    { "gfiles", "Files", 2 }, { "gmon", "Monitor", 3 },
+    { "gterm", "Term", 4 }, { WEB_APP, "Web", 5 },
+    { "gsettings", "Settings", 6 }, { "gedit", "Editor", 7 },
+    { "gtasks", "Tasks", 8 }, { "gmikser", "Mixer", 9 },
+    { "gappear", "Appearance", 10 }, { "gcalc", "Calculator", 11 },
+    { "gcal", "Calendar", 12 }, { "gpaint", "Paint", 13 },
+    { "gcode", "Code", ART_CODE }, { "gusers", "Accounts", ART_USERS },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -264,31 +271,40 @@ static int known_of_app(const char *app)
     return -1;
 }
 
+/* Programs that are not started from the menu or the search - another
+   program opens them, or a person who knows the name - but whose window
+   still wants its own picture in the dock rather than a letter */
+static const struct { const char *app, *label; int art; } other_apps[] = {
+    { "gimg", "Picture", ART_IMAGE },
+    { "gweb", "Browser", 5 },          /* the older browser: a globe too */
+};
+#define OTHER_N ((int)(sizeof(other_apps) / sizeof(other_apps[0])))
+
+static int other_of_app(const char *app)
+{
+    for (int k = 0; k < OTHER_N; k++)
+        if (!strcmp(app, other_apps[k].app))
+            return k;
+    return -1;
+}
+
+/* A program nobody gave a picture wears its first letter */
 static int art_of_app(const char *app)
 {
     int k = known_of_app(app);
-    return k >= 0 ? k : ART_LETTER;
+    if (k >= 0)
+        return known_apps[k].art;
+    k = other_of_app(app);
+    return k >= 0 ? other_apps[k].art : ART_LETTER;
 }
 
-/* Programs with a name on the desktop but no picture of their own -
-   a tile with their first letter stands for them (ART_LETTER) */
-static const struct { const char *app, *label; } lettered_apps[] = {
-    { "gusers", "Accounts" },
-};
-
-/* By the name, not by the picture: the letter is a picture of its own
-   and the last known program wears it, so an unknown program's
-   ART_LETTER would name it after that one */
 static const char *label_of_app(const char *app)
 {
     int k = known_of_app(app);
     if (k >= 0)
         return known_apps[k].label;
-    for (k = 0; k < (int)(sizeof(lettered_apps) /
-                          sizeof(lettered_apps[0])); k++)
-        if (!strcmp(app, lettered_apps[k].app))
-            return lettered_apps[k].label;
-    return app;
+    k = other_of_app(app);
+    return k >= 0 ? other_apps[k].label : app;
 }
 
 #define ICON_N icon_n
@@ -1359,6 +1375,24 @@ static const int16_t cos12[12] = { 1000, 866, 500, 0, -500, -866,
 static const int16_t sin8[8] = { 0, 707, 1000, 707, 0, -707, -1000, -707 };
 static const int16_t cos8[8] = { 1000, 707, 0, -707, -1000, -707, 0, 707 };
 
+/* A hill in a picture: a triangle from its top (ax, ay) down to a base
+   'half' to either side at 'by', in the 320ths of a tile draw_art
+   counts in - filled a row at a time, its slopes smoothed by a line */
+static void art_hill(int x, int y, int s, int ax, int ay, int half, int by,
+                     uint32_t c)
+{
+    int top = y + ay * s / 320, base = y + by * s / 320;
+    int cx = x + ax * s / 320, hw = half * s / 320;
+    for (int r = top; r < base; r++) {
+        int w = (r - top) * hw / (base - top > 0 ? base - top : 1);
+        gfx_fill(cx - w, r, 2 * w + 1, 1, c, 255);
+    }
+    gfx_line16(cx * 16, top * 16, (cx - hw) * 16, base * 16, s * 6 / 20, c,
+               255);
+    gfx_line16(cx * 16, top * 16, (cx + hw) * 16, base * 16, s * 6 / 20, c,
+               255);
+}
+
 static void draw_art(int art, int x, int y, int s, char letter)
 {
     int X = x * 16, Y = y * 16;
@@ -1382,6 +1416,9 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0x5AC8FA, 0x34C759 },   /* Paint */
         { 0x8E8E93, 0x48484A },   /* anything else: a letter */
         { 0x9A9AA0, 0x5A5A60 },   /* Trash */
+        { 0x3A3A52, 0x16162A },   /* Code */
+        { 0x8FA3C8, 0x4E6290 },   /* Accounts */
+        { 0x7FD3FF, 0x2D8CEB },   /* Picture */
     };
     if (art < 0 || art >= ART_N)
         art = ART_LETTER;
@@ -1501,6 +1538,26 @@ static void draw_art(int art, int x, int y, int s, char letter)
         for (int k = 0; k < 3; k++)
             gfx_line16(PX(125 + 35 * k), PY(116), PX(125 + 35 * k),
                        PY(225), D(8), 0x77777D, 200);
+        break;
+    case ART_CODE:                                /* </> on a dark ground */
+        gfx_line16(PX(118), PY(108), PX(70), PY(160), D(20), 0x64D2FF, 255);
+        gfx_line16(PX(70), PY(160), PX(118), PY(212), D(20), 0x64D2FF, 255);
+        gfx_line16(PX(202), PY(108), PX(250), PY(160), D(20), 0x64D2FF, 255);
+        gfx_line16(PX(250), PY(160), PX(202), PY(212), D(20), 0x64D2FF, 255);
+        gfx_line16(PX(180), PY(88), PX(140), PY(232), D(18), 0xFFFFFF, 255);
+        break;
+    case ART_USERS:                               /* two people, one behind */
+        gfx_disc16(PX(208), PY(112), D(36), 0xFFFFFF, 150);
+        gfx_rrect16(PX(152), PY(160), D(112), D(80), D(40), 0xFFFFFF, 150);
+        gfx_disc16(PX(132), PY(124), D(46), 0xFFFFFF, 255);
+        gfx_rrect16(PX(60), PY(184), D(144), D(84), D(42), 0xFFFFFF, 255);
+        break;
+    case ART_IMAGE:                               /* a photograph: sun, hills */
+        gfx_rrect16(PX(50), PY(70), D(220), D(180), D(22), 0xFFFFFF, 255);
+        gfx_rrect16(PX(66), PY(86), D(188), D(148), D(12), 0xBFE6FF, 255);
+        gfx_disc16(PX(205), PY(125), D(20), 0xFFCC00, 255);
+        art_hill(x, y, s, 132, 138, 62, 234, 0x34C759);
+        art_hill(x, y, s, 204, 170, 50, 234, 0x2A9D4A);
         break;
     default: {                                    /* the first letter */
         char t[2] = { letter, 0 };
@@ -4475,7 +4532,8 @@ static void search_refresh(void)
         if (s2 > s)
             s = s2;
         if (s)
-            found_add(FIND_APP, k, k, known_apps[k].label, s, scores);
+            found_add(FIND_APP, k, known_apps[k].art, known_apps[k].label, s,
+                      scores);
     }
     for (int i = 0; i < MAX_WIN; i++) {
         if (!wins[i].used || wins[i].desk != cur_desk)
@@ -5175,6 +5233,22 @@ int desktop_lock(void)
     search_close();
     menu_open = 0;
     locked = 1;
+    return 0;
+}
+
+/* The machine's power button: the question the menu's Shut Down asks,
+   so that a press by mistake is one click from nothing happening. -1
+   when there is no desktop to ask on (the caller switches the machine
+   off, as a power button does). */
+int desktop_power_button(void)
+{
+    scene_changed();
+    if (!compositor_running || kiosk || locked)
+        return -1;
+    tmenu = -1;
+    search_close();
+    menu_open = 0;
+    ask = SESS_SHUTDOWN;
     return 0;
 }
 
@@ -6580,6 +6654,50 @@ int desktop_win_poll(int winid, int owner, void *out)
  */
 static int kiosk_pid = -1;
 static int kiosk_uptime;           /* frames the program has been alive */
+static char kiosk_why[64];         /* how its last try ended, when it gave up */
+
+/* What the screen says under "will not start": how the last try ended,
+   from the kernel's record of it. The words a photo of the screen has
+   to carry, on a machine where nobody can read the serial port. */
+static void kiosk_say_why(void)
+{
+    int code, at = 0;
+    const char *why;
+    uint64_t addr;
+    char name[16];
+    int n = 0;
+    while (kiosk_app[n] && kiosk_app[n] != ' ' && n < 15) {
+        name[n] = kiosk_app[n];
+        n++;
+    }
+    name[n] = 0;
+    at = cat(kiosk_why, 0, name);
+    if (kiosk_pid < 0) {
+        cat(kiosk_why, at, ": the program could not be loaded");
+    } else if (!task_end_of(kiosk_pid, &code, &why, &addr)) {
+        cat(kiosk_why, at, " ended at once");
+    } else if (code >= 0 || !why[0]) {
+        at = cat(kiosk_why, at, " ended with code ");
+        if (code < 0) {
+            at = cat(kiosk_why, at, "-");
+            code = -code;
+        }
+        cat_num(kiosk_why, at, (uint32_t)code);
+    } else {
+        at = cat(kiosk_why, at, " was stopped: ");
+        at = cat(kiosk_why, at, why);
+        if (addr) {
+            at = cat(kiosk_why, at, " at 0x");
+            int digits = 1;
+            while (digits < 16 && (addr >> (digits * 4)))
+                digits++;
+            for (int d = digits - 1; d >= 0 && at < 63; d--)
+                kiosk_why[at++] = "0123456789abcdef"[(addr >> (d * 4)) & 15];
+            kiosk_why[at] = 0;
+        }
+    }
+    printk("[desktop] the kiosk gave up: %s\n", kiosk_why);
+}
 
 static void kiosk_frame(int mx, int my)
 {
@@ -6597,6 +6715,7 @@ static void kiosk_frame(int mx, int my)
             kiosk_wait--;
         } else if (kiosk_launches >= KIOSK_TRIES) {
             kiosk_gave_up = 1;
+            kiosk_say_why();
         } else {
             kiosk_launches++;
             kiosk_pid = exec_spawn(kiosk_app);
@@ -6643,6 +6762,8 @@ static void kiosk_frame(int mx, int my)
                      cy, a, 0xFFFFFF);
         ui_font_text(UI_SANS, UI_PX, cx - ui_text_width(b) / 2, cy + 18, b,
                      0xFFFFFF);
+        ui_font_text(UI_SANS, UI_PX, cx - ui_text_width(kiosk_why) / 2,
+                     cy + 40, kiosk_why, 0xFFFFFF);
     }
 
     draw_hint();
