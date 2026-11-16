@@ -182,6 +182,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gmedia.elf \
                $(BUILD)/user64/ggallery.elf \
                $(BUILD)/user64/gcamera.elf \
+               $(BUILD)/user64/grecord.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/aestest.elf \
@@ -337,6 +338,15 @@ $(FFMPEG_STAMP): $(FFMPEG_CONFIG)
 	touch $@
 
 $(FFMPEG_LIBS): $(FFMPEG_STAMP)
+
+# The Recorder: memory that grows with the recording
+$(BUILD)/user64/grecord.elf: user64/grecord.c user/uapi.h user/udraw.h \
+                             user/umic.h user64/usys64.h user64/compat64.h \
+                             $(LIBC64) libc/libc64.ld \
+                             | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
+	    -Wall -Wextra -c $< -o $(BUILD)/libc64/grecord.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/grecord.o) -o $@
 
 # The Camera: zlib for the PNGs it saves, and memory given back
 $(BUILD)/user64/gcamera.elf: user64/gcamera.c user/uapi.h user/udraw.h \
@@ -856,6 +866,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gmedia=$(BUILD)/user64/gmedia.elf \
 	    ggallery=$(BUILD)/user64/ggallery.elf \
 	    gcamera=$(BUILD)/user64/gcamera.elf \
+	    grecord=$(BUILD)/user64/grecord.elf \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    aestest=$(BUILD)/user64/aestest.elf \

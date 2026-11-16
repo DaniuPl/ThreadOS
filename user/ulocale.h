@@ -40,7 +40,7 @@ static inline void ulocale_window_title(int win, const char *english,
     current_language = language;
 }
 
-static int ulocale_decimal_comma(void)
+static inline int ulocale_decimal_comma(void)
 {
     struct cfg_entry entry;
     for (uint32_t i = 0; sys_cfg_get(i, &entry) == 0; i++) {

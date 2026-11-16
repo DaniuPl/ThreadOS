@@ -8199,3 +8199,32 @@ works and is checked by `make test`.
       with Pillow's decoding, takes a JPEG and a PNG and checks them
       pixel for pixel, and sees the dot go when the window closes and
       when the program is killed; t_gallery shows a 1280x720 JPEG.
+
+- [x] **The microphone, the Recorder, and the dot that says it listens**
+      (kernel/hda.c, kernel/include/hda.h, kernel/include/mic_info.h,
+      user/umic.h, kernel64/syscall64.c, kernel64/task64.c,
+      kernel64/shell64.c, kernel/desktop.c, kernel/include/look.h,
+      kernel/locale.c, user64/grecord.c, scripts/tests/t_mic.py)
+      The HDA driver records now. It finds the codec's microphone from
+      the pins' configuration defaults (a microphone before a line in,
+      a socket that is not wired to anything left out), follows the
+      connection lists from an input converter back to it, picks the
+      way at each selector, opens the amplifiers at 0 dB and the pin
+      with its bias voltage, and runs an input stream into a ring of
+      two thirds of a second, 48 kHz, 16 bits, two channels. Programs
+      get it through SYS64_MIC - one at a time, what came in since they
+      last asked - and the kernel shell through 'mic' (what it found)
+      and 'mic record <seconds> <file>' (a WAV). The Recorder app has a
+      button that records and stops, a clock and a level bar, keeps
+      each recording in the home's Recordings folder and plays the last
+      one back. While anything records the bar has an orange dot left
+      of the camera's green one, drawn from the driver's state; a
+      program's end stops its recording, as with the camera. t_mic
+      gives QEMU's hda-micro a known pseudo-random signal through SDL's
+      disk driver - paced like a real microphone, where ALSA's file
+      plugin hands seconds of sound over at once - and checks that a
+      shell recording is exactly four seconds of it, sample for sample
+      and unbroken; that the Recorder's button lights the dot and puts
+      it out again, and that its file is an unbroken stretch of the
+      signal as long as the recording was; and that killing the
+      Recorder mid-recording puts the dot out too.

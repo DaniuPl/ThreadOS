@@ -149,6 +149,7 @@ static void cmd_help(void)
            "frames\n");
     printk("          wifi [scan|test] - the Wi-Fi card, the networks\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
+    printk("          mic [record <s> <file>] - the microphone\n");
     printk("          format [N] - the whole disk, or partition N, as TFS\n");
     printk("          install - ThreadOS onto this machine's disk\n");
     printk("            (the whole screen; 'install text [whole]' - here)\n");
@@ -856,6 +857,93 @@ static uint32_t text_num(const char *s)
    anything at all. Without arguments: A above middle C for a fifth of
    a second, because a number one recognises is worth more than a
    number one has to look up. */
+/* 'mic': what is listening; 'mic record <seconds> <file>': that long,
+   into a WAV file - for a person checking a microphone, and for tests */
+static void put16le(uint8_t *o, uint32_t v)
+{
+    o[0] = (uint8_t)v;
+    o[1] = (uint8_t)(v >> 8);
+}
+
+static void put32le(uint8_t *o, uint32_t v)
+{
+    put16le(o, v);
+    put16le(o + 2, v >> 16);
+}
+
+static void cmd_mic(const char *arg)
+{
+    if (!arg || !*arg) {
+        printk("mic: %s\n", hda_mic_present() ? hda_mic_name()
+                                               : "there is no microphone");
+        return;
+    }
+    if (!starts_with(arg, "record ")) {
+        printk("mic: 'mic' or 'mic record <seconds> <file>'\n");
+        return;
+    }
+    const char *a = arg + 7;
+    uint32_t secs = 0;
+    while (*a >= '0' && *a <= '9')
+        secs = secs * 10 + (uint32_t)(*a++ - '0');
+    while (*a == ' ')
+        a++;
+    if (!secs || secs > 10 || !*a) {
+        printk("mic: 1 to 10 seconds, and a file\n");
+        return;
+    }
+    uint32_t frames = secs * 48000, bytes = frames * 4;
+    uint32_t pages = (44 + bytes + 4095) / 4096;
+    uint32_t at = pmm_alloc_contiguous(pages);
+    if (!at) {
+        printk("mic: no memory for %u seconds\n", secs);
+        return;
+    }
+    uint8_t *wav = (uint8_t *)(uintptr_t)at;
+    int r = hda_mic_start(-1);
+    if (r < 0) {
+        printk("mic: %s\n", r == -2 ? "something is recording already"
+                                     : "there is no microphone");
+        for (uint32_t p = 0; p < pages; p++)
+            pmm_free_frame(at + p * 4096);
+        return;
+    }
+    uint32_t got = 0, idle = 0;
+    while (got < frames && idle < 200) {
+        int n = hda_mic_read((int16_t *)(void *)(wav + 44 + got * 4),
+                             frames - got);
+        if (n <= 0) {
+            idle++;
+            task64_sleep(1);
+            continue;
+        }
+        idle = 0;
+        got += (uint32_t)n;
+    }
+    hda_mic_stop();
+    /* The RIFF header: PCM, two channels, 48 kHz, 16 bits */
+    memcpy(wav, "RIFF", 4);
+    put32le(wav + 4, 36 + got * 4);
+    memcpy(wav + 8, "WAVEfmt ", 8);
+    put32le(wav + 16, 16);
+    put16le(wav + 20, 1);
+    put16le(wav + 22, 2);
+    put32le(wav + 24, 48000);
+    put32le(wav + 28, 48000 * 4);
+    put16le(wav + 32, 4);
+    put16le(wav + 34, 16);
+    memcpy(wav + 36, "data", 4);
+    put32le(wav + 40, got * 4);
+    int slot = fs_open(task64_cwd(), a, 1);
+    if (slot < 0 || fs_truncate(slot) < 0 ||
+        fs_write_at(slot, 0, wav, 44 + got * 4) < 0)
+        printk("mic: could not write %s\n", a);
+    else
+        printk("mic: recorded %u frames into %s\n", got, a);
+    for (uint32_t p = 0; p < pages; p++)
+        pmm_free_frame(at + p * 4096);
+}
+
 static void cmd_beep(const char *arg)
 {
     uint32_t hz = 440, ms = 200;
@@ -1215,6 +1303,10 @@ static void execute(const char *line)
         hwinfo_print();
     } else if (!strcmp(line, "devices")) {
         devices_print();
+    } else if (!strcmp(line, "mic")) {
+        cmd_mic("");
+    } else if (starts_with(line, "mic ")) {
+        cmd_mic(line + 4);
     } else if (!strcmp(line, "camera")) {
         uvc_print();
     } else if (starts_with(line, "camera grab ")) {

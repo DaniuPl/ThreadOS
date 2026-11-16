@@ -53,6 +53,7 @@
 #include "../kernel/include/devices.h"
 #include "../kernel/include/uvc.h"
 #include "../kernel/include/cam_info.h"
+#include "../kernel/include/mic_info.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/random.h"
 
@@ -1503,6 +1504,44 @@ static void handle(struct regs *r)
         iwlwifi_info_fill(&wi);
         *(struct wifi_info *)(uintptr_t)a2 = wi;
         r->rax = 0;
+        return;
+    }
+    case SYS64_MIC: {
+        /* As the camera: one program records, its end stops it */
+        int me = task64_tgid();
+        if (a1 == MIC_INFO) {
+            if (!paging64_user_writable(a2, sizeof(struct mic_info))) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            struct mic_info *mi = (struct mic_info *)(uintptr_t)a2;
+            memset(mi, 0, sizeof(*mi));
+            mi->present = hda_mic_present();
+            mi->recording = hda_mic_on();
+            mi->owner = hda_mic_who();
+            mi->rate = 48000;
+            mi->channels = 2;
+            const char *nm = hda_mic_name();
+            for (int i = 0; nm[i] && i < (int)sizeof(mi->name) - 1; i++)
+                mi->name[i] = nm[i];
+            r->rax = 0;
+        } else if (a1 == MIC_OPEN) {
+            r->rax = (uint64_t)(int64_t)hda_mic_start(me);
+        } else if (a1 == MIC_READ) {
+            if (hda_mic_who() != me || a3 > 48000 ||
+                !paging64_user_writable(a2, a3 * 4)) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            r->rax = (uint64_t)(int64_t)hda_mic_read(
+                (int16_t *)(uintptr_t)a2, (uint32_t)a3);
+        } else if (a1 == MIC_CLOSE) {
+            if (hda_mic_who() == me)
+                hda_mic_stop();
+            r->rax = 0;
+        } else {
+            r->rax = (uint64_t)-1;
+        }
         return;
     }
     case SYS64_CAMERA: {

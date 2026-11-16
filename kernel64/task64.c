@@ -1022,6 +1022,7 @@ static void let_go_of_fds(void)
         /* The program is gone with its last thread: so is its hold on
            the camera (asked only - the stream's thread stops it) */
         uvc_release(current->tgid);
+        hda_mic_release(current->tgid);
     }
     current->table = NULL;
     current->fds = NULL;

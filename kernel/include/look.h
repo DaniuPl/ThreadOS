@@ -56,6 +56,8 @@
 #define CAM_DOT_W    12      /* its place on the bar */
 #define CAM_DOT_D    8       /* the dot */
 #define CAM_DOT_RGB  0x30D158
+/* ... and an orange one left of it while the microphone listens */
+#define MIC_DOT_RGB  0xFF9F0A
 
 /* --- windows ----------------------------------------------------------- */
 /* The title bar. Twenty two pixels: the lights are eleven across and

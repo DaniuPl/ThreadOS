@@ -97,8 +97,15 @@
 #define PARAM_PIN_CAP     0x0C
 #define PARAM_CONN_LIST   0x0E
 #define PARAM_AMP_OUT_CAP 0x12
+#define PARAM_AMP_IN_CAP  0x0D
+#define VERB_GET_CONFIG       0xF1C
+#define VERB_GET_CONN_LIST    0xF02
+#define VERB_SET_CONN_SELECT  0x701
 
 #define WIDGET_OUTPUT     0x0
+#define WIDGET_INPUT      0x1
+#define WIDGET_MIXER      0x2
+#define WIDGET_SELECTOR   0x3
 #define WIDGET_PIN        0x4
 
 /* 48 kHz, sixteen bits, two channels. The one format a codec has to
@@ -246,6 +253,8 @@ static uint32_t param(int node, uint32_t which)
  * one speaker, and on a machine with several it takes the one the
  * codec lists first - which is the one its maker put first.
  */
+static void find_input(uint16_t gcap);
+
 static int find_output(void)
 {
     uint32_t sub = param(0, PARAM_SUBNODES);
@@ -280,6 +289,180 @@ static int find_output(void)
             return 1;
     }
     return 0;
+}
+
+/* --- listening: the way from a microphone to memory --------------------
+ *
+ * Sound in goes the other way through the codec: from a pin (the
+ * microphone's socket, or the one built into the lid), sometimes
+ * through a mixer or a selector, into an input converter, and from
+ * there into an input stream the controller writes into memory. Each
+ * widget lists what it takes its signal from; the way is found by
+ * walking those lists from every converter back towards the pin, and
+ * whatever chooses among its inputs on the way is told which one.
+ *
+ * The pin is chosen by what the codec's maker wrote into its default
+ * configuration: a microphone first, then a line in - and not a socket
+ * marked as connected to nothing, which every codec has a few of.
+ */
+static uint32_t in_base;              /* the first input stream's registers */
+static int adc = -1, mic = -1;        /* the converter and the pin */
+static int mic_kind;                  /* what the pin is: 0xA mic, 0x8 line */
+static int way[3], way_pick[3], way_n;   /* converter -> ... -> pin */
+static volatile uint8_t *cbdl;
+static uint32_t cbdl_phys;
+static volatile uint8_t *cbuf;
+static uint32_t cbuf_phys;
+static int cap_ready, cap_active, cap_owner = -1;
+static uint32_t cap_read;             /* the next byte to hand out */
+static char in_name[56];
+#define CAP_PAGES 32                  /* 128 KiB: two thirds of a second */
+#define CAP_BYTES (CAP_PAGES * PAGE_SIZE)
+
+/* What a widget takes its signal from: up to 'max' node numbers */
+static int conn_list(int node, int *out, int max)
+{
+    uint32_t len = param(node, PARAM_CONN_LIST);
+    if (len == 0xFFFFFFFFu)
+        return 0;
+    int n = (int)(len & 0x7F), lng = (int)(len >> 7) & 1, got = 0;
+    for (int i = 0; i < n && got < max; i += lng ? 2 : 4) {
+        uint32_t e = verb(node, VERB_GET_CONN_LIST, (uint32_t)i);
+        for (int k = 0; k < (lng ? 2 : 4) && i + k < n && got < max; k++) {
+            uint32_t v = lng ? (e >> (16 * k)) & 0xFFFF : (e >> (8 * k)) & 0xFF;
+            /* (a range of nodes is rare enough to be read as its ends) */
+            out[got++] = (int)(v & (lng ? 0x7FFF : 0x7F));
+        }
+    }
+    return got;
+}
+
+static int widget_type(int node)
+{
+    return (int)((param(node, PARAM_WIDGET_CAP) >> 20) & 0x0F);
+}
+
+/* The way from converter 'from' back to the pin, at most three widgets
+   long: 1 when found, way[] and way_pick[] filled from 'depth' on */
+static int find_way(int from, int depth)
+{
+    int list[16];
+    int n = conn_list(from, list, 16);
+    way[depth] = from;
+    for (int i = 0; i < n; i++) {
+        if (list[i] == mic) {
+            way_pick[depth] = i;
+            way_n = depth + 1;
+            return 1;
+        }
+    }
+    if (depth >= 2)
+        return 0;
+    for (int i = 0; i < n; i++) {
+        int t = widget_type(list[i]);
+        if ((t == WIDGET_MIXER || t == WIDGET_SELECTOR) &&
+            find_way(list[i], depth + 1)) {
+            way_pick[depth] = i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void find_input(uint16_t gcap)
+{
+    if (!((gcap >> 8) & 0x0F))
+        return;                        /* the controller has no input stream */
+    uint32_t sub = param(0, PARAM_SUBNODES);
+    int first = (int)((sub >> 16) & 0xFF), count = (int)(sub & 0xFF);
+    for (int fg = first; fg < first + count && adc < 0; fg++) {
+        if ((param(fg, PARAM_FUNC_TYPE) & 0x7F) != 0x01)
+            continue;
+        uint32_t ws = param(fg, PARAM_SUBNODES);
+        int wf = (int)((ws >> 16) & 0xFF), wc = (int)(ws & 0xFF);
+        int best = -1, best_rank = 0;
+        for (int w = wf; w < wf + wc; w++) {
+            if (widget_type(w) != WIDGET_PIN ||
+                !(param(w, PARAM_PIN_CAP) & (1u << 5)))
+                continue;              /* not a pin that takes sound in */
+            uint32_t cfg = verb(w, VERB_GET_CONFIG, 0);
+            int device = (int)((cfg >> 20) & 0xF);
+            if (((cfg >> 30) & 3) == 1)
+                continue;              /* connected to nothing */
+            int rank = device == 0xA ? 3 : device == 0x8 ? 2 : 1;
+            if (rank > best_rank) {
+                best = w;
+                best_rank = rank;
+                mic_kind = device;
+            }
+        }
+        if (best < 0)
+            continue;
+        mic = best;
+        for (int w = wf; w < wf + wc && adc < 0; w++)
+            if (widget_type(w) == WIDGET_INPUT && find_way(w, 0))
+                adc = w;
+    }
+    if (adc < 0) {
+        mic = -1;
+        return;
+    }
+    cbdl_phys = pmm_alloc_frame();
+    cbuf_phys = pmm_alloc_contiguous(CAP_PAGES);
+    if (!cbdl_phys || !cbuf_phys) {
+        adc = mic = -1;
+        return;
+    }
+    cbdl = (volatile uint8_t *)(uintptr_t)cbdl_phys;
+    cbuf = (volatile uint8_t *)(uintptr_t)cbuf_phys;
+    memset((void *)cbdl, 0, PAGE_SIZE);
+    for (int i = 0; i < 2; i++) {
+        volatile uint32_t *e = (volatile uint32_t *)(cbdl + i * 16);
+        e[0] = cbuf_phys + (uint32_t)i * (CAP_BYTES / 2);
+        e[1] = 0;
+        e[2] = CAP_BYTES / 2;
+        e[3] = 0;
+    }
+    in_base = 0x80;                    /* the first input stream */
+
+    /* The way, told: every widget on it awake, each one that chooses
+       pointed at the next, every amplifier on it open at 0 dB - the
+       offset its capabilities give, which is where 0 dB is */
+    verb(mic, VERB_SET_POWER, 0);
+    verb(mic, VERB_SET_PIN_CTL, mic_kind == 0xA ? 0x21 : 0x20);  /* in; mic bias */
+    for (int k = 0; k < way_n; k++) {
+        int node = way[k];
+        verb(node, VERB_SET_POWER, 0);
+        if (widget_type(node) != WIDGET_MIXER)
+            verb(node, VERB_SET_CONN_SELECT, (uint32_t)way_pick[k]);
+        uint32_t cap = param(node, PARAM_AMP_IN_CAP);
+        if (cap != 0xFFFFFFFFu && cap) {
+            uint32_t gain = cap & 0x7F;
+            /* in, both sides, the input it chose, unmuted */
+            verb(node, VERB_SET_AMP, (1u << 14) | (3u << 12) |
+                 ((uint32_t)way_pick[k] << 8) | gain);
+        }
+    }
+    uint32_t pin_cap = param(mic, PARAM_AMP_IN_CAP);
+    if (pin_cap != 0xFFFFFFFFu && pin_cap)
+        verb(mic, VERB_SET_AMP, (1u << 14) | (3u << 12) | (pin_cap & 0x7F));
+    verb(adc, VERB_SET_CONV_FMT, FORMAT_48K_16_2);
+    verb(adc, VERB_SET_CONV_STREAM, 0x20);       /* tag 2, channel 0 */
+    cap_ready = 1;
+
+    int n = 0;
+    const char *p = mic_kind == 0xA ? "microphone, socket " :
+                    mic_kind == 0x8 ? "line in, socket " : "input, socket ";
+    while (*p)
+        in_name[n++] = *p++;
+    in_name[n++] = (char)('0' + (mic / 10) % 10);
+    in_name[n++] = (char)('0' + mic % 10);
+    p = " -> input ";
+    while (*p)
+        in_name[n++] = *p++;
+    in_name[n++] = (char)('0' + (adc / 10) % 10);
+    in_name[n++] = (char)('0' + adc % 10);
+    in_name[n] = '\0';
 }
 
 /* --- the rings and the buffers --------------------------------------- */
@@ -474,6 +657,9 @@ int hda_init(void)
 
     bdl_setup();
     stream_setup();
+    /* A microphone, if the codec has one and the controller an input
+       stream: no sound out is a reason to give up, no sound in is not */
+    find_input(gcap);
 
     /* The name is the codec's own identifier and the two nodes the
        sound goes through - which is what one wants to see on a machine
@@ -807,4 +993,90 @@ int hda_remember(void)
     }
     text[n] = '\0';
     return config_set("volume", text);
+}
+
+/* --- recording ----------------------------------------------------------
+ *
+ * The input stream runs round its buffer for as long as something is
+ * listening, and its position (LPIB) says how far it has written; a
+ * read hands out what lies between where the last read stopped and
+ * there. Two thirds of a second of room: whoever records has to come
+ * back sooner than that.
+ */
+int hda_mic_present(void)
+{
+    return ready && cap_ready;
+}
+
+const char *hda_mic_name(void)
+{
+    return hda_mic_present() ? in_name : "no microphone";
+}
+
+int hda_mic_start(int owner)
+{
+    if (!hda_mic_present())
+        return -1;
+    if (cap_active)
+        return -2;
+    wr8(in_base + SD_CTL, SDCTL_RESET);
+    wait_ms(2);
+    wr8(in_base + SD_CTL, 0);
+    wait_ms(2);
+    wr32(in_base + SD_BDPL, cbdl_phys);
+    wr32(in_base + SD_BDPU, 0);
+    wr32(in_base + SD_CBL, CAP_BYTES);
+    wr16(in_base + SD_LVI, 1);
+    wr16(in_base + SD_FMT, FORMAT_48K_16_2);
+    wr8(in_base + SD_CTL + 2, 0x20);           /* stream tag two */
+    wr8(in_base + SD_STS, 0x1C);
+    memset((void *)cbuf, 0, CAP_BYTES);
+    cap_read = 0;
+    cap_owner = owner;
+    cap_active = 1;
+    wr8(in_base + SD_CTL, SDCTL_RUN);
+    return 0;
+}
+
+int hda_mic_read(int16_t *out, uint32_t frames)
+{
+    if (!cap_active)
+        return -1;
+    uint32_t pos = rd32(in_base + SD_LPIB) % CAP_BYTES;
+    uint32_t avail = (pos + CAP_BYTES - cap_read) % CAP_BYTES;
+    uint32_t want = frames * 4;
+    if (want > avail)
+        want = avail;
+    want &= ~3u;                               /* whole frames */
+    uint8_t *o = (uint8_t *)out;
+    for (uint32_t i = 0; i < want; i++)
+        o[i] = cbuf[(cap_read + i) % CAP_BYTES];
+    cap_read = (cap_read + want) % CAP_BYTES;
+    return (int)(want / 4);
+}
+
+void hda_mic_stop(void)
+{
+    if (!cap_active)
+        return;
+    wr8(in_base + SD_CTL, 0);
+    cap_active = 0;
+    cap_owner = -1;
+}
+
+int hda_mic_who(void)
+{
+    return cap_active ? cap_owner : -1;
+}
+
+int hda_mic_on(void)
+{
+    return cap_active;
+}
+
+void hda_mic_release(int tgid)
+{
+    /* A register write: safe from the middle of a program's exit */
+    if (cap_active && cap_owner == tgid && tgid >= 0)
+        hda_mic_stop();
 }

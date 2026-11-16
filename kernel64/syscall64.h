@@ -166,6 +166,10 @@
 /* The camera: a1 = CAM_INFO, CAM_OPEN, CAM_FRAME, CAM_CLOSE
    (kernel/include/cam_info.h) */
 #define SYS64_CAMERA 102
+/* The microphone: a1 = MIC_INFO (a2 = struct mic_info *), MIC_OPEN,
+   MIC_READ (a2 = buffer, a3 = frames: 16-bit stereo, 48 kHz),
+   MIC_CLOSE */
+#define SYS64_MIC 103
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

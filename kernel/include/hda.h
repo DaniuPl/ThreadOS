@@ -74,6 +74,21 @@ int hda_beep(uint32_t hz, uint32_t ms);
  * works, and a mixer that pretended otherwise would feel wrong at
  * both ends.
  */
+/* Sound in: the microphone (or a line in) the codec's maker marked,
+   recorded at 48 kHz, 16 bits, two channels. One recording at a time;
+   start says -1 with no microphone, -2 when one is going; read hands
+   out what came since the last read (up to 'frames'), and has to be
+   called at least every half second. 'owner' is the program's tgid
+   (-1 for the shell), and the program's end stops it (release). */
+int hda_mic_present(void);
+const char *hda_mic_name(void);
+int hda_mic_start(int owner);
+int hda_mic_read(int16_t *out, uint32_t frames);
+void hda_mic_stop(void);
+int hda_mic_who(void);
+int hda_mic_on(void);
+void hda_mic_release(int tgid);
+
 void hda_set_volume(int percent);        /* 0..100 */
 int hda_volume(void);
 void hda_set_mute(int on);
