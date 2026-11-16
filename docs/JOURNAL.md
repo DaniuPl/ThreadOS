@@ -7712,3 +7712,26 @@ works and is checked by `make test`.
       screenoff, pointer) are in GROUPS, t_settings and t_xhci carry its
       new checks, and make fuzz reads the ARM64 device tree as well.
       t_iwlwifi stays out of GROUPS until the driver passes it.
+
+- [x] **The system's own CA roots** (third_party/cacert/cacert.pem,
+      libc/overlay/src/threados/socket.c, Makefile, scripts/tests/t_curl.py)
+      curl could check a server only against roots it was handed with
+      --cacert, so no real site worked out of the box. Mozilla's roots,
+      as curl.se extracts them, are in the initrd now, and the C library
+      makes up the file Linux keeps them in - /etc/ssl/certs/ca-
+      certificates.crt, and /etc/ssl/cert.pem and the Red Hat path for
+      programs that look there - read out of the initrd, so a live
+      system with no disk has them too. curl is built to look there.
+      Roots of one's own, a local network's CA, go where the system's
+      older TLS already looks for them: roots.der at the top of the
+      disk; the C library appends them to the bundle in PEM, so both
+      kinds of program trust the same roots. Mbed TLS measures its CA
+      file by seeking to the end, so the made-up files seek every way.
+
+      t_curl copies the bundle out with curl's file:// and compares it,
+      read off the disk image, with third_party/cacert/cacert.pem byte
+      for byte; puts its own test root into roots.der and sees curl,
+      given no --cacert, trust the test's server; and compares the
+      bundle then with Mozilla's followed by that root in PEM as
+      Python's ssl module writes it. A root the system does not trust
+      is still refused.

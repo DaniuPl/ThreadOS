@@ -21,8 +21,17 @@ record every request and every handshake, so both ends are checked:
   over TLS, compared by SHA-256 off the disk image. And what has to be
   refused, with curl's exit code 60 and no request reaching the server:
   an address the certificate does not name, a root curl was not given,
-  no roots at all, and a certificate that expired before the guest's
-  clock - while -k, told not to check, does get through
+  a root the system does not trust, and a certificate that expired
+  before the guest's clock - while -k, told not to check, does get
+  through
+
+  the system's own roots: curl, given none, reads Mozilla's bundle
+  where Linux keeps it (/etc/ssl/certs/ca-certificates.crt, made up by
+  the C library out of the initrd) - copied out with file://, it is
+  third_party/cacert/cacert.pem byte for byte; a root put into
+  roots.der at the top of the disk is added to it, in PEM exactly as
+  Python's ssl module writes one, and curl then trusts the test's
+  server with no --cacert at all
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -47,6 +56,7 @@ from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, make_iso64, no64, TfsImage,
                    start_dns_server, DNS_HINT)
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROMPT = "thread64>"
 NAME = "files.threados.test"
 BIG = random.Random(11).randbytes(2 * 1024 * 1024)
@@ -195,6 +205,10 @@ def make_certs(work):
     for root in ("root", "other"):
         with open(j(root + ".pem"), "rb") as fh:
             FILES["/" + root + ".pem"] = fh.read()
+    openssl("x509", "-in", j("root.pem"), "-outform", "DER",
+            "-out", j("root.der"))
+    with open(j("root.der"), "rb") as fh:
+        FILES["/root.der"] = fh.read()
     return j
 
 
@@ -347,7 +361,8 @@ def main():
                     ("a root curl was not given",
                      f"--cacert other.pem {h13}/hello.txt?other",
                      "/hello.txt?other"),
-                    ("no roots at all", f"{h13}/hello.txt?none",
+                    ("a root the system does not trust (no --cacert: "
+                     "only Mozilla's)", f"{h13}/hello.txt?none",
                      "/hello.txt?none"),
                     ("a certificate that expired before the guest's clock",
                      f"--cacert root.pem {hold}/hello.txt?expired",
@@ -356,6 +371,22 @@ def main():
                 check(f"refused: {what} (exit code {code}, "
                       f"{'a request reached' if agreed(path) else 'nothing reached'}"
                       f" the server)", code == 60 and not agreed(path))
+
+            # The system's roots, as a program finds them
+            _, code = run(q, "run curl -s -o bundle.pem "
+                             "file:///etc/ssl/certs/ca-certificates.crt")
+            check(f"curl reads the system's CA bundle (code {code})",
+                  code == 0)
+            _, code = run(q, f"run curl -s -o /roots.der {base}/root.der")
+            check("the test's root goes into roots.der", code == 0)
+            got, code = run(q, f"run curl -s {h13}/hello.txt?system")
+            check(f"with the root in roots.der, curl trusts the server "
+                  f"with no --cacert ({got}, code {code}, "
+                  f"{agreed('/hello.txt?system')})",
+                  got == ["hello from the host"] and code == 0 and
+                  agreed("/hello.txt?system") == [("1.3", "TLSv1.3")])
+            _, code = run(q, "run curl -s -o bundle2.pem "
+                             "file:///etc/ssl/certs/ca-certificates.crt")
 
             got, code = run(q, f"run curl -s -k {hold}/hello.txt?insecure")
             check(f"-k, told not to check, gets through all the same "
@@ -371,6 +402,19 @@ def main():
             q.close()
 
         img = TfsImage(disk)
+        with open(os.path.join(ROOT, "third_party", "cacert",
+                               "cacert.pem"), "rb") as fh:
+            mozilla = fh.read()
+        bundle = img.read("/bundle.pem")
+        check(f"the bundle is third_party/cacert/cacert.pem byte for byte "
+              f"({len(bundle or b'')} against {len(mozilla)} bytes)",
+              bundle == mozilla)
+        want = mozilla + ssl.DER_cert_to_PEM_cert(FILES["/root.der"]).encode()
+        bundle2 = img.read("/bundle2.pem")
+        check("with roots.der, the bundle is Mozilla's and then the "
+              "root in PEM, as Python's ssl module writes it "
+              f"({len(bundle2 or b'')} against {len(want)} bytes)",
+              bundle2 == want)
         for name in ("big.bin", "tls.bin"):
             data = img.read("/" + name)
             check(f"{name} on the disk has the SHA-256 of what was sent",

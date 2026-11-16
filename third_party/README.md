@@ -14,6 +14,7 @@ as code of our own around it (`apps/js`).
 | `zlib-1.4.tar.xz` | zlib, deflate compression | 1.4 | zlib (`LICENSE` in the archive) | https://zlib.net/zlib-1.4.tar.xz (SHA-256 `4f11c512053d7bab8d9e9b89bde3575add3e4c50a383b42ef6cb837035fc5a7c`, as zlib.net lists it; the GitHub release is the same file) |
 | `curl-8.23.0.tar.xz` | curl and libcurl, a URL transfer library | 8.23.0 | curl (MIT-style, `COPYING` in the archive) | https://curl.se/download/curl-8.23.0.tar.xz (SHA-256 `8dadd7d2536a314f982ad05a651b713f426bf7d02cc2c76cffb9796f2218e6c5`; the GitHub release is the same file) |
 | `mbedtls-3.6.7.tar.bz2` | Mbed TLS, TLS 1.2 and 1.3, X.509 and the cryptography under them | 3.6.7 (LTS) | Apache-2.0, taken under that one of its two licences (Apache-2.0 OR GPL-2.0-or-later, `LICENSE` in the archive) | https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.7/mbedtls-3.6.7.tar.bz2 (SHA-256 `a7e8bcbec0e6f761b4af24f25677626b35f762f68eef79c08677a363212d11f6`, as the release page lists it) |
+| `cacert/cacert.pem` | Mozilla's root certificates, as the CA bundle curl.se extracts from NSS's certdata.txt | Mozilla data of 2026-11-05 | MPL-2.0 (Mozilla's certdata.txt) | https://curl.se/ca/cacert.pem (SHA-256 `427c064216761a1e72a8b30f0d954d08cb6e4435a82091fb865afd20c8497285`, as curl.se publishes it in cacert.pem.sha256) |
 | `freetype-2.15.0.tar.xz` | FreeType, a font engine | 2.15.0 | FreeType License (BSD-style, `LICENSE.TXT` and `docs/FTL.TXT` in the archive) | https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz (SHA-256 `93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5`; the SourceForge copy is the same file) |
 | `harfbuzz/` | HarfBuzz, a text shaping engine | 15.1.0 | Old MIT (`COPYING`) | https://github.com/harfbuzz/harfbuzz/releases/download/15.1.0/harfbuzz-15.1.0.tar.xz (SHA-256 `0fc7c565443a5f4be7da65ac5ee5bd737d9b158dc908708b7689a0a5796b0c8d`) |
 | `sqlite-amalgamation-3540100.zip` | SQLite, an SQL database engine, and its command-line shell | 3.54.1 | Public domain (the header of `sqlite3.c`) | https://www.sqlite.org/2026/sqlite-amalgamation-3540100.zip (SHA3-256 `92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30`, as sqlite.org lists it) |
@@ -43,6 +44,11 @@ Trimmed, not modified:
   the resolver in the calling thread, and no built-in CA bundle (roots
   are given with `--cacert`). Only libcurl and the `curl` tool are
   built.
+- **cacert**: the file as curl.se publishes it, unchanged; it goes into
+  the initrd as `cacert.pem`, and musl's overlay serves it, with the
+  roots in the disk's `roots.der` appended, at the paths Linux keeps a
+  CA bundle at (`/etc/ssl/certs/ca-certificates.crt` and two more).
+  Updating it is replacing the file.
 - **Mbed TLS**: the archive is kept intact; its library is built by its
   own `library/Makefile` with the default `mbedtls_config.h` (`MBEDTLS_*`
   in the `Makefile`), and its `programs/test/selftest.c` becomes

@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <netinet/in.h>
@@ -56,6 +57,10 @@
 #define T_UDP_POLL   96
 #define T_UDP_PORT   97
 #define T_GETRANDOM  98
+#define T_READ      12
+#define T_OPEN      13
+#define T_CLOSE     14
+#define T_INITRD_READ 76
 
 /* kernel/include/tcp.h */
 #define P_IN        0x01
@@ -128,13 +133,19 @@ static struct sk *sock_of(long fd)
 	return s->used ? s : 0;
 }
 
-/* --- A made-up /etc/resolv.conf, and /dev/urandom ----------------- */
+/* --- Made-up files: /etc/resolv.conf, /dev/urandom, the CA bundle -- */
 
 /* random: /dev/urandom or /dev/random, whose every read is the
    kernel's generator (kernel/random.c). Libraries that do not know
    musl has getrandom() - Mbed TLS asks for it only from glibc - open
-   the file instead. */
-static struct vf { int used, random; char data[64]; int len, pos; } vfiles[VFILES];
+   the file instead.
+   big: a file too large for data[], on the heap - the CA bundle. */
+static struct vf {
+	int used, random;
+	char data[64];
+	char *big;
+	int len, pos;
+} vfiles[VFILES];
 
 static struct vf *vfile_of(long fd)
 {
@@ -176,10 +187,130 @@ static long vfile_new(int random)
 	return -EMFILE;
 }
 
+/* --- The certificates TLS checks servers against --------------------
+ *
+ * Mozilla's roots, as curl.se publishes them (third_party/cacert/), are
+ * in the initrd as cacert.pem, so every system has them - a live one
+ * with no disk too. Programs look for them where Linux keeps them; curl
+ * is built to (--with-ca-bundle) and so is much else. Roots of one's
+ * own - a local network's CA - go into roots.der at the top of the
+ * disk, as for the system's older TLS (user/ucert.h); they are added to
+ * the bundle here, in PEM, so both kinds of program trust the same
+ * roots.
+ */
+#define BUNDLE_MAX (1 << 20)
+#define ROOTS_MAX  65536
+
+static int is_bundle(const char *path)
+{
+	return !strcmp(path, "/etc/ssl/certs/ca-certificates.crt") ||
+	       !strcmp(path, "/etc/ssl/cert.pem") ||
+	       !strcmp(path, "/etc/pki/tls/certs/ca-bundle.crt");
+}
+
+static const char b64[] =
+	"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/* One DER certificate as a PEM block, 64 characters to a line. The
+   length written, or 0 when it does not fit. */
+static long pem_block(const unsigned char *der, long n, char *out, long room)
+{
+	static const char head[] = "-----BEGIN CERTIFICATE-----\n";
+	static const char tail[] = "-----END CERTIFICATE-----\n";
+	long need = sizeof(head) - 1 + (n + 2) / 3 * 4 + (n + 47) / 48 +
+	            sizeof(tail) - 1;
+	if (need > room)
+		return 0;
+	long at = 0, col = 0;
+	memcpy(out, head, sizeof(head) - 1);
+	at += sizeof(head) - 1;
+	for (long i = 0; i < n; i += 3) {
+		unsigned v = (unsigned)der[i] << 16;
+		if (i + 1 < n) v |= (unsigned)der[i + 1] << 8;
+		if (i + 2 < n) v |= der[i + 2];
+		out[at++] = b64[v >> 18 & 63];
+		out[at++] = b64[v >> 12 & 63];
+		out[at++] = i + 1 < n ? b64[v >> 6 & 63] : '=';
+		out[at++] = i + 2 < n ? b64[v & 63] : '=';
+		if ((col += 4) == 64 || i + 3 >= n) {
+			out[at++] = '\n';
+			col = 0;
+		}
+	}
+	memcpy(out + at, tail, sizeof(tail) - 1);
+	return at + sizeof(tail) - 1;
+}
+
+/* The length of the DER element at p (tag, length, contents), or 0 */
+static long der_len(const unsigned char *p, long room)
+{
+	if (room < 2 || p[0] != 0x30)
+		return 0;
+	if (p[1] < 0x80)
+		return 2 + p[1] <= room ? 2 + p[1] : 0;
+	int k = p[1] & 0x7F;
+	if (k < 1 || k > 3 || room < 2 + k)
+		return 0;
+	long n = 0;
+	for (int i = 0; i < k; i++)
+		n = n << 8 | p[2 + i];
+	return 2 + k + n <= room ? 2 + k + n : 0;
+}
+
+static long open_bundle(void)
+{
+	char *buf = malloc(BUNDLE_MAX);
+	if (!buf)
+		return -ENOMEM;
+	static const char name[] = "cacert.pem";
+	touch(buf, BUNDLE_MAX);
+	long n = tos(T_INITRD_READ, (long)name, sizeof(name) - 1, (long)buf,
+	             BUNDLE_MAX);
+	if (n < 0)
+		n = 0;
+	/* The disk's own roots, if any, each as one more PEM block */
+	long fd = tos(T_OPEN, (long)"/roots.der", 10, 0, 0);
+	unsigned char *der = fd >= 0 ? malloc(ROOTS_MAX) : 0;
+	if (der) {
+		long got = 0, r;
+		if (n && buf[n - 1] != '\n' && n < BUNDLE_MAX)
+			buf[n++] = '\n';        /* a block of ours starts a line */
+		while (got < ROOTS_MAX &&
+		       (r = tos(T_READ, fd, (long)(der + got),
+		                ROOTS_MAX - got, 0)) > 0)
+			got += r;
+		for (long at = 0, len; at < got &&
+		     (len = der_len(der + at, got - at)) > 0; at += len) {
+			long w = pem_block(der + at, len, buf + n, BUNDLE_MAX - n);
+			if (!w)
+				break;
+			n += w;
+		}
+		free(der);
+	}
+	if (fd >= 0)
+		tos(T_CLOSE, fd, 0, 0, 0);
+	if (!n) {
+		free(buf);
+		return -ENOENT;
+	}
+	long vfd = vfile_new(0);
+	if (vfd < 0) {
+		free(buf);
+		return vfd;
+	}
+	struct vf *v = &vfiles[vfd - VFILE_BASE];
+	v->big = buf;
+	v->len = (int)n;
+	return vfd;
+}
+
 NET_HIDDEN long __tos_open_virtual(const char *path)
 {
 	if (!strcmp(path, "/dev/urandom") || !strcmp(path, "/dev/random"))
 		return vfile_new(1);
+	if (is_bundle(path))
+		return open_bundle();
 	if (strcmp(path, "/etc/resolv.conf"))
 		return -ENOENT;
 	unsigned info[4];
@@ -700,7 +831,7 @@ static long vfile_call(struct vf *v, long n, long a, long b, long c)
 		}
 		long k = v->len - v->pos < c ? v->len - v->pos : c;
 		touch((void *)b, k);
-		memcpy((void *)b, v->data + v->pos, k);
+		memcpy((void *)b, (v->big ? v->big : v->data) + v->pos, k);
 		v->pos += k;
 		return k;
 	}
@@ -716,14 +847,22 @@ static long vfile_call(struct vf *v, long n, long a, long b, long c)
 		}
 		return total;
 	}
-	case SYS_lseek:
+	case SYS_lseek: {
 		if (v->random)
 			return 0;
-		if (c == SEEK_SET && b >= 0 && b <= v->len)
-			return v->pos = b;
-		return -EINVAL;
+		/* SEEK_END too: a file is often measured by seeking to its
+		   end and asking where that is (Mbed TLS reads its CA file
+		   so) */
+		long to = c == SEEK_SET ? b : c == SEEK_CUR ? v->pos + b
+		        : c == SEEK_END ? v->len + b : -1;
+		if (to < 0 || to > v->len)
+			return -EINVAL;
+		return v->pos = (int)to;
+	}
 	case SYS_close:
 		lock();
+		free(v->big);
+		v->big = 0;
 		v->used = 0;
 		unlock();
 		return 0;

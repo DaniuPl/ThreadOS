@@ -485,7 +485,7 @@ $(CURL_TREE)/Makefile: $(CURL_TAR) Makefile $(LIBC64) $(ZLIB_A) $(MBEDTLS_STAMP)
 	    --disable-mqtt --disable-manual --disable-docs --disable-ntlm \
 	    --disable-kerberos-auth --without-libpsl --without-brotli \
 	    --without-zstd --without-nghttp2 --without-libidn2 \
-	    --without-ca-bundle --without-ca-path \
+	    --with-ca-bundle=/etc/ssl/certs/ca-certificates.crt --without-ca-path \
 	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
 
 $(CURL_TOOL): $(CURL_TREE)/Makefile
@@ -782,7 +782,8 @@ $(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERS
 
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
              $(VERSION_FILE) $(VERSION_CODE_FILE) \
-             third_party/iwlwifi/iwlwifi-3160-17.ucode
+             third_party/iwlwifi/iwlwifi-3160-17.ucode \
+             third_party/cacert/cacert.pem
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
@@ -857,6 +858,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    iwl3160.ucode=third_party/iwlwifi/iwlwifi-3160-17.ucode \
+	    cacert.pem=third_party/cacert/cacert.pem \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)
 	@echo "Done: $@ ($$(stat -c%s $@) B)"
 
