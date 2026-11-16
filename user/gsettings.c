@@ -812,6 +812,13 @@ static void draw_desk(void)
             style_values[i]);
     }
     y += ROW_H;
+    if (same(style, "windows")) {
+        /* The rest is the dock's, and the taskbar is not a dock: it
+           stays at the bottom, the same size, and does not hide */
+        note(y, "In the Windows style the taskbar stands at the bottom.");
+        note(y + 14, "The dock's settings are for the macOS style.");
+        return;
+    }
     row_name(y, "Position on screen");
     const char *now = setting("dockpos");
     if (!now[0])
@@ -829,10 +836,7 @@ static void draw_desk(void)
     check_box(y, "Hide the menu bar when it is not used",
               same(setting("barhide"), "1"), "barhide");
     y += CHIP_H + 16;
-    if (same(style, "windows"))
-        note(y, "In the Windows style the taskbar stands at the bottom.");
-    else
-        note(y, "The size of the dock is in Appearance.");
+    note(y, "The size of the dock is in Appearance.");
     note(y + 14, "With the bar hidden, the pointer at the top brings it.");
 }
 

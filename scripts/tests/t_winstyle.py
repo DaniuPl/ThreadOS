@@ -14,6 +14,9 @@ right end of its title bar. Read off the screen and done with the mouse:
   button fills the screen from the very top down to the taskbar; its
   close button closes it
 
+  Settings' Desktop & Dock page, in this style, says the taskbar
+  stands at the bottom where the dock's Position row stands otherwise
+
   Start opens the menu standing on the taskbar, its last entry Shut
   Down
 
@@ -39,6 +42,7 @@ WB_W = _kernel_define("kernel/include/look.h", "WB_W")
 FILES_W = _kernel_define("user/gfiles.c", "W0")
 FILES_H = _kernel_define("user/gfiles.c", "H0")
 DARK = theme("dark")
+SEC_DESK = GSET_SECTIONS.index("Desktop & Dock")
 
 
 def bar_name(q):
@@ -146,6 +150,52 @@ def main():
                     time.sleep(0.5)
                 check("its close button at the right end closes it",
                       "process 'gfiles' has ended" in q.serial())
+
+            # Settings' page in this style: the dock's rows are gone, a
+            # note says why, where its Position row stood
+            q.click(slot_x(W, n, 1 + DOCK_APPS.index("gsettings")) +
+                    TB_SLOT // 2, H - TB_H // 2)
+            q.mouse_goto(W // 2, H // 2 - 100)
+            at_set = None
+            end = time.time() + 15
+            while time.time() < end and at_set is None:
+                time.sleep(0.5)
+                for slot in range(8):
+                    x, y = cascade(slot, GSET_W + 2, GSET_H + TITLE_H + 2,
+                                   w=W, h=H)
+                    if win_title(q, x, y, GSET_W + 2) == "Settings":
+                        at_set = (x + 1, y + CONTENT_DY, x, y)
+                        break
+            check("Settings starts from its taskbar button", at_set is not None)
+            if at_set:
+                cx, cy, sx, sy = at_set
+                q.click(cx + GSET_SIDE_W // 2,
+                        cy + GSET_SIDE_Y0 + SEC_DESK * GSET_SIDE_H +
+                        GSET_SIDE_H // 2)
+                q.mouse_goto(W // 2, H - 100)
+                row = cy + GSET_PANE_Y0 + GSET_ROW_H
+                said = ""
+                end = time.time() + 10
+                while time.time() < end and not said.startswith("In the"):
+                    time.sleep(0.5)
+                    said = q.read_ui(cx + GSET_PANE_X,
+                                     ui_font_baseline_in(11, row, 16), 300,
+                                     px=11, fg=DARK["app_dim"])
+                name = q.read_ui(cx + GSET_PANE_X,
+                                 ui_font_baseline_in(UD_PX, row, 18), 200,
+                                 px=UD_PX, fg=DARK["app_text"])
+                check("on Desktop & Dock, a note where the dock's Position "
+                      "stands in the Mac style ('%s'), and no Position ('%s')"
+                      % (said, name),
+                      # (the full stop is too faint at 11 px to read)
+                      said.rstrip(".") == "In the Windows style the taskbar "
+                                         "stands at the bottom" and
+                      name == "")
+                q.click(sx + GSET_W + 2 - WB_W // 2, sy + TITLE_H // 2)
+                end = time.time() + 10
+                while time.time() < end and \
+                        "process 'gsettings' has ended" not in q.serial():
+                    time.sleep(0.5)
 
             # Start
             time.sleep(1)

@@ -104,6 +104,8 @@ static const struct translation translations[] = {
     { "Interface style", "Styl interfejsu" },
     { "In the Windows style the taskbar stands at the bottom.",
       "W stylu Windows pasek zadań stoi na dole." },
+    { "The dock's settings are for the macOS style.",
+      "Ustawienia Docka dotyczą stylu macOS." },
     { "Hide the dock until the pointer reaches it",
       "Chowaj Dock, aż kursor dotknie krawędzi" },
     { "Full Screen", "Pełny ekran" },

@@ -8027,9 +8027,12 @@ works and is checked by `make test`.
       close one red under the pointer; maximise fills everything but
       the taskbar. It is one geometry with the dock's - the taskbar is
       a dock laid out differently - so clicking, the tile menus and
-      the window list work on it unchanged. t_winstyle reads the bar
+      the window list work on it unchanged. The dock's own settings
+      (its side, hiding, magnifying) leave the Settings page in this
+      style, a note in their place: none of them moves the taskbar. t_winstyle reads the bar
       gone and the date on the taskbar's clock, starts Files from its
       button, maximises it from the very top down to the taskbar and
-      closes it with the buttons at the right, opens Start and reads
-      Shut Down at the end of its menu, and goes back to the Mac
+      closes it with the buttons at the right, reads the note on the
+      Settings page where Position stands otherwise, opens Start and
+      reads Shut Down at the end of its menu, and goes back to the Mac
       style. t_dock clicks the Position chips a row lower.
