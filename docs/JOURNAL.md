@@ -7988,3 +7988,21 @@ works and is checked by `make test`.
       the others only with magnification on. t_bar checks the new
       default and the setting; t_notify reads the wallpaper under the
       bar, which is now there.
+
+- [x] **Filling the screen, the dock that hides, and full screen**
+      (kernel/desktop.c, kernel/config.c, user/gsettings.c,
+      scripts/tests/t_fullscreen.py, t_winkeys.py)
+      The green light fills the room between the bar and the dock, and
+      both stay - a full window that hid the dock was not what a person
+      wanted from it. "Hide the dock until the pointer reaches it"
+      ('dockhide') takes the dock away instead: the room then reaches
+      the screen's edge and the dock comes out over the windows while
+      the pointer is at that edge. Full Screen, a fourth entry in a
+      window tile's menu, is a Mac's full screen: the whole screen, the
+      bar and the dock out until the pointer reaches their edge - and
+      then the window's title bar slides out under the bar, because the
+      bar would cover the lights on it, the only way back. A window that
+      took over a closed one's slot no longer inherits its being
+      maximised or minimised (it never was cleared). t_fullscreen fills
+      a terminal and reads the dock under it, goes Full Screen and back
+      through the slid-out title bar, and hides the dock.

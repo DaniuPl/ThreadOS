@@ -801,6 +801,9 @@ static void draw_desk(void)
         chip(PANE_X + i * (CHIP_W + CHIP_GAP), y + CTRL_DY, sides[i],
              same(now, side_values[i]), "dockpos", side_values[i]);
     y += ROW_H;
+    check_box(y, "Hide the dock until the pointer reaches it",
+              same(setting("dockhide"), "1"), "dockhide");
+    y += CHIP_H + 8;
     check_box(y, "Magnify the icons under the pointer",
               same(setting("dockmag"), "1"), "dockmag");
     y += CHIP_H + 8;

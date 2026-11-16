@@ -50,6 +50,8 @@ static struct setting settings[] = {
                                                                     0, { 0 } },
     { "dockmag", "0",       "the dock's tiles grow under the pointer:\n"
                             "0 no, 1 yes",                          0, { 0 } },
+    { "dockhide", "0",      "the dock hides until the pointer reaches its\n"
+                            "edge: 0 no (it stays), 1 yes",         0, { 0 } },
     { "barhide", "0",       "the bar at the top hides when not used:\n"
                             "0 no (it stays), 1 yes",               0, { 0 } },
     { "dock",   "1",        "the size of the dock: 0 small, 1 medium,\n"

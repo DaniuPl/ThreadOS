@@ -485,20 +485,20 @@ def main():
             win_tile = DOCK_N + n - 1            # the clock's: the last one
             check("a clock again, in the dock (%d windows)" % n,
                   n == after + 1)
-            items = tile_menu(q, win_tile, n, 3)
+            items = tile_menu(q, win_tile, n, 4)
             check("the right button on a window's tile: what can be done "
                   "with it (%s)" % (items,),
-                  items == ["Show", "Minimise", "Close"])
-            tile_pick(q, win_tile, n, 3, 1)
+                  items == ["Show", "Minimise", "Full Screen", "Close"])
+            tile_pick(q, win_tile, n, 4, 1)
             check("Minimise puts it away - off the screen, still in the dock",
                   q.gclock_time(WX + 1, WY + CONTENT_DY).count(":") != 2
                   and q.dock_windows() == n)
-            tile_menu(q, win_tile, n, 3)
-            tile_pick(q, win_tile, n, 3, 0)
+            tile_menu(q, win_tile, n, 4)
+            tile_pick(q, win_tile, n, 4, 0)
             shown = q.gclock_time(WX + 1, WY + CONTENT_DY)
             check("Show brings it back ('%s')" % shown, shown.count(":") == 2)
-            tile_menu(q, win_tile, n, 3)
-            tile_pick(q, win_tile, n, 3, 2)
+            tile_menu(q, win_tile, n, 4)
+            tile_pick(q, win_tile, n, 4, 3)
             time.sleep(2)
             check("Close closes it (%d windows in the dock)" % q.dock_windows(),
                   q.dock_windows() == n - 1)

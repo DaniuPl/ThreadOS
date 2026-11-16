@@ -590,6 +590,11 @@ struct window {
        reasonable. */
     int maxed;
     int rx, ry, rw, rh;
+    /* Full screen, as the green light makes it on a Mac: the whole
+       screen, the bar and the dock out of the way until the pointer
+       reaches the edge they stand at. A full window is maxed too, so
+       the way back is maximising's. */
+    int full;
     /* The application has been asked to close and has not yet ended.
        'closing' counts down the frames it has left; when it runs out we
        stop asking - an application that does not answer must not hold
@@ -629,6 +634,7 @@ static struct window wins[MAX_WIN];
    within the window) */
 static int resize_content(struct window *w);
 static void toggle_max(int i);
+static void toggle_full(int i);
 static void close_window(int i);
 static void snap_window(int i, int where);
 
@@ -831,11 +837,15 @@ static int dock_want(void)
    settings once a second (idle_settings), not on every geometry */
 static int dock_side = DOCK_SIDE_BOTTOM;
 static int dock_magnify;
+static int dock_autohide;      /* out of the way until the pointer comes */
 static int bar_autohide;
 /* How far magnification has come in, 0..256: it grows when the pointer
    reaches the dock and shrinks when it leaves, over a few frames */
 static int dock_mag_level;
 static int dock_moved;                 /* the side changed: relayout */
+/* Over a full-screen window: the bar and the dock come out when the
+   pointer reaches their edge, and stay while it is on them */
+static int bar_peek, dock_peek;
 
 #define DOCK_MAG_REACH 3      /* tiles either side of the pointer that grow */
 
@@ -937,8 +947,12 @@ static void dock_geom(struct dock *d)
    takes clicks over the dock's whole thickness - and over a magnified
    tile's whole size - and half the gap on either side: a tile that has
    to be hit to the pixel is a tile that gets missed. */
+static int dock_shown(void);
+
 static int dock_hit(int mx, int my)
 {
+    if (!dock_shown())
+        return -1;
     struct dock d;
     dock_geom(&d);
     int n = d.n_l + d.n_w;
@@ -968,7 +982,7 @@ static int dock_hit(int mx, int my)
 static int work_top(void) { return BAR_H; }
 static int work_bottom(void)
 {
-    if (dock_side != DOCK_SIDE_BOTTOM)
+    if (dock_side != DOCK_SIDE_BOTTOM || dock_autohide)
         return video_h();
     struct dock d;
     dock_geom(&d);
@@ -976,7 +990,7 @@ static int work_bottom(void)
 }
 static int work_left(void)
 {
-    if (dock_side != DOCK_SIDE_LEFT)
+    if (dock_side != DOCK_SIDE_LEFT || dock_autohide)
         return 0;
     struct dock d;
     dock_geom(&d);
@@ -984,7 +998,7 @@ static int work_left(void)
 }
 static int work_right(void)
 {
-    if (dock_side != DOCK_SIDE_RIGHT)
+    if (dock_side != DOCK_SIDE_RIGHT || dock_autohide)
         return video_w();
     struct dock d;
     dock_geom(&d);
@@ -1013,10 +1027,11 @@ static int session_item_y(int i)
  * over the tile: a window's tile can show it, put it away into the dock
  * or close it; a program's tile can start another one. */
 static int tmenu = -1;                 /* the tile (as dock_hit()), or -1 */
-static const char *const tmenu_win[] = { "Show", "Minimise", "Close" };
+static const char *const tmenu_win[] = { "Show", "Minimise", "Full Screen",
+                                          "Close" };
 static const char *const tmenu_app[] = { "Open" };
 
-static int tmenu_n(int t) { return t >= 100 ? 3 : 1; }
+static int tmenu_n(int t) { return t >= 100 ? 4 : 1; }
 static const char *tmenu_item(int t, int i)
 {
     return t >= 100 ? tmenu_win[i] : tmenu_app[i];
@@ -1077,10 +1092,25 @@ static void context_at(int x, int y)
     menu_sel = -1;
 }
 
+static int here(int i);
+
+/* The window that has the screen to itself, or -1: the one listening,
+   when it is full and in sight */
+static int full_win(void)
+{
+    if (focus_idx < 0 || !here(focus_idx))
+        return -1;
+    const struct window *w = &wins[focus_idx];
+    return w->full && !w->minimized ? focus_idx : -1;
+}
+
 /* The bar stays, as a Mac's menu bar does, unless 'barhide' asks it to
-   go after three seconds nobody uses it */
+   go after three seconds nobody uses it - or a window has the screen,
+   and then only the pointer at the top brings it */
 static int bar_visible(void)
 {
+    if (full_win() >= 0)
+        return mouse_y < 3 || bar_peek || menu_on_bar();
     return !bar_autohide || frames <= bar_until || mouse_y < 3 ||
            menu_on_bar();
 }
@@ -2068,7 +2098,7 @@ static void draw_body(const struct window *win, int focused, int off)
     /* The grip: two short strokes the way the corner is pulled. A hint,
        not a handle to be modelled - and an application's content covers
        it, as it always did. */
-    if (!kiosk && resizable(win)) {
+    if (!kiosk && resizable(win) && h > TITLE_H + 8) {  /* (not a bare bar) */
         int gx = (x + w - 3) * 16, gy = (y + h - 3) * 16;
         for (int d = 3; d <= 7; d += 4)
             gfx_line16(gx, gy - d * 16, gx - d * 16, gy, 14, L.win_line, 255);
@@ -2318,6 +2348,25 @@ static void draw_window(const struct window *win)
     gfx_round_apply(x, y, w, h, WIN_R, corner_keep);
     gfx_rring16(x * 16, y * 16, w * 16, h * 16, WIN_R * 16, 16, L.win_line,
                 focused ? 220 : 170);
+}
+
+/* Over a full-screen window the bar, when it comes out, would cover the
+   window's title bar and with it the only way out of full screen: on a
+   Mac the title bar slides down under the bar, and so it does here - a
+   copy of it, drawn right below */
+static void draw_full_title(void)
+{
+    int fw = full_win();
+    if (fw < 0 || !bar_peek)
+        return;
+    static struct window strip;
+    strip = wins[fw];
+    strip.y = BAR_H;
+    strip.h = TITLE_H + 1;
+    strip.content = (void *)0;              /* the bar alone, no body */
+    gfx_shadow(strip.x, strip.y, strip.w, strip.h, 0, SHADOW_S,
+               L.shadow_a, SHADOW_DY);
+    draw_body(&strip, 1, 0);
 }
 
 /* Is the point on a window's title bar (the drag handle) */
@@ -3000,9 +3049,41 @@ static void handle_input(int mx, int my, int buttons)
         {
             struct dock d;
             dock_geom(&d);
-            if (in_rect(mx, my, d.x, d.y, d.w, d.h)) {
+            if (dock_shown() && in_rect(mx, my, d.x, d.y, d.w, d.h)) {
                 prev_pressed = pressed;   /* the glass between tiles */
                 return;
+            }
+        }
+
+        /* A full window's title bar, slid out under the bar while the
+           bar is out (draw_full_title): its lights are where they are
+           seen, and the green one gives the window its own size back */
+        {
+            int fw = full_win();
+            if (fw >= 0 && bar_peek && !kiosk) {
+                struct window strip = wins[fw];
+                strip.y = BAR_H;
+                if (on_light(&strip, 2, mx, my)) {
+                    toggle_max(fw);
+                    prev_pressed = pressed;
+                    return;
+                }
+                if (on_light(&strip, 1, mx, my)) {
+                    wins[fw].minimized = 1;
+                    anim_start(fw, ANIM_MIN);
+                    focus_idx = -1;
+                    prev_pressed = pressed;
+                    return;
+                }
+                if (on_light(&strip, 0, mx, my)) {
+                    close_window(fw);
+                    prev_pressed = pressed;
+                    return;
+                }
+                if (my >= BAR_H && my < BAR_H + TITLE_H) {
+                    prev_pressed = pressed;   /* the rest of the strip */
+                    return;
+                }
             }
         }
 
@@ -3035,8 +3116,10 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* zoom - and the same light puts it back, so one click
-               undoes the other */
+            /* zoom: the window fills the room between the bar and the
+               dock, which stay - and the same light puts it back, so
+               one click undoes the other. (Full screen, with the bar
+               and the dock out of the way, is the dock tile's menu.) */
             if (!kiosk && on_light(w, 2, mx, my)) {
                 toggle_max(i);
                 hit = 1;
@@ -3050,6 +3133,7 @@ static void handle_input(int mx, int my, int buttons)
             if (resizable(w) &&
                 in_rect(mx, my, grip_x(w), grip_y(w), GRIP_SZ, GRIP_SZ)) {
                 w->maxed = 0;
+                w->full = 0;
                 resize_idx = i;
                 focus_idx = i;
                 raise_win(i);
@@ -3312,6 +3396,37 @@ static int resize_content(struct window *w)
  * is no memory for a buffer that size, nothing happens at all: the
  * window keeps its size and its old buffer, and stays where it was.
  * Half a maximise would be worse than none. */
+/* The whole screen, the bar and the dock let go. Its size before is
+   kept where maximising keeps it, so that the way back is the same. */
+static void toggle_full(int i)
+{
+    struct window *w = &wins[i];
+    if (w->maxed)
+        return;
+    int ox = w->x, oy = w->y, ow = w->w, oh = w->h;
+    w->x = 0;
+    w->y = 0;
+    w->w = video_w();
+    w->h = video_h();
+    if (resize_content(w) < 0) {       /* no memory for that buffer */
+        w->x = ox;
+        w->y = oy;
+        w->w = ow;
+        w->h = oh;
+        return;
+    }
+    w->rx = ox;
+    w->ry = oy;
+    w->rw = ow;
+    w->rh = oh;
+    w->maxed = 1;
+    w->full = 1;
+    w->minimized = 0;
+    focus_idx = i;
+    raise_win(i);
+    scene_changed();
+}
+
 static void toggle_max(int i)
 {
     struct window *w = &wins[i];
@@ -3340,6 +3455,7 @@ static void toggle_max(int i)
         w->w = w->rw;
         w->h = w->rh;
         w->maxed = 0;
+        w->full = 0;
         resize_content(w);             /* shrinking always has the memory */
     }
 
@@ -4399,6 +4515,15 @@ static void tile_action(int t, int i)
             anim_start(w, ANIM_MIN);
             if (focus_idx == w)
                 focus_idx = -1;
+        }
+    } else if (i == 2) {                 /* Full Screen, and back */
+        if (wins[w].full)
+            toggle_max(w);
+        else {
+            if (wins[w].maxed)
+                toggle_max(w);           /* its own size first, then all */
+            wins[w].minimized = 0;
+            toggle_full(w);
         }
     } else {                             /* Close: asked, as the red light asks */
         close_window(w);
@@ -6545,6 +6670,11 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->ch = ch;
         w->pcw = PC(cw);
         w->pch = PC(ch);
+        /* A slot is used again: a window that was closed maximised,
+           full or minimised must not hand that on to the next one */
+        w->maxed = 0;
+        w->full = 0;
+        w->minimized = 0;
         w->used = 1;
         w->desk = cur_desk;        /* where the person is looking */
         raise_win(i);              /* a new window on top */
@@ -7195,7 +7325,13 @@ static void relayout(void)
         if (!w->used)
             continue;
         w->anim = 0;
-        if (w->maxed) {
+        if (w->full) {
+            w->x = 0;
+            w->y = 0;
+            w->w = video_w();
+            w->h = video_h();
+            fit_rect(&w->rx, &w->ry, &w->rw, &w->rh);
+        } else if (w->maxed) {
             w->x = work_left();
             w->y = work_top();
             w->w = work_right() - work_left();
@@ -7298,6 +7434,11 @@ static void idle_settings(void)
                                               : DOCK_SIDE_BOTTOM;
     dock_magnify = config_get_num("dockmag", 0) != 0;
     bar_autohide = config_get_num("barhide", 0) != 0;
+    int hide = config_get_num("dockhide", 0) != 0;
+    if (hide != dock_autohide) {
+        dock_autohide = hide;
+        dock_moved = 1;                /* the windows' room changes */
+    }
     if (side != dock_side) {
         dock_side = side;
         dock_moved = 1;
@@ -7305,6 +7446,42 @@ static void idle_settings(void)
                side == DOCK_SIDE_LEFT ? "left" : side == DOCK_SIDE_RIGHT
                                                      ? "right" : "bottom");
     }
+}
+
+static int dock_shown(void)
+{
+    return (full_win() < 0 && !dock_autohide) || dock_peek;
+}
+
+/* Once a frame, over a full-screen window: the pointer at the very edge
+   the dock stands at brings it out, and it stays while the pointer is
+   on it; the same for the bar at the top */
+static void peek_step(void)
+{
+    int full = full_win() >= 0;
+    if (!full && !dock_autohide) {
+        bar_peek = dock_peek = 0;
+        return;
+    }
+    int was = bar_peek + 2 * dock_peek;
+    if (!full)
+        bar_peek = 0;
+    else if (mouse_y < 3)
+        bar_peek = 1;
+    else if (mouse_y >= BAR_H + TITLE_H && !menu_on_bar())
+        bar_peek = 0;            /* (kept over the slid-out title bar) */
+    struct dock d;
+    dock_geom(&d);
+    int edge = dock_side == DOCK_SIDE_LEFT ? mouse_x < 3
+               : dock_side == DOCK_SIDE_RIGHT ? mouse_x >= video_w() - 3
+                                              : mouse_y >= video_h() - 3;
+    if (edge)
+        dock_peek = 1;
+    else if (!in_rect(mouse_x, mouse_y, d.x - 8, d.y - 8, d.w + 16,
+                      d.h + 16) && tmenu < 0)
+        dock_peek = 0;
+    if (was != bar_peek + 2 * dock_peek)
+        scene_changed();
 }
 
 /* Once a frame: magnification comes in while the pointer is over the
@@ -7444,6 +7621,7 @@ static void desktop_thread(void *arg)
             relayout();
         }
         handle_input(mx, my, buttons);
+        peek_step();
         dock_magnify_step();
 
         if (dark == 2) {
@@ -7521,9 +7699,12 @@ static void desktop_thread(void *arg)
                         L.accent, 220);
         }
 
-        if (bar_visible())
+        if (bar_visible()) {
             draw_bar();
-        draw_dock();
+            draw_full_title();
+        }
+        if (dock_shown())
+            draw_dock();
         draw_island();             /* passing things, under what is asked for */
         draw_tmenu();
         draw_menu();
