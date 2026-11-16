@@ -8,20 +8,27 @@
  * That is the whole transport, and it has been the same since 2001.
  *
  * What this driver does: reset the adapter, ask for its address, its
- * name and its version, scan for LE devices, and carry framed HCI ACL
- * packets over the two bulk endpoints. L2CAP, security, pairing and
- * HID profiles still have to be built on top of that transport.
+ * name and its version, look for the devices around it, and carry
+ * framed HCI ACL packets over the two bulk endpoints. L2CAP, security,
+ * pairing and HID profiles still have to be built on top of that
+ * transport.
  *
- * The honest part. QEMU emulates no Bluetooth device - the whole stack
- * was thrown out of it years ago - so not one line of the conversation
- * below has ever reached an adapter that answers. What IS tested is
- * the reading and writing of packets, against recorded ones, because
- * that is what can be tested without hardware. When this meets a real
- * adapter, expect the transport to be right and the sequence to need
- * work; adapters from Intel and Broadcom additionally want their
- * firmware loaded before they will do anything beyond answering their
- * own address. The ACL header builder/parser is tested too; that still
- * does not prove that a real adapter or HID device will answer.
+ * Looking is two searches at once. A phone whose Bluetooth settings
+ * are open answers an INQUIRY - classic Bluetooth, the way phones,
+ * headsets and computers are found - with its name in the answer
+ * (extended inquiry results) or, from older devices, without one, and
+ * then the name is asked for (Remote Name Request). Watches, tags and
+ * mice ADVERTISE over Bluetooth Low Energy instead, many with their
+ * name only in the answer to an active scan. The first version of this
+ * did only a passive LE scan, under an event mask that left LE events
+ * switched off, so it found nothing - not even the phone in the hand.
+ *
+ * QEMU emulates no Bluetooth device, so scripts/btadapter.py makes one
+ * up - an HCI controller on USB, plugged in through usbredir, with a
+ * phone and a watch around it - and t_bt holds the whole conversation
+ * against it. Adapters from Intel and Broadcom may additionally want
+ * firmware patches before everything works; the Intel Wireless 3160's
+ * Bluetooth half answers all of the above without one.
  */
 
 #include <stdint.h>
@@ -47,10 +54,18 @@
 #define OP_LE_SCAN_PARAMS   0x200B
 #define OP_LE_SCAN_ENABLE   0x200C
 #define OP_INQUIRY          0x0401
+#define OP_INQUIRY_CANCEL   0x0402
+#define OP_REMOTE_NAME      0x0419
+#define OP_WRITE_INQ_MODE   0x0C45
+#define OP_WRITE_LE_HOST    0x0C6D
 
+#define EV_INQUIRY_COMPLETE 0x01
 #define EV_INQUIRY_RESULT   0x02
+#define EV_REMOTE_NAME      0x07
 #define EV_CMD_COMPLETE     0x0E
 #define EV_CMD_STATUS       0x0F
+#define EV_INQUIRY_RSSI     0x22
+#define EV_INQUIRY_EXT      0x2F
 #define EV_LE_META          0x3E
 
 struct neighbour {
@@ -58,6 +73,11 @@ struct neighbour {
     char name[NAME_MAX];
     int rssi;
     int classic;                /* 1 = heard through an inquiry, 0 = LE */
+    /* What a name request needs to reach a classic device quickly:
+       how it listens for pages, and its clock against ours */
+    uint8_t scan_mode;
+    uint16_t clock;
+    uint32_t cod;               /* the class of device: phone, headset... */
 };
 
 static int dev = -1;            /* the handle from the USB layer */
@@ -76,6 +96,9 @@ static int have_addr, have_name, have_version;
 
 static struct neighbour seen[DEVICES_MAX];
 static int nseen;
+static volatile int inquiry_done;
+static int name_asked;          /* the name request waiting for its answer */
+static uint8_t name_addr[6];
 
 /* The answer to the last command, for whoever is waiting for it */
 static uint16_t last_opcode;
@@ -182,18 +205,62 @@ static void le_meta(const uint8_t *p, int len)
     }
 }
 
-static void inquiry_result(const uint8_t *p, int len)
+/* The answers to an inquiry come in three forms, by the inquiry mode
+   and the adapter's age: the plain one (no name, no signal), one with
+   the signal strength, and the extended one with the name inside - the
+   same pieces as LE advertising data. In the first two the devices of
+   one event are laid out field by field: every address first, then
+   every scan mode, and so on. */
+static void inquiry_result(const uint8_t *p, int len, int kind)
 {
     if (len < 1)
         return;
     int n = p[0];
-    int i = 1;
+    if (kind == EV_INQUIRY_EXT)
+        n = 1;
+    if (n < 1 || 1 + 14 * n > len)
+        return;
+    const uint8_t *addr = p + 1, *mode = addr + 6 * n;
+    const uint8_t *cod = mode + (kind == EV_INQUIRY_RESULT ? 3 : 2) * n;
+    const uint8_t *clk = cod + 3 * n, *rssi = clk + 2 * n;
 
-    /* Classic devices answer with no name and no signal strength - a
-       name has to be asked for separately, with a connection. */
-    for (int r = 0; r < n && i + 14 <= len; r++) {
-        remember(p + i, 1);
-        i += 14;
+    for (int r = 0; r < n; r++) {
+        struct neighbour *d = remember(addr + 6 * r, 1);
+        if (!d)
+            break;
+        d->scan_mode = mode[r];
+        d->cod = (uint32_t)(cod[3 * r] | (cod[3 * r + 1] << 8) |
+                            (cod[3 * r + 2] << 16));
+        d->clock = (uint16_t)(clk[2 * r] | (clk[2 * r + 1] << 8));
+        if (kind != EV_INQUIRY_RESULT)
+            d->rssi = (int)(int8_t)rssi[r];
+    }
+    if (kind == EV_INQUIRY_EXT && len > 15) {
+        struct neighbour *d = remember(addr, 1);
+        if (d)
+            ad_data(d, p + 15, len - 15);
+    }
+}
+
+/* The answer to a name request: the name, up to 248 bytes, ended by a
+   zero when shorter */
+static void remote_name(const uint8_t *p, int len)
+{
+    if (len < 7)
+        return;
+    if (name_asked && !memcmp(p + 1, name_addr, 6))
+        name_asked = 0;
+    if (p[0] != 0)
+        return;                          /* it would not say */
+    for (int i = 0; i < nseen; i++) {
+        if (memcmp(seen[i].addr, p + 1, 6))
+            continue;
+        int k = 0;
+        for (int j = 7; j < len && p[j] && k < NAME_MAX - 1; j++) {
+            char c = (char)p[j];
+            seen[i].name[k++] = (c >= 32 && c < 127) ? c : '?';
+        }
+        seen[i].name[k] = 0;
     }
 }
 
@@ -277,7 +344,17 @@ void bt_event(const uint8_t *pkt, int len)
         return;
 
     case EV_INQUIRY_RESULT:
-        inquiry_result(p, plen);
+    case EV_INQUIRY_RSSI:
+    case EV_INQUIRY_EXT:
+        inquiry_result(p, plen, code);
+        return;
+
+    case EV_INQUIRY_COMPLETE:
+        inquiry_done = 1;
+        return;
+
+    case EV_REMOTE_NAME:
+        remote_name(p, plen);
         return;
 
     default:
@@ -584,9 +661,21 @@ static int try_port(int port)
         return give_up("the adapter did not answer HCI Reset");
     }
 
-    static const uint8_t all_events[8] = {
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1F, 0xFF, 0x00 };
-    command(OP_SET_EVENT_MASK, all_events, 8, 1000);
+    /* The events this driver reads, as Linux asks for them. Bit 61,
+       the LE meta event, is off after a reset: without it an adapter
+       scans for LE devices and keeps every one it hears to itself.
+       Bit 46 is the extended inquiry result - the one with the name. */
+    static const uint8_t events[8] = {
+        0xFF, 0xFF, 0xFB, 0xFF, 0x07, 0xF8, 0xBF, 0x3D };
+    command(OP_SET_EVENT_MASK, events, 8, 1000);
+    /* Answers to an inquiry with their names in, or at least with the
+       signal; an adapter older than either keeps the plain ones */
+    static const uint8_t eir_mode = 2, rssi_mode = 1;
+    if (!command(OP_WRITE_INQ_MODE, &eir_mode, 1, 1000))
+        command(OP_WRITE_INQ_MODE, &rssi_mode, 1, 1000);
+    /* A dual-mode adapter is told the host speaks LE too */
+    static const uint8_t le_host[2] = { 0x01, 0x00 };
+    command(OP_WRITE_LE_HOST, le_host, 2, 1000);
     command(OP_READ_BDADDR, (const uint8_t *)0, 0, 1000);
     command(OP_READ_LOCAL_NAME, (const uint8_t *)0, 0, 1000);
     command(OP_READ_VERSION, (const uint8_t *)0, 0, 1000);
@@ -749,29 +838,75 @@ void bt_info_fill(struct bt_info *o)
     }
 }
 
+/* A classic device found without its name is asked for it: a short
+   connection of its own, a second or two, so a few at most */
+static void ask_names(void)
+{
+    int asked = 0;
+    for (int i = 0; i < nseen && asked < 4; i++) {
+        struct neighbour *d = &seen[i];
+        if (!d->classic || d->name[0])
+            continue;
+        uint8_t q[10];
+        memcpy(q, d->addr, 6);
+        q[6] = d->scan_mode;
+        q[7] = 0;
+        q[8] = (uint8_t)d->clock;
+        q[9] = (uint8_t)((d->clock >> 8) | 0x80);   /* the offset is valid */
+        memcpy(name_addr, d->addr, 6);
+        name_asked = 1;
+        asked++;
+        if (!command(OP_REMOTE_NAME, q, 10, 1000)) {
+            name_asked = 0;
+            continue;
+        }
+        for (int t = 0; t < 600 && name_asked; t++)
+            if (poll_event() <= 0)
+                task_sleep(10);
+        name_asked = 0;
+    }
+}
+
 static int scan(uint32_t seconds)
 {
     nseen = 0;
 
-    /* Passive scanning: we listen, we do not ask. An interval of 0x0010
-       and a window the same size mean "listen all the time", which for
-       a few seconds of scanning is exactly what is wanted. */
+    /* LE: active scanning - the scanner asks every advertiser for its
+       scan response, which is where most keep their name. An interval
+       of 0x0010 and a window the same size mean "listen all the time",
+       which for a few seconds of scanning is exactly what is wanted. */
     static const uint8_t params[7] = {
-        0x00,                            /* passive */
+        0x01,                            /* active */
         0x10, 0x00,                      /* interval */
         0x10, 0x00,                      /* window */
         0x00,                            /* our address: public */
         0x00 };                          /* accept everything */
     command(OP_LE_SCAN_PARAMS, params, 7, 1000);
-
     static const uint8_t on[2] = { 0x01, 0x01 };   /* enable, drop repeats */
-    if (!command(OP_LE_SCAN_ENABLE, on, 2, 1000))
+    int le = command(OP_LE_SCAN_ENABLE, on, 2, 1000);
+
+    /* Classic: an inquiry of the general access code, which is what a
+       device whose Bluetooth settings are open listens for. Its length
+       is counted in 1.28 s. */
+    uint32_t units = seconds * 100 / 128;
+    uint8_t inq[5] = { 0x33, 0x8B, 0x9E,
+                       (uint8_t)(units < 1 ? 1 : units > 0x30 ? 0x30 : units),
+                       0 };
+    inquiry_done = 0;
+    int classic = command(OP_INQUIRY, inq, 5, 1000);
+    if (!le && !classic)
         return -1;
 
     pump(seconds * 1000);
 
-    static const uint8_t off[2] = { 0x00, 0x00 };
-    command(OP_LE_SCAN_ENABLE, off, 2, 1000);
+    if (le) {
+        static const uint8_t off[2] = { 0x00, 0x00 };
+        command(OP_LE_SCAN_ENABLE, off, 2, 1000);
+    }
+    if (classic && !inquiry_done)
+        command(OP_INQUIRY_CANCEL, (const uint8_t *)0, 0, 1000);
+    if (classic)
+        ask_names();
     return nseen;
 }
 

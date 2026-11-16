@@ -15,8 +15,8 @@
  *
  * HCI commands and events plus the ACL bulk framing are here. L2CAP,
  * pairing/security and HID profiles are not. QEMU has no Bluetooth
- * device to emulate, so the test checks recorded packets and ACL frame
- * bytes, not a conversation with working hardware.
+ * device, so t_bt checks recorded packets and, against an adapter it
+ * makes up (scripts/btadapter.py), the conversation that finds devices.
  */
 
 /* Looks for an adapter on the USB bus and wakes it: reset, address,
@@ -41,8 +41,10 @@ const char *bt_address(void);
 const char *bt_name(void);
 const char *bt_version(void);
 
-/* A scan for devices in range (LE advertising). Returns how many were
-   heard, or -1 when there is no adapter. */
+/* A search for devices in range: an inquiry for classic ones (phones,
+   headsets, computers), with their names, and an active LE scan at the
+   same time. Returns how many were heard, or -1 when there is no
+   adapter. */
 int bt_scan(uint32_t seconds);
 
 /* The same search in a thread of its own, for whoever cannot wait for

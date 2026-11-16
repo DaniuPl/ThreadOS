@@ -7845,3 +7845,26 @@ works and is checked by `make test`.
       looked up. desktop.icons became the administrator's file, so
       t_icons signs in as one before writing it - and its second part,
       which passed only because the write had failed, writes for real.
+
+- [x] **Bluetooth finds phones: an inquiry, the LE events let through**
+      (kernel/bt.c, scripts/btadapter.py, scripts/usbredir.py,
+      scripts/tests/t_bt.py)
+      On the laptop the adapter woke, but a phone with Bluetooth on was
+      never found. Two reasons. The search was only a passive LE scan,
+      and a phone is found the classic way, by an inquiry, while its
+      Bluetooth settings are open. And the event mask the driver set
+      left bit 61 - the LE meta event - off, as it is after a reset, so
+      the adapter kept every LE device it heard to itself. The mask is
+      Linux's now (LE events, extended inquiry results); a search is an
+      inquiry of the general access code and an active LE scan at once;
+      inquiry mode 2 brings the names with the answers, and an adapter
+      too old for it gets mode 1 and asks each nameless device for its
+      name (Remote Name Request). Inquiry results are read as the
+      specification lays them out, field by field across devices.
+      QEMU has no Bluetooth, so scripts/btadapter.py is an HCI
+      controller on USB, plugged in through usbredir (which now carries
+      bulk endpoints too), written from the Core specification and as
+      strict as a real one about masked events, with a phone and a watch
+      in range. t_bt finds both by name with both kinds of adapter, and
+      checks the mask, the access code and the scan type the adapter
+      was sent. On the old driver it finds nothing.

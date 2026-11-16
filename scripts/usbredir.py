@@ -10,10 +10,16 @@ test can plug in a device QEMU has no model of - a keyboard with media
 keys on a second interface, a volume knob - and the kernel's drivers
 meet the same bytes as from the real thing.
 
-Only what a HID device needs: control transfers on endpoint 0 and
-interrupt IN endpoints. QEMU attaches a redirected device to an xHCI
-controller only from a peer with 64-bit packet ids and 32-bit bulk
-lengths, so those are offered (there are no bulk packets here).
+Control transfers on endpoint 0, interrupt IN endpoints, and bulk
+endpoints that take what is sent to them (scripts/btadapter.py's
+Bluetooth adapter has two; nothing is ever sent back on them). QEMU
+attaches a redirected device to an xHCI controller only from a peer
+with 64-bit packet ids and 32-bit bulk lengths, so those are offered.
+
+A device is anything with the descriptors (device, config, string()),
+control(), iface_infos() and endpoints(); HidDevice is one, and a
+device with an attach(redir) is handed the connection, to send what it
+has to say on its own.
 """
 
 import socket
@@ -28,13 +34,13 @@ SET_CONFIGURATION, GET_CONFIGURATION, CONFIGURATION_STATUS = 6, 7, 8
 SET_ALT_SETTING, GET_ALT_SETTING, ALT_SETTING_STATUS = 9, 10, 11
 START_INTERRUPT, STOP_INTERRUPT, INTERRUPT_STATUS = 15, 16, 17
 CANCEL_DATA = 21
-CONTROL_PACKET, INTERRUPT_PACKET = 100, 103
+CONTROL_PACKET, BULK_PACKET, INTERRUPT_PACKET = 100, 101, 103
 
 CAP_CONNECT_DEVICE_VERSION, CAP_EP_INFO_MAX_PACKET_SIZE = 1, 4
 CAP_64BITS_IDS, CAP_32BITS_BULK_LENGTH = 5, 6
 SUCCESS, STALL = 0, 4
 SPEED_FULL = 1
-TYPE_CONTROL, TYPE_INTERRUPT, TYPE_INVALID = 0, 3, 255
+TYPE_CONTROL, TYPE_BULK, TYPE_INTERRUPT, TYPE_INVALID = 0, 2, 3, 255
 
 
 def ep_index(addr):
@@ -70,6 +76,16 @@ class HidDevice:
         self.config = struct.pack("<BBHBBBBB", 9, 2, 9 + len(body),
                                   len(interfaces), 1, 0, 0x80, 50) + body
         self.requests = []           # (requesttype, request, value, index)
+
+    def iface_infos(self):
+        """(class, subclass, protocol) of every interface"""
+        return [(3, f.subclass, f.protocol) for f in self.interfaces]
+
+    def endpoints(self):
+        """(address, type, interval, interface, max packet) of every
+        endpoint but the control one"""
+        return [(0x80 | f.ep, TYPE_INTERRUPT, f.interval, i, f.maxpacket)
+                for i, f in enumerate(self.interfaces)]
 
     def since_reset(self):
         """The requests after the last reset: the firmware enumerates a
@@ -129,6 +145,8 @@ class Redir:
         self.alive = True
         self.ids64 = False           # once both hellos have said so
         self.configured = threading.Event()
+        if hasattr(device, "attach"):
+            device.attach(self)
         threading.Thread(target=self.serve, daemon=True).start()
 
     def qemu_args(self, n, bus="xhci.0"):
@@ -187,20 +205,21 @@ class Redir:
 
     def plug_in(self):
         d = self.device
-        n = len(d.interfaces)
+        infos = d.iface_infos()
+        n = len(infos)
         pad = lambda vals, size=32: bytes(vals) + bytes(size - len(vals))
         self.send(INTERFACE_INFO, struct.pack("<I", n) +
-                  pad(range(n)) + pad([3] * n) +
-                  pad([f.subclass for f in d.interfaces]) +
-                  pad([f.protocol for f in d.interfaces]))
+                  pad(range(n)) + pad([c for c, _, _ in infos]) +
+                  pad([s for _, s, _ in infos]) +
+                  pad([p for _, _, p in infos]))
         types, intervals, ifaces = [TYPE_INVALID] * 32, [0] * 32, [0] * 32
         sizes = [0] * 32
         types[0] = types[16] = TYPE_CONTROL
         sizes[0] = sizes[16] = 8
-        for i, f in enumerate(d.interfaces):
-            e = ep_index(0x80 | f.ep)
+        for addr, kind, interval, i, maxpacket in d.endpoints():
+            e = ep_index(addr)
             types[e], intervals[e], ifaces[e], sizes[e] = \
-                TYPE_INTERRUPT, f.interval, i, f.maxpacket
+                kind, interval, i, maxpacket
         self.send(EP_INFO, bytes(types) + bytes(intervals) + bytes(ifaces) +
                   struct.pack("<32H", *sizes))
         self.send(DEVICE_CONNECT, struct.pack("<BBBBHHH", SPEED_FULL, 0, 0, 0,
@@ -220,6 +239,19 @@ class Redir:
                 reply = struct.pack("<BBBBHHH", ep, req, rtype, status, value,
                                     index, length if status == SUCCESS else 0)
                 self.send(CONTROL_PACKET, reply, b"", pid)
+            # What the device says because of it - an HCI event after a
+            # command - goes after the transfer's own answer, as on a
+            # real bus
+            if hasattr(self.device, "after_control"):
+                self.device.after_control()
+        elif kind == BULK_PACKET:
+            ep, _, length, stream = struct.unpack("<BBHI", body[:8])
+            if not ep & 0x80:
+                # OUT: taken. IN is never answered - there is nothing to
+                # read - and QEMU cancels it when the guest gives up.
+                self.send(BULK_PACKET, struct.pack("<BBHIH", ep, SUCCESS,
+                                                   length & 0xFFFF, stream,
+                                                   length >> 16), pid=pid)
         elif kind == SET_CONFIGURATION:
             self.configured.set()
             self.send(CONFIGURATION_STATUS, struct.pack("<BB", SUCCESS,
