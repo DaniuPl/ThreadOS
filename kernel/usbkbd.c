@@ -403,7 +403,7 @@ int usbkbd_init(void)
                        port + 1, f->num, f->ep);
         }
         if (bound)
-            usbhc_claim(port);
+            usbhc_claim(port, "usbkbd");
     }
     if (!neps)
         return 0;

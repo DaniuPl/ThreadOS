@@ -47,6 +47,7 @@
 #include "kernel/include/pci.h"
 #include "kernel/include/bt.h"
 #include "kernel/include/usbhc.h"
+#include "devices_rec.h"
 
 /* --- what went against the specification ------------------------------ */
 
@@ -1405,6 +1406,13 @@ static void boot(void)
 
     check("Bluetooth: the adapter found on the laptop's bus, in socket 8 "
           "behind five other devices", found && bt_present());
+    check("the Device Manager is told: xhci has the controller, and it "
+          "is up", dev_rec.claims == 1 && !strcmp(dev_rec.driver, "xhci") &&
+          dev_rec.up);
+    struct usb_seen u;
+    check("and what is in socket 8: the adapter, its class E0, taken by bt",
+          usbhc_seen(7, &u) && u.driver && !strcmp(u.driver, "bt") &&
+          u.cls == 0xE0 && !u.trouble);
     check("the firmware let go of the controller before the system "
           "touched it", !touched_while_owned && !fw_owns &&
           (R(XECP) & (1u << 24)));

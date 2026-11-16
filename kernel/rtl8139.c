@@ -18,6 +18,7 @@
 
 #include "include/rtl8139.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/io.h"
 #include "include/isr.h"
 #include "include/pic.h"
@@ -181,6 +182,7 @@ int rtl8139_init(void)
     struct pci_dev dev;
     if (!pci_find_device(RTL_VENDOR, RTL_DEVICE, &dev))
         return 0;
+    device_claim(&dev, "rtl8139");
     if (!(dev.bar0 & 0x01))             /* we expect an I/O port BAR */
         return 0;
 
@@ -223,5 +225,6 @@ int rtl8139_init(void)
     pic_unmask(dev.irq);
 
     present = 1;
+    device_up(&dev);
     return 1;
 }

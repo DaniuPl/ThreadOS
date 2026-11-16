@@ -54,6 +54,7 @@
 #include "include/wifi_info.h"
 #include "include/mmio.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/pmm.h"
 #include "include/initrd.h"
 #include "include/printk.h"
@@ -518,6 +519,9 @@ static void dma_barrier(void)
 static void vfmt(char *out, uint32_t cap, const char *f, va_list ap)
 {
     uint32_t n = 0;
+    /* PUT's argument is evaluated only while there is room: anything
+       that has to happen whatever the room (moving along a string,
+       taking the next argument) is done outside it */
 #define PUT(c) do { if (n + 1 < cap) out[n++] = (char)(c); } while (0)
     for (; *f; f++) {
         if (*f != '%') {
@@ -538,13 +542,15 @@ static void vfmt(char *out, uint32_t cap, const char *f, va_list ap)
             const char *s = va_arg(ap, const char *);
             if (!s)
                 s = "(null)";
-            while (*s)
-                PUT(*s++);
+            for (; *s; s++)
+                PUT(*s);
             break;
         }
-        case 'c':
-            PUT(va_arg(ap, int));
+        case 'c': {
+            int c = va_arg(ap, int);
+            PUT(c);
             break;
+        }
         case 'd':
         case 'u':
         case 'x': {
@@ -568,8 +574,10 @@ static void vfmt(char *out, uint32_t cap, const char *f, va_list ap)
                 PUT('-');
             for (int w = k + neg; w < width; w++)
                 PUT(pad);
-            while (k)
-                PUT(tmp[--k]);
+            while (k > 0) {
+                k--;
+                PUT(tmp[k]);
+            }
             break;
         }
         case '\0':
@@ -1921,14 +1929,21 @@ static void image_sizes(char *out, uint32_t cap, const struct fw_image *img)
     }
 }
 
+/* The firmware file is not there at all - as against one that is
+   there and wrong: the Device Manager says the first as "needs
+   firmware", which is what a person can do something about */
+static int fw_missing;
+
 static int parse_firmware(void)
 {
     uint32_t size;
     const uint8_t *d = initrd_find(FW_FILE, &size);
     if (!d) {
+        fw_missing = 1;
         why("there is no %s in the initrd", FW_FILE);
         return IWL_ERR_BADFW;
     }
+    fw_missing = 0;
     memset(&fw, 0, sizeof(fw));
     fw.file = d;
     fw.size = size;
@@ -2076,6 +2091,30 @@ static void read_pcie_cap(void)
     }
 }
 
+/* For the Device Manager: what became of the card. Asked each time,
+   because the card starts in a thread of its own and can stop later
+   (an error, the radio switch) */
+static int device_state(char *out, int n)
+{
+    switch (st.stage) {
+    case IWL_STAGE_READY:
+        return DEV_WORKING;
+    case IWL_STAGE_RFKILL:
+        fmt(out, (uint32_t)n, "the radio switch is off");
+        return DEV_WORKING;
+    case IWL_STAGE_FAILED:
+        if (fw_missing) {
+            fmt(out, (uint32_t)n, "%s is not on the system", FW_FILE);
+            return DEV_FIRMWARE;
+        }
+        fmt(out, (uint32_t)n, "%s", st.last_error);
+        return DEV_FAILED;
+    default:
+        fmt(out, (uint32_t)n, "%s", iwlwifi_stage_name(st.stage));
+        return DEV_STARTING;
+    }
+}
+
 static int probe(void)
 {
     if (!find_card(&pdev)) {
@@ -2083,6 +2122,8 @@ static int probe(void)
         why("no Intel Wireless 3160 on the PCI bus");
         return IWL_ERR_NOCARD;
     }
+    device_claim(&pdev, "iwlwifi");
+    device_live(&pdev, device_state);
     st.bus = pdev.bus;
     st.slot = pdev.slot;
     st.func = pdev.func;

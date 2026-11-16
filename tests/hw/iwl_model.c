@@ -23,6 +23,8 @@
  *   rfkill   - the radio switch is off
  *   scan     - the bring-up, then a scan (stage 2): the command checked
  *              field by field, seven frames heard, five networks
+ *   nofile   - the initrd has no firmware file: the Device Manager is
+ *              to say the card needs firmware, not that it failed
  * Prints "ok: ..." / "FAIL: ..." per check, "note: ..." where the
  * specifications leave a choice and the model took one.
  */
@@ -42,7 +44,9 @@
 
 #include "kernel/include/iwlwifi.h"
 #include "kernel/include/pci.h"
+#include "kernel/include/device_info.h"
 #include "iwl/card.h"
+#include "devices_rec.h"
 
 int scenario;
 int bar_mapped;
@@ -364,6 +368,8 @@ static size_t fw_size;
 
 const void *initrd_find(const char *name, uint32_t *size)
 {
+    if (scenario == SC_NOFILE)
+        return NULL;
     if (strcmp(name, "iwl3160.ucode")) {
         note("initrd_find(\"%s\"): the initrd has iwl3160.ucode", name);
         return NULL;
@@ -798,13 +804,37 @@ static void scenario_rfkill(int rc)
     check("no [ OK ] line", log_find("^\\[ OK \\] Wi-Fi") < 0);
 }
 
+/* --- what the Device Manager is told ------------------------------------------------ */
+
+/* The card's state as Settings' Devices page asks for it: the function
+   the driver left with device_live(), called now */
+static int device_said(char *why, int n)
+{
+    why[0] = 0;
+    if (dev_rec.claims != 1 || strcmp(dev_rec.driver, "iwlwifi") ||
+        !dev_rec.live)
+        return -1;
+    return dev_rec.live(why, n);
+}
+
+static void scenario_nofile(int rc)
+{
+    check("iwlwifi_run says the firmware is bad", rc == IWL_ERR_BADFW);
+    char why[64];
+    int state = device_said(why, sizeof(why));
+    printf("  the Device Manager is told: state %d, '%s'\n", state, why);
+    check("the Device Manager: the card needs firmware, iwl3160.ucode",
+          state == DEV_FIRMWARE && strstr(why, "iwl3160.ucode"));
+}
+
 /* --- main ------------------------------------------------------------------------ */
 
 int main(int argc, char **argv)
 {
     setvbuf(stdout, (char *)0, _IONBF, 0);
     if (argc < 3) {
-        fprintf(stderr, "usage: %s ok|nofw-ack|assert|rfkill|scan <ucode>\n",
+        fprintf(stderr, "usage: %s ok|nofw-ack|assert|rfkill|scan|nofile "
+                "<ucode>\n",
                 argv[0]);
         return 2;
     }
@@ -818,6 +848,8 @@ int main(int argc, char **argv)
         scenario = SC_RFKILL;
     else if (!strcmp(argv[1], "scan"))
         scenario = SC_SCAN;
+    else if (!strcmp(argv[1], "nofile"))
+        scenario = SC_NOFILE;
     else {
         fprintf(stderr, "unknown scenario %s\n", argv[1]);
         return 2;
@@ -870,19 +902,35 @@ int main(int argc, char **argv)
             armed = 0;
         }
         scenario_ok_after(before, polled_ok);
+        char why[64];
+        check("the Device Manager: the card claimed by iwlwifi, working",
+              device_said(why, sizeof(why)) == DEV_WORKING);
         break;
     }
     case SC_NOFW_ACK:
         scenario_nofw(rc);
         break;
-    case SC_ASSERT:
+    case SC_ASSERT: {
         scenario_assert(rc);
+        char why[64];
+        int state = device_said(why, sizeof(why));
+        check("the Device Manager: the card failed, and why",
+              state == DEV_FAILED && why[0]);
         break;
-    case SC_RFKILL:
+    }
+    case SC_RFKILL: {
         scenario_rfkill(rc);
+        char why[64];
+        int state = device_said(why, sizeof(why));
+        check("the Device Manager: the card works, its radio switch off",
+              state == DEV_WORKING && strstr(why, "radio switch"));
         break;
+    }
     case SC_SCAN:
         scenario_scan(rc);
+        break;
+    case SC_NOFILE:
+        scenario_nofile(rc);
         break;
     }
     if (tasks)

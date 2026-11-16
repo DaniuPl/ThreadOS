@@ -28,6 +28,7 @@
 
 #include "include/pci.h"
 #include "include/rtl8168.h"
+#include "devices_rec.h"
 
 #define IO_BASE 0xC000
 
@@ -291,6 +292,9 @@ int main(int argc, char **argv)
         regs[0xF2] = 0x08;             /* RXDV_GATED_EN, as it comes up */
 
     check("the card is found and started", rtl8168_init() == 1);
+    check("and the Device Manager is told: rtl8168 has it, and it is up",
+          dev_rec.claims == 1 && !strcmp(dev_rec.driver, "rtl8168") &&
+          dev_rec.up);
     check("bus mastering on, the receive thread made",
           bus_master && threads == 1);
     check("its address is the one in IDR0-5",

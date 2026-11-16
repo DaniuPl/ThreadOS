@@ -160,6 +160,9 @@
 /* Wi-Fi: a1 = 0 fills *(struct wifi_info *)a2, a1 = 1 starts a scan in
    the background -> 0 / -1 */
 #define SYS64_WIFI 100
+/* The Device Manager: device a1 of the machine into a2 (struct
+   device_info); 1 = there was one, 0 = past the end */
+#define SYS64_DEVICE 101
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

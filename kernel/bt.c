@@ -652,7 +652,7 @@ static int try_port(int port)
 
     dev = d;
     ev_have = 0;
-    usbhc_claim(port);
+    usbhc_claim(port, "bt");
 
     /* Reset first, always: an adapter the firmware has already talked
        to is in a state we know nothing about. */

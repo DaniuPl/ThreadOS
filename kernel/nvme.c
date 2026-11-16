@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include "include/nvme.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/printk.h"
 #include "include/string.h"
 
@@ -314,6 +315,7 @@ int nvme_init(void)
     /* Class 01/08/02: mass storage, NVM controller, NVMe interface */
     if (!pci_find_class(0x01, 0x08, 0x02, &dev))
         return 0;
+    device_claim(&dev, "nvme");
     if (dev.bar0 & 0x01)           /* we expect a memory BAR */
         return 0;
 
@@ -363,5 +365,6 @@ int nvme_init(void)
         return 0;
 
     present = 1;
+    device_up(&dev);
     return 1;
 }

@@ -48,11 +48,12 @@ UCODE = os.path.join(ROOT, "third_party", "iwlwifi", "iwlwifi-3160-17.ucode")
 # the model's checks for that scenario, counted in tests/hw/iwl_model.c -
 # fewer means the run stopped before the end)
 SCENARIOS = (
-    ("ok", "everything right", 34),
+    ("ok", "everything right", 35),
     ("nofw-ack", "a firmware chunk never acknowledged", 9),
-    ("assert", "the runtime firmware crashes", 14),
-    ("rfkill", "the radio switch off", 9),
+    ("assert", "the runtime firmware crashes", 15),
+    ("rfkill", "the radio switch off", 10),
     ("scan", "a scan of the networks around", 8),
+    ("nofile", "no firmware file on the system", 4),
 )
 
 
@@ -67,6 +68,10 @@ def build(work):
         shutil.copy(os.path.join(HW, "iwl", "include", name), inc)
     shutil.copy(os.path.join(ROOT, "kernel", "include", "iwlwifi.h"), inc)
     shutil.copy(os.path.join(ROOT, "kernel", "include", "wifi_info.h"), inc)
+    for name in ("devices.h", "device_info.h"):
+        shutil.copy(os.path.join(ROOT, "kernel", "include", name), inc)
+    shutil.copy(os.path.join(HW, "devices_rec.c"), kdir)
+    shutil.copy(os.path.join(HW, "devices_rec.h"), work)
     shutil.copy(os.path.join(HW, "iwl", "paging64.h"),
                 os.path.join(work, "kernel64"))
     driver = os.path.join(ROOT, "kernel", "iwlwifi.c")
@@ -84,6 +89,7 @@ def build(work):
          "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
          "-I", work, "-o", binary,
          os.path.join(kdir, "iwlwifi.c"), os.path.join(work, "iwl_model.c"),
+         os.path.join(kdir, "devices_rec.c"),
          os.path.join(work, "iwl", "card.c"), os.path.join(work, "iwl", "fw.c")],
         capture_output=True, text=True)
     if out.returncode != 0:

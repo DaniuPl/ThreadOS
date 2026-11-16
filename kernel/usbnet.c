@@ -302,7 +302,7 @@ static int try_port(int port)
        means "pass nothing upwards", and that is what it starts with. */
     rndis_set(OID_FILTER, FILTER_NORMAL);
 
-    usbhc_claim(port);
+    usbhc_claim(port, "usbnet");
     present = 1;
     task_create("usbnet", rx_thread, 0);
     printk("[ OK ] A USB network card (RNDIS): "

@@ -157,6 +157,14 @@ int blk_count(void)
     return ndevs;
 }
 
+int blk_has_ata(void)
+{
+    for (int i = 0; i < ndevs; i++)
+        if (devs[i].kind == BLK_ATA)
+            return 1;
+    return 0;
+}
+
 int blk_current(void)
 {
     return cur;

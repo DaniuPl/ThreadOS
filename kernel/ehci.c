@@ -51,6 +51,7 @@
 #include <stdint.h>
 #include "include/ehci.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/spinlock.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -215,10 +216,17 @@ static uint32_t phys(const volatile void *p)
     return (uint32_t)(uintptr_t)p;
 }
 
+/* The controller this driver claimed: a reason to give up after that
+   is the Device Manager's to show as well */
+static struct pci_dev claimed_dev;
+static int claimed;
+
 static int give_up(const char *why)
 {
     gave_up = why;
     base = 0;
+    if (claimed)
+        device_trouble(&claimed_dev, DEV_FAILED, why);
     return 0;
 }
 
@@ -755,6 +763,9 @@ int ehci_init(void)
        interface 0x20 (EHCI) */
     if (!pci_find_class(0x0C, 0x03, 0x20, &dev))
         return give_up("there is no EHCI controller on the PCI bus");
+    device_claim(&dev, "ehci");
+    claimed_dev = dev;
+    claimed = 1;
     if (dev.bar[0] & 0x01)
         return give_up("the controller's BAR0 is not a memory window");
 
@@ -854,5 +865,6 @@ int ehci_init(void)
     /* A device needs time after power and after the change of owner
        before it shows up on our side */
     wait_ms(100);
+    device_up(&dev);
     return 1;
 }

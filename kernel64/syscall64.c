@@ -50,6 +50,7 @@
 #include "../kernel/include/bt_info.h"
 #include "../kernel/include/iwlwifi.h"
 #include "../kernel/include/wifi_info.h"
+#include "../kernel/include/devices.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/random.h"
 
@@ -1500,6 +1501,19 @@ static void handle(struct regs *r)
         iwlwifi_info_fill(&wi);
         *(struct wifi_info *)(uintptr_t)a2 = wi;
         r->rax = 0;
+        return;
+    }
+    case SYS64_DEVICE: {
+        if ((int64_t)a1 < 0 ||
+            !paging64_user_writable(a2, sizeof(struct device_info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        static struct device_info di;
+        int found = devices_get((int)a1, &di);
+        if (found)
+            *(struct device_info *)(uintptr_t)a2 = di;
+        r->rax = (uint64_t)found;
         return;
     }
     case SYS64_PCI_INFO: {

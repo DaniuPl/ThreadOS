@@ -43,6 +43,10 @@ def build(work):
     for name in os.listdir(os.path.join(HW, "include")):
         shutil.copy(os.path.join(HW, "include", name), inc)
     shutil.copy(os.path.join(ROOT, "kernel", "include", "rtl8168.h"), inc)
+    for name in ("devices.h", "device_info.h"):
+        shutil.copy(os.path.join(ROOT, "kernel", "include", name), inc)
+    for name in ("devices_rec.c", "devices_rec.h"):
+        shutil.copy(os.path.join(HW, name), work)
     shutil.copy(os.path.join(ROOT, "kernel", "rtl8168.c"), work)
     shutil.copy(os.path.join(HW, "rtl8168_model.c"), work)
     binary = os.path.join(work, "model")
@@ -50,7 +54,8 @@ def build(work):
         ["gcc", "-std=gnu11", "-Wall", "-Wextra", "-g", "-O1",
          "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
          "-o", binary, os.path.join(work, "rtl8168.c"),
-         os.path.join(work, "rtl8168_model.c")],
+         os.path.join(work, "rtl8168_model.c"),
+         os.path.join(work, "devices_rec.c")],
         capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr[:3000])
@@ -85,7 +90,7 @@ def main():
                 check(f"{name}: {ln.split(': ', 1)[1]}", ln.startswith("ok"))
             check(f"{name}: every check ran, and nothing the sanitizers "
                   f"saw ({len(lines)} checks)",
-                  out.returncode == 0 and len(lines) >= 9 and
+                  out.returncode == 0 and len(lines) >= 10 and
                   "runtime error" not in text and "Sanitizer" not in text)
             if out.returncode != 0:
                 print(text[-3000:])

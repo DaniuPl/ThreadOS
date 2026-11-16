@@ -27,6 +27,7 @@
 #include "pciinfo.h"
 #include "ubt.h"
 #include "uwifi.h"
+#include "udevices.h"
 
 /* Small enough to open in the cascade's third place on a 640x480
    screen, between the bar and the dock */
@@ -35,7 +36,7 @@
 
 #define SIDE_W 150            /* the sections, down the left */
 #define SIDE_Y0 44            /* the first section's top */
-#define SIDE_H 22             /* fourteen of them have to fit in 362 */
+#define SIDE_H 21             /* fifteen of them have to fit in 362 */
 #define ICON 16               /* a section's coloured square */
 #define SIDE_TEXT_X 36        /* a section's name, right of its square */
 #define PANE_X 170            /* the open section, right of them */
@@ -60,6 +61,12 @@
 #define WIFI_LIST_Y 166       /* Wi-Fi: the first network's row (PANE_Y0,
                                  three lines, the button and a gap) */
 #define WIFI_ROW_H 20         /* ...and each one's height */
+#define DEV_MAX 64            /* Devices: as many as are listed */
+#define DEV_LIST_Y 108        /* the first device's row: under two lines
+                                 of figures (PANE_Y0 + 2 * INFO_H + 8) */
+#define DEV_ROW_H 20
+#define DEV_STATE_W 120       /* its state, at the row's right end */
+#define DEV_AMBER 0xFF9F0A    /* what needs a person: no driver, no firmware */
 #define LOCK_WAY_W 84         /* Screen Lock: a way to unlock, as a chip */
 #define LOCK_PIN_W 92         /* ...the PIN field */
 #define LOCK_PW_W 140         /* ...and the password beside it */
@@ -88,13 +95,14 @@
 #define SEC_FILES   10
 #define SEC_REGION  11
 #define SEC_ABOUT   12
-#define SEC_UPDATES 13
-#define SEC_N       14
+#define SEC_DEVICES 13
+#define SEC_UPDATES 14
+#define SEC_N       15
 
 static const char *const sections[] = {
     "Wi-Fi", "Bluetooth", "Network", "Sound", "General", "Appearance",
     "Desktop & Dock", "Display", "Screen Lock", "Mouse", "Files", "Region",
-    "About", "Updates"
+    "About", "Devices", "Updates"
 };
 /* A line under the last of each group */
 static int group_ends(int i)
@@ -105,7 +113,8 @@ static int group_ends(int i)
 /* Each section's square, under the picture of it */
 static const uint32_t section_colour[] = {
     0x0A84FF, 0x0A84FF, 0x0A84FF, 0xFF375F, 0x8E8E93, 0x3A3A3C, 0x5E5CE6,
-    0x0A84FF, 0x3A3A3C, 0x8E8E93, 0x1E8CF0, 0x34A853, 0x8E8E93, 0xFF9500
+    0x0A84FF, 0x3A3A3C, 0x8E8E93, 0x1E8CF0, 0x34A853, 0x8E8E93, 0x30B0C7,
+    0xFF9500
 };
 
 static int win = -1;
@@ -204,6 +213,14 @@ static void section_icon(int i, int x, int y, uint32_t bg)
         ud_ring(win, x + 2, y + 2, 12, 12, 6, w);
         ud_disc(win, x + 7, y + 4, 2, w);
         ud_fill(win, x + 7, y + 7, 2, 5, w);
+        break;
+    case SEC_DEVICES:                   /* a chip on its pins */
+        for (int k = 0; k < 3; k++) {
+            ud_fill(win, x + 4 + 3 * k, y + 1, 2, 14, w);
+            ud_fill(win, x + 1, y + 4 + 3 * k, 14, 2, w);
+        }
+        ud_round(win, x + 3, y + 3, 10, 10, 2, w);
+        ud_round(win, x + 5, y + 5, 6, 6, 1, bg);
         break;
     default:                            /* Updates: down, into the tray */
         ud_line(win, x + 8, y + 2, x + 8, y + 10, 24, w);
@@ -577,6 +594,7 @@ static void fields_from_settings(void)
 #define A_TOGGLE  8               /* name flips between 0 and 1 */
 #define A_BT_SEARCH 12
 #define A_WIFI_SEARCH 15
+#define A_DEVICE 16               /* a device opened, or -1: the list */
 #define A_UNLOCK_PICK 13          /* the way the lock opens, chosen */
 #define A_UNLOCK_SAVE 14          /* ...and saved, with the password */
 #define A_UPDATE_CHECK   9
@@ -687,6 +705,16 @@ static void info(int i, const char *name, const char *value)
     int base = ud_baseline(y, INFO_H, UD_PX);
     ud_text_l(win, PANE_X, base, name, l.dim, UD_SANS, UD_PX);
     ud_text(win, PANE_X + INFO_X, base, value, l.text, UD_SANS, UD_PX);
+}
+
+/* ...and one whose value is a word of ours, to be translated, rather
+   than a figure or a name the machine gave */
+static void info_l(int i, const char *name, const char *value)
+{
+    int y = PANE_Y0 + i * INFO_H;
+    int base = ud_baseline(y, INFO_H, UD_PX);
+    ud_text_l(win, PANE_X, base, name, l.dim, UD_SANS, UD_PX);
+    ud_text_l(win, PANE_X + INFO_X, base, value, l.text, UD_SANS, UD_PX);
 }
 
 /* --- the sections ------------------------------------------------------ */
@@ -1135,6 +1163,162 @@ static void draw_wifi(void)
     note(y + 36, "Until then: the network port, or a USB network adapter.");
 }
 
+/* --- Devices ------------------------------------------------------------
+
+   The Device Manager: every device in the machine and what became of
+   it, the ones that need something first - a person opens it to find
+   out why something does not work, and that is the answer they are
+   looking for. A row opens the device on its own: the numbers a driver
+   is found by, where it sits, and what its driver said. */
+
+static struct device_info devs[DEV_MAX];
+static int ndevs;
+static int dev_top;                     /* the first row shown */
+static int dev_open = -1;               /* the device on its own, or -1 */
+
+static void load_devices(void)
+{
+    struct device_info d;
+    ndevs = 0;
+    for (int i = 0; ndevs < DEV_MAX && i < 512 && sys_device(i, &d) == 1; i++)
+        devs[ndevs++] = d;
+    /* The most urgent first, and the bus's order within each kind:
+       an insertion sort, because it keeps that order */
+    for (int i = 1; i < ndevs; i++) {
+        struct device_info t = devs[i];
+        int j = i;
+        while (j > 0 && devs[j - 1].state > t.state) {
+            devs[j] = devs[j - 1];
+            j--;
+        }
+        devs[j] = t;
+    }
+}
+
+static const char *dev_state_text(int s)
+{
+    switch (s) {
+    case DEV_FAILED:    return "Failed";
+    case DEV_FIRMWARE:  return "Needs firmware";
+    case DEV_NO_DRIVER: return "No driver";
+    case DEV_SPARE:     return "Not in use";
+    case DEV_STARTING:  return "Starting";
+    case DEV_WORKING:   return "Working";
+    default:            return "Part of the machine";
+    }
+}
+
+static uint32_t dev_state_colour(int s)
+{
+    switch (s) {
+    case DEV_FAILED:    return l.danger;
+    case DEV_FIRMWARE:
+    case DEV_NO_DRIVER: return DEV_AMBER;
+    case DEV_STARTING:  return l.accent;
+    case DEV_WORKING:   return l.good;
+    default:            return l.line;
+    }
+}
+
+static void put_id(char *out, const struct device_info *d)
+{
+    put_hex4(out, 0, d->vendor);
+    out[4] = ':';
+    put_hex4(out, 5, d->device);
+    out[9] = 0;
+}
+
+static void put_where(char *out, const struct device_info *d)
+{
+    int n = put_str(out, 0, d->bus == DEV_BUS_PCI ? "PCI " : "USB socket ");
+    n = put_num(out, n, d->where[0]);
+    if (d->bus == DEV_BUS_PCI) {
+        out[n++] = ':';
+        n = put_num(out, n, d->where[1]);
+        out[n++] = '.';
+        n = put_num(out, n, d->where[2]);
+    }
+}
+
+static void draw_device(const struct device_info *d)
+{
+    char id[12], where[24];
+    put_id(id, d);
+    put_where(where, d);
+    info(0, "Device", d->name);
+    info(1, "Maker:model", id);
+    info(2, "Where", where);
+    if (d->driver[0])
+        info(3, "Driver", d->driver);
+    else
+        info_l(3, "Driver", "none");
+    int base = ud_baseline(PANE_Y0 + 4 * INFO_H, INFO_H, UD_PX);
+    ud_text_l(win, PANE_X, base, "Status", l.dim, UD_SANS, UD_PX);
+    ud_text_l(win, PANE_X + INFO_X, base, dev_state_text(d->state),
+              dev_state_colour(d->state) == l.line ? l.text
+                                                   : dev_state_colour(d->state),
+              UD_SANS, UD_PX);
+    int y = PANE_Y0 + 5 * INFO_H + 6;
+    if (d->why[0]) {
+        note(y, d->why);
+        y += 18;
+    }
+    if (d->state == DEV_NO_DRIVER) {
+        note(y, "ThreadOS has no driver for it yet. The numbers above");
+        note(y + 14, "are what a driver would be found by.");
+    } else if (d->state == DEV_FIRMWARE) {
+        note(y, "Its driver is there; the maker's firmware is not.");
+    }
+    button(PANE_X, ch - NOTE_DY - CHIP_H - 22, SAVE_W, "Back", A_DEVICE, -1);
+}
+
+static void draw_devices(void)
+{
+    load_devices();
+    if (dev_open >= ndevs)
+        dev_open = -1;
+    if (dev_open >= 0) {
+        draw_device(&devs[dev_open]);
+        return;
+    }
+    int need = 0;
+    for (int i = 0; i < ndevs; i++)
+        if (devs[i].state <= DEV_NO_DRIVER)
+            need++;
+    /* Two lines of figures, rather than "21 devices": a number
+       before its noun takes three forms in Polish */
+    char num[12], urgent[12];
+    put_num(num, 0, (uint32_t)ndevs);
+    put_num(urgent, 0, (uint32_t)need);
+    info(0, "Devices", num);
+    info(1, "Need attention", urgent);
+
+    int rows = (ch - NOTE_DY - 22 - DEV_LIST_Y) / DEV_ROW_H;
+    if (dev_top > ndevs - rows)
+        dev_top = ndevs - rows;
+    if (dev_top < 0)
+        dev_top = 0;
+    int w = cw - PANE_X - 16;
+    for (int k = 0; k < rows && dev_top + k < ndevs; k++) {
+        const struct device_info *d = &devs[dev_top + k];
+        int y = DEV_LIST_Y + k * DEV_ROW_H;
+        int base = ud_baseline(y, DEV_ROW_H, UD_PX);
+        ud_round(win, PANE_X, y + (DEV_ROW_H - 8) / 2, 8, 8, 4,
+                 dev_state_colour(d->state));
+        ud_clip(win, PANE_X + 14, y, w - 14 - DEV_STATE_W, DEV_ROW_H);
+        ud_text(win, PANE_X + 14, base, d->name,
+                d->state == DEV_PLUMBING ? l.dim : l.text, UD_SANS, UD_PX);
+        ud_unclip(win);
+        ud_text_l(win, PANE_X + w - DEV_STATE_W + 4, base,
+                  dev_state_text(d->state), l.dim, UD_SANS, UD_PX);
+        hot(PANE_X, y, w, DEV_ROW_H, A_DEVICE, dev_top + k, (const char *)0,
+            (const char *)0);
+    }
+    if (ndevs > rows)
+        note(DEV_LIST_Y + rows * DEV_ROW_H + 2,
+             "The wheel shows the rest.");
+}
+
 static struct bt_info bti;
 
 static void draw_bluetooth(void)
@@ -1409,6 +1593,7 @@ static void draw(void)
     case SEC_MOUSE:   draw_mouse(); break;
     case SEC_FILES:   draw_files(); break;
     case SEC_REGION:  draw_region(); break;
+    case SEC_DEVICES: draw_devices(); break;
     case SEC_UPDATES: draw_updates(); break;
     default:          draw_about(); break;
     }
@@ -1469,6 +1654,7 @@ static void click(int x, int y)
             if (section != t->arg)
                 said = 0;
             section = t->arg;
+            dev_open = -1;
             break;
         case A_SET:
             apply(t->name, t->value);
@@ -1498,6 +1684,9 @@ static void click(int x, int y)
             break;
         case A_WIFI_SEARCH:
             sys_wifi(WIFI_SEARCH, (struct wifi_info *)0);
+            break;
+        case A_DEVICE:
+            dev_open = t->arg;
             break;
         case A_UNLOCK_PICK:
             unlock_pick = t->arg;
@@ -1622,6 +1811,9 @@ void _start(void)
                     click(ev.x, ev.y);
             } else if (ev.type == WEV_KEY) {
                 key((char)ev.val);
+            } else if (ev.type == WEV_SCROLL && section == SEC_DEVICES &&
+                       dev_open < 0) {
+                dev_top -= ev.val;      /* draw_devices() keeps it in range */
             }
         }
         if (update_poll())

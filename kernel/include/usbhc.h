@@ -45,8 +45,9 @@ int usbhc_attach(int port);
 /* "This device is mine now." Said by a driver that has configured a
    device and started talking to it: after that the port answers
    "nothing here" to every other driver, so nobody reads descriptors
-   down a wire somebody else is already using. */
-void usbhc_claim(int port);
+   down a wire somebody else is already using. The driver's name is
+   what the Device Manager shows against the device. */
+void usbhc_claim(int port, const char *driver);
 
 /* A control transfer to a device. 'setup' is the 8-byte request, data
    may go either way (in=1 reads). Returns the number of data bytes
@@ -110,5 +111,16 @@ int usbhc_request(int dev, uint8_t type, uint8_t req,
    speed - or why something that is there did not answer. For
    'hardware'. */
 void usbhc_print_devices(void);
+
+/* What is in socket 'sock', for the Device Manager: 1 when something
+   is there - its numbers and class, the driver that took it (0 when
+   none did), or why it did not answer */
+struct usb_seen {
+    uint16_t vid, pid;
+    uint8_t cls, sub, proto;
+    const char *driver;
+    const char *trouble;
+};
+int usbhc_seen(int sock, struct usb_seen *out);
 
 #endif

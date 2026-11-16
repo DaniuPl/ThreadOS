@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include "include/rtl8168.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/io.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -246,7 +247,10 @@ static int find_card(struct pci_dev *dev)
 int rtl8168_init(void)
 {
     struct pci_dev dev;
-    if (!find_card(&dev) || !(dev.bar[0] & 1))
+    if (!find_card(&dev))
+        return 0;
+    device_claim(&dev, "rtl8168");
+    if (!(dev.bar[0] & 1))
         return 0;
     io = (uint16_t)(dev.bar[0] & ~3u);
     pci_enable_bus_master(&dev);
@@ -315,5 +319,6 @@ int rtl8168_init(void)
            st & PHYSTATUS_1000 ? "1000 Mb/s" :
            st & PHYSTATUS_100 ? "100 Mb/s" : "10 Mb/s");
     task_create("rtl8168", rx_thread, 0);
+    device_up(&dev);
     return 1;
 }

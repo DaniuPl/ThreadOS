@@ -18,6 +18,7 @@
 #include <stdint.h>
 #include "include/uhci.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/pmm.h"
 #include "include/io.h"
 #include "include/printk.h"
@@ -296,6 +297,7 @@ int uhci_init(void)
        programming interface 0x00 (UHCI) */
     if (!pci_find_class(0x0C, 0x03, 0x00, &dev))
         return 0;
+    device_claim(&dev, "uhci");
 
     /* UHCI sits in I/O port space - for it that is BAR4 */
     if (!(dev.bar[4] & 0x01))
@@ -341,5 +343,6 @@ int uhci_init(void)
     wr16(REG_CMD, CMD_RS | CMD_MAXP);
 
     nports = 2;                          /* UHCI always has two ports */
+    device_up(&dev);
     return 1;
 }

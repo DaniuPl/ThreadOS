@@ -131,7 +131,7 @@ int usbmouse_init(void)
         if (usbhc_int_endpoint(dev, ep_num, ep_maxpacket, ep_interval) < 0)
             continue;
 
-        usbhc_claim(port);
+        usbhc_claim(port, "usbmouse");
         found = 1;
         task_create("usbmouse", poll_thread, 0);
         printk("[ OK ] A USB mouse (HID, %s) on port %d, "

@@ -8036,3 +8036,40 @@ works and is checked by `make test`.
       Settings page where Position stands otherwise, opens Start and
       reads Shut Down at the end of its menu, and goes back to the Mac
       style. t_dock clicks the Position chips a row lower.
+
+- [x] **The Device Manager**
+      (kernel/devices.c, kernel/include/devices.h, device_info.h,
+      kernel/usbhc.c, the PCI drivers, kernel64/syscall64.c,
+      kernel64/shell64.c, user/gsettings.c, user/udevices.h,
+      tests/hw/devices_rec.c, scripts/tests/t_devices.py, t_iwlwifi.py,
+      t_rtl8168.py, t_intelusb.py)
+      Settings has a Devices section, and the shell 'devices': every
+      device on the PCI bus and in the USB sockets, and what became of
+      it - working under which driver, failed (and why), needing its
+      maker's firmware, with no driver at all, not in use (a second
+      network card: ThreadOS drives one), starting, or part of the
+      machine (bridges). The ones needing a person come first; a row
+      opens the device with the numbers a driver is found by. It is the
+      first half of drivers from the internet: it says what is missing.
+      The bus is walked each time, so a device nothing drives is listed
+      as much as one that works; what a driver did is what the driver
+      says - it claims the device when it finds it and says when it is
+      up, so one that gives up half way leaves it standing as failed,
+      with the reason where the driver has one. USB drivers name
+      themselves when they claim a socket. The Wi-Fi card is asked
+      each time, since it starts in a thread of its own. A table in
+      devices.c says which devices ThreadOS has drivers for, for the
+      ones nothing claimed; t_devices checks it holds every number the
+      drivers in kernel/ look their devices up by, so a new driver
+      cannot be left out of it. t_devices compares the list with
+      QEMU's own query-pci, checks each state on a machine with an
+      e1000, an idle RTL8139, QEMU's 'edu' device and a USB keyboard,
+      and reads the Settings page. The host models check that the
+      RTL8168, xHCI and Bluetooth drivers claim and report, and that
+      the Wi-Fi card says it needs firmware when the file is missing,
+      failed when its firmware crashes, and works with its radio off.
+      That last check found a hang in the Wi-Fi driver's formatter: a
+      string or number longer than the room left was never stepped
+      past, because the step was inside a macro that skipped its
+      argument when full - a long error from the card would have hung
+      whoever asked for it.

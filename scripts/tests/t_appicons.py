@@ -31,7 +31,8 @@ from ptest import check, summary, no64, _kernel_define
 
 _GS = "user/gsettings.c"
 ICON = _kernel_define(_GS, "ICON")
-OLD_LETTERS = "WBNSGA?DLMFRiU"    # (Desktop & Dock never had a letter)
+# (Desktop & Dock and Devices came after the letters, and never had one)
+OLD_LETTERS = "WBNSGA?DLMFRi?U"
 
 
 def far(a, b):

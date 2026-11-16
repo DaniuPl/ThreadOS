@@ -37,7 +37,7 @@ HW = os.path.join(ROOT, "tests", "hw")
 
 DRIVERS = ("xhci.c", "usbhc.c", "bt.c")
 HEADERS = ("xhci.h", "usbhc.h", "bt.h", "bt_info.h", "uhci.h", "ehci.h",
-           "pci.h")
+           "pci.h", "devices.h", "device_info.h")
 
 
 STUBS = r"""
@@ -86,6 +86,8 @@ def build(work):
     for name in DRIVERS:
         shutil.copy(os.path.join(ROOT, "kernel", name), kdir)
     shutil.copy(os.path.join(HW, "xhci_model.c"), work)
+    shutil.copy(os.path.join(HW, "devices_rec.c"), kdir)
+    shutil.copy(os.path.join(HW, "devices_rec.h"), work)
     with open(os.path.join(work, "stubs.c"), "w") as fh:
         fh.write(STUBS)
     binary = os.path.join(work, "model")
@@ -94,7 +96,8 @@ def build(work):
          "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
          "-I", work, "-o", binary]
         + [os.path.join(kdir, n) for n in DRIVERS]
-        + [os.path.join(work, "xhci_model.c"), os.path.join(work, "stubs.c")],
+        + [os.path.join(work, "xhci_model.c"), os.path.join(work, "stubs.c"),
+           os.path.join(kdir, "devices_rec.c")],
         capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr[:4000])
@@ -112,7 +115,7 @@ def main():
               binary is not None)
         if not binary:
             return summary()
-        for scenario, name, least in (("boot", "everything there at start-up", 18),
+        for scenario, name, least in (("boot", "everything there at start-up", 20),
                                       ("late", "the radio switched on late", 5)):
             try:
                 out = subprocess.run([binary, scenario], capture_output=True,

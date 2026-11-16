@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include "include/hda.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/pmm.h"
 #include "include/printk.h"
 #include "include/string.h"
@@ -125,9 +126,16 @@ static char name[48];
    six different things and each has a different answer. */
 static const char *why = "never looked for";
 
+/* The controller this driver claimed: a reason to give up after that
+   is the Device Manager's to show as well */
+static struct pci_dev claimed_dev;
+static int claimed;
+
 static int give_up(const char *reason)
 {
     why = reason;
+    if (claimed)
+        device_trouble(&claimed_dev, DEV_FAILED, reason);
     return 0;
 }
 
@@ -418,6 +426,9 @@ int hda_init(void)
        programming interface is zero on every one of them. */
     if (!pci_find_class(0x04, 0x03, 0x00, &dev))
         return give_up("there is no HDA controller on the PCI bus");
+    device_claim(&dev, "hda");
+    claimed_dev = dev;
+    claimed = 1;
 
     uint32_t bar = dev.bar[0] & 0xFFFFFFF0u;
     if (!bar || (dev.bar[0] & 0x01))
@@ -487,6 +498,7 @@ int hda_init(void)
     name[n] = '\0';
 
     ready = 1;
+    device_up(&dev);
     return 1;
 }
 

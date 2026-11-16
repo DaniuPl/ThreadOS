@@ -42,7 +42,8 @@
 #define ERRLOG_PTR 0x00812000u
 #define EVLOG_PTR  0x00812800u
 
-enum scenario { SC_OK, SC_NOFW_ACK, SC_ASSERT, SC_RFKILL, SC_SCAN };
+enum scenario { SC_OK, SC_NOFW_ACK, SC_ASSERT, SC_RFKILL, SC_SCAN,
+                SC_NOFILE };
 extern int scenario;
 
 /* --- time: nanoseconds of card time; it moves only when the driver

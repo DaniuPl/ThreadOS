@@ -26,6 +26,7 @@
 #include <stdint.h>
 #include "include/ahci.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/pmm.h"
 
 /* The controller registers lie high, beyond the memory described up
@@ -253,6 +254,7 @@ int ahci_init(void)
     /* Class 0x01 (mass storage), subclass 0x06 (SATA), interface 0x01 (AHCI) */
     if (!pci_find_class(0x01, 0x06, 0x01, &dev))
         return 0;
+    device_claim(&dev, "ahci");
 
     uint32_t abar = dev.bar[5] & 0xFFFFFFF0u;
     if (!abar || (dev.bar[5] & 0x01))        /* an I/O port BAR - not our case */
@@ -314,6 +316,8 @@ int ahci_init(void)
         disks[ndisks].sectors = disk_sectors;
         ndisks++;
     }
+    /* A controller with nothing on its ports is still working */
+    device_up(&dev);
     if (ndisks)
         use(0);
     return ndisks;

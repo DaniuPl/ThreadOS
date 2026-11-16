@@ -51,6 +51,7 @@
 #include "../kernel/include/fatcmd.h"
 #include "../kernel/include/install.h"
 #include "../kernel/include/hwinfo.h"
+#include "../kernel/include/devices.h"
 #include "../kernel/include/power.h"
 #include "../kernel/include/hda.h"
 #include "../kernel/include/bt.h"
@@ -140,6 +141,7 @@ static void cmd_help(void)
     printk("          fat [N [disk]] - the FAT partition: fatls, fatcat,\n");
     printk("            fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("          hardware - what is in this machine, disks, font\n");
+    printk("          devices - every device and what drives it\n");
     printk("          bt [scan|test] - Bluetooth\n");
     printk("          wifi [scan|test] - the Wi-Fi card, the networks\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
@@ -1193,6 +1195,8 @@ static void execute(const char *line)
         cmd_beep(argument(line, sizeof("beep ") - 1));
     } else if (!strcmp(line, "hardware")) {
         hwinfo_print();
+    } else if (!strcmp(line, "devices")) {
+        devices_print();
     } else if (!strcmp(line, "mouse")) {
         cmd_mouse();
     } else if (!strcmp(line, "bt")) {

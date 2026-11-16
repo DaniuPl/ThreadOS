@@ -31,6 +31,7 @@
 #include "include/spinlock.h"
 #include "include/task.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/printk.h"
 #include "include/string.h"
 #include "include/pit.h"
@@ -571,9 +572,16 @@ int xhci_ports(void)
  * whole diagnosis, so it is written down and printed by 'hardware'. */
 static const char *gave_up;
 
+/* The controller this driver claimed: a reason to give up after that
+   is the Device Manager's to show as well */
+static struct pci_dev claimed_dev;
+static int claimed;
+
 static int give_up(const char *why)
 {
     gave_up = why;
+    if (claimed)
+        device_trouble(&claimed_dev, DEV_FAILED, why);
     return 0;
 }
 
@@ -711,6 +719,9 @@ int xhci_init(void)
        programming interface 0x30 (xHCI) */
     if (!pci_find_class(0x0C, 0x03, 0x30, &dev))
         return give_up("there is no xHCI controller on the PCI bus");
+    device_claim(&dev, "xhci");
+    claimed_dev = dev;
+    claimed = 1;
 
     /* xHCI sits in memory - BAR0, possibly 64-bit (bits 2:1 equal to 2
        mean the upper half of the address is in BAR1) */
@@ -820,6 +831,7 @@ int xhci_init(void)
         was = now;
         wait_ms(10);
     }
+    device_up(&dev);
     return 1;
 }
 

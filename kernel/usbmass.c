@@ -280,7 +280,7 @@ static int try_port(int port)
         return 0;
     }
 
-    usbhc_claim(port);
+    usbhc_claim(port, "usbmass");
     printk("[ OK ] USB disk: %s, %u sectors (port %d, %s)\n",
            u->name, u->sectors, port + 1, usbhc_port_hc(port));
     count++;

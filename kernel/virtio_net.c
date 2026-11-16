@@ -11,6 +11,7 @@
 #include "include/isr.h"
 #include "include/net.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/pic.h"
 #include "include/pmm.h"
 #include "include/printk.h"
@@ -195,6 +196,7 @@ int virtio_net_init(void)
     if (!pci_find_device(VIRTIO_VENDOR, VIRTIO_NET_LEGACY, &dev) &&
         !pci_find_device(VIRTIO_VENDOR, VIRTIO_NET_TRANSITIONAL, &dev))
         return 0;
+    device_claim(&dev, "virtio_net");
     if (!(dev.bar0 & 1) || dev.irq == 0 || dev.irq >= 16)
         return 0;
 
@@ -235,6 +237,7 @@ int virtio_net_init(void)
     present = 1;
     pic_unmask(dev.irq);
     outw(io_base + REG_QUEUE_NOTIFY, 0);
+    device_up(&dev);
     return 1;
 }
 

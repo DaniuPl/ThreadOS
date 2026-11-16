@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include "include/e1000.h"
 #include "include/pci.h"
+#include "include/devices.h"
 #include "include/io.h"
 #include "include/isr.h"
 #include "include/pic.h"
@@ -259,6 +260,7 @@ int e1000_init(void)
     struct pci_dev dev;
     if (!pci_find_device(E1000_VENDOR, E1000_DEVICE, &dev))
         return 0;
+    device_claim(&dev, "e1000");
     if (dev.bar0 & 0x01)               /* we expect a memory BAR */
         return 0;
 
@@ -325,5 +327,6 @@ int e1000_init(void)
     pic_unmask(dev.irq);
 
     present = 1;
+    device_up(&dev);
     return 1;
 }

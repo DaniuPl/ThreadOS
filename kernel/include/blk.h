@@ -34,6 +34,11 @@ int blk_use(int i);                  /* 0 = done, -1 = there is no such one */
 const char *blk_name(void);
 const char *blk_name_of(int i);
 
+/* Whether a disk is on the old IDE bus: that driver speaks to fixed
+   ports, never to a device it found, so this is how the Device Manager
+   learns the IDE controller is in use */
+int blk_has_ata(void);
+
 /* Capacity in 512 B sectors (0 = unknown) */
 uint32_t blk_sectors(void);
 uint32_t blk_sectors_of(int i);

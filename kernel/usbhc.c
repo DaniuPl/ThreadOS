@@ -64,6 +64,7 @@ static struct device list[DEVICES];
 static int port_dev[PORTS_MAX];
 static int port_known[PORTS_MAX];
 static int port_taken[PORTS_MAX];
+static const char *port_driver[PORTS_MAX];
 
 /* A socket is not the same thing as a port on the controller.
  *
@@ -323,10 +324,12 @@ static int ehci_greet(int port, struct device *u)
  * answers "nothing here" to everybody else. */
 
 
-void usbhc_claim(int port)
+void usbhc_claim(int port, const char *driver)
 {
-    if (port >= 0 && port < PORTS_MAX)
+    if (port >= 0 && port < PORTS_MAX) {
         port_taken[port] = 1;
+        port_driver[port] = driver;
+    }
 }
 
 int usbhc_attach(int port)
@@ -456,6 +459,23 @@ void usbhc_print_devices(void)
                    class_name(s), speed_name(s->speed));
         }
     }
+}
+
+int usbhc_seen(int port, struct usb_seen *out)
+{
+    if (port < 0 || port >= usbhc_ports() || port >= PORTS_MAX)
+        return 0;
+    const struct seen *s = &seen[port];
+    if (!s->trouble && !s->vid && !s->pid)
+        return 0;
+    out->vid = s->vid;
+    out->pid = s->pid;
+    out->cls = s->cls;
+    out->sub = s->sub;
+    out->proto = s->proto;
+    out->driver = port_taken[port] ? port_driver[port] : (const char *)0;
+    out->trouble = s->trouble;
+    return 1;
 }
 
 /* --- hubs -----------------------------------------------------------
@@ -795,6 +815,7 @@ void usbhc_forget(int port)
     }
     port_known[port] = 0;
     port_taken[port] = 0;
+    port_driver[port] = (const char *)0;
     port_dev[port] = -1;
     struct seen none = { 0, 0, 0, 0, 0, 0, (const char *)0 };
     seen[port] = none;

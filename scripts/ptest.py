@@ -826,7 +826,7 @@ GSET_SIDE_TEXT_X = _kernel_define(_GS, "SIDE_TEXT_X")
 # system's alone, so that the rest stand in the same place in both
 GSET_SECTIONS = ["Wi-Fi", "Bluetooth", "Network", "Sound", "General",
                  "Appearance", "Desktop & Dock", "Display", "Screen Lock",
-                 "Mouse", "Files", "Region", "About"]
+                 "Mouse", "Files", "Region", "About", "Devices"]
 GSET_SECTIONS64 = GSET_SECTIONS + ["Updates"]
 GSET_OPENS_ON = "General"
 
