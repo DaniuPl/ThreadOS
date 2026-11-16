@@ -7,8 +7,10 @@
  *
  * Stage 1: the card found, its firmware loaded and calibrated, the
  * runtime firmware up and idle; the MAC address and the channel list
- * read from the card's NVM. Scanning, joining and data frames come
- * later, on top of the interface in the second half of this file. */
+ * read from the card's NVM. Stage 2: scanning - the networks around,
+ * with their names, channels, signal and protection. Joining and data
+ * frames come later, on top of the interface in the second half of
+ * this file. */
 
 /* Finds the card. Without one it says so in one line and returns; with
    one it starts the driver's thread, which brings the card up (the
@@ -144,6 +146,35 @@ int iwl_notif_register(uint32_t id, iwl_notif_fn fn);
    FIFO feeds it (SCD_QUEUE_CFG); and closed again */
 int iwl_txq_enable(int queue, int fifo, int sta_id, int tid);
 int iwl_txq_disable(int queue);
+
+/* --- Stage 2: scanning ---------------------------------------------- */
+
+#define IWLWIFI_MAX_BSS 32
+
+#define IWLWIFI_SEC_OPEN 0
+#define IWLWIFI_SEC_WEP  1
+#define IWLWIFI_SEC_WPA  2
+#define IWLWIFI_SEC_WPA2 3
+
+/* A network heard in the last scan */
+struct iwlwifi_bss {
+    uint8_t bssid[6];
+    char ssid[33];          /* "" when the network hides it */
+    uint8_t ssid_len;
+    uint8_t channel;
+    int8_t rssi;            /* dBm, the loudest it was heard */
+    uint8_t security;       /* IWLWIFI_SEC_* */
+};
+
+/* A scan of every channel the card may use: how many networks were
+   heard, or IWL_ERR_*. iwlwifi_scan asks the driver's thread and waits
+   for it (from any thread: the shell, Settings); iwlwifi_scan_now does
+   it on the calling thread, which has to be the driver's - or a test
+   standing in for it. */
+int iwlwifi_scan(void);
+int iwlwifi_scan_now(void);
+/* The networks of the last scan; how many there are */
+int iwlwifi_bss(struct iwlwifi_bss *out, int max);
 
 /* One 802.11 frame onto a data queue. tx_cmd is the 56-byte TX command
    (the caller fills rate, station, flags, security; the transport fills

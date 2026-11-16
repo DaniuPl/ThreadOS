@@ -7911,3 +7911,29 @@ works and is checked by `make test`.
       Files tile where it stands on an 800x600 screen on a 640x480 one,
       typed the sudo password unasked and woke a dark screen with the
       first letter of a command; it passes now.
+
+- [x] **Wi-Fi stage 2: scanning, on the card's model**
+      (kernel/iwlwifi.c, kernel64/shell64.c, tests/hw/iwl/fw.c,
+      tests/hw/iwl_model.c, scripts/tests/t_iwlwifi.py)
+      The 3160's firmware (API 17) has no UMAC scan in its capabilities,
+      so it scans the older way: one SCAN_OFFLOAD_REQUEST_CMD with the
+      dwell times, the channels (room for the 40 its TLV 31 says) and
+      the probe request, after which the firmware sweeps by itself and
+      sends what it hears as REPLY_RX_PHY_CMD + REPLY_RX_MPDU_CMD pairs,
+      then SCAN_OFFLOAD_COMPLETE. The command is filled as Linux's
+      iwlmvm fills a regular scan for this firmware - active with the
+      wildcard SSID, every beacon passed up, the aux station's TX
+      commands, no EBS (the file does not offer it); the layouts are
+      those of the firmware API headers Linux carries under BSD-3-Clause.
+      Beacons and probe responses become a list of networks: BSSID,
+      name (none when hidden), channel from the DS element, the loudest
+      signal heard, and the protection - RSN is WPA2, Microsoft's
+      element WPA, the privacy bit alone WEP. 'wifi scan' prints it;
+      the scan runs on the driver's thread, asked from the shell's.
+      The card's model now takes the scan command and holds every field
+      to the API and to what iwlmvm sends, then has seven frames heard
+      around it: a WPA2 network, an open one answering by probe
+      response, a hidden one, a WEP one heard twice, WPA on channel 36,
+      a damaged frame and somebody's data frame. The scenario wants
+      exactly five networks with their names, channels, loudest signals
+      and protection. A wrong filter flag in the driver fails it.

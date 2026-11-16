@@ -141,7 +141,7 @@ static void cmd_help(void)
     printk("            fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("          hardware - what is in this machine, disks, font\n");
     printk("          bt [scan|test] - Bluetooth\n");
-    printk("          wifi - the Wi-Fi card and its firmware\n");
+    printk("          wifi [scan] - the Wi-Fi card, the networks around\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          format [N] - the whole disk, or partition N, as TFS\n");
     printk("          install - ThreadOS onto this machine's disk\n");
@@ -502,6 +502,33 @@ static void cmd_wifi(void)
         printk("  calibration: %d results\n", s->calib_results);
     if (s->last_error[0])
         printk("  last error: %s\n", s->last_error);
+    if (s->stage == IWL_STAGE_READY)
+        printk("( 'wifi scan' - the networks around )\n");
+}
+
+/* 'wifi scan': every channel the card may use, and what was heard */
+static void cmd_wifi_scan(void)
+{
+    static const char *const kind[] = { "open", "WEP", "WPA", "WPA2" };
+    printk("wifi: scanning...\n");
+    int n = iwlwifi_scan();
+    if (n < 0) {
+        const struct iwlwifi_state *s = iwlwifi_state();
+        printk("wifi: no scan (%s)\n", s->stage != IWL_STAGE_READY
+               ? iwlwifi_stage_name(s->stage)
+               : s->last_error[0] ? s->last_error : "it did not finish");
+        return;
+    }
+    static struct iwlwifi_bss list[IWLWIFI_MAX_BSS];
+    int got = iwlwifi_bss(list, IWLWIFI_MAX_BSS);
+    for (int i = 0; i < got; i++) {
+        const uint8_t *b = list[i].bssid;
+        printk("  %x:%x:%x:%x:%x:%x  ch %u  %d dBm  %s  %s\n", b[0], b[1],
+               b[2], b[3], b[4], b[5], (uint32_t)list[i].channel,
+               (int)list[i].rssi, kind[list[i].security & 3],
+               list[i].ssid_len ? list[i].ssid : "(hidden)");
+    }
+    printk("wifi: networks heard: %d\n", n);
 }
 
 static void cmd_bt(const char *arg)
@@ -1174,6 +1201,8 @@ static void execute(const char *line)
         cmd_bt(line + 3);
     } else if (!strcmp(line, "wifi")) {
         cmd_wifi();
+    } else if (!strcmp(line, "wifi scan")) {
+        cmd_wifi_scan();
     } else if (!strcmp(line, "font")) {
         fonts_command("");
     } else if (starts_with(line, "font ")) {

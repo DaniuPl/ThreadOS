@@ -52,6 +52,7 @@ SCENARIOS = (
     ("nofw-ack", "a firmware chunk never acknowledged", 9),
     ("assert", "the runtime firmware crashes", 14),
     ("rfkill", "the radio switch off", 9),
+    ("scan", "a scan of the networks around", 8),
 )
 
 

@@ -73,7 +73,7 @@ struct image {
 static struct image img[2] = { { .name = "runtime" }, { .name = "INIT" } };
 static uint32_t def_calib[4][2];
 static int def_calib_seen[4];
-static uint32_t phy_sku, api0, capa0, n_cpu;
+static uint32_t phy_sku, api0, capa0, n_cpu, n_scan_ch;
 
 static void bad_file(const char *why)
 {
@@ -111,6 +111,8 @@ void fw_parse(const uint8_t *f, size_t len)
             capa0 = rd32(d + 4);
         } else if (t == 27 && l == 4) {
             n_cpu = rd32(d);
+        } else if (t == 31 && l == 4) {
+            n_scan_ch = rd32(d);
         }
         o += 8 + ((l + 3) & ~3u);
     }
@@ -898,6 +900,254 @@ static void phy_context(const struct cmd *c)
     answer_status(c, 0);
 }
 
+/* --- stage 2: the scan -----------------------------------------------------------
+ *
+ * SCAN_OFFLOAD_REQUEST_CMD (0x51) as the firmware API lays it out -
+ * SCAN_REQUEST_FIXED_PART_API_S_VER_7, then n_scan_channels (the file's
+ * TLV 31) of SCAN_CHANNEL_CFG_S_VER_1, then PROBE_REQUEST_FRAME_API_S_VER_2
+ * - and filled as iwlmvm fills it for a regular scan with a firmware
+ * that has no UMAC scan: active with the wildcard SSID, every beacon
+ * passed up, the aux station's TX commands. What the firmware then
+ * hears it sends up as REPLY_RX_PHY_CMD + REPLY_RX_MPDU_CMD pairs, and
+ * ends with SCAN_OFFLOAD_COMPLETE (iwl_periodic_scan_complete, status
+ * 1 = completed). The networks around the model's card are below.
+ */
+
+#define SEC_OPEN 0
+#define SEC_WEP  1
+#define SEC_WPA  2
+#define SEC_WPA2 3
+
+struct scan_ap {
+    uint8_t bssid[6];
+    const char *ssid;           /* "" = hidden */
+    uint8_t channel;
+    int8_t rssi;
+    int sec;
+    int probe_resp;             /* answers with a probe response, not a beacon */
+    int bad_crc;                /* heard damaged: the firmware says so */
+};
+
+#define SCAN_APS 7
+static const struct scan_ap scan_aps[SCAN_APS] = {
+    { { 0x02, 0x7A, 0x00, 0x00, 0x00, 0x01 }, "ThreadOS-Home", 6, -48,
+      SEC_WPA2, 0, 0 },
+    { { 0x02, 0x7A, 0x00, 0x00, 0x00, 0x02 }, "Cafe Guest", 1, -71,
+      SEC_OPEN, 1, 0 },
+    { { 0x02, 0x7A, 0x00, 0x00, 0x00, 0x03 }, "", 11, -80, SEC_WPA2, 0, 0 },
+    { { 0x02, 0x7A, 0x00, 0x00, 0x00, 0x04 }, "OldRouter", 11, -70,
+      SEC_WEP, 0, 0 },
+    { { 0x02, 0x7A, 0x00, 0x00, 0x00, 0x04 }, "OldRouter", 11, -60,
+      SEC_WEP, 0, 0 },          /* the same one again, louder */
+    { { 0x02, 0x7A, 0x00, 0x00, 0x00, 0x05 }, "Office", 36, -58, SEC_WPA,
+      0, 0 },
+    { { 0x02, 0x7A, 0x00, 0x00, 0x00, 0x06 }, "Broken", 6, -50, SEC_OPEN,
+      0, 1 },
+};
+
+static uint8_t scan_ch[64];
+static int scan_nch, scan_on;
+
+static int scan_frame(uint8_t *f, const struct scan_ap *a)
+{
+    memset(f, 0, 24);
+    f[0] = a->probe_resp ? 0x50 : 0x80;
+    memset(f + 4, 0xFF, 6);
+    memcpy(f + 10, a->bssid, 6);
+    memcpy(f + 16, a->bssid, 6);
+    uint8_t *b = f + 24;
+    memset(b, 0, 8);                        /* timestamp */
+    wr16(b + 8, 100);                       /* beacon interval, TU */
+    wr16(b + 10, 0x0001 | (a->sec != SEC_OPEN ? 0x0010 : 0));
+    int n = 36;
+    size_t sl = strlen(a->ssid);
+    f[n++] = 0;
+    f[n++] = (uint8_t)sl;
+    memcpy(f + n, a->ssid, sl);
+    n += (int)sl;
+    static const uint8_t rates[] = { 1, 8, 0x82, 0x84, 0x8B, 0x96, 0x0C,
+                                     0x12, 0x18, 0x24 };
+    memcpy(f + n, rates, sizeof(rates));
+    n += sizeof(rates);
+    f[n++] = 3;
+    f[n++] = 1;
+    f[n++] = a->channel;
+    if (a->sec == SEC_WPA2) {
+        static const uint8_t rsn[] = { 48, 20, 1, 0, 0x00, 0x0F, 0xAC, 4,
+                                       1, 0, 0x00, 0x0F, 0xAC, 4, 1, 0,
+                                       0x00, 0x0F, 0xAC, 2, 0, 0 };
+        memcpy(f + n, rsn, sizeof(rsn));
+        n += sizeof(rsn);
+    } else if (a->sec == SEC_WPA) {
+        static const uint8_t wpa[] = { 221, 22, 0x00, 0x50, 0xF2, 1, 1, 0,
+                                       0x00, 0x50, 0xF2, 2, 1, 0, 0x00, 0x50,
+                                       0xF2, 2, 1, 0, 0x00, 0x50, 0xF2, 2 };
+        memcpy(f + n, wpa, sizeof(wpa));
+        n += sizeof(wpa);
+    }
+    return n;
+}
+
+static void scan_heard(const struct scan_ap *a, int as_data)
+{
+    uint8_t phy[68];
+    memset(phy, 0, sizeof(phy));
+    phy[0] = 8;                             /* non_cfg_phy_cnt */
+    wr16(phy + 22, a->channel);
+    wr32(phy + 24 + 4, (uint32_t)(-a->rssi) & 0xFF);
+    batch_add(0xC0, 0x8000, phy, sizeof(phy), 0);
+    uint8_t m[4 + 300 + 4];
+    int n = scan_frame(m + 4, a);
+    if (as_data) {
+        m[4] = 0x08;                        /* a data frame: not for a scan */
+        m[5] = 0x02;
+    }
+    wr16(m, (uint16_t)n);
+    wr16(m + 2, 0);
+    wr32(m + 4 + n, a->bad_crc ? 0x2 : 0x3);
+    batch_add(0xC1, 0x8000, m, (uint32_t)(4 + n + 4), 0);
+    if (!a->bad_crc && !as_data)
+        fs.scan_frames++;
+}
+
+static void scan_dwell(uint32_t arg)
+{
+    uint32_t g = arg >> 8, i = arg & 0xFF;
+    if (g != (gen & 0xFFFFFF) || st != FW_RUNNING || !scan_on)
+        return;
+    batch_begin();
+    for (int k = 0; k < SCAN_APS; k++)
+        if (scan_aps[k].channel == scan_ch[i])
+            scan_heard(&scan_aps[k], 0);
+    if (scan_ch[i] == 6)                    /* and somebody's data */
+        scan_heard(&scan_aps[0], 1);
+    if ((int)i == scan_nch - 1) {
+        uint8_t done[12];
+        memset(done, 0, sizeof(done));
+        done[1] = 1;                        /* last_schedule_iteration */
+        done[2] = 1;                        /* IWL_SCAN_OFFLOAD_COMPLETED */
+        batch_add(0x6D, 0x8000, done, sizeof(done), 0);
+        scan_on = 0;
+        fs.scans_done++;
+    }
+    batch_send(0);
+}
+
+static void scan_request(const struct cmd *c)
+{
+    uint32_t want = 764 + 12 * n_scan_ch + 528;
+    if (!n_scan_ch) {
+        bad_command(c, "a scan, and the file says no N_SCAN_CHANNELS");
+        return;
+    }
+    if (!want_len(c, want, "SCAN_REQUEST_FIXED_PART_API_S_VER_7 + "
+                           "TLV 31's channels + PROBE_REQUEST_FRAME_API_S_VER_2"))
+        return;
+    if (!fs.rt_configured)
+        violation("a scan before the runtime image was configured");
+    if (scan_on) {
+        violation("a scan while one is running (LMAC scans one at a time)");
+        answer_status(c, 1);
+        return;
+    }
+    const uint8_t *p = c->data;
+    int bad = 0;
+    uint32_t rx = (phy_sku >> 20) & 0xF, tx = (phy_sku >> 16) & 0xF;
+    uint32_t n = p[4];
+    if (n < 1 || n > n_scan_ch) {
+        violation("a scan of %u channels: 1 to %u fit", n, n_scan_ch);
+        bad = 1;
+    }
+    if (p[5] != 10 || p[6] != 110 || p[7] != 44 || p[8] != 90)
+        note("scan dwell %u/%u/%u/%u TU; iwlmvm uses 10/110/44/90",
+             p[5], p[6], p[7], p[8]);
+    uint16_t chain = rd16(p + 10);
+    if (chain != (uint16_t)((rx << 1) | (rx << 7) | (rx << 4) | 1)) {
+        violation("rx_chain_select 0x%x: the valid RX antennas 0x%x "
+                  "valid, forced and forced-MIMO, and DRIVER_FORCE", chain,
+                  rx);
+        bad = 1;
+    }
+    uint32_t flags = rd32(p + 12);
+    if (!(flags & 0x01))
+        note("a scan without PASS_ALL: with no match sets the firmware "
+             "passes up nothing it hears");
+    if (flags & 0x02)
+        note("a passive scan: no probe requests sent");
+    if (rd32(p + 28) != 0x44) {
+        violation("filter_flags 0x%x, not ACCEPT_GRP | IN_BEACON: foreign "
+                  "beacons stay in the firmware", rd32(p + 28));
+        bad = 1;
+    }
+    for (int b = 0; b < 2; b++) {
+        const uint8_t *t = p + 32 + 12 * b;
+        uint32_t rate = rd32(t + 4);
+        uint32_t ant = (rate >> 14) & 0x7;
+        if (rd32(t) != 0x3000 || t[8] != 1 || !ant || (ant & ~tx) ||
+            (rate & 0xFF) != (b ? 13u : 10u) ||
+            ((rate >> 9) & 1) != (b ? 0u : 1u)) {
+            violation("scan tx_cmd[%d]: flags 0x%x rate 0x%x station %u; "
+                      "SEQ_CTL|BT_DIS, %s on a valid antenna, the aux "
+                      "station 1", b, rd32(t), rate, t[8],
+                      b ? "6 Mb/s OFDM" : "1 Mb/s CCK");
+            bad = 1;
+        }
+    }
+    if (rd32(p + 740) != 1 || p[750] < 1 || p[751] != 1) {
+        violation("a regular scan: iter_num 1, schedule[0] at least one "
+                  "iteration, full_scan_mul 1");
+        bad = 1;
+    }
+    int ok_ch = 1;
+    for (uint32_t i = 0; i < n && i < 64; i++) {
+        const uint8_t *ch = p + 764 + 12 * i;
+        uint16_t num = rd16(ch + 4);
+        int known = 0;
+        for (int k = 0; k < 39; k++)
+            if (nvm_chan_num[k] == num && (nvm_chan_flags[k] & 1) &&
+                (k < 14 || (NVM_SKU & 2)))
+                known = 1;
+        if (!known || rd16(ch + 6) != 1 || !(rd32(ch) & (1u << 28)))
+            ok_ch = 0;
+        scan_ch[i] = (uint8_t)num;
+    }
+    if (!ok_ch) {
+        violation("a scan channel the NVM does not allow, or without "
+                  "iter_count 1 and PARTIAL");
+        bad = 1;
+    }
+    const uint8_t *pr = p + 764 + 12 * n_scan_ch, *f = pr + 16;
+    uint16_t hoff = rd16(pr), hlen = rd16(pr + 2);
+    int seg_ok = 1;
+    for (int k = 0; k < 4; k++)
+        if (rd16(pr + 4 * k) + rd16(pr + 4 * k + 2) > 512)
+            seg_ok = 0;
+    static const uint8_t bcast[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    if (!seg_ok || hoff != 0 || hlen < 26 || f[0] != 0x40 || f[1] != 0 ||
+        memcmp(f + 4, bcast, 6) || memcmp(f + 10, nvm_mac, 6) ||
+        memcmp(f + 16, bcast, 6) || f[24] != 0) {
+        violation("the scan's probe request: a probe request header to "
+                  "broadcast from the card's own address, the SSID element "
+                  "first, every segment inside the 512-byte buffer");
+        bad = 1;
+    }
+    const uint8_t *band0 = f + rd16(pr + 4);
+    if (rd16(pr + 6) < 2 || band0[0] != 1)
+        note("no supported-rates element for 2.4 GHz in the probe request: "
+             "an AP may ignore it");
+    scan_nch = (int)n;
+    fs.scans++;
+    if (!bad)
+        fs.scan_cmd_ok++;
+    answer_status(c, 0);
+    if (bad || !(flags & 0x01))
+        return;
+    scan_on = 1;
+    for (int i = 0; i < scan_nch; i++)
+        model_at((uint64_t)(i + 1) * 40 * MS, scan_dwell,
+                 ((gen & 0xFFFFFF) << 8) | (uint32_t)i);
+}
+
 static void rt_command(const struct cmd *c)
 {
     rt_cmds++;
@@ -990,6 +1240,9 @@ static void rt_command(const struct cmd *c)
         break;
     case 0x88:
         nvm_access(c);
+        break;
+    case 0x51:
+        scan_request(c);
         break;
     case 0x03:
         answer(c, NULL, 0);

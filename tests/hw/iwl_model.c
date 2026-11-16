@@ -21,6 +21,8 @@
  *   nofw-ack - the card never signals a firmware chunk done
  *   assert   - the runtime firmware crashes at its first command
  *   rfkill   - the radio switch is off
+ *   scan     - the bring-up, then a scan (stage 2): the command checked
+ *              field by field, seven frames heard, five networks
  * Prints "ok: ..." / "FAIL: ..." per check, "note: ..." where the
  * specifications leave a choice and the model took one.
  */
@@ -497,6 +499,69 @@ static void check_channels(void)
           "derived as SPEC_I 5.7 says", same);
 }
 
+/* Stage 2. What the scan must come to, written out here from the model's
+   networks (tests/hw/iwl/fw.c) rather than read from them: a beacon
+   heard twice is one network at its louder, a damaged frame and a data
+   frame are none, a hidden network has no name, and the protection is
+   RSN = WPA2, Microsoft's element = WPA, the privacy bit alone = WEP. */
+static void scenario_scan(int rc)
+{
+    check("scan: the card came up first", rc == IWL_OK);
+    if (rc != IWL_OK)
+        return;
+    volatile int n = -999;
+    deadline = now_ns + 20000 * MS;
+    armed = 1;
+    if (!setjmp(escape))
+        n = iwlwifi_scan_now();
+    armed = 0;
+    check("scan: it ended, inside 20 s of card time", !hung && n >= 0);
+    check("scan: the firmware took the command - SCAN_OFFLOAD_REQUEST_CMD "
+          "of the size the file's channel count makes, every field as the "
+          "API and a regular iwlmvm scan have it", fs.scan_cmd_ok == 1);
+    check("scan: the firmware swept every channel and said it was done",
+          fs.scans_done == 1);
+    static const struct {
+        const char *bssid, *ssid;
+        int channel, rssi, sec;
+    } want[5] = {
+        { "02:7a:00:00:00:01", "ThreadOS-Home", 6, -48, IWLWIFI_SEC_WPA2 },
+        { "02:7a:00:00:00:02", "Cafe Guest", 1, -71, IWLWIFI_SEC_OPEN },
+        { "02:7a:00:00:00:03", "", 11, -80, IWLWIFI_SEC_WPA2 },
+        { "02:7a:00:00:00:04", "OldRouter", 11, -60, IWLWIFI_SEC_WEP },
+        { "02:7a:00:00:00:05", "Office", 36, -58, IWLWIFI_SEC_WPA },
+    };
+    struct iwlwifi_bss got[IWLWIFI_MAX_BSS];
+    int ng = iwlwifi_bss(got, IWLWIFI_MAX_BSS);
+    check("scan: five networks - the damaged frame and the data frame "
+          "are none, the twice-heard one is one", n == 5 && ng == 5);
+    int found = 0;
+    for (int w = 0; w < 5; w++) {
+        int ok = 0;
+        for (int i = 0; i < ng && i < IWLWIFI_MAX_BSS; i++) {
+            char b[18];
+            snprintf(b, sizeof(b), "%02x:%02x:%02x:%02x:%02x:%02x",
+                     got[i].bssid[0], got[i].bssid[1], got[i].bssid[2],
+                     got[i].bssid[3], got[i].bssid[4], got[i].bssid[5]);
+            if (strcmp(b, want[w].bssid))
+                continue;
+            ok = !strcmp(got[i].ssid, want[w].ssid) &&
+                 got[i].ssid_len == strlen(want[w].ssid) &&
+                 got[i].channel == want[w].channel &&
+                 got[i].rssi == want[w].rssi &&
+                 got[i].security == want[w].sec;
+            if (!ok)
+                printf("  %s: the driver has '%s' ch %u %d dBm sec %u\n", b,
+                       got[i].ssid, got[i].channel, got[i].rssi,
+                       got[i].security);
+        }
+        found += ok;
+    }
+    check("scan: each by its BSSID, with its name (none when hidden), its "
+          "channel, its loudest signal and its protection (WPA2, open by "
+          "a probe response, WEP, WPA on 5 GHz)", found == 5);
+}
+
 /* The milestone lines of the contract, in order */
 static const char *milestones[] = {
     "^\\[wifi\\] Intel Wireless 3160 at 0*2:0*0\\.0, hw rev 0x0*165$",
@@ -739,7 +804,7 @@ int main(int argc, char **argv)
 {
     setvbuf(stdout, (char *)0, _IONBF, 0);
     if (argc < 3) {
-        fprintf(stderr, "usage: %s ok|nofw-ack|assert|rfkill <ucode>\n",
+        fprintf(stderr, "usage: %s ok|nofw-ack|assert|rfkill|scan <ucode>\n",
                 argv[0]);
         return 2;
     }
@@ -751,6 +816,8 @@ int main(int argc, char **argv)
         scenario = SC_ASSERT;
     else if (!strcmp(argv[1], "rfkill"))
         scenario = SC_RFKILL;
+    else if (!strcmp(argv[1], "scan"))
+        scenario = SC_SCAN;
     else {
         fprintf(stderr, "unknown scenario %s\n", argv[1]);
         return 2;
@@ -813,6 +880,9 @@ int main(int argc, char **argv)
         break;
     case SC_RFKILL:
         scenario_rfkill(rc);
+        break;
+    case SC_SCAN:
+        scenario_scan(rc);
         break;
     }
     if (tasks)

@@ -42,7 +42,7 @@
 #define ERRLOG_PTR 0x00812000u
 #define EVLOG_PTR  0x00812800u
 
-enum scenario { SC_OK, SC_NOFW_ACK, SC_ASSERT, SC_RFKILL };
+enum scenario { SC_OK, SC_NOFW_ACK, SC_ASSERT, SC_RFKILL, SC_SCAN };
 extern int scenario;
 
 /* --- time: nanoseconds of card time; it moves only when the driver
@@ -149,6 +149,8 @@ struct fw_stats {
     int flood_sent;
     int nvm_reads;
     int rt_before_calib;
+    int scans, scan_cmd_ok, scans_done;   /* stage 2 */
+    int scan_frames;                      /* beacons/responses sent up whole */
 };
 extern struct fw_stats fs;
 void fw_rt_report(void);

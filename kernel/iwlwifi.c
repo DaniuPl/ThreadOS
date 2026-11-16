@@ -363,6 +363,7 @@ static struct {
     uint32_t size;
     struct fw_image init, rt;
     uint32_t flags, api0, capa0, phy_sku, n_cpu;
+    uint32_t n_scan_channels;   /* room for channels in a scan command */
     uint32_t calib_flow[4], calib_event[4];
     uint32_t major, minor, local;
 } fw;
@@ -1983,6 +1984,11 @@ static int parse_firmware(void)
                 fw.calib_event[get32(v)] = get32(v + 8);
             }
             break;
+        case TLV_N_SCAN_CHANNELS:
+            bad = len < 4 || get32(v) < 1 || get32(v) > 64;
+            if (!bad)
+                fw.n_scan_channels = get32(v);
+            break;
         case TLV_NUM_OF_CPU:
             bad = len < 4 || get32(v) < 1 || get32(v) > 2;
             if (!bad)
@@ -2871,6 +2877,270 @@ void iwlwifi_poll(void)
     }
 }
 
+/* ===================================================================
+ * Stage 2: scanning
+ *
+ * This firmware (API 17) scans the old way, "LMAC": the capability for
+ * the newer UMAC scan is not in its TLVs. One host command,
+ * SCAN_OFFLOAD_REQUEST_CMD, carries everything - the dwell times, the
+ * channels, the probe request to send on them - and the firmware then
+ * does the whole sweep by itself. What it hears comes in as received
+ * frames, each a pair of packets: REPLY_RX_PHY_CMD (how it was heard:
+ * channel, signal) and REPLY_RX_MPDU_CMD (the 802.11 frame itself).
+ * SCAN_OFFLOAD_COMPLETE ends it. The command is filled the way Linux's
+ * iwlmvm fills it for a regular scan with this firmware: active, the
+ * wildcard SSID, every beacon passed up, extended dwell on 1, 6 and 11.
+ * =================================================================== */
+
+#define SCAN_OFFLOAD_REQUEST_CMD 0x51
+#define SCAN_OFFLOAD_COMPLETE    0x6D
+#define REPLY_RX_PHY_CMD         0xC0
+#define REPLY_RX_MPDU_CMD        0xC1
+
+#define SCAN_FIXED        764   /* SCAN_REQUEST_FIXED_PART_API_S_VER_7 + the rest */
+#define SCAN_CHAN_CFG      12   /* SCAN_CHANNEL_CFG_S_VER_1 */
+#define SCAN_PREQ         528   /* PROBE_REQUEST_FRAME_API_S_VER_2 */
+#define SCAN_MAX_CHANNELS  64
+#define SCAN_FLAG_PASS_ALL       0x01
+#define SCAN_FLAG_EXTENDED_DWELL 0x80
+#define SCAN_CHANNEL_PARTIAL     (1u << 28)
+#define SCAN_DONE_MS      15000
+
+static uint8_t scan_cmd[SCAN_FIXED + SCAN_CHAN_CFG * SCAN_MAX_CHANNELS +
+                        SCAN_PREQ];
+static struct iwlwifi_bss bss[IWLWIFI_MAX_BSS];
+static int n_bss;
+static volatile int scan_running, scan_status;
+/* The PHY half of the frame being received: where and how loud */
+static uint16_t rx_channel;
+static int rx_signal;
+
+static uint32_t scan_cmd_size(void)
+{
+    return SCAN_FIXED + SCAN_CHAN_CFG * fw.n_scan_channels + SCAN_PREQ;
+}
+
+static uint32_t scan_build(void)
+{
+    uint8_t *c = scan_cmd;
+    uint32_t size = scan_cmd_size();
+    memset(c, 0, size);
+    uint32_t n = (uint32_t)st.n_channels < fw.n_scan_channels
+                     ? (uint32_t)st.n_channels : fw.n_scan_channels;
+    c[4] = (uint8_t)n;
+    c[5] = 10;                          /* active dwell, TU */
+    c[6] = 110;                         /* passive */
+    c[7] = 44;                          /* fragmented */
+    c[8] = 90;                          /* extended: channels 1, 6, 11 */
+    uint32_t rx = valid_rx_ant(), tx = valid_tx_ant();
+    put16(c + 10, (uint16_t)((rx << 1) | (rx << 7) | (rx << 4) | 1));
+    put32(c + 12, SCAN_FLAG_PASS_ALL | SCAN_FLAG_EXTENDED_DWELL);
+    /* max_out_time and suspend_time 0: not associated */
+    put32(c + 24, channels[0].band == IWLWIFI_BAND_24 ? 1 : 0);
+    put32(c + 28, (1u << 2) | (1u << 6));  /* ACCEPT_GRP, IN_BEACON */
+    /* The probe request's TX command, per band: no CCK on 5 GHz */
+    uint32_t ant = (tx & -tx) << 14;    /* the first antenna there is */
+    put32(c + 32, (1u << 12) | (1u << 13));      /* BT_DIS, SEQ_CTL */
+    put32(c + 36, 10 | (1u << 9) | ant);         /* 1 Mb/s CCK */
+    c[40] = AUX_STA_ID;
+    put32(c + 44, (1u << 12) | (1u << 13));
+    put32(c + 48, 13 | ant);                     /* 6 Mb/s OFDM */
+    c[52] = AUX_STA_ID;
+    put32(c + 736, 6);                  /* scan priority EXT_6 */
+    put32(c + 740, 1);                  /* one iteration */
+    c[750] = 1;                         /* schedule[0]: once, */
+    c[751] = 1;                         /* ... every channel */
+    for (uint32_t i = 0; i < n; i++) {
+        uint8_t *ch = c + SCAN_FIXED + SCAN_CHAN_CFG * i;
+        put32(ch, SCAN_CHANNEL_PARTIAL);
+        put16(ch + 4, channels[i].number);
+        put16(ch + 6, 1);
+    }
+    /* The probe request: a header and the wildcard SSID, then what is
+       said per band - the rates, and on 2.4 GHz a DS parameter set the
+       firmware fills with the channel - and nothing common */
+    uint8_t *pr = c + SCAN_FIXED + SCAN_CHAN_CFG * fw.n_scan_channels;
+    uint8_t *f = pr + 16;
+    f[0] = 0x40;                        /* management, probe request */
+    memset(f + 4, 0xFF, 6);             /* to everybody */
+    memcpy(f + 10, st.mac, 6);
+    memset(f + 16, 0xFF, 6);            /* any BSS */
+    f[24] = 0;                          /* SSID, empty: any */
+    f[25] = 0;
+    static const uint8_t band24[] = {
+        1, 8, 0x02, 0x04, 0x0B, 0x16, 0x0C, 0x12, 0x18, 0x24,
+        50, 4, 0x30, 0x48, 0x60, 0x6C,
+        3, 1, 0 };
+    static const uint8_t band5[] = {
+        1, 8, 0x0C, 0x12, 0x18, 0x24, 0x30, 0x48, 0x60, 0x6C };
+    memcpy(f + 26, band24, sizeof(band24));
+    memcpy(f + 26 + sizeof(band24), band5, sizeof(band5));
+    put16(pr + 0, 0);                   /* mac_header */
+    put16(pr + 2, 26);
+    put16(pr + 4, 26);                  /* band_data[0]: 2.4 GHz */
+    put16(pr + 6, sizeof(band24));
+    put16(pr + 8, 26 + sizeof(band24)); /* band_data[1]: 5 GHz */
+    put16(pr + 10, sizeof(band5));
+    put16(pr + 12, 26 + sizeof(band24) + sizeof(band5));
+    put16(pr + 14, 0);                  /* common_data */
+    return size;
+}
+
+static void rx_phy(uint32_t id, const uint8_t *p, uint32_t len, uint16_t seq)
+{
+    (void)id;
+    (void)seq;
+    if (len < 68)
+        return;
+    rx_channel = get16(p + 22);
+    /* The energy the antennas heard, as a positive number: -dBm */
+    uint32_t e = get32(p + 24 + 4 * 1);
+    int a = (int)(e & 0xFF), b = (int)((e >> 8) & 0xFF);
+    int sa = a ? -a : -128, sb = b ? -b : -128;
+    rx_signal = sa > sb ? sa : sb;
+}
+
+static struct iwlwifi_bss *bss_for(const uint8_t *bssid)
+{
+    for (int i = 0; i < n_bss; i++)
+        if (!memcmp(bss[i].bssid, bssid, 6))
+            return &bss[i];
+    if (n_bss >= IWLWIFI_MAX_BSS)
+        return 0;
+    struct iwlwifi_bss *b = &bss[n_bss++];
+    memset(b, 0, sizeof(*b));
+    memcpy(b->bssid, bssid, 6);
+    b->rssi = -128;
+    return b;
+}
+
+/* A beacon or a probe response: who it is, on which channel, and how
+   it is protected - RSN is WPA2, Microsoft's WPA element is WPA, the
+   privacy bit alone is WEP */
+static void rx_mpdu(uint32_t id, const uint8_t *p, uint32_t len, uint16_t seq)
+{
+    (void)id;
+    (void)seq;
+    if (len < 4)
+        return;
+    uint32_t n = get16(p);
+    if (n < 36 || 4 + n + 4 > len)
+        return;
+    uint32_t status = get32(p + 4 + n);
+    if ((status & 3) != 3)              /* CRC and no overrun */
+        return;
+    const uint8_t *f = p + 4;
+    uint16_t fc = get16(f);
+    uint32_t type = (fc >> 2) & 3, sub = (fc >> 4) & 0xF;
+    if (type != 0 || (sub != 5 && sub != 8))
+        return;
+    struct iwlwifi_bss *b = bss_for(f + 16);
+    if (!b)
+        return;
+    int privacy = (get16(f + 34) & 0x10) != 0;
+    int rsn = 0, wpa = 0, channel = rx_channel;
+    for (uint32_t i = 36; i + 2 <= n;) {
+        uint8_t eid = f[i], elen = f[i + 1];
+        const uint8_t *v = f + i + 2;
+        if (i + 2 + elen > n)
+            break;
+        if (eid == 0 && elen <= 32) {
+            memcpy(b->ssid, v, elen);
+            b->ssid[elen] = 0;
+            b->ssid_len = elen;
+        } else if (eid == 3 && elen == 1) {
+            channel = v[0];
+        } else if (eid == 48) {
+            rsn = 1;
+        } else if (eid == 221 && elen >= 4 && v[0] == 0x00 &&
+                   v[1] == 0x50 && v[2] == 0xF2 && v[3] == 0x01) {
+            wpa = 1;
+        }
+        i += 2 + elen;
+    }
+    b->channel = (uint8_t)channel;
+    b->security = rsn ? IWLWIFI_SEC_WPA2 : wpa ? IWLWIFI_SEC_WPA
+                  : privacy ? IWLWIFI_SEC_WEP : IWLWIFI_SEC_OPEN;
+    if (rx_signal > b->rssi)
+        b->rssi = (int8_t)rx_signal;
+}
+
+static void scan_complete(uint32_t id, const uint8_t *p, uint32_t len,
+                          uint16_t seq)
+{
+    (void)id;
+    (void)seq;
+    scan_status = len >= 3 ? p[2] : 0;
+    scan_running = 0;
+}
+
+int iwlwifi_scan_now(void)
+{
+    if (st.stage != IWL_STAGE_READY)
+        return IWL_ERR_STATE;
+    if (!fw.n_scan_channels) {
+        why("the firmware file says nothing of how many channels a scan "
+            "takes");
+        return IWL_ERR_BADFW;
+    }
+    iwl_notif_register(REPLY_RX_PHY_CMD, rx_phy);
+    iwl_notif_register(REPLY_RX_MPDU_CMD, rx_mpdu);
+    iwl_notif_register(SCAN_OFFLOAD_COMPLETE, scan_complete);
+    n_bss = 0;
+    rx_signal = -128;
+    struct iwl_hcmd c;
+    memset(&c, 0, sizeof(c));
+    c.id = SCAN_OFFLOAD_REQUEST_CMD;
+    c.data[0] = scan_cmd;
+    c.len[0] = scan_build();
+    scan_running = 1;
+    scan_status = 0;
+    int r = iwl_send_cmd(&c);
+    if (r != IWL_OK) {
+        scan_running = 0;
+        say("[wifi] the scan did not start (%d)\n", r);
+        return r;
+    }
+    struct waiter w;
+    wait_begin(&w, SCAN_DONE_MS);
+    do {
+        service();
+        if (fw_err || hw_gone)
+            break;
+    } while (scan_running && wait_more(&w));
+    if (scan_running) {
+        scan_running = 0;
+        why("the scan did not end within %u ms", (uint32_t)SCAN_DONE_MS);
+        return fw_err ? IWL_ERR_FW : IWL_ERR_TIMEOUT;
+    }
+    say("[wifi] scan done (status %u): %d network(s)\n",
+        (uint32_t)scan_status, n_bss);
+    return n_bss;
+}
+
+int iwlwifi_bss(struct iwlwifi_bss *out, int max)
+{
+    int n = n_bss < max ? n_bss : max;
+    for (int i = 0; i < n; i++)
+        out[i] = bss[i];
+    return n_bss;
+}
+
+/* From any thread: the scan is the driver thread's to run */
+static volatile int scan_wanted, scan_result;
+static volatile uint32_t scan_gen;
+
+int iwlwifi_scan(void)
+{
+    if (st.stage != IWL_STAGE_READY)
+        return IWL_ERR_STATE;
+    uint32_t gen = scan_gen;
+    scan_wanted = 1;
+    for (int i = 0; i < 400 && scan_gen == gen; i++)
+        task_sleep(50);
+    return scan_gen == gen ? IWL_ERR_TIMEOUT : scan_result;
+}
+
 static void iwl_thread(void *arg)
 {
     (void)arg;
@@ -2878,6 +3148,11 @@ static void iwl_thread(void *arg)
     for (;;) {
         if (r == IWL_OK) {
             iwlwifi_poll();
+            if (st.stage == IWL_STAGE_READY && scan_wanted) {
+                scan_wanted = 0;
+                scan_result = iwlwifi_scan_now();
+                scan_gen++;
+            }
             if (st.stage == IWL_STAGE_READY) {
                 task_sleep(POLL_INTERVAL_MS);
                 continue;
