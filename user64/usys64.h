@@ -547,7 +547,7 @@ struct win_text_cmd {
 
 #define WEV_NONE  0
 #define WEV_CLICK 1
-#define WEV_KEY   2
+#define WEV_KEY   2            /* val: the character; x: WEV_MOD_* held */
 /* The window is being closed - the program is being ASKED to end. It
    has about two seconds; after that the desktop stops asking, because
    a window nobody can close is worse than a program that loses its

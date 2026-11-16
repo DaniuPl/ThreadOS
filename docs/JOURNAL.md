@@ -8228,3 +8228,54 @@ works and is checked by `make test`.
       it out again, and that its file is an unbroken stretch of the
       signal as long as the recording was; and that killing the
       Recorder mid-recording puts the dot out too.
+
+- [x] **Code, a development environment in the JetBrains manner**
+      (user64/gcode.c, kernel/desktop.c, user64/usys64.h, user/gedit.c,
+      kernel/locale.c, Makefile, scripts/tests/t_gcode.py)
+      The Code app was the text editor with a project list and a
+      terminal bolted on (gedit.c under GCODE_IDE: 200 lines of 96
+      characters at most). It is a program of its own now, built against
+      musl, and laid out the way the JetBrains IDEs are, so that it can
+      be the place C++, and Rust and Java after it, are written in: a
+      toolbar with the project's badge and name (a menu: New Project,
+      Open, Close Project, the projects opened lately), the run
+      configuration, Run and Stop; a stripe of tool windows - Project
+      (the folder as a tree) and Structure (the file's functions and
+      types) at the top, Run, Terminal and Problems at the bottom - tabs,
+      the editor, breadcrumbs and the caret's place in the status bar.
+      A project is a folder; what Code knows about it (its name, the
+      command that runs it, the open files) is in its .code directory,
+      and ~/.code-projects lists the recent ones, the last of which
+      comes back when Code starts. With none there is a welcome screen,
+      and New Project makes ~/Projects/<name> from a template: empty,
+      JavaScript (runs with QuickJS), C or C++.
+      The editor has no length limits, colours C, C++, Rust, Java,
+      JavaScript, Python, shell, JSON, Markdown and Makefiles, shows tabs
+      at their stops, matches brackets, indents after an opening brace
+      and takes a step back for a closing one, closes brackets and quotes
+      and steps over the closing half, undoes and redoes by steps
+      (Ctrl+Z, Ctrl+Shift+Z), selects with Shift and the mouse, copies,
+      cuts and pastes through the clipboard, comments lines (Ctrl+/),
+      doubles and deletes them (Ctrl+D, Ctrl+Y), finds (Ctrl+F) and goes
+      to a file by part of its name (Ctrl+O). Run saves everything and
+      runs the configuration, whose steps may be joined by && - build,
+      then run - each only if the one before ended well; "file:line"
+      in what it printed (a compiler's "main.c:3:5: error", a stack
+      trace's "(main.js:12:1)") becomes a Problem, listed with its
+      message and marked in the gutter, and a click goes there.
+      For Ctrl and a letter, and Shift and an arrow, a program has to
+      know the modifiers: a key event now carries them in x, as a click
+      does in val (programs that ignore x see no change).
+      t_gcode replaces the old test: from the welcome it makes a
+      JavaScript project and checks the files on the disk, the tree and
+      the colours; types a function (indent, brackets), comments a line
+      out and in, replaces a selection, doubles a line and undoes it
+      step by step, saves and compares with the disk; runs it and reads
+      the output, makes an error and follows Problems to its line, runs
+      configurations of steps that stop at a failure and go on after a
+      success; makes a file with the +, goes to a file, follows
+      Structure, runs uls64 in the Terminal; closes Code and finds the
+      project open again, closes the project and reopens it from the
+      welcome; then makes a C++ project and checks C++, Rust and Java
+      colouring. The Camera's build rule moved below zlib's, where
+      $(ZLIB_A) has a value, so a fresh build directory links it.

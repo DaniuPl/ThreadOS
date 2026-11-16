@@ -7001,7 +7001,11 @@ static void desktop_on_key(char c)
     }
     if (focus_idx >= 0 && focus_idx < MAX_WIN && wins[focus_idx].used &&
         wins[focus_idx].content) {
-        win_enqueue(&wins[focus_idx], WEV_KEY, 0, 0, (unsigned char)c);
+        /* x carries the modifiers held, as a click's val does: Ctrl
+           and a letter is the letter, and Shift and an arrow the arrow,
+           and a program that selects or has shortcuts needs to know */
+        win_enqueue(&wins[focus_idx], WEV_KEY, kbdmap_mods() << 8, 0,
+                    (unsigned char)c);
     } else if (prev_key_handler) {
         prev_key_handler(c);
     }

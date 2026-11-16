@@ -222,7 +222,6 @@ $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
                        Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
-$(BUILD)/user64/gcode.elf: user/gedit.c
 
 # --- The shared library, built (see "The shared library" above) -----
 LIBTHREAD64 := $(BUILD)/libthread64.so
@@ -348,14 +347,15 @@ $(BUILD)/user64/grecord.elf: user64/grecord.c user/uapi.h user/udraw.h \
 	    -Wall -Wextra -c $< -o $(BUILD)/libc64/grecord.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/grecord.o) -o $@
 
-# The Camera: zlib for the PNGs it saves, and memory given back
-$(BUILD)/user64/gcamera.elf: user64/gcamera.c user/uapi.h user/udraw.h \
-                             user/ucam.h user/ujpeg.h user64/usys64.h \
-                             user64/compat64.h $(ZLIB_A) $(LIBC64) \
-                             libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
-	$(CC) $(LIBC64_CFLAGS) -Iuser -I$(ZLIB_TREE) -D_GNU_SOURCE \
-	    -DTHREADOS_LIBC -Wall -Wextra -c $< -o $(BUILD)/libc64/gcamera.o
-	$(call LIBC64_LINK,$(BUILD)/libc64/gcamera.o $(ZLIB_A)) -o $@
+# Code, the development environment: files of any length and a tree of
+# any size, so built against musl
+$(BUILD)/user64/gcode.elf: user64/gcode.c user/uapi.h user/udraw.h \
+                           user/ulocale.h user/uterm.h user64/usys64.h \
+                           user64/compat64.h $(LIBC64) libc/libc64.ld \
+                           | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
+	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gcode.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gcode.o) -o $@
 
 # The Gallery: a folder of pictures decoded and shrunk, which needs
 # memory given back - so it is built against musl
@@ -452,6 +452,17 @@ $(BUILD)/user64/zlibtest.elf: libc/tests/zlibtest.c $(ZLIB_A) $(LIBC64) \
 	$(CC) $(LIBC64_CFLAGS) -I$(ZLIB_TREE) -Wall -Wextra -c $< \
 	    -o $(BUILD)/libc64/zlibtest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/zlibtest.o $(ZLIB_A)) -o $@
+
+# The Camera: zlib for the PNGs it saves, and memory given back (here,
+# under zlib, because a prerequisite takes a variable's value where it
+# is read)
+$(BUILD)/user64/gcamera.elf: user64/gcamera.c user/uapi.h user/udraw.h \
+                             user/ucam.h user/ujpeg.h user64/usys64.h \
+                             user64/compat64.h $(ZLIB_A) $(LIBC64) \
+                             libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -I$(ZLIB_TREE) -D_GNU_SOURCE \
+	    -DTHREADOS_LIBC -Wall -Wextra -c $< -o $(BUILD)/libc64/gcamera.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gcamera.o $(ZLIB_A)) -o $@
 
 # --- Mbed TLS -----------------------------------------------------------
 # TLS 1.2 and 1.3, X.509 and the cryptography under them. The release
