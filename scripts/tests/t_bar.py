@@ -97,7 +97,9 @@ def main():
             check("the top bar is visible while the pointer uses it",
                   bar_name(q) == "ThreadOS")
             q.mouse_goto(600, 300)
-            deadline = time.time() + 6
+            # Three seconds of the desktop's frames, which a loaded host
+            # draws more slowly than fifty a second: waited for, not timed
+            deadline = time.time() + 20
             while time.time() < deadline and bar_name(q) == "ThreadOS":
                 time.sleep(0.2)
             check("the idle top bar hides",

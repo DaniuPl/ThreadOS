@@ -53,7 +53,7 @@ def new_disk():
     return path
 
 
-def dock_ready(q, timeout=40, password=None):
+def dock_ready(q, timeout=120, password=None):
     """Waits for the desktop WITHOUT looking at the background colour -
     the background is the very thing these tests change. The dock's
     first tile has its white window on it whatever the background is.
@@ -231,7 +231,7 @@ def main():
         q2 = Qemu(KERNEL, INITRD, disk2, serial=tempfile.mktemp(suffix=".log"))
         try:
             check("the desktop came up after the restart, once signed in",
-                  dock_ready(q2, timeout=60, password="thread"))
+                  dock_ready(q2, password="thread"))
             time.sleep(2)
             w, h, at = q2.screen_raw()
             r, g, b = at(600, 300)

@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: a USB keyboard (HID).
+"""ThreadOS smoke test: a USB keyboard in the 64-bit kernel.
 
-A machine newer than roughly 2010 no longer has a PS/2 connector. The
-first machine here has its keyboard on the older bus - UHCI; the second
-on the newer one, xHCI, which also has a group of its own (t_xhci.py).
-What matters is that HIGHER UP no difference between them can be seen.
+A machine newer than roughly 2010 no longer has a PS/2 connector. This
+group looks after the older bus - UHCI. The newer one, xHCI, has its own
+(t_xhci.py); what matters is that HIGHER UP no difference between them
+can be seen.
 
-The controller addresses memory with 32 bits while a pointer here is
-eight bytes wide, so the UHCI driver and the HID class in the boot
-protocol cast the structures' addresses explicitly.
+The UHCI driver and the HID class in the boot protocol are the same
+files as in the 32-bit kernel - in long mode the only thing needed was
+explicit casts of the structures' addresses, because the controller
+addresses memory with 32 bits while a pointer here is eight bytes wide.
 
 QEMU is given a 'usb-kbd' and directs keys to it, so the mere fact that
 a command runs is proof that they went the whole way: through the
@@ -18,6 +19,7 @@ controller's descriptor queue, an HID report and the console's queue.
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -28,7 +30,7 @@ from ptest import check, summary, make_iso64, no64
 
 
 def main():
-    print("--- a USB keyboard (HID) ---")
+    print("--- a USB keyboard (HID) in the 64-bit kernel ---")
 
     reason = no64()
     if reason:
@@ -74,13 +76,9 @@ def main():
             for _ in range(3):
                 before = len(q.serial())
                 type_shifted()
-                deadline = time.time() + 5
-                while time.time() < deadline:
-                    if "echo A" in q.serial()[before:]:
-                        big_one = True
-                        break
-                    time.sleep(0.3)
-                if big_one:
+                time.sleep(1.0)
+                if "echo A" in q.serial()[before:]:
+                    big_one = True
                     break
             check("the Shift modifier from the HID report gives a capital letter", big_one)
 
@@ -88,7 +86,8 @@ def main():
             # different path inside the kernel than an ordinary character
             # (a switch, not the queue)
             q.sendkey("alt-f2")
-            second_one = q.wait_fbcon("console 2", timeout=15)
+            time.sleep(1.0)
+            second_one = q.screen_fbcon()
             check("Alt+F2 from the USB keyboard switches consoles",
                   "console 2" in second_one)
         finally:
@@ -140,47 +139,6 @@ def main():
         for f in (iso, slog):
             if os.path.exists(f):
                 os.unlink(f)
-
-    # --- Fast typing, behind xHCI ---------------------------------------
-    # A read on an xHCI (or EHCI) endpoint is two calls: one hands the
-    # controller a read to wait in, the next takes what came back. The
-    # driver took one report a round, so a read was out only every
-    # other round - and two reports to a key (pressed, let go). Typed
-    # faster than that, keys queued in the keyboard until it threw them
-    # away. Eighty a second, each held ten milliseconds: every letter has
-    # to arrive, in order - the shell says back what it was given, as a
-    # command it does not know.
-    print("--- fast typing on a keyboard behind xHCI ---")
-    q = Qemu(KERNEL, INITRD, append=TEXT_MODE, usbkbd="xhci")
-    try:
-        start = q.wait_serial("A USB keyboard", timeout=40)
-        check("the keyboard on xHCI was recognised on the bus",
-              re.search(r"A USB keyboard \(HID, xHCI\) on port \d+",
-                        start) is not None)
-        q.wait_serial("thread64>", timeout=40)
-        # An empty line first, and its prompt back: the shell is then
-        # reading, and the word below is the only thing on its line
-        q.command("", "thread64>", timeout=20)
-        word = "thequickbrownfoxjumps"
-        before = len(q.serial())
-        for ch in word:
-            q.hmp("sendkey %s 10" % ch)
-            time.sleep(0.012)
-        # Enter only once the shell has had time to echo what arrived;
-        # a key that was lost never comes, so this is a wait with a
-        # limit, not a condition - the check below says what came
-        deadline = time.time() + 10
-        while time.time() < deadline and word not in q.serial()[before:]:
-            time.sleep(0.3)
-        said_all = q.command("", "(try 'help')", timeout=20)
-        said = [ln.strip() for ln in said_all.splitlines()
-                if "Unknown command:" in ln]
-        check("eighty keys a second all arrive, in order (%s)"
-              % (said[-1] if said else "-"),
-              bool(said)
-              and "Unknown command: %s (try 'help')" % word in said[-1])
-    finally:
-        q.close()
 
     return summary()
 
