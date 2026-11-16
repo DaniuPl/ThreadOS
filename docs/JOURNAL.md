@@ -8113,3 +8113,31 @@ works and is checked by `make test`.
       when no window is. t_bar reads Settings there with Settings in
       front; the others read the program or the desktop where they
       read the system's name.
+
+- [ ] **The camera, stage one: found, described, asked**
+      (kernel/uvc.c, kernel/include/uvc.h, kernel/xhci.c,
+      kernel64/kmain64.c, kernel64/shell64.c, scripts/usbredir.py,
+      scripts/usbcam.py, scripts/tests/t_camera.py)
+      A laptop's camera is a USB Video Class device, and a person
+      asked for a Camera app. This is the first stage: the driver finds
+      the camera, reads its whole configuration, lists every format
+      and frame size it offers (MJPEG and uncompressed YUY2), and asks
+      about each one with a PROBE - the camera answers how many bytes a
+      microframe the mode needs, and the alternate setting to use is
+      the smallest one carrying that. It commits nothing and keeps the
+      camera at alternate 0, dark, until there is a picture to take:
+      that needs isochronous transfers, the next stage. 'camera' in the
+      shell lists the modes, and the Device Manager shows the camera
+      under uvc. On the way, xHCI's control buffer grew from 512 bytes
+      to a page for each device - a real camera's configuration is
+      longer than 512 - and a bulk endpoint may come without an OUT
+      half, as a camera that streams over bulk has it, without cutting
+      off a higher endpoint already set up. usbredir.py learnt high
+      speed and alternate settings (telling QEMU the new endpoints
+      before the answer, as the protocol requires), and usbcam.py is a
+      made-up UVC 1.10 camera with a configuration of 525 bytes, eight
+      modes and eight alternates. t_camera holds 'camera' to what
+      usbcam.py works out from its own bytes - including a mode that
+      needs exactly an alternate's size and one that no alternate
+      carries - checks one 34-byte PROBE per mode and no COMMIT, and
+      does it again for a camera with a bulk endpoint.

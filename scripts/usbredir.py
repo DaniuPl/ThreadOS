@@ -19,7 +19,13 @@ with 64-bit packet ids and 32-bit bulk lengths, so those are offered.
 A device is anything with the descriptors (device, config, string()),
 control(), iface_infos() and endpoints(); HidDevice is one, and a
 device with an attach(redir) is handed the connection, to send what it
-has to say on its own.
+has to say on its own. A device may say its speed (SPEED_HIGH for a
+camera; full speed otherwise), and one with alternate settings gives
+endpoints(alts) - the endpoints of the alternates in force, by
+interface - instead: QEMU forwards a SET_INTERFACE as a packet of its
+own, not as a control transfer, and is told the new endpoints before
+the answer, as the protocol requires. What the guest set is kept in
+the device's requests as ("set_alt", interface, alternate).
 """
 
 import socket
@@ -39,8 +45,9 @@ CONTROL_PACKET, BULK_PACKET, INTERRUPT_PACKET = 100, 101, 103
 CAP_CONNECT_DEVICE_VERSION, CAP_EP_INFO_MAX_PACKET_SIZE = 1, 4
 CAP_64BITS_IDS, CAP_32BITS_BULK_LENGTH = 5, 6
 SUCCESS, STALL = 0, 4
-SPEED_FULL = 1
-TYPE_CONTROL, TYPE_BULK, TYPE_INTERRUPT, TYPE_INVALID = 0, 2, 3, 255
+SPEED_FULL, SPEED_HIGH = 1, 2
+TYPE_CONTROL, TYPE_ISO, TYPE_BULK, TYPE_INTERRUPT, TYPE_INVALID = \
+    0, 1, 2, 3, 255
 
 
 def ep_index(addr):
@@ -145,6 +152,7 @@ class Redir:
         self.alive = True
         self.ids64 = False           # once both hellos have said so
         self.configured = threading.Event()
+        self.alts = {}               # interface -> the alternate in force
         if hasattr(device, "attach"):
             device.attach(self)
         threading.Thread(target=self.serve, daemon=True).start()
@@ -203,7 +211,9 @@ class Redir:
         except (EOFError, OSError):
             pass
 
-    def plug_in(self):
+    def describe(self):
+        """INTERFACE_INFO and EP_INFO: the interfaces, and the endpoints
+        of the alternates in force"""
         d = self.device
         infos = d.iface_infos()
         n = len(infos)
@@ -214,16 +224,25 @@ class Redir:
                   pad([p for _, _, p in infos]))
         types, intervals, ifaces = [TYPE_INVALID] * 32, [0] * 32, [0] * 32
         sizes = [0] * 32
+        ep0 = getattr(d, "ep0_size", 8)
         types[0] = types[16] = TYPE_CONTROL
-        sizes[0] = sizes[16] = 8
-        for addr, kind, interval, i, maxpacket in d.endpoints():
+        sizes[0] = sizes[16] = ep0
+        eps = d.endpoints(dict(self.alts)) if getattr(d, "has_alts", False) \
+            else d.endpoints()
+        for addr, kind, interval, i, maxpacket in eps:
             e = ep_index(addr)
             types[e], intervals[e], ifaces[e], sizes[e] = \
                 kind, interval, i, maxpacket
         self.send(EP_INFO, bytes(types) + bytes(intervals) + bytes(ifaces) +
                   struct.pack("<32H", *sizes))
-        self.send(DEVICE_CONNECT, struct.pack("<BBBBHHH", SPEED_FULL, 0, 0, 0,
-                                              d.vendor, d.product, 0x0100))
+
+    def plug_in(self):
+        d = self.device
+        self.describe()
+        self.send(DEVICE_CONNECT, struct.pack("<BBBBHHH",
+                                              getattr(d, "speed", SPEED_FULL),
+                                              0, 0, 0, d.vendor, d.product,
+                                              0x0100))
 
     def packet(self, kind, pid, body):
         if kind == CONTROL_PACKET:
@@ -262,12 +281,19 @@ class Redir:
                                   1 if self.configured.is_set() else 0),
                       pid=pid)
         elif kind == SET_ALT_SETTING:
+            iface, alt = body[0], body[1]
+            self.alts[iface] = alt
+            # The endpoints change with the alternate: told before the
+            # answer, as the protocol says
+            if getattr(self.device, "has_alts", False):
+                self.device.requests.append(("set_alt", iface, alt))
+                self.describe()
             self.send(ALT_SETTING_STATUS, struct.pack("<BBB", SUCCESS,
-                                                      body[0], body[1]),
-                      pid=pid)
+                                                      iface, alt), pid=pid)
         elif kind == GET_ALT_SETTING:
-            self.send(ALT_SETTING_STATUS, struct.pack("<BBB", SUCCESS,
-                                                      body[0], 0), pid=pid)
+            self.send(ALT_SETTING_STATUS,
+                      struct.pack("<BBB", SUCCESS, body[0],
+                                  self.alts.get(body[0], 0)), pid=pid)
         elif kind == START_INTERRUPT:
             self.receiving.add(body[0])
             self.send(INTERRUPT_STATUS, struct.pack("<BB", SUCCESS, body[0]),

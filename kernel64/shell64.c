@@ -52,6 +52,7 @@
 #include "../kernel/include/install.h"
 #include "../kernel/include/hwinfo.h"
 #include "../kernel/include/devices.h"
+#include "../kernel/include/uvc.h"
 #include "../kernel/include/power.h"
 #include "../kernel/include/hda.h"
 #include "../kernel/include/bt.h"
@@ -143,6 +144,7 @@ static void cmd_help(void)
     printk("          hardware - what is in this machine, disks, font\n");
     printk("          devices - every device and what drives it\n");
     printk("          bt [scan|test] - Bluetooth\n");
+    printk("          camera - the camera and what it can send\n");
     printk("          wifi [scan|test] - the Wi-Fi card, the networks\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          format [N] - the whole disk, or partition N, as TFS\n");
@@ -1197,6 +1199,8 @@ static void execute(const char *line)
         hwinfo_print();
     } else if (!strcmp(line, "devices")) {
         devices_print();
+    } else if (!strcmp(line, "camera")) {
+        uvc_print();
     } else if (!strcmp(line, "mouse")) {
         cmd_mouse();
     } else if (!strcmp(line, "bt")) {

@@ -42,6 +42,7 @@
 #include "../kernel/include/usbkbd.h"
 #include "../kernel/include/usbmouse.h"
 #include "../kernel/include/bt.h"
+#include "../kernel/include/uvc.h"
 #include "../kernel/include/iwlwifi.h"
 #include "../kernel/include/dynlink.h"
 #include "../kernel/include/biglock.h"
@@ -652,6 +653,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        finds one; on a machine without Bluetooth this costs one walk
        across the ports and says nothing. */
     bt_init();
+    /* And the camera in the lid, found and asked what it can send */
+    uvc_init();
     /* Wi-Fi (Intel 3160). Its firmware takes a second or two to load
        and calibrate, so the driver does that in a thread of its own and
        reports when it is done; without the card this is one line. */

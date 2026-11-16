@@ -203,7 +203,11 @@ static int slot_speed[SLOTS];  /* what speed the device answered at */
  * devices have two reads in flight at once, and one buffer means each
  * one's report lands where the other is about to read it - which shows
  * up as a keyboard that goes silent the moment a mouse is plugged in. */
-static uint8_t buf[SLOTS][512] __attribute__((aligned(512)));
+/* A page each: a camera's configuration descriptor - every format,
+   frame size and alternate setting it has - runs to a kilobyte or two,
+   and has to be read whole. Aligned to its size, it never crosses the
+   64 KiB line one TRB may not cross. */
+static uint8_t buf[SLOTS][4096] __attribute__((aligned(4096)));
 static uint8_t ibuf[SLOTS][INT_EPS][64] __attribute__((aligned(64)));
 
 /* Transfers that have finished, waiting for the device they belong to.
@@ -1196,11 +1200,13 @@ int xhci_int_in(int slot, int ep, void *data, int len)
  */
 int xhci_bulk_endpoint(int slot, int in_ep, int out_ep, int maxpacket)
 {
-    if (!base || slot < 1 || slot > SLOTS || in_ep < 1 || out_ep < 1)
+    /* out_ep 0: an IN endpoint alone - a camera that streams over bulk
+       has nothing to be told that way */
+    if (!base || slot < 1 || slot > SLOTS || in_ep < 1 || out_ep < 0)
         return -1;
 
     int in_dci = dci_dir(in_ep, 1);
-    int out_dci = dci_dir(out_ep, 0);
+    int out_dci = out_ep ? dci_dir(out_ep, 0) : 0;
     if (in_dci > 31 || out_dci > 31)
         return -1;
 
@@ -1210,20 +1216,25 @@ int xhci_bulk_endpoint(int slot, int in_ep, int out_ep, int maxpacket)
     uint8_t *we = in_ctx[slot - 1];
     memset(we, 0, CTX_BYTES);
     uint32_t *control = info(we, 0);
-    control[1] = 0x1u | (1u << in_dci) | (1u << out_dci);
+    control[1] = 0x1u | (1u << in_dci) | (out_dci ? 1u << out_dci : 0u);
 
     /* The device context says how many endpoints the controller is to
        keep room for - and that is the HIGHEST number in use, not how
-       many there are. */
-    int top = in_dci > out_dci ? in_dci : out_dci;
+       many there are: an interrupt endpoint above these two, added
+       earlier, must not be cut off */
     uint32_t *src = info(dev_ctx[slot - 1], 0);
+    uint32_t top = src[0] >> 27;
+    if ((uint32_t)in_dci > top)
+        top = (uint32_t)in_dci;
+    if ((uint32_t)out_dci > top)
+        top = (uint32_t)out_dci;
     uint32_t *device = info(we, 1);
-    device[0] = (src[0] & 0x07FFFFFFu) | ((uint32_t)top << 27);
+    device[0] = (src[0] & 0x07FFFFFFu) | (top << 27);
     device[1] = src[1];
 
     static const int kinds[2] = { 6, 2 };      /* bulk in, bulk out */
     int dcis[2] = { in_dci, out_dci };
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < (out_dci ? 2 : 1); i++) {
         uint32_t *punkt = info(we, dcis[i] + 1);
         punkt[0] = 0;                          /* bulk has no interval */
         punkt[1] = (3u << 1) |                 /* three attempts on error */
