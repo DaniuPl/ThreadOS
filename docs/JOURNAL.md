@@ -7230,3 +7230,49 @@ works and is checked by `make test`.
       13 px while the tone plays (the height the test works out from
       the WAV's peak) and 3 px in the silence, and goes when the stream
       ends. t_session reads the loudness off the island now.
+
+- [x] **Media keys on USB: report descriptors, and more than one
+      endpoint per device** (kernel/hid.c, kernel/usbkbd.c,
+      kernel/xhci.c, kernel/usbhc.c, kernel/desktop.c,
+      scripts/usbredir.py, scripts/tests/t_usbmedia.py,
+      tests/fuzz/hid_harness.c)
+      A keyboard's loudness keys rarely come with its letters. The
+      letters are the boot interface, eight fixed bytes; the media keys
+      are a second interface sending reports the device lays out
+      itself, and a volume knob is nothing but that. ThreadOS read only
+      the boot interface, so those keys did nothing. kernel/hid.c reads
+      report descriptors (HID 1.11, 6.2.2: globals with push and pop,
+      locals, input fields, report ids, arrays and variables, the 0xFF
+      maximum written as one byte) and says which usages a report has
+      down; usbkbd binds every HID interface with keyboard or consumer
+      usages - the boot keyboard still in the boot protocol - and turns
+      Volume Up, Volume Down and Mute into the keys the desktop knows.
+      Keys are tracked per report id, so a system-key report does not
+      make a held key look new.
+
+      Two interfaces mean two interrupt endpoints on one device, and the
+      USB layer had one: xHCI kept one ring and one buffer per slot and
+      filed completions by slot alone, so the second endpoint's report
+      would have been taken as the first's. Completions now remember
+      their endpoint, a device has up to three interrupt endpoints on
+      xHCI, EHCI and UHCI alike, and control and bulk waits skip the
+      interrupt endpoints' completions. A slot whose second endpoint has
+      a lower number keeps the first (the context's last entry is the
+      highest in use).
+
+      The test found a bug of the desktop's: the loudness keys were
+      kept in one variable until the next frame, so two presses within
+      a frame - two keyboards, or a keyboard's two interfaces - were
+      one. They are counted now.
+
+      QEMU has no such device, so t_usbmedia makes them: scripts/
+      usbredir.py speaks QEMU's usbredir protocol and is a device
+      described by its own descriptors - a keyboard whose second
+      interface sends the consumer page as a 16-bit array under report
+      id 2 and system keys under id 1, and a knob with one bit per key.
+      Each key is checked on the island and against the driver ('volume'
+      on the serial port); the kernel is seen to read the described
+      interfaces' report descriptors, put only the keyboard in the boot
+      protocol and read all three endpoints; reports from both of the
+      keyboard's interfaces sent together both count. `make fuzz` puts
+      kernel/hid.c through damaged descriptors and reports.

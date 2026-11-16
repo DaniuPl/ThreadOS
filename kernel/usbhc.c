@@ -40,16 +40,20 @@ static int companion;                /* EHCI mode: a UHCI beside it */
    us. */
 #define DEVICES 8
 
+#define INT_EPS 3
+
 struct device {
     int used;
     int hc;                          /* EHCI or UHCI - who carries it */
     int addr;
     int lowspeed;
     int maxpacket;
-    int ep;
-    int ep_maxpacket;
-    int toggle;
-    int int_pipe;                    /* EHCI: the interrupt queue head */
+    /* Interrupt endpoints: a keyboard with media keys has two, one
+       per interface. ep 0 = the place is free. */
+    int ep[INT_EPS];
+    int ep_maxpacket[INT_EPS];
+    int toggle[INT_EPS];             /* UHCI: the data toggle of each */
+    int int_pipe[INT_EPS];           /* EHCI: each one's queue head */
     int bulk_mps;                    /* EHCI: bulk endpoints */
     int toggle_in, toggle_out;
 };
@@ -543,8 +547,10 @@ static int usbhc_greet(int port)
             continue;
         struct device u = { 0 };
         u.maxpacket = 8;
-        u.ep_maxpacket = 8;
-        u.int_pipe = -1;
+        for (int k = 0; k < INT_EPS; k++) {
+            u.ep_maxpacket[k] = 8;
+            u.int_pipe[k] = -1;
+        }
         if (controller == EHCI && sock[port].hc == EHCI) {
             u.hc = EHCI;
             if (ehci_greet(port, &u) < 0)
@@ -650,8 +656,9 @@ void usbhc_forget(int port)
     if (controller != XHCI && port_known[port] && port_dev[port] > 0 &&
         port_dev[port] <= DEVICES) {
         struct device *u = &list[port_dev[port] - 1];
-        if (u->hc == EHCI && u->int_pipe >= 0)
-            ehci_int_release(u->int_pipe);
+        for (int k = 0; k < INT_EPS; k++)
+            if (u->hc == EHCI && u->int_pipe[k] >= 0)
+                ehci_int_release(u->int_pipe[k]);
         u->used = 0;
     }
     port_known[port] = 0;
@@ -800,17 +807,26 @@ int usbhc_int_endpoint(int dev, int ep, int maxpacket, int interval)
     if (controller == NONE || dev > DEVICES)
         return -1;
     struct device *u = &list[dev - 1];
+    int k = 0;
+    while (k < INT_EPS && u->ep[k] && u->ep[k] != ep)
+        k++;
+    if (k == INT_EPS)
+        return -1;                       /* this device has enough of them */
     if (u->hc == EHCI) {
         /* A queue head of its own in the periodic schedule */
-        u->ep = ep;
-        u->int_pipe = ehci_int_endpoint(u->addr, ep, maxpacket);
-        return u->int_pipe >= 0 ? 0 : -1;
+        if (u->ep[k] == ep && u->int_pipe[k] >= 0)
+            ehci_int_release(u->int_pipe[k]);
+        u->ep[k] = ep;
+        u->int_pipe[k] = ehci_int_endpoint(u->addr, ep, maxpacket);
+        if (u->int_pipe[k] < 0)
+            u->ep[k] = 0;
+        return u->int_pipe[k] >= 0 ? 0 : -1;
     }
     /* UHCI has nothing to set up: an endpoint is described to it with
        every transfer separately */
-    u->ep = ep;
-    u->ep_maxpacket = maxpacket;
-    u->toggle = 0;
+    u->ep[k] = ep;
+    u->ep_maxpacket[k] = maxpacket;
+    u->toggle[k] = 0;
     return 0;
 }
 
@@ -823,10 +839,15 @@ int usbhc_int_in(int dev, int ep, void *data, int len)
     if (controller == NONE || dev > DEVICES)
         return -1;
     struct device *u = &list[dev - 1];
+    int k = 0;
+    while (k < INT_EPS && u->ep[k] != ep)
+        k++;
+    if (k == INT_EPS)
+        return -1;                       /* never set up */
     if (u->hc == EHCI)
-        return ehci_int_in(u->int_pipe, data, len);
-    return uhci_interrupt_in(u->addr, u->lowspeed, ep, u->ep_maxpacket,
-                             data, len, &u->toggle);
+        return ehci_int_in(u->int_pipe[k], data, len);
+    return uhci_interrupt_in(u->addr, u->lowspeed, ep, u->ep_maxpacket[k],
+                             data, len, &u->toggle[k]);
 }
 
 /* Bulk endpoints - a disk, not a keyboard.

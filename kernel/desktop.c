@@ -603,10 +603,11 @@ static int menu_open;
    which the desktop's thread acts on - the keys arrive in an interrupt */
 static volatile int menu_sel = -1;
 static volatile int menu_go = -1;
-/* The loudness keys: what was pressed (1 up, -1 down, 2 mute), for the
-   desktop's thread - writing the setting is not an interrupt's work -
-   and until when the card says how loud it is now */
-static volatile int vol_key;
+/* The loudness keys: what was pressed, for the desktop's thread -
+   writing the setting is not an interrupt's work - and until when the
+   island says how loud it is now */
+static volatile int vol_steps;      /* up minus down, since the last frame */
+static volatile int vol_mutes;      /* Mute presses, since the last frame */
 static uint32_t vol_until;
 static int menu_px, menu_py;
 static int context_open;
@@ -2455,18 +2456,19 @@ static void handle_input(int mx, int my, int buttons)
         if (menu_open)
             menu_activate(k);
     }
-    if (vol_key) {
-        int k = vol_key;
-        vol_key = 0;
-        if (k == 2) {
-            hda_set_mute(!hda_muted());
-        } else {
-            /* in steps of five, and a step up from silence is a sound */
-            int v = hda_volume() + 5 * k;
-            hda_set_volume(v);
-            hda_set_mute(0);
-            hda_remember();
-        }
+    /* Counted, not remembered: two keyboards - or a keyboard's two
+       interfaces - pressing within one frame are two presses */
+    int steps = __atomic_exchange_n(&vol_steps, 0, __ATOMIC_ACQ_REL);
+    int mutes = __atomic_exchange_n(&vol_mutes, 0, __ATOMIC_ACQ_REL);
+    if (steps) {
+        /* in steps of five, and a step up from silence is a sound */
+        hda_set_volume(hda_volume() + 5 * steps);
+        hda_set_mute(0);
+    }
+    if (mutes & 1)
+        hda_set_mute(!hda_muted());
+    if (steps || mutes) {
+        hda_remember();
         vol_until = frames + 3 * FRAME_HZ / 2;
     }
 
@@ -5961,7 +5963,11 @@ static void desktop_on_key(char c)
         return;
     }
     if (c == KEY_VOLUP || c == KEY_VOLDOWN || c == KEY_MUTE) {
-        vol_key = c == KEY_VOLUP ? 1 : c == KEY_VOLDOWN ? -1 : 2;
+        if (c == KEY_MUTE)
+            __atomic_add_fetch(&vol_mutes, 1, __ATOMIC_ACQ_REL);
+        else
+            __atomic_add_fetch(&vol_steps, c == KEY_VOLUP ? 1 : -1,
+                               __ATOMIC_ACQ_REL);
         return;
     }
     if (c == KEY_MENU) {                /* the Windows key: the menu */

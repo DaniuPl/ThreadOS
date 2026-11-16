@@ -134,17 +134,25 @@ static struct trb evt_trb[TRB_CHAIN] __attribute__((aligned(64)));
 static uint32_t erst[4] __attribute__((aligned(64)));
 static uint8_t dev_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
 static uint8_t in_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
-/* Transfer rings: [0] endpoint zero, [1] the interrupt one, [2] bulk
-   in, [3] bulk out. A ring per endpoint, because that is what the
-   controller expects: it keeps its own read position in each of them
-   and a shared ring would make two endpoints trip over each other. */
-#define RINGS 4
+/* Transfer rings: [0] endpoint zero, [1] the first interrupt one, [2]
+   bulk in, [3] bulk out, [4] and [5] two more interrupt ones. A ring
+   per endpoint, because that is what the controller expects: it keeps
+   its own read position in each of them and a shared ring would make
+   two endpoints trip over each other.
+
+   More than one interrupt endpoint, because a keyboard with media keys
+   is two devices in one: the keys on one interface, the loudness and
+   the playback keys on another, each with its own endpoint. */
+#define RINGS 6
+#define INT_EPS 3
+static int int_ring(int k) { return k == 0 ? 1 : 3 + k; }
 static struct trb ep_trb[SLOTS][RINGS][TRB_CHAIN] __attribute__((aligned(64)));
 
 static struct ring cmd_pier;
 static struct ring ep_pier[SLOTS][RINGS];
 static uint32_t evt_index, evt_cycle;
-static int armed[SLOTS];       /* is a read pending on the interrupt endpoint */
+static int int_dci[SLOTS][INT_EPS];   /* each interrupt endpoint's number */
+static int armed[SLOTS][INT_EPS];     /* is a read pending on it */
 static int slot_speed[SLOTS];  /* what speed the device answered at */
 
 /* Buffer for control transfer data: the controller reaches for it itself */
@@ -155,6 +163,7 @@ static int slot_speed[SLOTS];  /* what speed the device answered at */
  * one's report lands where the other is about to read it - which shows
  * up as a keyboard that goes silent the moment a mouse is plugged in. */
 static uint8_t buf[SLOTS][512] __attribute__((aligned(64)));
+static uint8_t ibuf[SLOTS][INT_EPS][64] __attribute__((aligned(64)));
 
 /* Transfers that have finished, waiting for the device they belong to.
  *
@@ -169,7 +178,7 @@ static uint8_t buf[SLOTS][512] __attribute__((aligned(64)));
  * would overwrite the first and the caller would wait forever for a
  * thing it had already been told. */
 #define COMPS 8
-struct comp { int code, left; };
+struct comp { int code, left, dci; };
 static struct {
     struct comp q[COMPS];
     int head, tail;
@@ -337,21 +346,43 @@ static void sort_events(void)
             continue;                    /* nobody is collecting - drop it */
         done[s - 1].q[done[s - 1].head].code = (int)(t.status >> 24);
         done[s - 1].q[done[s - 1].head].left = (int)(t.status & 0xFFFFFF);
+        done[s - 1].q[done[s - 1].head].dci = (int)((t.control >> 16) & 0x1F);
         done[s - 1].head = next;
     }
     spin_unlock_irq(&ring_lock, flags);
 }
 
-/* Takes one finished transfer of this slot's, if there is one. */
-static int take_comp(int slot, struct comp *out)
+/* Is this endpoint one of the slot's interrupt endpoints? */
+static int is_int_dci(int slot, int dci)
+{
+    for (int k = 0; k < INT_EPS; k++)
+        if (int_dci[slot - 1][k] == dci)
+            return 1;
+    return 0;
+}
+
+/* Takes one finished transfer of this slot's on endpoint 'dci', or with
+   dci 0 on any endpoint that is not an interrupt one - the control and
+   bulk transfers, which wait for their answers one at a time. The
+   others stay queued, in their order, for whoever they belong to: a
+   report from the media keys must not be taken for the keyboard's. */
+static int take_comp(int slot, int dci, struct comp *out)
 {
     irqflags_t flags = spin_lock_irq(&ring_lock);
     int got = 0;
+    int t = done[slot - 1].tail, h = done[slot - 1].head;
 
-    if (done[slot - 1].tail != done[slot - 1].head) {
-        *out = done[slot - 1].q[done[slot - 1].tail];
-        done[slot - 1].tail = (done[slot - 1].tail + 1) % COMPS;
+    for (int i = t; i != h; i = (i + 1) % COMPS) {
+        struct comp c = done[slot - 1].q[i];
+        if (dci ? c.dci != dci : is_int_dci(slot, c.dci))
+            continue;
+        *out = c;
+        /* close the gap, keeping the rest in order */
+        for (int j = i; (j + 1) % COMPS != h; j = (j + 1) % COMPS)
+            done[slot - 1].q[j] = done[slot - 1].q[(j + 1) % COMPS];
+        done[slot - 1].head = (h + COMPS - 1) % COMPS;
         got = 1;
+        break;
     }
     spin_unlock_irq(&ring_lock, flags);
     return got;
@@ -366,7 +397,7 @@ static int wait_slot(int slot, struct comp *out, uint32_t ms)
 
     while (pit_ticks() < az) {
         sort_events();
-        if (take_comp(slot, out))
+        if (take_comp(slot, 0, out))
             return 1;
         /* The first few hundred turns are a busy wait, because most
            answers come back in microseconds and going to sleep would
@@ -535,7 +566,7 @@ int xhci_init(void)
     memset(dev_ctx, 0, sizeof(dev_ctx));
     memset(in_ctx, 0, sizeof(in_ctx));
     for (int s = 0; s < SLOTS; s++)
-        for (int e = 0; e < 2; e++)
+        for (int e = 0; e < RINGS; e++)
             ring_setup(&ep_pier[s][e], ep_trb[s][e]);
 
     wr(op + OP_CONFIG, SLOTS);
@@ -784,9 +815,15 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
     int number = dci(ep);
     if (number > 31)
         return -1;
+    int k = 0;
+    while (k < INT_EPS && int_dci[slot - 1][k] && int_dci[slot - 1][k] != number)
+        k++;
+    if (k == INT_EPS)
+        return -1;                       /* this device has enough of them */
+    int r = int_ring(k);
 
-    ring_setup(&ep_pier[slot - 1][1], ep_trb[slot - 1][1]);
-    armed[slot - 1] = 0;
+    ring_setup(&ep_pier[slot - 1][r], ep_trb[slot - 1][r]);
+    armed[slot - 1][k] = 0;
 
     uint8_t *we = in_ctx[slot - 1];
     memset(we, 0, CTX_BYTES);
@@ -794,10 +831,15 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
     control[1] = 0x1u | (1u << number);   /* the device plus this endpoint */
 
     /* The device context has to be given afresh, because the number of
-       endpoints changes - the controller will not work it out itself */
+       endpoints changes - the controller will not work it out itself.
+       Its last endpoint is the highest one in use: an endpoint added
+       after one with a higher number must not cut that one off. */
     uint32_t *src = info(dev_ctx[slot - 1], 0);
     uint32_t *device = info(we, 1);
-    device[0] = (src[0] & 0x07FFFFFFu) | ((uint32_t)number << 27);
+    uint32_t last = src[0] >> 27;
+    if ((uint32_t)number > last)
+        last = (uint32_t)number;
+    device[0] = (src[0] & 0x07FFFFFFu) | (last << 27);
     device[1] = src[1];
 
     /* The interval in a descriptor and the interval in an endpoint
@@ -831,7 +873,7 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
     punkt[1] = (3u << 1) |               /* three attempts on error */
                (7u << 3) |               /* type: interrupt in */
                ((uint32_t)maxpacket << 16);
-    uint64_t p = fiz(ep_trb[slot - 1][1]) | 1;
+    uint64_t p = fiz(ep_trb[slot - 1][r]) | 1;
     punkt[2] = (uint32_t)p;
     punkt[3] = (uint32_t)(p >> 32);
     punkt[4] = (uint32_t)maxpacket | ((uint32_t)maxpacket << 16);
@@ -840,6 +882,7 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
                   ((uint32_t)TRB_CONFIG_EP << 10) | ((uint32_t)slot << 24),
                   (struct trb *)0) != CODE_OK)
         return -1;
+    int_dci[slot - 1][k] = number;
     return 0;
 }
 
@@ -854,28 +897,33 @@ int xhci_int_endpoint(int slot, int ep, int maxpacket, int interval)
 int xhci_int_in(int slot, int ep, void *data, int len)
 {
     if (!base || slot < 1 || slot > SLOTS || len <= 0 ||
-        len > (int)sizeof(buf[0]))
+        len > (int)sizeof(ibuf[0][0]))
         return -1;
+    int number = dci(ep), k = 0;
+    while (k < INT_EPS && int_dci[slot - 1][k] != number)
+        k++;
+    if (k == INT_EPS)
+        return -1;                       /* never set up */
 
-    if (!armed[slot - 1]) {
-        insert(&ep_pier[slot - 1][1], fiz(buf[slot - 1]), (uint32_t)len,
-             ((uint32_t)TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
-        doorbells[slot] = (uint32_t)dci(ep);
-        armed[slot - 1] = 1;
+    if (!armed[slot - 1][k]) {
+        insert(&ep_pier[slot - 1][int_ring(k)], fiz(ibuf[slot - 1][k]),
+               (uint32_t)len, ((uint32_t)TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+        doorbells[slot] = (uint32_t)number;
+        armed[slot - 1][k] = 1;
         return 0;                        /* the answer will come in a moment */
     }
 
     sort_events();
     struct comp c;
-    if (!take_comp(slot, &c))
+    if (!take_comp(slot, number, &c))
         return 0;                        /* the device is silent - we keep waiting */
-    armed[slot - 1] = 0;
+    armed[slot - 1][k] = 0;
 
     if (c.code != CODE_OK && c.code != CODE_SHORT)
         return -1;
     int passed = len - c.left;
     if (passed > 0)
-        memcpy(data, buf[slot - 1], (uint32_t)passed);
+        memcpy(data, ibuf[slot - 1][k], (uint32_t)passed);
     return passed;
 }
 
@@ -1032,7 +1080,8 @@ int xhci_release(int slot)
     command(0, ((uint32_t)TRB_DISABLE_SLOT << 10) | ((uint32_t)slot << 24),
             (struct trb *)0);
     dcbaa[slot] = 0;
-    armed[slot - 1] = 0;
+    for (int k = 0; k < INT_EPS; k++)
+        armed[slot - 1][k] = int_dci[slot - 1][k] = 0;
     done[slot - 1].head = done[slot - 1].tail = 0;
     return 0;
 }

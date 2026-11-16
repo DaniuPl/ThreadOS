@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Checks the ThreadOS parsers against corrupted data.
 
-Four fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
+Five fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
 packet path in the kernel (net.c + tcp.c), the kernel's TrueType
 reader (ttf.c), because a font is a file and files come from anywhere,
-and Mbed TLS's certificate and key parsers, which curl hands whatever a
+the kernel's HID report descriptor reader (hid.c), because a descriptor
+comes from whatever is plugged in, and Mbed TLS's certificate and key parsers, which curl hands whatever a
 server sends. In the kernel an error does
 not end in the death of a process but in the system going down, so it
 is all the more worth looking for.
@@ -118,6 +119,50 @@ def build_ttf(workdir):
         print(out.stderr[:3000])
         raise SystemExit("the TrueType harness could not be built")
     return binary
+
+
+def build_hid(workdir):
+    """The kernel's hid.c, linked in kstub/ like ttf.c"""
+    kstub = os.path.join(FUZZ, "kstub")
+    binary = os.path.join(workdir, "hharness")
+    cmd = ["gcc", "-I", os.path.join(kstub, "include"),
+           "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+           "-fno-omit-frame-pointer", "-g", "-O1", "-Wall",
+           "-o", binary, os.path.join(FUZZ, "hid_harness.c"),
+           os.path.join(kstub, "hid.c")]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    if out.returncode != 0:
+        print(out.stderr[:3000])
+        raise SystemExit("the HID harness could not be built")
+    return binary
+
+
+def hid_seeds():
+    """Report descriptors the way devices write them - a boot keyboard,
+    media keys as an array under report ids, media keys as one bit
+    each - with reports for them (scripts/usbredir.py builds the same
+    ones for t_usbmedia)"""
+    import struct
+    sys.path.insert(0, os.path.join(ROOT, "scripts"))
+    import usbredir as u
+    media = (u.usage_page(0x0C) + u.usage(0x01) + u.collection(1) +
+             u.report_id(2) + u.logical_min(0) + u.logical_max(0x23C) +
+             u.usage_min(0) + u.usage_max(0x23C) + u.report_size(16) +
+             u.report_count(1) + u.input_(0) + u.end_collection())
+    bits = (u.usage_page(0x0C) + u.usage(0x01) + u.collection(1) +
+            u.logical_min(0) + u.logical_max(1) + u.report_size(1) +
+            u.report_count(8) + b"".join(u.usage(x) for x in
+                                         (0xE9, 0xEA, 0xE2, 0xCD, 0xB5,
+                                          0xB6, 0xB7, 0xB0)) +
+            u.input_(2) + u.end_collection())
+
+    def case(desc, *reports):
+        return (struct.pack("<H", len(desc)) + desc +
+                b"".join(bytes([len(r)]) + bytes(r) for r in reports))
+    return [case(u.BOOT_KEYBOARD, [0, 0, 4, 5, 0, 0, 0, 0], [2] + [0] * 7),
+            case(media, [2, 0xE9, 0], [2, 0, 0], [1, 1], [3, 1, 2]),
+            case(bits, [1], [0xFF], [0]),
+            case(u.BOOT_KEYBOARD + media, [2, 0xE2, 0], [0] * 8)]
 
 
 MBED_FUZZERS = ("x509crt", "pubkey", "privkey")
@@ -454,9 +499,11 @@ def main():
         kbinary = build_kernel(workdir)
         tbinary = build_ttf(workdir)
         mbinaries = build_mbedtls(workdir)
+        hbinary = build_hid(workdir)
         corpus = seeds(workdir)
         corpus["frames"] = frames()
         corpus["ttf"] = fonts()
+        corpus["hid"] = hid_seeds()
         corpus["mbedtls-x509crt"] = list(corpus["x509"])
         corpus["mbedtls-pubkey"], corpus["mbedtls-privkey"] = \
             mbedtls_seeds(workdir)
@@ -483,6 +530,8 @@ def main():
                     cmd = [kbinary, path]
                 elif parser == "ttf":
                     cmd = [tbinary, path]
+                elif parser == "hid":
+                    cmd = [hbinary, path]
                 elif parser in mbinaries:
                     cmd = [mbinaries[parser], path]
                 else:

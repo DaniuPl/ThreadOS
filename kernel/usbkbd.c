@@ -1,14 +1,24 @@
-/* USB keyboard (HID, boot protocol)
+/* USB keyboards (HID): the keys, and the media keys
  *
  * Recognising the device goes the way it goes in every system: reset
  * the port, ask for the device descriptor at address zero, assign an
- * address, ask for the configuration and find in it an interface of
- * the HID class in its boot version. Then we switch the device into
- * the boot protocol - the one the BIOS uses - and from then on we get
- * a fixed eight-byte report: the modifiers and up to six pressed keys.
+ * address, ask for the configuration and find in it the interfaces of
+ * the HID class.
  *
- * The report says what IS pressed, not what has just changed - so we
- * compare it with the previous one and report only the new keys.
+ * The keyboard itself - the interface in the HID boot version - is
+ * switched into the boot protocol, the one the BIOS uses, and from then
+ * on we get a fixed eight-byte report: the modifiers and up to six
+ * pressed keys.
+ *
+ * The keys a keyboard has beyond those - louder, quieter, mute - come
+ * almost always on a SECOND interface of the same device, in a report
+ * whose layout the device describes itself (kernel/hid.c reads it).
+ * So does a volume knob, which is nothing but that interface, and a
+ * keyboard that reports more than six keys at once. Each such
+ * interface gets its own interrupt endpoint, read by the same thread.
+ *
+ * A report says what IS pressed, not what has just changed - so we
+ * compare it with the previous one and act only on the new keys.
  *
  * We poll from a thread, a few dozen times a second. The keyboard has
  * nothing more urgent to say anyway, and having no interrupts means
@@ -23,49 +33,77 @@
 #include "include/task.h"
 #include "include/printk.h"
 #include "include/string.h"
+#include "include/hid.h"
 
 /* The buffers are static, because the controller reaches for them
    itself - they have to lie in contiguous memory and at an address it
    understands directly */
-static uint8_t desc_buf[256] __attribute__((aligned(16)));
-static uint8_t report[8] __attribute__((aligned(16)));
+static uint8_t desc_buf[512] __attribute__((aligned(16)));
+static uint8_t rdesc[512] __attribute__((aligned(16)));
 
-static int dev;
-static int found;                  /* the device handle from the controller layer */
-static int ep_num, ep_maxpacket, ep_interval = 8;
+/* One interrupt endpoint we read: a boot keyboard's, or an interface
+   whose reports the device described */
+#define HID_EPS 4
+#define DOWN_MAX 16
+static struct hep {
+    int dev, ep, maxpacket;
+    int boot;                       /* the fixed eight bytes */
+    struct hid_map map;             /* otherwise: where what is */
+    uint32_t down[DOWN_MAX];        /* what was down, by the last reports */
+    uint8_t down_id[DOWN_MAX];      /* and which report said so */
+    int ndown;
+} eps[HID_EPS];
+static uint8_t reports[HID_EPS][64] __attribute__((aligned(16)));
+static int neps;
+static int found;
 
-/* Looks in the configuration for a HID interface in its boot version
-   and its interrupt endpoint. Returns the interface number or -1. */
-static int find_boot_keyboard(const uint8_t *cfg, int total)
+/* An interface of the HID class as the configuration describes it */
+struct iface {
+    int num, subclass, protocol;
+    int ep, maxpacket, interval;
+    int rdesc_len;                  /* its report descriptor's length */
+};
+#define IFACES 8
+
+/* The HID interfaces in a configuration (alternate setting 0), with
+   their interrupt IN endpoints. Returns how many. */
+static int find_hid(const uint8_t *cfg, int total, struct iface *out)
 {
-    int iface = -1;
+    int n = 0, cur = -1;
     for (int i = 0; i + 1 < total;) {
         int dlen = cfg[i];
         uint8_t dtype = cfg[i + 1];
-        if (dlen < 2)
+        if (dlen < 2 || i + dlen > total)
             break;
-
-        if (dtype == 0x04 && i + 8 < total) {          /* an interface */
-            /* class 3 = HID, subclass 1 = boot, protocol 1 = keyboard */
-            if (cfg[i + 5] == 3 && cfg[i + 6] == 1 && cfg[i + 7] == 1)
-                iface = cfg[i + 2];
-            else
-                iface = -1;
-        } else if (dtype == 0x05 && iface >= 0 && i + 6 < total) {
+        if (dtype == 0x04 && dlen >= 9) {               /* an interface */
+            cur = -1;
+            /* class 3 = HID; alternate settings other than 0 are not
+               what a device starts in */
+            if (cfg[i + 5] == 3 && cfg[i + 3] == 0 && n < IFACES) {
+                cur = n++;
+                out[cur].num = cfg[i + 2];
+                out[cur].subclass = cfg[i + 6];
+                out[cur].protocol = cfg[i + 7];
+                out[cur].ep = 0;
+                out[cur].rdesc_len = 0;
+            }
+        } else if (dtype == 0x21 && cur >= 0 && dlen >= 9) {   /* HID */
+            if (cfg[i + 6] == 0x22)                         /* report */
+                out[cur].rdesc_len = cfg[i + 7] | (cfg[i + 8] << 8);
+        } else if (dtype == 0x05 && cur >= 0 && dlen >= 7 && !out[cur].ep) {
             uint8_t addr = cfg[i + 2];
             uint8_t attr = cfg[i + 3];
             if ((addr & 0x80) && (attr & 0x03) == 0x03) {  /* IN, interrupt */
-                ep_num = addr & 0x0F;
-                ep_maxpacket = cfg[i + 4] | (cfg[i + 5] << 8);
-                if (ep_maxpacket > 8)
-                    ep_maxpacket = 8;                  /* the report is 8 bytes */
-                ep_interval = cfg[i + 6];
-                return iface;
+                out[cur].ep = addr & 0x0F;
+                out[cur].maxpacket = cfg[i + 4] | (cfg[i + 5] << 8);
+                if (out[cur].maxpacket > 64)
+                    out[cur].maxpacket = 64;
+                out[cur].interval = cfg[i + 6];
             }
         }
         i += dlen;
     }
-    return -1;
+    return n;
 }
 
 /* A HID usage code -> our character. The table covers what matters on
@@ -156,7 +194,7 @@ static void handle_key(uint8_t usage, uint8_t mods)
 static uint8_t prev[6];
 static uint8_t prev_mods;
 
-static void handle_report(void)
+static void boot_report(const uint8_t *report)
 {
     uint8_t mods = report[0];
     /* The Windows key is a modifier in a USB report (GUI, left 0x08,
@@ -182,6 +220,56 @@ static void handle_report(void)
         prev[i] = report[2 + i];
 }
 
+/* A report laid out by the device's own descriptor */
+static void described_report(struct hep *h, const uint8_t *report, int len)
+{
+    uint32_t now[DOWN_MAX];
+    int n = hid_pressed(&h->map, report, len, now, DOWN_MAX);
+    /* Each report id is a report of its own - the media keys' says
+       nothing about the system keys' - so what is down is kept per id */
+    uint8_t id = h->map.ids ? report[0] : 0;
+    uint8_t mods = 0;
+    for (int i = 0; i < n; i++)
+        if (now[i] >> 16 == HID_PAGE_KEYBOARD &&
+            (now[i] & 0xFFFF) >= 0xE0 && (now[i] & 0xFFFF) <= 0xE7)
+            mods |= (uint8_t)(1 << ((now[i] & 0xFFFF) - 0xE0));
+    for (int i = 0; i < n; i++) {
+        int seen = 0;
+        for (int j = 0; j < h->ndown; j++)
+            if (h->down[j] == now[i] && h->down_id[j] == id)
+                seen = 1;
+        if (seen)
+            continue;
+        uint16_t page = (uint16_t)(now[i] >> 16), usage = (uint16_t)now[i];
+        if (page == HID_PAGE_CONSUMER) {
+            /* HID Usage Tables, 15: the consumer page */
+            if (usage == 0xE9)
+                keyboard_inject(KEY_VOLUP);
+            else if (usage == 0xEA)
+                keyboard_inject(KEY_VOLDOWN);
+            else if (usage == 0xE2)
+                keyboard_inject(KEY_MUTE);
+        } else if (page == HID_PAGE_KEYBOARD) {
+            if (usage == 0xE3 || usage == 0xE7)
+                keyboard_inject(KEY_MENU);
+            else if (usage < 0xE0)
+                handle_key((uint8_t)usage, mods);
+        }
+    }
+    /* This id's keys are now exactly these; the other ids' stay */
+    int k = 0;
+    for (int j = 0; j < h->ndown; j++)
+        if (h->down_id[j] != id) {
+            h->down[k] = h->down[j];
+            h->down_id[k++] = h->down_id[j];
+        }
+    for (int i = 0; i < n && k < DOWN_MAX; i++) {
+        h->down[k] = now[i];
+        h->down_id[k++] = id;
+    }
+    h->ndown = k;
+}
+
 static void poll_thread(void *arg)
 {
     (void)arg;
@@ -194,14 +282,55 @@ static void poll_thread(void *arg)
            keys a second, and a fast typist's next ones queued in the
            keyboard until it threw them away. So a report taken is
            followed at once by the next read, and the thread sleeps only
-           while one is out with nothing come back yet. */
-        int n = usbhc_int_in(dev, ep_num, report, ep_maxpacket);
-        if (n >= 8) {
-            handle_report();
-            continue;
+           while every endpoint has one out with nothing come back yet. */
+        int any = 0;
+        for (int i = 0; i < neps; i++) {
+            struct hep *h = &eps[i];
+            int n = usbhc_int_in(h->dev, h->ep, reports[i], h->maxpacket);
+            if (n <= 0)
+                continue;
+            any = 1;
+            if (h->boot && n >= 8)
+                boot_report(reports[i]);
+            else if (!h->boot)
+                described_report(h, reports[i], n);
         }
-        task_sleep(10);
+        if (!any)
+            task_sleep(10);
     }
+}
+
+/* Asks for an interface's report descriptor and reads it. 1 = it has
+   keys we act on (the keyboard page or the consumer page). */
+static int describe(int dev, const struct iface *f, struct hid_map *m)
+{
+    int len = f->rdesc_len;
+    if (len <= 0 || len > (int)sizeof(rdesc))
+        return 0;
+    /* GET_DESCRIPTOR addressed to the interface: type 0x22, a report */
+    uint8_t setup[8] = { 0x81, 0x06, 0x00, 0x22, (uint8_t)f->num, 0,
+                         (uint8_t)len, (uint8_t)(len >> 8) };
+    if (usbhc_control(dev, setup, rdesc, len, 1) < len)
+        return 0;
+    if (hid_parse(rdesc, len, m) < 0)
+        return 0;
+    return hid_has_page(m, HID_PAGE_CONSUMER) ||
+           hid_has_page(m, HID_PAGE_KEYBOARD);
+}
+
+static int add_endpoint(int dev, const struct iface *f, int boot)
+{
+    if (neps == HID_EPS || !f->ep)
+        return -1;
+    if (usbhc_int_endpoint(dev, f->ep, f->maxpacket, f->interval) < 0)
+        return -1;
+    struct hep *h = &eps[neps++];
+    h->dev = dev;
+    h->ep = f->ep;
+    h->maxpacket = f->maxpacket;
+    h->boot = boot;
+    h->ndown = 0;
+    return 0;
 }
 
 int usbkbd_init(void)
@@ -209,12 +338,12 @@ int usbkbd_init(void)
     if (!usbhc_init())
         return 0;
 
-    for (int port = 0; port < usbhc_ports(); port++) {
+    for (int port = 0; port < usbhc_ports() && neps < HID_EPS; port++) {
         /* The port reset, the device address and the endpoint zero packet
            size are handled by the controller layer - each of them
            looks different there, and from here the difference is
            invisible */
-        dev = usbhc_attach(port);
+        int dev = usbhc_attach(port);
         if (dev < 0)
             continue;
 
@@ -226,30 +355,61 @@ int usbkbd_init(void)
         if (usbhc_descriptor(dev, 0x02, 0, desc_buf, total) < total)
             continue;
 
-        int iface = find_boot_keyboard(desc_buf, total);
-        if (iface < 0)
+        struct iface ifs[IFACES];
+        int nifs = find_hid(desc_buf, total, ifs);
+        /* A mouse is the mouse driver's, media buttons and all: a
+           device with a boot mouse and no boot keyboard is left alone */
+        int kbd = 0, mouse = 0;
+        for (int i = 0; i < nifs; i++) {
+            if (ifs[i].subclass == 1 && ifs[i].protocol == 1)
+                kbd = 1;
+            if (ifs[i].subclass == 1 && ifs[i].protocol == 2)
+                mouse = 1;
+        }
+        if (!nifs || (mouse && !kbd))
             continue;                    /* something other than a keyboard */
 
         uint8_t cfg_value = desc_buf[5];
         if (usbhc_request(dev, 0x00, 0x09, cfg_value, 0) < 0)
             continue;                    /* SET_CONFIGURATION */
 
-        /* SET_IDLE 0 - report changes only, do not repeat endlessly */
-        usbhc_request(dev, 0x21, 0x0A, 0, (uint16_t)iface);
-        /* SET_PROTOCOL 0 - the boot protocol, a fixed 8-byte report */
-        usbhc_request(dev, 0x21, 0x0B, 0, (uint16_t)iface);
-
-        if (usbhc_int_endpoint(dev, ep_num, ep_maxpacket, ep_interval) < 0)
-            continue;
-
-        usbhc_claim(port);
-        found = 1;
-        task_create("usbkbd", poll_thread, 0);
-        printk("[ OK ] A USB keyboard (HID, %s) on port %d, "
-               "endpoint %d\n", usbhc_port_hc(port), port + 1, ep_num);
-        return 1;
+        int bound = 0;
+        for (int i = 0; i < nifs && neps < HID_EPS; i++) {
+            struct iface *f = &ifs[i];
+            if (f->subclass == 1 && f->protocol == 2)
+                continue;
+            int boot = f->subclass == 1 && f->protocol == 1;
+            if (!boot && !describe(dev, f, &eps[neps].map))
+                continue;                /* no keys of ours in it */
+            /* SET_IDLE 0 - report changes only, do not repeat endlessly */
+            usbhc_request(dev, 0x21, 0x0A, 0, (uint16_t)f->num);
+            /* SET_PROTOCOL 0 - the boot protocol, a fixed 8-byte report;
+               the others stay in the report protocol they start in */
+            if (boot)
+                usbhc_request(dev, 0x21, 0x0B, 0, (uint16_t)f->num);
+            if (add_endpoint(dev, f, boot) < 0)
+                continue;
+            bound++;
+            if (boot)
+                printk("[ OK ] A USB keyboard (HID, %s) on port %d, "
+                       "endpoint %d\n", usbhc_port_hc(port), port + 1, f->ep);
+            else
+                printk("[ OK ] USB %s (HID report of %d field%s) on port "
+                       "%d, interface %d, endpoint %d\n",
+                       hid_has_page(&eps[neps - 1].map, HID_PAGE_CONSUMER)
+                           ? "media keys" : "keys",
+                       eps[neps - 1].map.nfields,
+                       eps[neps - 1].map.nfields == 1 ? "" : "s",
+                       port + 1, f->num, f->ep);
+        }
+        if (bound)
+            usbhc_claim(port);
     }
-    return 0;
+    if (!neps)
+        return 0;
+    found = 1;
+    task_create("usbkbd", poll_thread, 0);
+    return 1;
 }
 
 int usbkbd_present(void)
