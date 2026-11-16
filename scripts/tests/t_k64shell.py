@@ -287,7 +287,7 @@ def main():
             ex = q23.wait_serial("[ush64] done, exit code 0",
                                  timeout=30)
             check("once the user's shell leaves the kernel's shell is back",
-                  "ush64: pa!" in ex)
+                  "ush64: bye!" in ex)
 
             # Floating-point numbers. On x86-64 SSE is part of
             # the calling convention, so the compiler uses it without
