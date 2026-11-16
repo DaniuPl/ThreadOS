@@ -55,6 +55,7 @@
 #define T_TCP_ADDR   95
 #define T_UDP_POLL   96
 #define T_UDP_PORT   97
+#define T_GETRANDOM  98
 
 /* kernel/include/tcp.h */
 #define P_IN        0x01
@@ -70,7 +71,7 @@
 #define SOCK_BASE 64
 #define SOCKS     32
 #define VFILE_BASE (SOCK_BASE + SOCKS)
-#define VFILES    4
+#define VFILES    8
 
 static long tos(long n, long a1, long a2, long a3, long a4)
 {
@@ -127,9 +128,13 @@ static struct sk *sock_of(long fd)
 	return s->used ? s : 0;
 }
 
-/* --- A made-up /etc/resolv.conf ----------------------------------- */
+/* --- A made-up /etc/resolv.conf, and /dev/urandom ----------------- */
 
-static struct vf { int used; char data[64]; int len, pos; } vfiles[VFILES];
+/* random: /dev/urandom or /dev/random, whose every read is the
+   kernel's generator (kernel/random.c). Libraries that do not know
+   musl has getrandom() - Mbed TLS asks for it only from glibc - open
+   the file instead. */
+static struct vf { int used, random; char data[64]; int len, pos; } vfiles[VFILES];
 
 static struct vf *vfile_of(long fd)
 {
@@ -155,29 +160,40 @@ static int put_ip(char *out, unsigned ip)
 	return n;
 }
 
+static long vfile_new(int random)
+{
+	lock();
+	for (int i = 0; i < VFILES; i++) {
+		if (vfiles[i].used)
+			continue;
+		memset(&vfiles[i], 0, sizeof(vfiles[i]));
+		vfiles[i].used = 1;
+		vfiles[i].random = random;
+		unlock();
+		return VFILE_BASE + i;
+	}
+	unlock();
+	return -EMFILE;
+}
+
 NET_HIDDEN long __tos_open_virtual(const char *path)
 {
+	if (!strcmp(path, "/dev/urandom") || !strcmp(path, "/dev/random"))
+		return vfile_new(1);
 	if (strcmp(path, "/etc/resolv.conf"))
 		return -ENOENT;
 	unsigned info[4];
 	touch(info, sizeof(info));
 	if (tos(T_NETINFO, (long)info, 0, 0, 0) <= 0 || !info[3])
 		return -ENOENT;
-	lock();
-	for (int i = 0; i < VFILES; i++) {
-		if (vfiles[i].used)
-			continue;
-		struct vf *v = &vfiles[i];
-		memcpy(v->data, "nameserver ", 11);
-		v->len = 11 + put_ip(v->data + 11, info[3]);
-		v->data[v->len++] = '\n';
-		v->pos = 0;
-		v->used = 1;
-		unlock();
-		return VFILE_BASE + i;
-	}
-	unlock();
-	return -EMFILE;
+	long fd = vfile_new(0);
+	if (fd < 0)
+		return fd;
+	struct vf *v = &vfiles[fd - VFILE_BASE];
+	memcpy(v->data, "nameserver ", 11);
+	v->len = 11 + put_ip(v->data + 11, info[3]);
+	v->data[v->len++] = '\n';
+	return fd;
 }
 
 /* --- Sockets -------------------------------------------------------- */
@@ -671,6 +687,17 @@ static long vfile_call(struct vf *v, long n, long a, long b, long c)
 {
 	switch (n) {
 	case SYS_read: {
+		if (v->random) {
+			long done = 0;
+			while (done < c) {
+				long k = c - done > 4096 ? 4096 : c - done;
+				touch((char *)b + done, k);
+				if (tos(T_GETRANDOM, b + done, k, 0, 0) != k)
+					return done ? done : -EFAULT;
+				done += k;
+			}
+			return done;
+		}
 		long k = v->len - v->pos < c ? v->len - v->pos : c;
 		touch((void *)b, k);
 		memcpy((void *)b, v->data + v->pos, k);
@@ -690,6 +717,8 @@ static long vfile_call(struct vf *v, long n, long a, long b, long c)
 		return total;
 	}
 	case SYS_lseek:
+		if (v->random)
+			return 0;
 		if (c == SEEK_SET && b >= 0 && b <= v->len)
 			return v->pos = b;
 		return -EINVAL;
@@ -702,8 +731,8 @@ static long vfile_call(struct vf *v, long n, long a, long b, long c)
 		struct kstat *st = (void *)b;
 		touch(st, sizeof(*st));
 		memset(st, 0, sizeof(*st));
-		st->st_mode = S_IFREG | 0444;
-		st->st_size = v->len;
+		st->st_mode = v->random ? S_IFCHR | 0444 : S_IFREG | 0444;
+		st->st_size = v->random ? 0 : v->len;
 		st->st_nlink = 1;
 		return 0;
 	}

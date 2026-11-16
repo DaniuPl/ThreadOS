@@ -357,6 +357,10 @@ LIBC64_CFLAGS := -m64 -std=gnu11 -O2 -mno-red-zone -fno-stack-protector \
                  -fno-pic -fno-asynchronous-unwind-tables \
                  -nostdinc -isystem $(MUSL_ROOT)/include \
                  -isystem $(shell $(CC) -print-file-name=include)
+# The same for builds that change into a tree of their own (configure
+# scripts, upstream makefiles), where a relative BUILD would point
+# nowhere
+LIBC64_CFLAGS_ABS := $(subst -isystem $(MUSL_ROOT)/include,-isystem $(abspath $(MUSL_ROOT))/include,$(LIBC64_CFLAGS))
 LIBC64_LINK = $(CC) -m64 -static -no-pie -nostdlib -s \
               -Wl,--build-id=none -Wl,-z,max-page-size=0x1000 \
               -T libc/libc64.ld $(MUSL_ROOT)/lib/crt1.o \
@@ -416,13 +420,43 @@ $(BUILD)/user64/zlibtest.elf: libc/tests/zlibtest.c $(ZLIB_A) $(LIBC64) \
 	    -o $(BUILD)/libc64/zlibtest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/zlibtest.o $(ZLIB_A)) -o $@
 
+# --- Mbed TLS -----------------------------------------------------------
+# TLS 1.2 and 1.3, X.509 and the cryptography under them. The release
+# archive as Mbed TLS publishes it, its library built by its own
+# makefile with the default configuration; random bytes come from
+# getrandom(), which is the kernel's (kernel/random.c). Its self-test
+# program runs the library's known-answer tests on ThreadOS.
+MBEDTLS_TAR   := third_party/mbedtls-3.6.7.tar.bz2
+MBEDTLS_TREE  := $(BUILD)/mbedtls
+MBEDTLS_STAMP := $(MBEDTLS_TREE)/lib/.built
+MBEDTLS_A     := $(MBEDTLS_TREE)/lib/libmbedtls.a \
+                 $(MBEDTLS_TREE)/lib/libmbedx509.a \
+                 $(MBEDTLS_TREE)/lib/libmbedcrypto.a
+
+$(MBEDTLS_STAMP): $(MBEDTLS_TAR) Makefile $(LIBC64)
+	rm -rf $(MBEDTLS_TREE) && mkdir -p $(MBEDTLS_TREE)
+	tar -xf $< -C $(MBEDTLS_TREE) --strip-components=1
+	$(MAKE) -s -C $(MBEDTLS_TREE)/library CC="$(CC)" \
+	    CFLAGS="$(LIBC64_CFLAGS_ABS)" static >/dev/null
+	mkdir -p $(MBEDTLS_TREE)/lib
+	cp $(MBEDTLS_TREE)/library/libmbed*.a $(MBEDTLS_TREE)/lib/
+	touch $@
+
+$(BUILD)/user64/mbedtest.elf: $(MBEDTLS_STAMP) | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -I$(MBEDTLS_TREE)/include -w \
+	    -c $(MBEDTLS_TREE)/programs/test/selftest.c \
+	    -o $(BUILD)/libc64/mbedtest.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/mbedtest.o $(MBEDTLS_A)) -o $@
+
+USER64_ELFS += $(BUILD)/user64/mbedtest.elf
+
 # --- curl ---------------------------------------------------------------
 # The release archive as curl.se publishes it, configured the way it is
 # for any other system with a C library: its own configure script, told
 # to cross-compile, linking its test programs the way every program here
 # is linked (musl's start files around them, libc.a and libgcc after).
-# HTTP and the protocols that need nothing more for now; no TLS yet, no
-# IPv6 and no Unix sockets (the kernel has neither), and the resolver in
+# HTTP and HTTPS (TLS through Mbed TLS, below); no IPv6 and no Unix
+# sockets (the kernel has neither), and the resolver in
 # the calling thread, since socketpair() is not there to wake a resolver
 # thread with.
 CURL_TAR   := third_party/curl-8.23.0.tar.xz
@@ -436,15 +470,16 @@ CURL_LDFLAGS := -static -no-pie -nostdlib -Wl,--build-id=none \
 CURL_LIBS  := $(abspath $(ZLIB_A)) $(abspath $(LIBC64)) \
               $(shell $(CC) -print-libgcc-file-name) $(abspath $(MUSL_ROOT)/lib/crtn.o)
 
-$(CURL_TREE)/Makefile: $(CURL_TAR) Makefile $(LIBC64) $(ZLIB_A)
+$(CURL_TREE)/Makefile: $(CURL_TAR) Makefile $(LIBC64) $(ZLIB_A) $(MBEDTLS_STAMP)
 	rm -rf $(CURL_TREE) && mkdir -p $(CURL_TREE)
 	tar -xf $< -C $(CURL_TREE) --strip-components=1
 	cd $(CURL_TREE) && ./configure --host=x86_64-pc-linux-musl \
 	    --build=x86_64-pc-linux-gnu CC="$(CC)" \
-	    CFLAGS="$(LIBC64_CFLAGS) -D_GNU_SOURCE" \
+	    CFLAGS="$(LIBC64_CFLAGS_ABS) -D_GNU_SOURCE" \
 	    CPPFLAGS="-I$(abspath $(ZLIB_TREE))" \
 	    LDFLAGS="$(CURL_LDFLAGS)" LIBS="$(CURL_LIBS)" \
-	    --disable-shared --enable-static --without-ssl --with-zlib \
+	    --disable-shared --enable-static --with-mbedtls=$(abspath $(MBEDTLS_TREE)) \
+	    --with-zlib \
 	    --disable-ipv6 --disable-unix-sockets --disable-threaded-resolver \
 	    --disable-socketpair --disable-ldap --disable-ldaps --disable-rtsp \
 	    --disable-dict --disable-telnet --disable-tftp --disable-pop3 \
@@ -819,6 +854,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    zlibtest=$(BUILD)/user64/zlibtest.elf \
 	    curl=$(BUILD)/user64/curl.elf \
 	    fonttest=$(BUILD)/user64/fonttest.elf \
+	    mbedtest=$(BUILD)/user64/mbedtest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)

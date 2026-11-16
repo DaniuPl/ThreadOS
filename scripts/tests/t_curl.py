@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: curl.
+"""ThreadOS smoke test: curl, over HTTP and HTTPS.
 
 curl 8.23.0 (third_party/, the release archive unchanged) is configured
-by its own configure script for musl and built with zlib; the curl tool
-runs on ThreadOS over the C library's sockets. On the other side stands
-an HTTP server in Python on the host, which records every request, so
-both ends are checked:
+by its own configure script for musl and built with zlib, and with Mbed
+TLS 3.6.7 for TLS; the curl tool runs on ThreadOS over the C library's
+sockets. On the other side stand HTTP and HTTPS servers in Python on
+the host (OpenSSL's TLS, certificates made by the openssl tool), which
+record every request and every handshake, so both ends are checked:
 
   a plain GET; a 2 MB download into a file, read back off the disk image
   (ptest.TfsImage) and compared by SHA-256; a gzip-encoded answer that
@@ -13,6 +14,15 @@ both ends are checked:
   POST whose body the server checks; a chunked answer; HEAD (-I); a 404
   with -f, which curl must turn into its exit code 22; a name resolved
   through the system's DNS; -w reporting the status and the size
+
+  HTTPS with a chain the server sends (root, intermediate, server) and
+  only the root given to curl: TLS 1.3, and TLS 1.2 from a server that
+  offers nothing newer, each seen negotiated by the server itself; 2 MB
+  over TLS, compared by SHA-256 off the disk image. And what has to be
+  refused, with curl's exit code 60 and no request reaching the server:
+  an address the certificate does not name, a root curl was not given,
+  no roots at all, and a certificate that expired before the guest's
+  clock - while -k, told not to check, does get through
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -25,6 +35,8 @@ import random
 import re
 import shutil
 import socketserver
+import ssl
+import subprocess
 import sys
 import tempfile
 import threading
@@ -40,6 +52,8 @@ NAME = "files.threados.test"
 BIG = random.Random(11).randbytes(2 * 1024 * 1024)
 TEXT = b"".join(b"line %d: the quick brown fox\n" % i for i in range(3000))
 REQUESTS = []
+HANDSHAKES = []      # (server, TLS version or "failed", path or None)
+FILES = {}           # served as they are: the roots curl is given
 
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -63,7 +77,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_GET(self):
         REQUESTS.append((self.command, self.path, dict(self.headers)))
-        if self.path == "/hello.txt":
+        if self.path in FILES:
+            self.send(200, FILES[self.path])
+        elif self.path.split("?")[0] == "/hello.txt":
             self.send(200, b"hello from the host\n",
                       [("Content-Type", "text/plain"), ("X-Test", "seen")])
         elif self.path == "/big.bin":
@@ -98,6 +114,90 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = True
 
 
+class TLSHandler(Handler):
+    """The same answers, after a handshake in this connection's thread,
+    which records what was agreed - or that nothing was"""
+
+    def setup(self):
+        self.agreed = None
+        try:
+            self.request.settimeout(60)
+            self.request.do_handshake()
+            self.agreed = self.request.version()
+        except (ssl.SSLError, OSError):
+            HANDSHAKES.append((self.server.tag, "failed", None))
+        super().setup()
+
+    def handle(self):
+        if self.agreed:
+            super().handle()
+
+    def do_GET(self):
+        HANDSHAKES.append((self.server.tag, self.agreed, self.path))
+        super().do_GET()
+
+
+class TLSServer(Server):
+    def __init__(self, tag, chain, key, newest=None):
+        self.tag = tag
+        self.ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self.ctx.load_cert_chain(chain, key)
+        if newest:
+            self.ctx.maximum_version = newest
+        super().__init__(("0.0.0.0", 0), TLSHandler)
+        threading.Thread(target=self.serve_forever, daemon=True).start()
+
+    def get_request(self):
+        sock, addr = self.socket.accept()
+        return self.ctx.wrap_socket(sock, server_side=True,
+                                    do_handshake_on_connect=False), addr
+
+
+def openssl(*args):
+    subprocess.run(["openssl", *args], check=True, capture_output=True,
+                   timeout=120)
+
+
+def make_certs(work):
+    """Two roots of our own: one with an intermediate under it, which
+    signs the server's certificates (one for ten years, one for a day -
+    long gone by the guest's clock, which says 2030), and one that
+    signs nothing curl will see"""
+    j = lambda name: os.path.join(work, name)
+    with open(j("ca.ext"), "w") as fh:
+        fh.write("basicConstraints=critical,CA:TRUE\n"
+                 "keyUsage=critical,keyCertSign,cRLSign\n")
+    with open(j("leaf.ext"), "w") as fh:
+        fh.write("basicConstraints=critical,CA:FALSE\n"
+                 "subjectAltName=DNS:threados.test\n")
+    for root in ("root", "other"):
+        openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", j(root + ".key"), "-out", j(root + ".pem"),
+                "-days", "3650", "-subj", f"/CN=ThreadOS curl test {root}",
+                "-addext", "basicConstraints=critical,CA:TRUE")
+    openssl("req", "-new", "-newkey", "ec", "-pkeyopt",
+            "ec_paramgen_curve:prime256v1", "-nodes", "-keyout", j("int.key"),
+            "-out", j("int.csr"), "-subj", "/CN=ThreadOS curl test int")
+    openssl("x509", "-req", "-in", j("int.csr"), "-CA", j("root.pem"),
+            "-CAkey", j("root.key"), "-CAcreateserial", "-out", j("int.pem"),
+            "-days", "3650", "-extfile", j("ca.ext"))
+    for leaf, days in (("leaf", "3650"), ("old", "1")):
+        openssl("req", "-new", "-newkey", "rsa:2048", "-nodes",
+                "-keyout", j(leaf + ".key"), "-out", j(leaf + ".csr"),
+                "-subj", "/CN=threados.test")
+        openssl("x509", "-req", "-in", j(leaf + ".csr"), "-CA", j("int.pem"),
+                "-CAkey", j("int.key"), "-CAcreateserial",
+                "-out", j(leaf + ".pem"), "-days", days,
+                "-extfile", j("leaf.ext"))
+        with open(j(leaf + "-chain.pem"), "w") as out:
+            out.write(open(j(leaf + ".pem")).read() +
+                      open(j("int.pem")).read())
+    for root in ("root", "other"):
+        with open(j(root + ".pem"), "rb") as fh:
+            FILES["/" + root + ".pem"] = fh.read()
+    return j
+
+
 def run(q, command, timeout=120):
     seen = len(q.serial())
     q.type_line(command)
@@ -127,7 +227,22 @@ def main():
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://10.0.2.2:{port}"
     work = tempfile.mkdtemp()
+    servers = []
     try:
+        try:
+            certs = make_certs(work)
+        except (OSError, subprocess.SubprocessError) as e:
+            check(f"the openssl tool makes the test's certificates ({e})",
+                  False)
+            return summary()
+        tls13 = TLSServer("1.3", certs("leaf-chain.pem"), certs("leaf.key"))
+        tls12 = TLSServer("1.2", certs("leaf-chain.pem"), certs("leaf.key"),
+                          newest=ssl.TLSVersion.TLSv1_2)
+        expired = TLSServer("expired", certs("old-chain.pem"),
+                            certs("old.key"))
+        servers = [tls13, tls12, expired]
+        h13, h12, hold = (f"https://threados.test:{t.server_address[1]}"
+                          for t in servers)
         iso = os.path.join(work, "t.iso")
         disk = os.path.join(work, "disk.img")
         with open(disk, "wb") as fh:
@@ -190,6 +305,64 @@ def main():
             check(f"a name through the system's DNS ({got})",
                   got == ["hello from the host"] and code == 0)
 
+            # --- HTTPS ---
+            for root in ("root", "other"):
+                _, code = run(q, f"run curl -s -o {root}.pem "
+                                 f"{base}/{root}.pem")
+                check(f"{root}.pem reaches the ThreadOS disk", code == 0)
+
+            def agreed(path):
+                return [h[:2] for h in HANDSHAKES if h[2] == path]
+
+            got, code = run(q, f"run curl -s --cacert root.pem "
+                               f"{h13}/hello.txt?tls13")
+            check(f"HTTPS: a GET through a chain to the root curl was given "
+                  f"({got}, code {code})",
+                  got == ["hello from the host"] and code == 0)
+            check(f"and the server agreed on TLS 1.3 "
+                  f"({agreed('/hello.txt?tls13')})",
+                  agreed("/hello.txt?tls13") == [("1.3", "TLSv1.3")])
+
+            got, code = run(q, f"run curl -s --cacert root.pem "
+                               f"{h12}/hello.txt?tls12")
+            check(f"a server that offers nothing newer than TLS 1.2 is "
+                  f"answered in TLS 1.2 ({got}, code {code}, "
+                  f"{agreed('/hello.txt?tls12')})",
+                  got == ["hello from the host"] and code == 0 and
+                  agreed("/hello.txt?tls12") == [("1.2", "TLSv1.2")])
+
+            t0 = time.time()
+            got, code = run(q, f"run curl -s --cacert root.pem -o tls.bin -w "
+                               f"%{{http_code}}:%{{size_download}}\\n "
+                               f"{h13}/big.bin", 600)
+            print(f"    (2 MB over TLS took {time.time() - t0:.0f} s)")
+            check(f"2 MB over TLS 1.3 into a file ({got})",
+                  got == [f"200:{len(BIG)}"] and code == 0)
+
+            port13 = tls13.server_address[1]
+            for what, args, path in (
+                    ("an address the certificate does not name",
+                     f"--cacert root.pem https://10.0.2.2:{port13}"
+                     f"/hello.txt?byip", "/hello.txt?byip"),
+                    ("a root curl was not given",
+                     f"--cacert other.pem {h13}/hello.txt?other",
+                     "/hello.txt?other"),
+                    ("no roots at all", f"{h13}/hello.txt?none",
+                     "/hello.txt?none"),
+                    ("a certificate that expired before the guest's clock",
+                     f"--cacert root.pem {hold}/hello.txt?expired",
+                     "/hello.txt?expired")):
+                got, code = run(q, f"run curl -s {args}")
+                check(f"refused: {what} (exit code {code}, "
+                      f"{'a request reached' if agreed(path) else 'nothing reached'}"
+                      f" the server)", code == 60 and not agreed(path))
+
+            got, code = run(q, f"run curl -s -k {hold}/hello.txt?insecure")
+            check(f"-k, told not to check, gets through all the same "
+                  f"({got}, code {code})",
+                  got == ["hello from the host"] and code == 0 and
+                  agreed("/hello.txt?insecure") == [("expired", "TLSv1.3")])
+
             agents = {r[2].get("User-Agent", "") for r in REQUESTS
                       if r[0] == "GET"}
             check(f"every request says it is curl 8.23.0 ({agents})",
@@ -198,11 +371,14 @@ def main():
             q.close()
 
         img = TfsImage(disk)
-        data = img.read("/big.bin")
-        check("big.bin on the disk has the SHA-256 of what was sent",
-              data is not None and
-              hashlib.sha256(data).digest() == hashlib.sha256(BIG).digest())
+        for name in ("big.bin", "tls.bin"):
+            data = img.read("/" + name)
+            check(f"{name} on the disk has the SHA-256 of what was sent",
+                  data is not None and hashlib.sha256(data).digest() ==
+                  hashlib.sha256(BIG).digest())
     finally:
+        for t in servers:
+            t.shutdown()
         srv.shutdown()
         dns_stop()
         shutil.rmtree(work, ignore_errors=True)

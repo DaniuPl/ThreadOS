@@ -21,10 +21,12 @@ Checked from outside:
   it - except when the pool is drawn on, when it is not
 
   on ThreadOS, randtest draws a megabyte through getrandom() in pieces
-  of every size: the file it writes, read off the disk image, has as
+  of every size, and a quarter of one from /dev/urandom (which Mbed
+  TLS reads, and which the C library makes up): the files it writes,
+  read off the disk image, have as
   many ones as zeros, every byte value and pair of values about as
   often as chance allows, no 16-byte block twice, and zlib cannot
-  shrink it
+  shrink them
 
   a forked child and its parent, and four threads drawing at the same
   time, never get the same bytes
@@ -265,17 +267,17 @@ def one_boot(work, tag, cpu_model):
         q.wait_serial("] Disk ", timeout=30)
         banner = next((l.strip("\r") for l in q.serial().split("\n")
                        if "Random numbers" in l), "")
-        got, code = run(q, "run randtest rand.bin", 300)
+        got, code = run(q, "run randtest rand.bin dev.bin", 300)
     finally:
         q.close()
     img = TfsImage(disk)
-    return banner, got, code, img.read("/rand.bin")
+    return banner, got, code, img.read("/rand.bin"), img.read("/dev.bin")
 
 
-def judge(tag, data):
+def judge(tag, data, size):
     n = len(data)
-    check(f"{tag}: rand.bin is on the disk, a megabyte", n == 1 << 20)
-    if n != 1 << 20:
+    check(f"{tag}: the file is on the disk, {size} bytes", n == size)
+    if n != size:
         return
     bits = n * 8
     ones = int.from_bytes(data, "little").bit_count()
@@ -311,11 +313,13 @@ def guest_checks(work):
     for tag, cpu, sources in (("default", None, "interrupt timing"),
                               ("max", "max", "RDSEED, RDRAND, interrupt "
                                              "timing")):
-        banner, got, code, data = one_boot(work, tag, cpu)
+        banner, got, code, data, dev = one_boot(work, tag, cpu)
         check(f"{tag} processor: the kernel names its sources as "
               f"'{sources}' ({banner})",
               banner.endswith("sources: " + sources))
         for want in ("wrote 1048576 bytes to rand.bin",
+                     "/dev/urandom: a character device, 262144 bytes "
+                     "read into dev.bin",
                      "GRND_NONBLOCK once seeded: 16 bytes",
                      "getentropy of 256 bytes: ok",
                      "after fork: the parent's and the child's bytes differ",
@@ -326,10 +330,12 @@ def guest_checks(work):
         sample = next((l.split()[1] for l in got if l.startswith("~sample ")),
                       None)
         results[tag] = (sample, data or b"")
-        if data is not None:
-            judge(tag, data)
-        else:
-            check(f"{tag}: rand.bin is on the disk", False)
+        for what, d, size in (("getrandom", data, 1 << 20),
+                              ("/dev/urandom", dev, 1 << 18)):
+            if d is not None:
+                judge(f"{tag}, {what}", d, size)
+            else:
+                check(f"{tag}: what {what} gave is on the disk", False)
     (s1, d1), (s2, d2) = results["default"], results["max"]
     shared = ({d1[i:i + 16] for i in range(0, len(d1), 16)} &
               {d2[i:i + 16] for i in range(0, len(d2), 16)})

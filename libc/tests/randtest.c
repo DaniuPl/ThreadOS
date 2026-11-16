@@ -1,12 +1,13 @@
 /* randtest - the kernel's random bytes, as a C program sees them
  *
- * Through getrandom() and getentropy(), the way libraries ask (mbedTLS,
- * SQLite, curl). It writes a megabyte of output to a file for the test
- * to judge on the host, and checks what only the inside can see: that
+ * Through getrandom(), getentropy() and /dev/urandom, the ways libraries
+ * ask (Mbed TLS reads the file). It writes a megabyte from getrandom()
+ * and a quarter of one from the file for the test to judge on the
+ * host, and checks what only the inside can see: that
  * a forked child and its parent do not get the same bytes, and that
  * threads drawing at the same time never get the same bytes either.
  *
- *   randtest <file>
+ *   randtest <getrandom's megabyte> <256 KiB of /dev/urandom>
  *
  * Lines starting with '~' differ from run to run.
  */
@@ -17,10 +18,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/random.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
 #define MEGABYTE (1 << 20)
+#define DEVBYTES (256 * 1024)
 #define THREADS 4
 #define DRAWS 2000
 
@@ -50,8 +53,8 @@ static int cmp16(const void *a, const void *b)
 
 int main(int argc, char **argv)
 {
-    if (argc < 2) {
-        printf("usage: randtest <file>\n");
+    if (argc < 3) {
+        printf("usage: randtest <file> <file>\n");
         return 2;
     }
     int bad = 0;
@@ -79,6 +82,31 @@ int main(int argc, char **argv)
         return 1;
     }
     printf("wrote %zu bytes to %s\n", have, argv[1]);
+
+    /* The file libraries open when they do not know getrandom() */
+    FILE *u = fopen("/dev/urandom", "rb");
+    struct stat st;
+    if (!u || fstat(fileno(u), &st) || !S_ISCHR(st.st_mode)) {
+        printf("/dev/urandom: %s\n", u ? "not a character device"
+                                       : strerror(errno));
+        bad = 1;
+    } else {
+        FILE *out = fopen(argv[2], "wb");
+        size_t moved = 0;
+        while (out && moved < DEVBYTES) {
+            size_t n = fread(mb, 1, 9000, u);
+            if (n != 9000)
+                break;
+            n = n > DEVBYTES - moved ? DEVBYTES - moved : n;
+            fwrite(mb, 1, n, out);
+            moved += n;
+        }
+        if (out)
+            fclose(out);
+        fclose(u);
+        printf("/dev/urandom: a character device, %zu bytes read into %s\n",
+               moved, argv[2]);
+    }
 
     unsigned char b[256];
     ssize_t r = getrandom(b, 16, GRND_NONBLOCK);

@@ -7163,3 +7163,37 @@ works and is checked by `make test`.
       Breaking the key replacement, or compressing a full BLAKE2s block
       before knowing it is the last, fails the test - the second still
       passes the kernel's own self-test, which hashes only "abc".
+
+- [x] **HTTPS: Mbed TLS, and curl over it** (third_party/mbedtls-3.6.7.tar.bz2,
+      Makefile, libc/overlay/src/threados/socket.c, scripts/tests/t_curl.py,
+      scripts/tests/t_mbedtls.py, scripts/fuzz_parsers.py)
+      Mbed TLS 3.6.7, the long-term release, brought in as its release
+      archive and built by its own library makefile with the default
+      configuration: TLS 1.2 and 1.3, X.509, and the cryptography under
+      them. curl is now configured with it. There is no built-in CA
+      bundle yet; roots are given with --cacert.
+
+      Its self-test found the first problem at once: outside glibc Mbed
+      TLS does not call getrandom() but opens /dev/urandom, which
+      ThreadOS did not have. musl's overlay now makes up /dev/urandom
+      and /dev/random next to /etc/resolv.conf - descriptors whose reads
+      are the kernel's generator - which every program that reads the
+      file gets as well. The configure-based builds (curl, Mbed TLS) now
+      get absolute include paths, so a relative BUILD works for them.
+
+      Tested three ways. t_mbedtls runs Mbed TLS's own self-test
+      (known answers for every hash, cipher, mode, big-number and curve
+      operation, the random generators, and an entropy test that reads
+      the system) on QEMU's "max" processor, where it finds AES-NI, and
+      its 298 lines must be exactly the host build's. t_curl adds HTTPS
+      against Python's ssl (OpenSSL) servers with a root, an
+      intermediate and a server certificate made by the openssl tool:
+      TLS 1.3, and TLS 1.2 from a server offering nothing newer, each
+      as the server itself recorded it; 2 MB over TLS compared by
+      SHA-256 off the disk image; exit code 60 and no request reaching
+      the server for an address the certificate does not name, a root
+      curl was not given, no roots at all, and a certificate that
+      expired before the guest's 2030 clock - while -k gets through.
+      `make fuzz` builds Mbed TLS's own certificate and key fuzz
+      programs under ASan and UBSan and feeds them corrupted
+      certificates and keys.

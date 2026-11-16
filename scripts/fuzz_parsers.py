@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Checks the ThreadOS parsers against corrupted data.
 
-Three fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
-packet path in the kernel (net.c + tcp.c), and the kernel's TrueType
-reader (ttf.c), because a font is a file and files come from anywhere. In the kernel an error does
+Four fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
+packet path in the kernel (net.c + tcp.c), the kernel's TrueType
+reader (ttf.c), because a font is a file and files come from anywhere,
+and Mbed TLS's certificate and key parsers, which curl hands whatever a
+server sends. In the kernel an error does
 not end in the death of a process but in the system going down, so it
 is all the more worth looking for.
 
@@ -116,6 +118,65 @@ def build_ttf(workdir):
         print(out.stderr[:3000])
         raise SystemExit("the TrueType harness could not be built")
     return binary
+
+
+MBED_FUZZERS = ("x509crt", "pubkey", "privkey")
+
+
+def build_mbedtls(workdir):
+    """Mbed TLS (third_party/, the archive the Makefile names) under the
+    same sanitizers, with its own fuzz programs from programs/fuzz and
+    the driver there that runs them on one file (onefile.c). Undefined
+    behaviour ends the program here, so that it counts."""
+    with open(os.path.join(ROOT, "Makefile")) as f:
+        tar = next(l.split(":=")[1].strip() for l in f
+                   if l.startswith("MBEDTLS_TAR"))
+    src = os.path.join(workdir, "mbedtls")
+    os.makedirs(src)
+    subprocess.run(["tar", "-xf", os.path.join(ROOT, tar), "-C", src,
+                    "--strip-components=1"], check=True)
+    san = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+           "-fno-omit-frame-pointer", "-g", "-O1"]
+    out = subprocess.run(["make", "-s", "-j8", "-C",
+                          os.path.join(src, "library"), "CC=gcc",
+                          "CFLAGS=" + " ".join(san), "static"],
+                         capture_output=True, text=True)
+    if out.returncode != 0:
+        print(out.stderr[-3000:])
+        raise SystemExit("Mbed TLS could not be built for fuzzing")
+    lib = os.path.join(src, "library")
+    fz = os.path.join(src, "programs", "fuzz")
+    binaries = {}
+    for name in MBED_FUZZERS:
+        binary = os.path.join(workdir, "mbed-" + name)
+        out = subprocess.run(
+            ["gcc", *san, "-w", "-I", os.path.join(src, "include"),
+             "-I", fz, "-o", binary, os.path.join(fz, "fuzz_%s.c" % name),
+             os.path.join(fz, "common.c"), os.path.join(fz, "onefile.c"),
+             os.path.join(lib, "libmbedx509.a"),
+             os.path.join(lib, "libmbedcrypto.a")],
+            capture_output=True, text=True)
+        if out.returncode != 0:
+            print(out.stderr[:3000])
+            raise SystemExit("Mbed TLS's fuzz_%s could not be built" % name)
+        binaries["mbedtls-" + name] = binary
+    return binaries
+
+
+def mbedtls_seeds(workdir):
+    """Keys for Mbed TLS's key parsers, private and public, in DER and
+    in PEM - the certificates come from seeds()"""
+    pub, priv = [], []
+    for tag in ("rsa", "p256", "p384"):
+        key = os.path.join(workdir, tag + ".key")
+        for form in ("DER", "PEM"):
+            for args, bucket in ((["-in", key], priv),
+                                 (["-in", key, "-pubout"], pub)):
+                out = subprocess.run(["openssl", "pkey", *args, "-outform",
+                                      form], capture_output=True, timeout=60)
+                if out.returncode == 0:
+                    bucket.append(out.stdout)
+    return pub, priv
 
 
 def fonts():
@@ -392,9 +453,13 @@ def main():
         binary = build(workdir)
         kbinary = build_kernel(workdir)
         tbinary = build_ttf(workdir)
+        mbinaries = build_mbedtls(workdir)
         corpus = seeds(workdir)
         corpus["frames"] = frames()
         corpus["ttf"] = fonts()
+        corpus["mbedtls-x509crt"] = list(corpus["x509"])
+        corpus["mbedtls-pubkey"], corpus["mbedtls-privkey"] = \
+            mbedtls_seeds(workdir)
         print("the harness is built, cases per parser: %d" % CASES)
         bad = gif_pixels(binary)
         print("  GIFs against Pillow's reading of them: %d wrong" % len(bad))
@@ -418,6 +483,8 @@ def main():
                     cmd = [kbinary, path]
                 elif parser == "ttf":
                     cmd = [tbinary, path]
+                elif parser in mbinaries:
+                    cmd = [mbinaries[parser], path]
                 else:
                     cmd = [binary, parser, path]
                 run = subprocess.run(cmd, capture_output=True, timeout=30)
@@ -430,7 +497,7 @@ def main():
                                      run.stderr.decode(errors="replace")))
                     if crashes >= 3:
                         break
-            print("  %-6s %4d cases, errors: %d" %
+            print("  %-15s %4d cases, errors: %d" %
                   (parser, CASES, crashes))
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
