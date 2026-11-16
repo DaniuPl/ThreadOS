@@ -36,6 +36,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
+# The mapping area: 64 GiB from 512 GiB (USER64_MMAP_BASE and _MAX in
+# kernel64/elf64.h)
+MMAP_BASE = 512 << 30
+MMAP_SIZE = 64 << 30
+
 
 def pages_from_files(text):
     """How many pages the kernel read from mapped files - the shell gives
@@ -80,7 +85,7 @@ def main():
             addr = re.search(r"the file at address (\d+)", read_out)
             check("the file got an address in the mapping area",
                   addr is not None and
-                  0x50000000 <= int(addr.group(1)) < 0x60000000)
+                  MMAP_BASE <= int(addr.group(1)) < MMAP_BASE + MMAP_SIZE)
             check("every byte of the file matches the pattern",
                   "the checked bytes match, and there were 12288" in read_out)
             check("trying to write to the mapping kills the process",

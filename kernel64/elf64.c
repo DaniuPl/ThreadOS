@@ -19,6 +19,11 @@
    second-level tables. The two numbers have to agree. */
 _Static_assert((USER64_BASE >> 30) == PAGING64_USER_PDPT,
                "USER64_BASE has to lie in the PAGING64_USER_PDPT gigabyte");
+_Static_assert((USER64_MMAP_BASE >> 39) == PAGING64_MMAP_PML4 &&
+               ((USER64_MMAP_BASE >> 30) & 0x1FF) == 0 &&
+               USER64_MMAP_MAX - USER64_MMAP_BASE ==
+               ((uint64_t)PAGING64_MMAP_GIGS << 30),
+               "the mapping area has to be PAGING64_MMAP_PML4's first gigabytes");
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/dynlink.h"
 #include "../kernel/include/printk.h"

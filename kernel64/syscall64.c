@@ -1054,8 +1054,9 @@ static void handle(struct regs *r)
         /* Only the program's own memory: a range that leaves it is
            refused rather than cut. (Not paging64_user_range: that
            brings every page of the range in first.) */
-        r->rax = a1 >= USER64_BASE && a1 + a2 >= a1 &&
-                 a1 + a2 <= USER64_STACK_TOP
+        r->rax = a1 + a2 >= a1 &&
+                 ((a1 >= USER64_BASE && a1 + a2 <= USER64_STACK_TOP) ||
+                  (a1 >= USER64_MMAP_BASE && a1 + a2 <= USER64_MMAP_MAX))
                      ? (uint64_t)(int64_t)paging64_discard(a1, a2)
                      : (uint64_t)(int64_t)-1;
         return;

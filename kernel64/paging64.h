@@ -41,6 +41,11 @@
    kernel64/elf64.h has to agree with this. */
 #define PAGING64_USER_PDPT 1
 
+/* And the mapping area (USER64_MMAP_BASE): the second entry of the top
+   table, a gigabyte per page directory, this many of them */
+#define PAGING64_MMAP_PML4 1
+#define PAGING64_MMAP_GIGS 64
+
 /* Builds our own tables and switches the processor over to them.
    0 = done. */
 int paging64_init(void);

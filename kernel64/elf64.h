@@ -45,12 +45,14 @@
    while pages nobody touches cost nothing. */
 #define USER64_STACK_MAX   (4 * 1024 * 1024ULL)
 
-/* Between the heap and the stack lies an area for mappings: shared
-   memory and whatever comes after it. The heap ends at its threshold
-   and the mapping area at the threshold of the room for the stack -
-   none of the three has any way of running into another. */
-#define USER64_MMAP_BASE   0x0000000050000000ULL
-#define USER64_MMAP_MAX    (USER64_STACK_TOP - USER64_STACK_MAX)
+/* The area for mappings - anonymous memory, files, shared memory,
+   threads' stacks - lies apart, at 512 GiB: the second entry of the
+   top table (PAGING64_MMAP_PML4), 64 GiB of it. It used to share the
+   gigabyte above with the program and its heap, and had a quarter of
+   it; a browser engine reserves more than that before it reads a
+   page. None of the areas has any way of running into another. */
+#define USER64_MMAP_BASE   0x0000008000000000ULL
+#define USER64_MMAP_MAX    (USER64_MMAP_BASE + (64ULL << 30))
 
 /* The shared library lies just below the mapping area, at a fixed
    address - the same in every process, because only then can its code

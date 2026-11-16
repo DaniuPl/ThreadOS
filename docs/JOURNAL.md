@@ -8336,3 +8336,25 @@ works and is checked by `make test`.
       said "I found no initrd64.img" when it was there but did not fit;
       it says "There is not enough memory for initrd64.img" now, which
       t_threadboot checks with an initrd bigger than the machine.
+
+- [x] **The mapping area at 512 GiB, 64 GiB of it**
+      (kernel64/elf64.h, kernel64/paging64.c, kernel64/paging64.h,
+      kernel64/syscall64.c, libc/tests/bigmap.c, scripts/tests/t_bigmap.py,
+      t_mmap.py, t_shm64.py)
+      The first thing WebKit's page engine needs of the kernel. A
+      program's mappings - anonymous memory, mapped files, shared memory,
+      its threads' stacks - shared its one gigabyte with its image, heap,
+      library and stack, and had 252 MiB of it; a web engine reserves
+      more than that before it reads a page. They lie in the second
+      entry of the top page table now, at 512 GiB, 64 GiB of room. The
+      walks over a program's pages - fork's copy of them, the freeing of
+      a space, the swap hand - go over both places, a gigabyte's page
+      directory at a time (user_pd()), and SYS64_DISCARD takes ranges in
+      either. bigmap maps three gigabytes and touches a byte every 16
+      MiB, gives pages back with madvise and reads zeros, forks and has
+      the child see and change its own copy, and runs four threads - on
+      one core and on four; t_bigmap also sees the machine get all its
+      memory back. (Noticed on the way, not changed: the swap hand frees
+      a frame before the other cores have forgotten it - a race to look
+      at - and the kernel manages at most 512 MiB of RAM, the next
+      thing WebKit will want.)

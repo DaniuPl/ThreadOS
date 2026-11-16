@@ -58,6 +58,31 @@ static uint64_t *table_at(uint64_t entry)
     return (uint64_t *)(uintptr_t)(entry & ADDR_MASK);
 }
 
+/* A program's memory lies in two places: the gigabyte at 1 GiB - its
+ * image, heap, library and stack (PAGING64_USER_PDPT of the first 512
+ * GiB) - and the mapping area at 512 GiB (PAGING64_MMAP_PML4), a
+ * gigabyte per page directory. The walks over a program's pages go
+ * through both a directory at a time: directory 0 is the first
+ * gigabyte, 1 onwards the mapping area's. NULL for one never used;
+ * 'base' says where its addresses begin. */
+#define USER_PDS (1 + PAGING64_MMAP_GIGS)
+
+
+static uint64_t *user_pd(uint64_t *top, int k, uint64_t *base)
+{
+    int hi = k > 0;
+    uint64_t e = top[hi ? PAGING64_MMAP_PML4 : 0];
+    if (!(e & PTE_PRESENT))
+        return (uint64_t *)0;
+    int gig = hi ? k - 1 : PAGING64_USER_PDPT;
+    e = table_at(e)[gig];
+    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
+        return (uint64_t *)0;
+    *base = ((uint64_t)(hi ? PAGING64_MMAP_PML4 : 0) << 39) |
+            ((uint64_t)gig << 30);
+    return table_at(e);
+}
+
 /* Returns the lower-level table, creating it when it does not exist yet.
  *
  * 'extra' are the permissions that have to be open along the way. The
@@ -543,11 +568,12 @@ uint64_t paging64_clone_space(uint64_t src)
 
     uint64_t *stop = (uint64_t *)(uintptr_t)src;
     uint64_t *dtop = (uint64_t *)(uintptr_t)dst;
-    uint64_t e = table_at(stop[0])[PAGING64_USER_PDPT];
-    if (!(e & PTE_PRESENT))
-        return dst;                     /* an empty process - nothing to share */
 
-    uint64_t *pd = table_at(e);
+    for (int k = 0; k < USER_PDS; k++) {
+    uint64_t base;
+    uint64_t *pd = user_pd(stop, k, &base);
+    if (!pd)
+        continue;                       /* nothing in that gigabyte */
     for (int i = 0; i < 512; i++) {
         if (!(pd[i] & PTE_PRESENT) || (pd[i] & PTE_HUGE))
             continue;
@@ -556,8 +582,7 @@ uint64_t paging64_clone_space(uint64_t src)
             if (!(pt[j] & PTE_PRESENT))
                 continue;
 
-            uint64_t va = ((uint64_t)PAGING64_USER_PDPT << 30) |
-                          ((uint64_t)i << 21) | ((uint64_t)j << 12);
+            uint64_t va = base | ((uint64_t)i << 21) | ((uint64_t)j << 12);
             uint64_t frame = pt[j] & ADDR_MASK;
             uint64_t flags = pt[j] &
                              (PG_WRITE | PG_USER | PG_NX | PG_COW | PG_FILE);
@@ -581,6 +606,7 @@ uint64_t paging64_clone_space(uint64_t src)
                 return 0;
             }
         }
+    }
     }
     return dst;
 }
@@ -681,10 +707,12 @@ void paging64_free_space(uint64_t space)
 
     uint64_t *top = (uint64_t *)(uintptr_t)space;
     uint64_t *pdpt = table_at(top[0]);
-    uint64_t e = pdpt[PAGING64_USER_PDPT];
 
-    if (e & PTE_PRESENT) {
-        uint64_t *pd = table_at(e);
+    for (int k = 0; k < USER_PDS; k++) {
+        uint64_t base;
+        uint64_t *pd = user_pd(top, k, &base);
+        if (!pd)
+            continue;
         for (int i = 0; i < 512; i++) {
             if (!(pd[i] & PTE_PRESENT) || (pd[i] & PTE_HUGE))
                 continue;
@@ -697,8 +725,11 @@ void paging64_free_space(uint64_t space)
             }
             pmm_free_frame((uint32_t)(pd[i] & ADDR_MASK));
         }
-        pmm_free_frame((uint32_t)(e & ADDR_MASK));
+        pmm_free_frame((uint32_t)((uint64_t)(uintptr_t)pd & ADDR_MASK));
     }
+    /* the mapping area's own directory table, if it ever had one */
+    if (top[PAGING64_MMAP_PML4] & PTE_PRESENT)
+        pmm_free_frame((uint32_t)(top[PAGING64_MMAP_PML4] & ADDR_MASK));
     pmm_free_frame((uint32_t)((uint64_t)(uintptr_t)pdpt & ADDR_MASK));
     pmm_free_frame((uint32_t)space);
 }
@@ -749,18 +780,21 @@ int paging64_reclaim_pages(uint64_t space, int want)
         return 0;
 
     uint64_t *top = (uint64_t *)(uintptr_t)space;
-    if (!(top[0] & PTE_PRESENT))
-        return 0;
-    uint64_t e = table_at(top[0])[PAGING64_USER_PDPT];
-    if (!(e & PTE_PRESENT) || (e & PTE_HUGE))
-        return 0;
-    uint64_t *pd = table_at(e);
     int freed = 0;
 
-    /* Two sweeps: the first clears the "accessed" bits, the second takes */
+    /* Two sweeps: the first clears the "accessed" bits, the second
+       takes. The hand goes round every directory of the program's,
+       the mapping area's too (user_pd). */
     for (int pass = 0; pass < 2 && freed < want; pass++) {
-        for (int n = 0; n < 512 && freed < want; n++) {
-            int i = (clock_pd + n) % 512;
+        for (int n = 0; n < USER_PDS * 512 && freed < want; n++) {
+            int at = (clock_pd + n) % (USER_PDS * 512);
+            uint64_t base;
+            uint64_t *pd = user_pd(top, at / 512, &base);
+            if (!pd) {
+                n += 511 - at % 512;       /* on to the next directory */
+                continue;
+            }
+            int i = at % 512;
             if (!(pd[i] & PTE_PRESENT) || (pd[i] & PTE_HUGE))
                 continue;
             uint64_t *pt = table_at(pd[i]);
@@ -796,7 +830,7 @@ int paging64_reclaim_pages(uint64_t space, int want)
                 }
                 pt[j] = swap_pte(slot, w);
                 pmm_free_frame((uint32_t)frame);
-                clock_pd = i;
+                clock_pd = at;
                 clock_pt = j + 1;
                 freed++;
             }

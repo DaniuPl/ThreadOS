@@ -415,6 +415,12 @@ $(BUILD)/user64/pthreadtest.elf: libc/tests/pthreadtest.c $(LIBC64) libc/libc64.
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/pthreadtest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/pthreadtest.o) -o $@
 
+# The mapping area at 512 GiB: gigabytes of it, fork and threads there
+$(BUILD)/user64/bigmap.elf: libc/tests/bigmap.c $(LIBC64) libc/libc64.ld \
+                            | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/bigmap.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/bigmap.o) -o $@
+
 $(BUILD)/user64/nettest.elf: libc/tests/nettest.c $(LIBC64) libc/libc64.ld \
                              | $(BUILD)/user64 $(BUILD)/libc64
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/nettest.o
@@ -651,6 +657,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
+               $(BUILD)/user64/bigmap.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
@@ -989,6 +996,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    syscalls=$(BUILD)/user64/syscalls.elf \
 	    libctest=$(BUILD)/user64/libctest.elf \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
+	    bigmap=$(BUILD)/user64/bigmap.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
 	    randtest=$(BUILD)/user64/randtest.elf \

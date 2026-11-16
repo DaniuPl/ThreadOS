@@ -26,6 +26,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64
 
+# The mapping area: 64 GiB from 512 GiB (USER64_MMAP_BASE and _MAX in
+# kernel64/elf64.h)
+MMAP_BASE = 512 << 30
+MMAP_SIZE = 64 << 30
+
 
 def main():
     print("--- shared memory (the 64-bit kernel) ---")
@@ -61,13 +66,14 @@ def main():
             check("both processes finished with no error",
                   "done, exit code 0" in out and "WRONG" not in out)
 
-            # The region lies in the mapping area (from 0x50000000
-            # upwards), not in the heap or on the stack - and that can be
-            # seen from the address
+            # The region lies in the mapping area (64 GiB from 512 GiB,
+            # USER64_MMAP_BASE in kernel64/elf64.h), not in the heap or
+            # on the stack - and that can be seen from the address
             addresses = re.findall(r"the region at address (\d+)", out)
             check("both processes got an address from the mapping area",
                   len(addresses) == 2 and
-                  all(0x50000000 <= int(a) < 0x60000000 for a in addresses))
+                  all(MMAP_BASE <= int(a) < MMAP_BASE + MMAP_SIZE
+                      for a in addresses))
             # The writer mapped a region on the side earlier, so it sees
             # the shared one higher up than the reader does. The same
             # bytes at two different addresses - that is the point.
