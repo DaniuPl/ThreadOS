@@ -7937,3 +7937,19 @@ works and is checked by `make test`.
       a damaged frame and somebody's data frame. The scenario wants
       exactly five networks with their names, channels, loudest signals
       and protection. A wrong filter flag in the driver fails it.
+
+- [x] **The Wi-Fi networks in Settings**
+      (kernel/include/wifi_info.h, user/uwifi.h, kernel64/syscall64.c,
+      kernel/iwlwifi.c, user/gsettings.c, scripts/tests/t_wifiui.py)
+      Settings' Wi-Fi page said "no driver for this card yet" whatever
+      the driver did. SYS64_WIFI now gives a program the card, its state
+      and address and the last scan's networks, the loudest first, and
+      starts a scan the driver's thread runs; the page shows them with
+      the name (or "Hidden network"), the protection and the signal in
+      four bars, and a button that searches. A card some other driver
+      would need still gets the old explanation. QEMU has no 3160, so
+      'wifi test' pushes 802.11 frames through the scan's own handlers
+      - three networks and one frame with a broken checksum - and says
+      on the page that the list is that. t_wifiui reads the list off
+      the screen: the order, the names, the protection, the bars, and
+      nothing of the broken frame.

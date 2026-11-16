@@ -48,6 +48,8 @@
 #include "../kernel/include/pci_info.h"
 #include "../kernel/include/bt.h"
 #include "../kernel/include/bt_info.h"
+#include "../kernel/include/iwlwifi.h"
+#include "../kernel/include/wifi_info.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/random.h"
 
@@ -1481,6 +1483,22 @@ static void handle(struct regs *r)
         static struct bt_info bi;
         bt_info_fill(&bi);
         *(struct bt_info *)(uintptr_t)a2 = bi;
+        r->rax = 0;
+        return;
+    }
+    case SYS64_WIFI: {
+        if (a1 == 1) {
+            r->rax = (uint64_t)(int64_t)iwlwifi_scan_start();
+            return;
+        }
+        if (a1 != 0 ||
+            !paging64_user_writable(a2, sizeof(struct wifi_info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        static struct wifi_info wi;
+        iwlwifi_info_fill(&wi);
+        *(struct wifi_info *)(uintptr_t)a2 = wi;
         r->rax = 0;
         return;
     }

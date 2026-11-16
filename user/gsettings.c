@@ -26,6 +26,7 @@
 #include "ulocale.h"
 #include "pciinfo.h"
 #include "ubt.h"
+#include "uwifi.h"
 
 /* Small enough to open in the cascade's third place on a 640x480
    screen, between the bar and the dock */
@@ -56,6 +57,9 @@
 #define INFO_H 24             /* a line of figures: a name and a value */
 #define INFO_X 120            /* the value, right of the name */
 #define NOTE_DY 14            /* the last line's baseline, from the bottom */
+#define WIFI_LIST_Y 166       /* Wi-Fi: the first network's row (PANE_Y0,
+                                 three lines, the button and a gap) */
+#define WIFI_ROW_H 20         /* ...and each one's height */
 #define LOCK_WAY_W 84         /* Screen Lock: a way to unlock, as a chip */
 #define LOCK_PIN_W 92         /* ...the PIN field */
 #define LOCK_PW_W 140         /* ...and the password beside it */
@@ -470,6 +474,7 @@ static void fields_from_settings(void)
 #define A_BEEP    7
 #define A_TOGGLE  8               /* name flips between 0 and 1 */
 #define A_BT_SEARCH 12
+#define A_WIFI_SEARCH 15
 #define A_UNLOCK_PICK 13          /* the way the lock opens, chosen */
 #define A_UNLOCK_SAVE 14          /* ...and saved, with the password */
 #define A_UPDATE_CHECK   9
@@ -872,8 +877,74 @@ static void put_hex4(char *out, int at, uint32_t v)
     out[at + 4] = 0;
 }
 
+static struct wifi_info wfi;
+
+/* How strong, in four bars: the steps phones use, near enough */
+static void wifi_bars(int x, int y, int rssi)
+{
+    int lit = rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
+    for (int i = 0; i < 4; i++) {
+        int h = 4 + 3 * i;
+        ud_round(win, x + 5 * i, y + 15 - h, 3, h, 1,
+                 i < lit ? l.text : l.line);
+    }
+}
+
+/* The card the driver has (the Intel Wireless 3160), what it is doing,
+   and what the last scan heard - or what 'wifi test' read from its
+   recorded frames on a machine with no card. 0 = not this page's
+   business: no driver has a card. */
+static int draw_wifi_driver(void)
+{
+    if (sys_wifi(WIFI_INFO, &wfi) != 0 || (!wfi.present && !wfi.recorded))
+        return 0;
+    static const char *const kind[4] = { "open", "WEP", "WPA", "WPA2" };
+    if (wfi.present) {
+        info(0, "Card", wfi.card);
+        info(1, "Status", wfi.ready ? "on" : wfi.state);
+        info(2, "Address", wfi.mac[0] ? wfi.mac : "-");
+    } else {
+        info(0, "Card", "none in this machine");
+        info(1, "Networks", "recorded ('wifi test')");
+        info(2, "Address", "-");
+    }
+    int y = PANE_Y0 + 3 * INFO_H + 8;
+    if (wfi.scanning)
+        ud_text_l(win, PANE_X, ud_baseline(y, CHIP_H, UD_PX),
+                  "Searching for networks...", l.dim, UD_SANS, UD_PX);
+    else if (wfi.ready)
+        button(PANE_X, y, 150, "Search for networks", A_WIFI_SEARCH, 0);
+    else if (wfi.present)
+        note(y + 4, wfi.error[0] ? wfi.error : "The card is not ready.");
+    y = WIFI_LIST_Y;
+    if (wfi.found < 0 && !wfi.scanning) {
+        note(y, "Search to see the networks around.");
+    } else if (wfi.found == 0 && !wfi.scanning) {
+        note(y, "No networks found.");
+    } else {
+        int n = wfi.found < WIFI_INFO_NETS ? wfi.found : WIFI_INFO_NETS;
+        for (int i = 0; i < n && y + WIFI_ROW_H < ch - NOTE_DY - 14; i++) {
+            const struct wifi_net *w = &wfi.net[i];
+            int base = ud_baseline(y, WIFI_ROW_H, UD_PX);
+            if (w->ssid[0])
+                ud_text(win, PANE_X, base, w->ssid, l.text, UD_SANS, UD_PX);
+            else
+                ud_text_l(win, PANE_X, base, "Hidden network", l.dim,
+                          UD_SANS, UD_PX);
+            ud_text_l(win, PANE_X + 200, base, kind[w->security & 3], l.dim,
+                      UD_SANS, UD_PX);
+            wifi_bars(PANE_X + 250, y + 2, w->rssi);
+            y += WIFI_ROW_H;
+        }
+    }
+    note(ch - NOTE_DY - 14, "Joining a network comes in the next stage.");
+    return 1;
+}
+
 static void draw_wifi(void)
 {
+    if (draw_wifi_driver())
+        return;
     /* A wireless card is a network controller of the "other" kind,
        class 02, subclass 80 - every one of them, whoever made it */
     struct pci_info p;
@@ -1268,6 +1339,9 @@ static void click(int x, int y)
             break;
         case A_BT_SEARCH:
             sys_bt(BT_SEARCH, (struct bt_info *)0);
+            break;
+        case A_WIFI_SEARCH:
+            sys_wifi(WIFI_SEARCH, (struct wifi_info *)0);
             break;
         case A_UNLOCK_PICK:
             unlock_pick = t->arg;

@@ -175,6 +175,15 @@ int iwlwifi_scan(void);
 int iwlwifi_scan_now(void);
 /* The networks of the last scan; how many there are */
 int iwlwifi_bss(struct iwlwifi_bss *out, int max);
+/* The scan, started for whoever cannot wait for it (Settings, through
+   SYS64_WIFI): 0 = asked, -1 = no card ready or one is running */
+int iwlwifi_scan_start(void);
+/* Everything above, for a program (wifi_info.h) */
+struct wifi_info;
+void iwlwifi_info_fill(struct wifi_info *out);
+/* 'wifi test': recorded beacons through the same parser, with no card -
+   what can be checked of the receiving half in a machine without one */
+void iwlwifi_selftest(void);
 
 /* One 802.11 frame onto a data queue. tx_cmd is the 56-byte TX command
    (the caller fills rate, station, flags, security; the transport fills

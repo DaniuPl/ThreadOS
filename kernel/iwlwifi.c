@@ -51,6 +51,7 @@
 #include <stdint.h>
 #include <stdarg.h>
 #include "include/iwlwifi.h"
+#include "include/wifi_info.h"
 #include "include/mmio.h"
 #include "include/pci.h"
 #include "include/pmm.h"
@@ -2911,6 +2912,8 @@ static uint8_t scan_cmd[SCAN_FIXED + SCAN_CHAN_CFG * SCAN_MAX_CHANNELS +
 static struct iwlwifi_bss bss[IWLWIFI_MAX_BSS];
 static int n_bss;
 static volatile int scan_running, scan_status;
+static int bss_found = -1;          /* after a scan; -1 = none yet */
+static int bss_recorded;            /* the list is the self-test's */
 /* The PHY half of the frame being received: where and how loud */
 static uint16_t rx_channel;
 static int rx_signal;
@@ -3115,6 +3118,8 @@ int iwlwifi_scan_now(void)
     }
     say("[wifi] scan done (status %u): %d network(s)\n",
         (uint32_t)scan_status, n_bss);
+    bss_found = n_bss;
+    bss_recorded = 0;
     return n_bss;
 }
 
@@ -3129,6 +3134,136 @@ int iwlwifi_bss(struct iwlwifi_bss *out, int max)
 /* From any thread: the scan is the driver thread's to run */
 static volatile int scan_wanted, scan_result;
 static volatile uint32_t scan_gen;
+
+int iwlwifi_scan_start(void)
+{
+    if (st.stage != IWL_STAGE_READY || scan_wanted || scan_running)
+        return -1;
+    scan_wanted = 1;
+    return 0;
+}
+
+static void hex_addr(char *out, const uint8_t *a)
+{
+    static const char hx[] = "0123456789abcdef";
+    for (int i = 0; i < 6; i++) {
+        out[3 * i] = hx[a[i] >> 4];
+        out[3 * i + 1] = hx[a[i] & 15];
+        out[3 * i + 2] = i < 5 ? ':' : 0;
+    }
+}
+
+static void copy_text(char *dst, uint32_t room, const char *src)
+{
+    uint32_t i = 0;
+    for (; src && src[i] && i + 1 < room; i++)
+        dst[i] = src[i];
+    dst[i] = 0;
+}
+
+void iwlwifi_info_fill(struct wifi_info *o)
+{
+    memset(o, 0, sizeof(*o));
+    o->present = st.stage != IWL_STAGE_NONE && st.stage != IWL_STAGE_NO_CARD;
+    o->ready = st.stage == IWL_STAGE_READY;
+    o->scanning = scan_wanted || scan_running;
+    o->found = bss_found;
+    o->recorded = bss_recorded;
+    if (o->present)
+        copy_text(o->card, sizeof(o->card), "Intel Wireless 3160");
+    copy_text(o->state, sizeof(o->state), iwlwifi_stage_name(st.stage));
+    if (st.mac_valid)
+        hex_addr(o->mac, st.mac);
+    copy_text(o->error, sizeof(o->error), st.last_error);
+    /* The loudest first: that is the order a person picks from */
+    int used[IWLWIFI_MAX_BSS] = { 0 };
+    for (int k = 0; k < WIFI_INFO_NETS && k < n_bss; k++) {
+        int best = -1;
+        for (int i = 0; i < n_bss; i++)
+            if (!used[i] && (best < 0 || bss[i].rssi > bss[best].rssi))
+                best = i;
+        used[best] = 1;
+        struct wifi_net *w = &o->net[k];
+        copy_text(w->ssid, sizeof(w->ssid), bss[best].ssid);
+        hex_addr(w->bssid, bss[best].bssid);
+        w->rssi = bss[best].rssi;
+        w->channel = bss[best].channel;
+        w->security = bss[best].security;
+    }
+}
+
+/* --- what can be checked without a card ------------------------------
+ *
+ * Beacons and a probe response of the shape 802.11 gives them, each
+ * with the PHY packet the firmware sends before it, pushed through the
+ * same two handlers a scan uses - and one with a broken checksum, which
+ * has to come to nothing. This proves the reading of frames, not that a
+ * card hears anything.
+ */
+static void test_frame(const uint8_t *bssid, const char *ssid, int channel,
+                       int rssi, int sec, int sub, uint32_t status)
+{
+    static uint8_t phy[68], m[4 + 160 + 4];
+    memset(phy, 0, sizeof(phy));
+    put16(phy + 22, (uint32_t)channel);
+    put32(phy + 28, (uint32_t)(-rssi) & 0xFF);
+    rx_phy(REPLY_RX_PHY_CMD, phy, sizeof(phy), 0);
+    uint8_t *f = m + 4;
+    memset(m, 0, sizeof(m));
+    f[0] = (uint8_t)(sub << 4);
+    memset(f + 4, 0xFF, 6);
+    memcpy(f + 10, bssid, 6);
+    memcpy(f + 16, bssid, 6);
+    put16(f + 32, 100);
+    put16(f + 34, sec == IWLWIFI_SEC_OPEN ? 0x0001 : 0x0011);
+    uint32_t n = 36, sl = 0;
+    while (ssid[sl])
+        sl++;
+    f[n++] = 0;
+    f[n++] = (uint8_t)sl;
+    memcpy(f + n, ssid, sl);
+    n += sl;
+    f[n++] = 3;
+    f[n++] = 1;
+    f[n++] = (uint8_t)channel;
+    if (sec == IWLWIFI_SEC_WPA2) {
+        static const uint8_t rsn[] = { 48, 20, 1, 0, 0x00, 0x0F, 0xAC, 4,
+                                       1, 0, 0x00, 0x0F, 0xAC, 4, 1, 0,
+                                       0x00, 0x0F, 0xAC, 2, 0, 0 };
+        memcpy(f + n, rsn, sizeof(rsn));
+        n += sizeof(rsn);
+    }
+    put16(m, n);
+    put32(f + n, status);
+    rx_mpdu(REPLY_RX_MPDU_CMD, m, 4 + n + 4, 0);
+}
+
+void iwlwifi_selftest(void)
+{
+    static const uint8_t a[6] = { 0x02, 0x7A, 0x00, 0x00, 0x10, 0x01 };
+    static const uint8_t b[6] = { 0x02, 0x7A, 0x00, 0x00, 0x10, 0x02 };
+    static const uint8_t c[6] = { 0x02, 0x7A, 0x00, 0x00, 0x10, 0x03 };
+    static const uint8_t d[6] = { 0x02, 0x7A, 0x00, 0x00, 0x10, 0x04 };
+    n_bss = 0;
+    rx_signal = -128;
+    test_frame(a, "ThreadOS-Test", 6, -52, IWLWIFI_SEC_WPA2, 8, 3);
+    test_frame(b, "Guest", 11, -74, IWLWIFI_SEC_OPEN, 5, 3);
+    test_frame(c, "", 1, -81, IWLWIFI_SEC_WPA2, 8, 3);
+    test_frame(d, "Broken", 6, -40, IWLWIFI_SEC_OPEN, 8, 1);  /* bad CRC */
+    bss_found = n_bss;
+    bss_recorded = 1;
+    printk("wifi: reading frames, with no card - of the shape 802.11 "
+           "gives them\n");
+    for (int i = 0; i < n_bss; i++) {
+        char t[18];
+        hex_addr(t, bss[i].bssid);
+        printk("  %s  ch %u  %d dBm  %s  %s\n", t,
+               (uint32_t)bss[i].channel, (int)bss[i].rssi,
+               bss[i].security == IWLWIFI_SEC_WPA2 ? "WPA2" : "open",
+               bss[i].ssid_len ? bss[i].ssid : "(hidden)");
+    }
+    printk("wifi: networks read: %d\n", n_bss);
+}
 
 int iwlwifi_scan(void)
 {

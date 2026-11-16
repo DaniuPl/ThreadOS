@@ -66,6 +66,7 @@ def build(work):
     for name in os.listdir(os.path.join(HW, "iwl", "include")):
         shutil.copy(os.path.join(HW, "iwl", "include", name), inc)
     shutil.copy(os.path.join(ROOT, "kernel", "include", "iwlwifi.h"), inc)
+    shutil.copy(os.path.join(ROOT, "kernel", "include", "wifi_info.h"), inc)
     shutil.copy(os.path.join(HW, "iwl", "paging64.h"),
                 os.path.join(work, "kernel64"))
     driver = os.path.join(ROOT, "kernel", "iwlwifi.c")

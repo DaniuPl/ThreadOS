@@ -141,7 +141,7 @@ static void cmd_help(void)
     printk("            fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("          hardware - what is in this machine, disks, font\n");
     printk("          bt [scan|test] - Bluetooth\n");
-    printk("          wifi [scan] - the Wi-Fi card, the networks around\n");
+    printk("          wifi [scan|test] - the Wi-Fi card, the networks\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          format [N] - the whole disk, or partition N, as TFS\n");
     printk("          install - ThreadOS onto this machine's disk\n");
@@ -1203,6 +1203,8 @@ static void execute(const char *line)
         cmd_wifi();
     } else if (!strcmp(line, "wifi scan")) {
         cmd_wifi_scan();
+    } else if (!strcmp(line, "wifi test")) {
+        iwlwifi_selftest();
     } else if (!strcmp(line, "font")) {
         fonts_command("");
     } else if (starts_with(line, "font ")) {
