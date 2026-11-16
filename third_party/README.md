@@ -11,6 +11,7 @@ as code of our own around it (`apps/js`).
 | `quickjs/`| QuickJS, a JavaScript engine (core)    | 2026-06-04 | MIT (`LICENSE`)   | https://bellard.org/quickjs/ |
 | `litehtml/` | litehtml, an HTML/CSS layout engine, with gumbo (an HTML5 parser) inside | git 8848b99 (2026-10-12); gumbo 0.14.1 | BSD-3-Clause (`LICENSE`); gumbo Apache-2.0 (`src/gumbo/LICENSE`) | https://github.com/litehtml/litehtml |
 | `ffmpeg-9.0.tar.xz` | FFmpeg demuxers and audio/video decoders | 9.0 | LGPL-2.1-or-later (`COPYING.LGPLv2.1`) | https://ffmpeg.org/releases/ffmpeg-9.0.tar.xz |
+| `iwlwifi/` | Firmware for the Intel Wireless 3160 Wi-Fi card (`iwlwifi-3160-17.ucode`), a binary the card runs itself | 17.bfb58538.0 | Intel's firmware licence: redistribution in binary form only, unmodified (`LICENCE.iwlwifi_firmware`) | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git (`intel/iwlwifi/`) |
 
 Trimmed, not modified:
 
@@ -33,4 +34,8 @@ Trimmed, not modified:
   AVI demuxers and the codecs used for those formats. GPL and version 3
   components are disabled; no FFmpeg programs or network protocols are
   built. The player and kernel audio stream interface are our own code.
+- **iwlwifi**: not source and not built: the card will not run without
+  the program its maker wrote for it, and the maker publishes it only as
+  this file. It is loaded into the card, never into the kernel. The
+  driver is our own code (`kernel/iwlwifi.c`).
 

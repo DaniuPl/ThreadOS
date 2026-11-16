@@ -1,0 +1,2946 @@
+/* Intel Wireless 3160 (802.11ac, one antenna, PCIe)
+ *
+ * This card is not a radio the driver drives register by register. It
+ * is a small computer of its own - a CPU with its own SRAM - and it
+ * does nothing until the driver has copied Intel's firmware into it.
+ * From then on the driver talks to the firmware in messages: host
+ * commands going in, responses and notifications coming back.
+ *
+ * The firmware file (third_party/iwlwifi) holds two images that matter
+ * here. INIT runs first: it reads the card's NVM - the MAC address and
+ * the channels this card may use where it was sold - and calibrates
+ * the radio. Its calibration results (the "PHY DB") come back to the
+ * driver, which then stops the card, loads the RUNTIME image and hands
+ * the results to it, because the runtime image does not calibrate the
+ * radio from scratch. A runtime image without them would run, but on
+ * a radio nobody measured.
+ *
+ * Messages travel over DMA rings, as on a network card. Each transmit
+ * queue is a ring of 256 descriptors (TFDs) of 128 bytes, each pointing
+ * at up to 20 buffers; queue 9 carries host commands, the data queues
+ * are set up by the firmware when asked. Everything the card sends
+ * arrives through one receive ring of 4 KiB buffers, several packets
+ * per buffer. The firmware itself is copied in through a separate DMA
+ * "service channel", a chunk at a time.
+ *
+ * The registers lie in BAR0. A few (the CSR block) are plain; the rest
+ * of the chip - the "periphery" (PRPH) and the card's SRAM - is reached
+ * through address/data register pairs, and only while the card is held
+ * awake (MAC_ACCESS_REQ in GP_CNTRL, then wait for the clock). The
+ * 3160 has a hardware bug there: while a host command is in flight the
+ * card must be held awake the whole time, not only around each access,
+ * or the firmware misses the command.
+ *
+ * The driver polls; it asks for no interrupt. The interrupt cause
+ * register (CSR_INT) latches whatever the mask says, so a thread that
+ * reads it sees what a handler would, and INTx is turned off at the
+ * PCI level so that nothing reaches the interrupt controller even
+ * through the causes the card raises when masked. Received packets are
+ * found by comparing the card's "closed" index in the RX status block
+ * with our own read index, which needs no interrupt at all.
+ *
+ * Every wait has a timeout and every failure names the step it stopped
+ * at, so one boot on a laptop says how far the card got. A firmware
+ * crash is reported with the error id from the firmware's error log.
+ *
+ * Layout: the transport first (register access, power-up, firmware
+ * load, the RX ring, the TX queues, host commands), then the firmware
+ * side (the INIT run, the PHY DB, the NVM, the runtime bring-up).
+ */
+
+#include <stdint.h>
+#include <stdarg.h>
+#include "include/iwlwifi.h"
+#include "include/mmio.h"
+#include "include/pci.h"
+#include "include/pmm.h"
+#include "include/initrd.h"
+#include "include/printk.h"
+#include "include/task.h"
+#include "include/pit.h"
+#include "include/string.h"
+#include "include/io.h"
+
+/* The registers are in memory and have to be mapped; the window's
+   address comes from the BAR. */
+#include "../kernel64/paging64.h"
+#define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
+
+#define INTEL_VENDOR     0x8086
+#define FW_FILE          "iwl3160.ucode"
+/* The registers used reach up to 0x1EB8 */
+#define BAR_SIZE         0x2000
+
+/* --- CSR registers (BAR0) ------------------------------------------- */
+
+#define CSR_HW_IF_CONFIG_REG   0x000
+#define CSR_INT_COALESCING     0x004
+#define CSR_INT                0x008   /* cause, write 1 to clear */
+#define CSR_INT_MASK           0x00C
+#define CSR_FH_INT_STATUS      0x010   /* DMA cause, write 1 to clear */
+#define CSR_RESET              0x020
+#define CSR_GP_CNTRL           0x024
+#define CSR_HW_REV             0x028
+#define CSR_GIO_REG            0x03C
+#define CSR_UCODE_DRV_GP1_CLR  0x05C
+#define CSR_MBOX_SET_REG       0x088
+#define CSR_MAC_SHADOW_REG_CTRL 0x0A8
+#define CSR_GIO_CHICKEN_BITS   0x100
+#define CSR_DBG_HPET_MEM_REG   0x240
+#define CSR_DBG_LINK_PWR_MGMT_REG 0x250
+
+#define HW_IF_HAP_WAKE_L1A     0x00080000
+#define HW_IF_NIC_READY        0x00400000
+#define HW_IF_PREPARE          0x08000000
+/* What nic_config writes: MAC dash/step from HW_REV, the PHY type, dash
+   and step from the firmware's PHY_SKU, RADIO_SI on, MAC_SI off */
+#define HW_IF_NIC_CONFIG_MASK  0x0000FF0F
+#define HW_IF_RADIO_SI         0x00000200
+
+#define INT_FH_RX              0x80000000
+#define INT_HW_ERR             0x20000000
+#define INT_RX_PERIODIC        0x10000000
+#define INT_FH_TX              0x08000000
+#define INT_SW_ERR             0x02000000
+#define INT_RF_KILL            0x00000080
+#define INT_CT_KILL            0x00000040
+#define INT_SW_RX              0x00000008
+#define FH_INT_RX_MASK         0x40030000
+#define FH_INT_TX_MASK         0x00000003
+
+#define RESET_FORCE_NMI        0x00000002
+#define RESET_SW_RESET         0x00000080
+#define RESET_MASTER_DISABLED  0x00000100
+#define RESET_STOP_MASTER      0x00000200
+
+#define GP_MAC_CLOCK_READY     0x00000001
+#define GP_INIT_DONE           0x00000004
+#define GP_MAC_ACCESS_REQ      0x00000008
+#define GP_GOING_TO_SLEEP      0x00000010
+#define GP_HW_RF_KILL_SW       0x08000000   /* set: the radio may run */
+
+#define GIO_L0S_ENABLED        0x00000002
+#define GIO_CHICKEN_L1A_NO_L0S_RX     0x00800000
+#define GIO_CHICKEN_DIS_L0S_EXIT_TIMER 0x20000000
+#define GP1_SW_BIT_RFKILL      0x00000002
+#define GP1_CMD_BLOCKED        0x00000004
+#define MBOX_OS_ALIVE          0x00000020
+#define HOST_INT_TIMEOUT_DEF   0x40          /* x 32 us */
+#define HOST_INT_OPER_MODE     0x80000000    /* a 7260/3160 coalescing fix */
+
+/* --- HBUS: the indirect windows ------------------------------------- */
+
+#define HBUS_TARG_MEM_RADDR    0x40C
+#define HBUS_TARG_MEM_WADDR    0x410
+#define HBUS_TARG_MEM_WDAT     0x418
+#define HBUS_TARG_MEM_RDAT     0x41C
+#define HBUS_TARG_PRPH_WADDR   0x444
+#define HBUS_TARG_PRPH_RADDR   0x448
+#define HBUS_TARG_PRPH_WDAT    0x44C
+#define HBUS_TARG_PRPH_RDAT    0x450
+#define HBUS_TARG_WRPTR        0x460         /* index | queue << 8 */
+
+/* --- FH: the DMA engine --------------------------------------------- */
+
+#define FH_TFDIB_CTRL0(ch)     (0x1900 + 8 * (ch))
+#define FH_TFDIB_CTRL1(ch)     (0x1904 + 8 * (ch))
+#define FH_KW_MEM_ADDR_REG     0x197C
+#define FH_SRVC_SRAM_ADDR(ch)  (0x19A4 + 4 * (ch))
+#define FH_RSCSR_STTS_WPTR     0x1BC0
+#define FH_RSCSR_RBDCB_BASE    0x1BC4
+#define FH_RSCSR_WPTR          0x1BC8
+#define FH_RSCSR_RDPTR         0x1BCC
+#define FH_RCSR_CONFIG         0x1C00
+#define FH_RCSR_RBDCB_WPTR     0x1C08
+#define FH_RCSR_FLUSH_RB_REQ   0x1C10
+#define FH_RSSR_RX_STATUS      0x1C44
+#define FH_TCSR_CONFIG(ch)     (0x1D00 + 0x20 * (ch))
+#define FH_TCSR_BUF_STS(ch)    (0x1D08 + 0x20 * (ch))
+#define FH_TX_CHICKEN_BITS     0x1E98
+#define FH_TSSR_TX_STATUS      0x1EB0
+
+#define FH_SRVC_CHNL           9
+#define FH_TX_CONFIG_ENABLE    0x80000000
+#define FH_TX_CREDIT_ENABLE    0x00000008
+#define FH_TX_CIRQ_HOST_ENDTFD 0x00100000
+#define FH_TX_BUF_STS_LOAD     0x00101003    /* one TB, index 1, valid */
+#define FH_TX_CHICKEN_AUTO_RETRY 0x00000002
+#define FH_RX_STATUS_IDLE      0x01000000
+/* RX on, IGNORE_RXF_EMPTY, interrupt to the host, 4 KiB buffers,
+   timeout 0x11 x 32 us, 2^8 = 256 descriptors */
+#define FH_RX_CONFIG           0x80801114
+#define FH_CHUNK_MAX           0x20000
+#define FH_MEM_EXT_START       0x40000
+#define FH_MEM_EXT_END         0x57FFF
+
+static uint32_t fh_cbbc(int q)
+{
+    if (q < 16)
+        return 0x19D0 + 4 * (uint32_t)q;
+    if (q < 20)
+        return 0x1BF0 + 4 * (uint32_t)(q - 16);
+    return 0x1B20 + 4 * (uint32_t)(q - 20);
+}
+
+/* --- PRPH: the periphery -------------------------------------------- */
+
+#define APMG_CLK_EN_REG        0x3004
+#define APMG_CLK_DIS_REG       0x3008
+#define APMG_PS_CTRL_REG       0x300C
+#define APMG_PCIDEV_STT_REG    0x3010
+#define APMG_RTC_INT_STT_REG   0x301C
+#define APMG_CLK_DMA_RQT       0x00000200
+#define APMG_PS_EARLY_PWR_OFF_RESET_DIS 0x00400000
+#define APMG_PS_PWR_SRC_MASK   0x03000000
+#define APMG_PCIDEV_L1_ACT_DIS 0x00000800
+#define APMG_RTC_INT_RFKILL    0x10000000
+#define OSC_CLK                0xA04068
+#define OSC_CLK_FORCE_CONTROL  0x00000008
+#define LMPM_CHICK             0xA01FF8
+#define DEVICE_SET_NMI_REG     0xA01C30
+
+#define SCD_SRAM_BASE_ADDR     0xA02C00
+#define SCD_DRAM_BASE_ADDR     0xA02C08
+#define SCD_TXFACT             0xA02C10
+#define SCD_QUEUECHAIN_SEL     0xA02CE8
+#define SCD_GP_CTRL            0xA02DA8
+#define SCD_AGGR_SEL           0xA02E48
+#define SCD_EN_CTRL            0xA02E54
+#define SCD_GP_CTRL_AUTO_ACTIVE 0x00040000
+#define SCD_GP_CTRL_31_QUEUES  0x00000001
+/* (the high halves add 4 x q, not 4 x (q - 20); only queue 9 is ever
+   programmed here, the firmware programs the others) */
+#define SCD_QUEUE_RDPTR(q)     ((q) < 20 ? 0xA02C68 + 4 * (q) : 0xA02EB4 + 4 * (q))
+#define SCD_QUEUE_STATUS(q)    ((q) < 20 ? 0xA02D0C + 4 * (q) : 0xA02F34 + 4 * (q))
+#define SCD_STTS_ACTIVE        (1u << 3)
+#define SCD_STTS_WSL           (1u << 4)
+#define SCD_STTS_ACT_EN        (1u << 19)
+#define SCD_STTS_MSK           0x017F0000
+/* The scheduler's SRAM, from its base */
+#define SCD_CONTEXT_MEM        0x600
+#define SCD_TRANS_TBL_END      ((0x7E0 + 2 * 31) & 0xFFFC)
+
+/* --- queues, rings, buffers ----------------------------------------- */
+
+#define NUM_QUEUES             31
+#define CMD_QUEUE              9
+#define CMD_FIFO               7
+#define TFD_QUEUE_SIZE         256
+#define TFD_SIZE               128
+#define TFD_MAX_TBS            20
+#define TB_MAX_LEN             4080          /* the length field is 12 bits */
+#define SCRATCH_SIZE           16            /* TB0: what the FH writes back */
+#define BC_TABLE_STRIDE        640           /* 320 x u16 per queue */
+#define CMD_SLOTS              32            /* command queue window */
+#define CMD_SLOT_SIZE          512
+#define CMD_INLINE_MAX         324           /* header + payload, inline */
+#define CMD_BIG_SIZE           16384         /* the larger ones (scan) */
+#define TX_SLOTS               64            /* frames in flight per data queue */
+#define TX_SLOT_SIZE           2560
+#define TX_BODY_OFF            128
+#define FRAME_LIMIT            64
+
+#define RX_QUEUE_SIZE          256
+#define RX_BUF_SIZE            4096
+#define RX_FRAME_INVALID       0x55550000
+#define RX_FRAME_SIZE_MASK     0x3FFF
+#define RX_FRAME_ALIGN         64
+
+#define SEQ_RX_FRAME           0x8000
+
+/* --- firmware file -------------------------------------------------- */
+
+#define FW_MAGIC               0x0A4C5749    /* "IWL\n" */
+#define FW_HEADER_SIZE         88
+#define TLV_PROBE_MAX_LEN      6
+#define TLV_FLAGS              18
+#define TLV_SEC_RT             19
+#define TLV_SEC_INIT           20
+#define TLV_DEF_CALIB          22
+#define TLV_PHY_SKU            23
+#define TLV_NUM_OF_CPU         27
+#define TLV_API_CHANGES_SET    29
+#define TLV_ENABLED_CAPA       30
+#define TLV_N_SCAN_CHANNELS    31
+#define TLV_FW_VERSION         36
+#define FW_SECTIONS_MAX        16
+#define FW_SEP_CPU1_CPU2       0xFFFFCCCC
+#define FW_SEP_PAGING          0xAAAABBBB
+#define API_NEW_VERSION        (1u << 20)
+#define UCODE_API_MIN          13
+#define UCODE_API_MAX          17
+#define UCODE_REGULAR          0
+#define UCODE_INIT             1
+
+/* --- host commands and notifications -------------------------------- */
+
+#define MVM_ALIVE              0x01
+#define REPLY_ERROR            0x02
+#define INIT_COMPLETE_NOTIF    0x04
+#define PHY_CONTEXT_CMD        0x08
+#define ADD_STA                0x18
+#define TX_CMD                 0x1C
+#define SCD_QUEUE_CFG          0x1D
+#define PHY_CONFIGURATION_CMD  0x6A
+#define CALIB_RES_NOTIF_PHY_DB 0x6B
+#define PHY_DB_CMD             0x6C
+#define POWER_TABLE_CMD        0x77
+#define NVM_ACCESS_CMD         0x88
+#define TX_ANT_CONFIGURATION_CMD 0x98
+#define BT_CONFIG              0x9B
+#define CARD_STATE_NOTIFICATION 0xA1
+#define REPLY_SF_CFG_CMD       0xD1
+
+#define ALIVE_STATUS_OK        0xCAFE
+#define ERRLOG_MIN_ADDR        0x800000
+#define ERRLOG_DWORDS          38            /* LOG_ERROR_TABLE_API_S_VER_2 */
+#define UMAC_ERRLOG_DWORDS     15
+
+#define NVM_SECTIONS           13
+#define NVM_CHUNK              2048
+#define NVM_BUF_SIZE           16384
+#define NVM_SEC_HW             0
+#define NVM_SEC_SW             1
+#define NVM_SEC_CALIB          4
+#define NVM_HW_ADDR_OFF        0x2A
+#define NVM_SW_CHANNELS_OFF    0x40
+#define NVM_VERSION_3160       0x0709
+#define NVM_CH_VALID           0x0001
+#define NVM_CH_IBSS            0x0002
+#define NVM_CH_ACTIVE          0x0008
+#define NVM_CH_RADAR           0x0010
+#define NVM_CH_INDOOR_ONLY     0x0020
+#define NVM_CH_GO_CONCURRENT   0x0040
+#define NVM_CH_40MHZ           0x0200
+#define NVM_CH_80MHZ           0x0400
+#define NVM_CH_160MHZ          0x0800
+#define NVM_SKU_BAND_52        0x0002
+#define DEFAULT_MAX_TX_POWER   22
+
+#define PHY_DB_CFG             1
+#define PHY_DB_CALIB_NCH       2
+#define PHY_DB_CALIB_CHG_PAPD  4
+#define PHY_DB_CALIB_CHG_TXP   5
+#define PHY_DB_GROUPS          9
+#define PHY_DB_POOL_SIZE       32768
+
+#define AUX_QUEUE              15
+#define AUX_FIFO               5
+#define AUX_MAC_INDEX          4
+#define AUX_STA_ID             1
+#define ADD_STA_SUCCESS        1
+#define MAX_TID_COUNT          8
+#define NUM_PHY_CTX            3
+#define PHY_BAND_24            1
+#define PHY_BAND_5             0
+#define FW_CTXT_ACTION_ADD     1
+
+/* Timeouts, in milliseconds */
+#define ALIVE_TIMEOUT_MS       1000
+#define CALIB_TIMEOUT_MS       2000
+#define CMD_TIMEOUT_MS         2000
+#define CMDQ_WATCHDOG_MS       2500
+#define CHUNK_TIMEOUT_MS       5000
+#define POLL_INTERVAL_MS       10
+
+/* ===================================================================
+ * State
+ * =================================================================== */
+
+struct fw_section {
+    uint32_t addr;
+    const uint8_t *data;
+    uint32_t len;
+};
+
+struct fw_image {
+    struct fw_section sec[FW_SECTIONS_MAX];
+    int n;
+};
+
+static struct {
+    const uint8_t *file;
+    uint32_t size;
+    struct fw_image init, rt;
+    uint32_t flags, api0, capa0, phy_sku, n_cpu;
+    uint32_t calib_flow[4], calib_event[4];
+    uint32_t major, minor, local;
+} fw;
+
+static struct iwlwifi_state st;
+static struct pci_dev pdev;
+static volatile uint8_t *regs;
+static int aspm_l1;
+static int probed, fw_parsed, dma_ready;
+
+/* What the hardware is doing */
+static int hw_up;               /* start_hw ran, stop_device not yet */
+static int device_enabled;      /* APM init ran */
+static int rx_ready;            /* the RX ring is live */
+static int fw_running;          /* ALIVE seen and the command queue up */
+static int fw_err;              /* the firmware crashed */
+static int hw_gone;             /* reads came back all ones */
+static int access_failed;       /* MAC_ACCESS_REQ was not granted */
+static int cmd_hold_awake;      /* the 3160's in-flight command wake-up */
+static int cur_ucode;           /* UCODE_INIT or UCODE_REGULAR */
+
+/* Why the current step failed, and which step it was */
+static const char *step = "";
+static char reason[128];
+
+static struct {
+    int seen;
+    uint32_t len;
+    uint16_t status;
+    uint32_t errlog, evlog, scd_base, umac_errlog;
+} alive;
+
+static struct {
+    int read;
+    uint32_t valid, id, pc, blink1, blink2, ilink1, ilink2;
+    uint32_t data1, data2, data3, hcmd, major, minor;
+} crash;
+
+/* DMA memory: from the frame allocator, identity-mapped, below 4 GiB */
+static uint8_t *kw_buf;               /* keep-warm page */
+static uint8_t *bc_tables;            /* 31 x 640 bytes, 1 KiB aligned */
+static uint8_t *fw_bounce;            /* one firmware chunk */
+static uint32_t fw_chunk_max;
+static volatile uint32_t *rx_bd;      /* the receive descriptor ring */
+static volatile uint8_t *rx_status;   /* struct iwl_rb_status */
+static uint8_t *rx_buf[RX_QUEUE_SIZE];
+static uint32_t rx_read, rx_write, rx_write_actual;
+static uint8_t *cmd_bufs;             /* 32 slots of the command queue */
+static uint8_t *cmd_big;              /* for the commands too large inline */
+static int cmd_big_owner = -1;        /* ring index holding it */
+
+struct txq {
+    uint8_t *tfds;                    /* 256 x 128 */
+    uint8_t *scratch;                 /* 256 x 16: the first TB of each */
+    uint8_t *slots;                   /* data queues: TX_SLOTS x TX_SLOT_SIZE */
+    uint32_t read, write;
+    uint32_t stamp;                   /* pit ticks at the last progress */
+    int active;
+    uint8_t sta[TX_SLOTS];
+};
+static struct txq txq[NUM_QUEUES];
+static uint32_t scd_base;
+
+/* Per command-queue slot: what is in flight there */
+static struct {
+    uint32_t id;
+    uint8_t flags;
+} cmd_meta[CMD_SLOTS];
+
+/* The one synchronous command allowed at a time */
+static struct {
+    int active, done;
+    uint32_t idx;
+    uint8_t *resp;
+    uint32_t cap, len;
+    int got_resp;
+} sync_cmd;
+
+/* The PHY DB: what the INIT image measured, handed to the runtime image */
+struct phydb_entry {
+    uint32_t off;
+    uint16_t len;
+    uint8_t present;
+};
+static uint8_t phydb_pool[PHY_DB_POOL_SIZE];
+static uint32_t phydb_used;
+static struct phydb_entry phydb_cfg, phydb_nch;
+static struct phydb_entry phydb_papd[PHY_DB_GROUPS], phydb_txp[PHY_DB_GROUPS];
+static int init_complete;
+
+/* The NVM as read: all sections end to end in one buffer */
+static uint8_t nvm_buf[NVM_BUF_SIZE];
+static struct {
+    uint32_t off, len;
+    int present;
+} nvm_sec[NVM_SECTIONS];
+static uint8_t nvm_resp[8 + NVM_CHUNK + 64];
+static struct iwlwifi_channel channels[IWLWIFI_MAX_CHANNELS];
+
+/* Notification handlers registered by the later stages */
+#define NOTIF_HANDLERS 16
+static struct {
+    uint32_t id;
+    iwl_notif_fn fn;
+} notif_handlers[NOTIF_HANDLERS];
+
+/* ===================================================================
+ * Small helpers
+ * =================================================================== */
+
+static uint16_t get16(const uint8_t *p)
+{
+    return (uint16_t)(p[0] | (p[1] << 8));
+}
+
+static uint32_t get32(const uint8_t *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static void put16(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+}
+
+static void put32(uint8_t *p, uint32_t v)
+{
+    p[0] = (uint8_t)v;
+    p[1] = (uint8_t)(v >> 8);
+    p[2] = (uint8_t)(v >> 16);
+    p[3] = (uint8_t)(v >> 24);
+}
+
+static uint32_t phys(const void *p)
+{
+    return (uint32_t)(uintptr_t)p;
+}
+
+/* Our writes to DMA memory must be visible before the register write
+   that tells the card to look, and the card's before we read them */
+static void dma_barrier(void)
+{
+    __sync_synchronize();
+}
+
+/* A tiny formatter: printk has no field widths, and a MAC address or a
+   register dump wants them. %s %c %d %u %x, with an optional 0 and a
+   width (%02x). */
+static void vfmt(char *out, uint32_t cap, const char *f, va_list ap)
+{
+    uint32_t n = 0;
+#define PUT(c) do { if (n + 1 < cap) out[n++] = (char)(c); } while (0)
+    for (; *f; f++) {
+        if (*f != '%') {
+            PUT(*f);
+            continue;
+        }
+        f++;
+        char pad = ' ';
+        int width = 0;
+        if (*f == '0') {
+            pad = '0';
+            f++;
+        }
+        while (*f >= '0' && *f <= '9')
+            width = width * 10 + (*f++ - '0');
+        switch (*f) {
+        case 's': {
+            const char *s = va_arg(ap, const char *);
+            if (!s)
+                s = "(null)";
+            while (*s)
+                PUT(*s++);
+            break;
+        }
+        case 'c':
+            PUT(va_arg(ap, int));
+            break;
+        case 'd':
+        case 'u':
+        case 'x': {
+            uint32_t v;
+            int neg = 0;
+            if (*f == 'd') {
+                int d = va_arg(ap, int);
+                neg = d < 0;
+                v = neg ? (uint32_t)0 - (uint32_t)d : (uint32_t)d;
+            } else {
+                v = va_arg(ap, uint32_t);
+            }
+            uint32_t base = *f == 'x' ? 16 : 10;
+            char tmp[12];
+            int k = 0;
+            do {
+                tmp[k++] = "0123456789abcdef"[v % base];
+                v /= base;
+            } while (v);
+            if (neg)
+                PUT('-');
+            for (int w = k + neg; w < width; w++)
+                PUT(pad);
+            while (k)
+                PUT(tmp[--k]);
+            break;
+        }
+        case '\0':
+            f--;
+            break;
+        default:
+            PUT('%');
+            PUT(*f);
+        }
+    }
+    if (cap)
+        out[n] = '\0';
+#undef PUT
+}
+
+static void fmt(char *out, uint32_t cap, const char *f, ...)
+{
+    va_list ap;
+    va_start(ap, f);
+    vfmt(out, cap, f, ap);
+    va_end(ap);
+}
+
+static void say(const char *f, ...)
+{
+    char line[256];
+    va_list ap;
+    va_start(ap, f);
+    vfmt(line, sizeof(line), f, ap);
+    va_end(ap);
+    printk("%s", line);
+}
+
+/* The reason a step failed. The first one wins: what went wrong first
+   is the cause, what followed is consequence. */
+static void why(const char *f, ...)
+{
+    if (reason[0])
+        return;
+    va_list ap;
+    va_start(ap, f);
+    vfmt(reason, sizeof(reason), f, ap);
+    va_end(ap);
+}
+
+static void mac_text(char *out, const uint8_t *m)
+{
+    fmt(out, 18, "%02x:%02x:%02x:%02x:%02x:%02x",
+        m[0], m[1], m[2], m[3], m[4], m[5]);
+}
+
+static void *dma_alloc(uint32_t bytes)
+{
+    uint32_t frames = (bytes + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint32_t addr = pmm_alloc_contiguous(frames);
+    if (!addr)
+        return 0;
+    void *p = (void *)(uintptr_t)addr;
+    memset(p, 0, frames * PAGE_SIZE);
+    return p;
+}
+
+/* ===================================================================
+ * Transport: delays and waits
+ * =================================================================== */
+
+/* A port write costs about a microsecond on a PC; good enough for the
+   short settling delays, which are all minimums */
+static void iwl_udelay(uint32_t us)
+{
+    while (us--)
+        io_wait();
+}
+
+/* Waits that may last: spin for the first millisecond (a command
+   usually comes back in microseconds), then sleep between looks. The
+   second limit, on the number of sleeps, ends the wait even if the
+   clock should stand still. */
+struct waiter {
+    uint32_t start, ms, spins, sleeps;
+};
+
+static void wait_begin(struct waiter *w, uint32_t ms)
+{
+    w->start = pit_ticks();
+    w->ms = ms;
+    w->spins = 0;
+    w->sleeps = 0;
+}
+
+/* 1 = paused, look again; 0 = the time is up */
+static int wait_more(struct waiter *w)
+{
+    if (w->spins < 100) {
+        w->spins++;
+        iwl_udelay(10);
+        return 1;
+    }
+    if ((pit_ticks() - w->start) * 10 >= w->ms || w->sleeps >= w->ms)
+        return 0;
+    task_sleep(1);
+    w->sleeps++;
+    return 1;
+}
+
+/* ===================================================================
+ * Transport: registers, NIC access, PRPH and SRAM
+ * =================================================================== */
+
+static uint32_t csr_rd(uint32_t off)
+{
+    return mmio_read32(regs, off);
+}
+
+static void csr_wr(uint32_t off, uint32_t v)
+{
+    mmio_write32(regs, off, v);
+}
+
+static void csr_set(uint32_t off, uint32_t bits)
+{
+    csr_wr(off, csr_rd(off) | bits);
+}
+
+static void csr_clear(uint32_t off, uint32_t bits)
+{
+    csr_wr(off, csr_rd(off) & ~bits);
+}
+
+/* Waits until (reg & mask) == (bits & mask); 0, or -1 on timeout */
+static int poll_bit(uint32_t off, uint32_t bits, uint32_t mask,
+                    uint32_t timeout_us)
+{
+    for (uint32_t t = 0;; t += 10) {
+        if ((csr_rd(off) & mask) == (bits & mask))
+            return 0;
+        if (t >= timeout_us)
+            return -1;
+        iwl_udelay(10);
+    }
+}
+
+/* The card's internals are reachable only while it is awake: ask, and
+   wait for the clock - and for it not to be on its way to sleep, or
+   access would be granted to a card that is going down */
+static int nic_grab(void)
+{
+    if (cmd_hold_awake)
+        return 0;
+    csr_set(CSR_GP_CNTRL, GP_MAC_ACCESS_REQ);
+    if (poll_bit(CSR_GP_CNTRL, GP_MAC_CLOCK_READY,
+                 GP_MAC_CLOCK_READY | GP_GOING_TO_SLEEP, 15000) < 0) {
+        csr_wr(CSR_RESET, RESET_FORCE_NMI);
+        if (!access_failed)
+            say("[wifi] timeout waiting for hardware access (GP_CNTRL 0x%08x)\n",
+                csr_rd(CSR_GP_CNTRL));
+        access_failed = 1;
+        why("the card did not wake up for register access");
+        return -1;
+    }
+    return 0;
+}
+
+static void nic_release(void)
+{
+    if (cmd_hold_awake)
+        return;     /* a command in flight keeps it awake (the 3160 bug) */
+    csr_clear(CSR_GP_CNTRL, GP_MAC_ACCESS_REQ);
+}
+
+/* A CSR/FH register written with the card held awake */
+static void direct_wr(uint32_t off, uint32_t v)
+{
+    if (nic_grab() < 0)
+        return;
+    csr_wr(off, v);
+    nic_release();
+}
+
+static uint32_t prph_addr(uint32_t addr)
+{
+    return (addr & 0x000FFFFF) | (3u << 24);    /* a whole dword */
+}
+
+static uint32_t prph_rd_held(uint32_t addr)
+{
+    csr_wr(HBUS_TARG_PRPH_RADDR, prph_addr(addr));
+    return csr_rd(HBUS_TARG_PRPH_RDAT);
+}
+
+static void prph_wr_held(uint32_t addr, uint32_t v)
+{
+    csr_wr(HBUS_TARG_PRPH_WADDR, prph_addr(addr));
+    csr_wr(HBUS_TARG_PRPH_WDAT, v);
+}
+
+static uint32_t prph_rd(uint32_t addr)
+{
+    if (nic_grab() < 0)
+        return 0x5A5A5A5A;
+    uint32_t v = prph_rd_held(addr);
+    nic_release();
+    return v;
+}
+
+static void prph_wr(uint32_t addr, uint32_t v)
+{
+    if (nic_grab() < 0)
+        return;
+    prph_wr_held(addr, v);
+    nic_release();
+}
+
+static void prph_set_bits(uint32_t addr, uint32_t bits)
+{
+    if (nic_grab() < 0)
+        return;
+    prph_wr_held(addr, prph_rd_held(addr) | bits);
+    nic_release();
+}
+
+static void prph_clear_bits(uint32_t addr, uint32_t bits)
+{
+    if (nic_grab() < 0)
+        return;
+    prph_wr_held(addr, prph_rd_held(addr) & ~bits);
+    nic_release();
+}
+
+/* 'keep' is the set of bits to keep, not the ones to change */
+static void prph_set_bits_mask(uint32_t addr, uint32_t bits, uint32_t keep)
+{
+    if (nic_grab() < 0)
+        return;
+    prph_wr_held(addr, (prph_rd_held(addr) & keep) | bits);
+    nic_release();
+}
+
+/* The card's SRAM, a dword at a time; the address auto-increments */
+static int sram_rd(uint32_t addr, uint32_t *buf, int n)
+{
+    if (nic_grab() < 0)
+        return -1;
+    csr_wr(HBUS_TARG_MEM_RADDR, addr);
+    for (int i = 0; i < n; i++)
+        buf[i] = csr_rd(HBUS_TARG_MEM_RDAT);
+    nic_release();
+    return 0;
+}
+
+/* buf == 0 writes zeros */
+static int sram_wr(uint32_t addr, const uint32_t *buf, int n)
+{
+    if (nic_grab() < 0)
+        return -1;
+    csr_wr(HBUS_TARG_MEM_WADDR, addr);
+    for (int i = 0; i < n; i++)
+        csr_wr(HBUS_TARG_MEM_WDAT, buf ? buf[i] : 0);
+    nic_release();
+    return 0;
+}
+
+static void force_nmi(void)
+{
+    prph_wr(DEVICE_SET_NMI_REG, 0x80);      /* the driver's NMI ... */
+    prph_wr(DEVICE_SET_NMI_REG, 0x01);      /* ... and the hardware's */
+}
+
+static int rfkill_set(void)
+{
+    if (!regs)
+        return 0;
+    return !(csr_rd(CSR_GP_CNTRL) & GP_HW_RF_KILL_SW);
+}
+
+static void disable_interrupts(void)
+{
+    csr_wr(CSR_INT_MASK, 0);
+    csr_wr(CSR_INT, 0xFFFFFFFF);
+    csr_wr(CSR_FH_INT_STATUS, 0xFFFFFFFF);
+}
+
+/* ===================================================================
+ * Transport: power-up, APM, stop
+ * =================================================================== */
+
+/* "The driver is here": NIC_READY, a handshake with the management
+   engine, which may own the card */
+static int set_hw_ready(void)
+{
+    csr_set(CSR_HW_IF_CONFIG_REG, HW_IF_NIC_READY);
+    if (poll_bit(CSR_HW_IF_CONFIG_REG, HW_IF_NIC_READY, HW_IF_NIC_READY, 50) < 0)
+        return -1;
+    csr_set(CSR_MBOX_SET_REG, MBOX_OS_ALIVE);
+    return 0;
+}
+
+static int prepare_card_hw(void)
+{
+    if (set_hw_ready() == 0)
+        return 0;
+    csr_set(CSR_DBG_LINK_PWR_MGMT_REG, 0x80000000);
+    task_sleep(1);
+    /* t runs across all ten rounds: only the first gets the full
+       150 ms, the later ones a single try each */
+    uint32_t t = 0;
+    for (int round = 0; round < 10; round++) {
+        csr_set(CSR_HW_IF_CONFIG_REG, HW_IF_PREPARE);
+        do {
+            if (set_hw_ready() == 0)
+                return 0;
+            iwl_udelay(200);
+            t += 200;
+        } while (t < 150000);
+        task_sleep(25);
+    }
+    why("the card did not become ready (NIC_READY); the management engine may own it");
+    return -1;
+}
+
+static int apm_init(void)
+{
+    csr_set(CSR_GIO_CHICKEN_BITS, GIO_CHICKEN_DIS_L0S_EXIT_TIMER);
+    csr_set(CSR_GIO_CHICKEN_BITS, GIO_CHICKEN_L1A_NO_L0S_RX);
+    csr_set(CSR_DBG_HPET_MEM_REG, 0xFFFF0000);
+    csr_set(CSR_HW_IF_CONFIG_REG, HW_IF_HAP_WAKE_L1A);
+    /* (the bit is named L0S_ENABLED, and it is set when L1 is on) */
+    if (aspm_l1)
+        csr_set(CSR_GIO_REG, GIO_L0S_ENABLED);
+    else
+        csr_clear(CSR_GIO_REG, GIO_L0S_ENABLED);
+    csr_set(CSR_GP_CNTRL, GP_INIT_DONE);
+    if (poll_bit(CSR_GP_CNTRL, GP_MAC_CLOCK_READY, GP_MAC_CLOCK_READY, 25000) < 0) {
+        why("the MAC clock did not come up (APM init)");
+        return IWL_ERR_TIMEOUT;
+    }
+    /* The 7260/3160 oscillator wants exactly this read-read-set-read-
+       read pattern, so that it keeps counting the L1 exit time */
+    prph_rd(OSC_CLK);
+    prph_rd(OSC_CLK);
+    prph_set_bits(OSC_CLK, OSC_CLK_FORCE_CONTROL);
+    prph_rd(OSC_CLK);
+    prph_rd(OSC_CLK);
+    prph_wr(APMG_CLK_EN_REG, APMG_CLK_DMA_RQT);
+    iwl_udelay(20);
+    prph_set_bits(APMG_PCIDEV_STT_REG, APMG_PCIDEV_L1_ACT_DIS);
+    prph_wr(APMG_RTC_INT_STT_REG, APMG_RTC_INT_RFKILL);
+    if (access_failed)
+        return IWL_ERR_IO;
+    device_enabled = 1;
+    return IWL_OK;
+}
+
+static int start_hw(void)
+{
+    access_failed = 0;
+    if (prepare_card_hw() < 0)
+        return IWL_ERR_IO;
+    csr_wr(CSR_RESET, RESET_SW_RESET);
+    iwl_udelay(15);
+    int r = apm_init();
+    if (r < 0)
+        return r;
+    /* (polled: the interrupt mask stays 0, see the top of the file) */
+    hw_up = 1;
+    st.rfkill = rfkill_set();
+    return IWL_OK;
+}
+
+static void txq_reset_all(void)
+{
+    for (int q = 0; q < NUM_QUEUES; q++) {
+        struct txq *t = &txq[q];
+        if (t->tfds)
+            memset(t->tfds, 0, TFD_QUEUE_SIZE * TFD_SIZE);
+        t->read = t->write = 0;
+        t->active = 0;
+    }
+    memset(cmd_meta, 0, sizeof(cmd_meta));
+    cmd_big_owner = -1;
+    sync_cmd.active = 0;
+}
+
+static void tx_stop(void)
+{
+    prph_wr(SCD_TXFACT, 0);
+    if (nic_grab() == 0) {
+        for (int ch = 0; ch < 8; ch++) {
+            uint32_t idle = (1u << ch) << 16;
+            csr_wr(FH_TCSR_CONFIG(ch), 0);
+            if (poll_bit(FH_TSSR_TX_STATUS, idle, idle, 5000) < 0)
+                say("[wifi] TX DMA channel %d did not go idle\n", ch);
+        }
+        nic_release();
+    }
+    txq_reset_all();
+}
+
+static void rx_stop(void)
+{
+    if (nic_grab() < 0)
+        return;
+    csr_wr(FH_RCSR_CONFIG, 0);
+    if (poll_bit(FH_RSSR_RX_STATUS, FH_RX_STATUS_IDLE, FH_RX_STATUS_IDLE, 1000) < 0)
+        say("[wifi] RX DMA did not go idle\n");
+    nic_release();
+}
+
+static void apm_stop(void)
+{
+    device_enabled = 0;
+    csr_set(CSR_RESET, RESET_STOP_MASTER);
+    if (poll_bit(CSR_RESET, RESET_MASTER_DISABLED, RESET_MASTER_DISABLED, 100) < 0)
+        say("[wifi] master disable timed out\n");
+    csr_set(CSR_RESET, RESET_SW_RESET);
+    iwl_udelay(10);
+    csr_clear(CSR_GP_CNTRL, GP_INIT_DONE);
+}
+
+/* Everything off, the card back in reset and quiet, ready for the next
+   start (or for nothing) */
+static void stop_device(void)
+{
+    if (!hw_up || !regs)
+        return;
+    hw_up = 0;
+    fw_running = 0;
+    disable_interrupts();
+    if (device_enabled && !hw_gone) {
+        tx_stop();
+        rx_stop();
+        prph_wr(APMG_CLK_DIS_REG, APMG_CLK_DMA_RQT);
+        iwl_udelay(5);
+    }
+    rx_ready = 0;
+    cmd_hold_awake = 0;
+    csr_clear(CSR_GP_CNTRL, GP_MAC_ACCESS_REQ);
+    apm_stop();
+    csr_wr(CSR_RESET, RESET_SW_RESET);
+    iwl_udelay(20);
+    /* Again: with the radio switch off, the APM stop raises an RF-kill
+       interrupt that some parts keep raising until it is acked */
+    disable_interrupts();
+    st.rfkill = rfkill_set();
+    prepare_card_hw();          /* take the card back */
+}
+
+/* ===================================================================
+ * Transport: RX
+ * =================================================================== */
+
+static void rx_restock(void)
+{
+    /* Each ring index keeps its own buffer: what was taken out has been
+       copied, so the buffer goes straight back. At most 255 are the
+       card's - read == write would look "full" to it. */
+    while (((rx_read - rx_write - 1) & (RX_QUEUE_SIZE - 1)) > 0) {
+        rx_bd[rx_write] = phys(rx_buf[rx_write]) >> 8;
+        rx_write = (rx_write + 1) & (RX_QUEUE_SIZE - 1);
+    }
+    dma_barrier();
+    /* The card takes the write index in steps of eight only */
+    if (rx_write_actual != (rx_write & ~7u)) {
+        rx_write_actual = rx_write & ~7u;
+        csr_wr(FH_RSCSR_WPTR, rx_write_actual);
+    }
+}
+
+static int rx_init(void)
+{
+    rx_read = rx_write = rx_write_actual = 0;
+    memset((void *)rx_status, 0, 16);
+    while (((rx_read - rx_write - 1) & (RX_QUEUE_SIZE - 1)) > 0) {
+        rx_bd[rx_write] = phys(rx_buf[rx_write]) >> 8;
+        rx_write = (rx_write + 1) & (RX_QUEUE_SIZE - 1);
+    }
+    dma_barrier();
+    if (nic_grab() < 0)
+        return IWL_ERR_IO;
+    csr_wr(FH_RCSR_CONFIG, 0);
+    csr_wr(FH_RCSR_RBDCB_WPTR, 0);
+    csr_wr(FH_RCSR_FLUSH_RB_REQ, 0);
+    csr_wr(FH_RSCSR_RDPTR, 0);
+    csr_wr(FH_RSCSR_WPTR, 0);
+    csr_wr(FH_RSCSR_RBDCB_BASE, phys((const void *)rx_bd) >> 8);
+    csr_wr(FH_RSCSR_STTS_WPTR, phys((const void *)rx_status) >> 4);
+    csr_wr(FH_RCSR_CONFIG, FH_RX_CONFIG);
+    nic_release();
+    /* The coalescing timer is the low byte of this register; only 32-bit
+       accesses go to the card, so the byte goes in by read-modify-write */
+    csr_wr(CSR_INT_COALESCING,
+           (csr_rd(CSR_INT_COALESCING) & ~0xFFu) | HOST_INT_TIMEOUT_DEF);
+    csr_set(CSR_INT_COALESCING, HOST_INT_OPER_MODE);
+    rx_write_actual = rx_write & ~7u;
+    csr_wr(FH_RSCSR_WPTR, rx_write_actual);
+    rx_ready = 1;
+    return IWL_OK;
+}
+
+static void handle_packet(const uint8_t *pkt, uint32_t len);
+
+/* One receive buffer: packets one after another, each on a 64-byte
+   boundary, until an end marker or the end of the buffer */
+static void rx_parse_buffer(const uint8_t *rb)
+{
+    uint32_t off = 0;
+    while (off + 4 + 4 < RX_BUF_SIZE) {
+        uint32_t lnf = get32(rb + off);
+        if (lnf == RX_FRAME_INVALID)
+            break;
+        uint32_t len = lnf & RX_FRAME_SIZE_MASK;   /* header + payload */
+        if (len < 4 || off + 4 + len > RX_BUF_SIZE)
+            break;          /* not a packet: nothing sane follows */
+        handle_packet(rb + off, len);
+        off += (len + 4 + RX_FRAME_ALIGN - 1) & ~(uint32_t)(RX_FRAME_ALIGN - 1);
+    }
+}
+
+static void rx_process(void)
+{
+    if (!rx_ready)
+        return;
+    /* closed_rb_num, read in one access: the card may be writing it */
+    uint32_t closed = *(volatile uint16_t *)rx_status & 0x0FFF;
+    closed &= RX_QUEUE_SIZE - 1;
+    dma_barrier();
+    int n = 0;
+    while (rx_read != closed && n < RX_QUEUE_SIZE) {
+        rx_parse_buffer(rx_buf[rx_read]);
+        rx_read = (rx_read + 1) & (RX_QUEUE_SIZE - 1);
+        n++;
+        if (!rx_ready)
+            return;     /* a handler stopped the card */
+    }
+    if (n)
+        rx_restock();
+}
+
+/* ===================================================================
+ * Transport: TX queues
+ * =================================================================== */
+
+static uint8_t *tfd_at(int q, uint32_t idx)
+{
+    return txq[q].tfds + (idx & (TFD_QUEUE_SIZE - 1)) * TFD_SIZE;
+}
+
+static uint8_t *scratch_at(int q, uint32_t idx)
+{
+    return txq[q].scratch + (idx & (TFD_QUEUE_SIZE - 1)) * SCRATCH_SIZE;
+}
+
+static int tfd_add_tb(uint8_t *tfd, uint32_t addr, uint32_t len)
+{
+    uint32_t n = tfd[3] & 0x1F;
+    if (n >= TFD_MAX_TBS || len > 0xFFF)
+        return -1;
+    uint8_t *tb = tfd + 4 + 6 * n;
+    put32(tb, addr);
+    put16(tb + 4, len << 4);         /* address bits 35:32 are 0: below 4 GiB */
+    tfd[3] = (uint8_t)(n + 1);
+    return 0;
+}
+
+static void bc_set(int q, uint32_t idx, uint16_t entry)
+{
+    uint8_t *bc = bc_tables + q * BC_TABLE_STRIDE;
+    put16(bc + 2 * idx, entry);
+    /* the scheduler reads past the ring's end for its window */
+    if (idx < 64)
+        put16(bc + 2 * (TFD_QUEUE_SIZE + idx), entry);
+}
+
+static int tx_init(void)
+{
+    txq_reset_all();
+    prph_wr(SCD_TXFACT, 0);
+    direct_wr(FH_KW_MEM_ADDR_REG, phys(kw_buf) >> 4);
+    if (nic_grab() < 0)
+        return IWL_ERR_IO;
+    for (int q = 0; q < NUM_QUEUES; q++)
+        csr_wr(fh_cbbc(q), phys(txq[q].tfds) >> 8);
+    nic_release();
+    prph_set_bits(SCD_GP_CTRL, SCD_GP_CTRL_AUTO_ACTIVE);
+    prph_set_bits(SCD_GP_CTRL, SCD_GP_CTRL_31_QUEUES);
+    return access_failed ? IWL_ERR_IO : IWL_OK;
+}
+
+/* The command queue is the one queue the driver programs into the
+   scheduler itself; the firmware does the rest */
+static void txq_enable_cmd(void)
+{
+    const int q = CMD_QUEUE;
+    prph_wr(SCD_EN_CTRL, 0);
+    prph_wr(SCD_QUEUE_STATUS(q), SCD_STTS_ACT_EN);       /* inactive */
+    prph_clear_bits(SCD_AGGR_SEL, 1u << q);
+    uint32_t ssn = txq[q].read;
+    txq[q].read = txq[q].write = ssn & 0xFF;
+    direct_wr(HBUS_TARG_WRPTR, (ssn & 0xFF) | (q << 8));
+    prph_wr(SCD_QUEUE_RDPTR(q), ssn);
+    uint32_t ctx[2] = {
+        0,
+        (FRAME_LIMIT & 0x7F) | ((FRAME_LIMIT << 16) & 0x7F0000),
+    };
+    sram_wr(scd_base + SCD_CONTEXT_MEM + 8 * q, ctx, 2);
+    prph_wr(SCD_QUEUE_STATUS(q), SCD_STTS_ACTIVE | CMD_FIFO | SCD_STTS_WSL |
+                                 SCD_STTS_MSK);
+    prph_wr(SCD_EN_CTRL, 1u << q);
+    txq[q].active = 1;
+}
+
+/* After ALIVE: the scheduler's memory cleared, the command queue on,
+   the FIFOs and DMA channels running */
+static int tx_start(void)
+{
+    for (int q = 0; q < NUM_QUEUES; q++)
+        txq[q].active = 0;
+    uint32_t base = prph_rd(SCD_SRAM_BASE_ADDR);
+    if (alive.scd_base && alive.scd_base != base)
+        say("[wifi] scheduler base: ALIVE says 0x%x, the card 0x%x\n",
+            alive.scd_base, base);
+    scd_base = base;
+    sram_wr(scd_base + SCD_CONTEXT_MEM, 0,
+            (SCD_TRANS_TBL_END - SCD_CONTEXT_MEM) / 4);
+    prph_wr(SCD_DRAM_BASE_ADDR, phys(bc_tables) >> 10);
+    txq_enable_cmd();
+    prph_wr(SCD_TXFACT, 0xFF);
+    if (nic_grab() == 0) {
+        for (int ch = 0; ch < 8; ch++)
+            csr_wr(FH_TCSR_CONFIG(ch), FH_TX_CONFIG_ENABLE | FH_TX_CREDIT_ENABLE);
+        nic_release();
+    }
+    if (nic_grab() == 0) {
+        csr_wr(FH_TX_CHICKEN_BITS,
+               csr_rd(FH_TX_CHICKEN_BITS) | FH_TX_CHICKEN_AUTO_RETRY);
+        nic_release();
+    }
+    prph_clear_bits(APMG_PCIDEV_STT_REG, APMG_PCIDEV_L1_ACT_DIS);
+    if (access_failed)
+        return IWL_ERR_IO;
+    return IWL_OK;
+}
+
+/* A data queue's transport side: the firmware configures the scheduler
+   for it (SCD_QUEUE_CFG), the driver only sets the pointers */
+static void txq_enable_transport(int q, uint32_t ssn)
+{
+    txq[q].read = txq[q].write = ssn & 0xFF;
+    direct_wr(HBUS_TARG_WRPTR, (ssn & 0xFF) | ((uint32_t)q << 8));
+    txq[q].active = 1;
+    txq[q].stamp = pit_ticks();
+}
+
+static void tx_reclaim(int q, uint32_t ssn)
+{
+    struct txq *t = &txq[q];
+    uint32_t to = ssn & 0xFF;
+    if (!t->active || t->read == to)
+        return;
+    uint32_t last = (to - 1) & 0xFF;
+    if (((last - t->read) & 0xFF) >= ((t->write - t->read) & 0xFF)) {
+        say("[wifi] queue %d: reclaim to %u, but %u..%u are in flight\n",
+            q, to, t->read, t->write);
+        return;
+    }
+    while (t->read != to) {
+        bc_set(q, t->read, (uint16_t)(1 | (t->sta[t->read % TX_SLOTS] << 12)));
+        tfd_at(q, t->read)[3] = 0;
+        t->read = (t->read + 1) & 0xFF;
+    }
+    t->stamp = pit_ticks();
+}
+
+int iwl_tx_frame(int queue, const uint8_t *tx_cmd, const void *hdr,
+                 uint32_t hdr_len, const void *body, uint32_t body_len)
+{
+    if (queue < 0 || queue >= NUM_QUEUES || queue == CMD_QUEUE ||
+        !txq[queue].active || !fw_running)
+        return IWL_ERR_STATE;
+    if (hdr_len < 2 || hdr_len > 40 ||
+        body_len > TX_SLOT_SIZE - TX_BODY_OFF)
+        return IWL_ERR_STATE;
+    struct txq *t = &txq[queue];
+    if (((t->write - t->read) & 0xFF) >= TX_SLOTS - 1)
+        return IWL_ERR_BUSY;
+    if (!t->slots) {
+        t->slots = dma_alloc(TX_SLOTS * TX_SLOT_SIZE);
+        if (!t->slots)
+            return IWL_ERR_NOMEM;
+    }
+    uint32_t w = t->write;
+    uint8_t *cmd = t->slots + (w % TX_SLOTS) * TX_SLOT_SIZE;
+    memset(cmd, 0, TX_BODY_OFF);
+    cmd[0] = TX_CMD;
+    cmd[1] = 0;
+    put16(cmd + 2, ((uint32_t)queue << 8) | w);
+    memcpy(cmd + 4, tx_cmd, 56);
+    memcpy(cmd + 60, hdr, hdr_len);
+    /* The device writes its retry counts back into the TX command's
+       scratch field, which lives in TB0 */
+    uint32_t tb0 = phys(scratch_at(queue, w));
+    put32(cmd + 4 + 44, tb0 + 4 + 8);
+    cmd[4 + 48] = 0;
+    uint32_t len = 56 + 4 + hdr_len - SCRATCH_SIZE;
+    uint32_t tb1_len = (len + 3) & ~3u;
+    if (tb1_len != len)         /* tell it about the pad after the header */
+        put32(cmd + 8, get32(cmd + 8) | 0x00100000);
+    memcpy(scratch_at(queue, w), cmd, SCRATCH_SIZE);
+    uint8_t *tfd = tfd_at(queue, w);
+    memset(tfd, 0, TFD_SIZE);
+    tfd_add_tb(tfd, tb0, SCRATCH_SIZE);
+    tfd_add_tb(tfd, phys(cmd) + SCRATCH_SIZE, tb1_len);
+    if (body_len) {
+        memcpy(cmd + TX_BODY_OFF, body, body_len);
+        tfd_add_tb(tfd, phys(cmd) + TX_BODY_OFF, body_len);
+    }
+    /* Byte count for the scheduler, in dwords for this firmware: the
+       frame, CRC and delimiter, plus what encryption adds */
+    uint32_t n = get16(tx_cmd) + 4 + 4;
+    switch (tx_cmd[17] & 7) {
+    case 1: n += 4 + 4; break;      /* WEP: IV + ICV */
+    case 2: n += 8; break;          /* CCM: MIC */
+    case 3: n += 4; break;          /* TKIP: ICV */
+    }
+    n = (n + 3) / 4;
+    if (n > 0xFFF)
+        return IWL_ERR_STATE;
+    bc_set(queue, w, (uint16_t)(n | ((uint32_t)tx_cmd[16] << 12)));
+    t->sta[w % TX_SLOTS] = tx_cmd[16];
+    if (t->read == t->write)
+        t->stamp = pit_ticks();
+    t->write = (w + 1) & 0xFF;
+    dma_barrier();
+    csr_wr(HBUS_TARG_WRPTR, t->write | ((uint32_t)queue << 8));
+    return IWL_OK;
+}
+
+/* ===================================================================
+ * Transport: host commands
+ * =================================================================== */
+
+/* The 3160 bug: from the first command until the queue drains, the card
+   is held awake, and the NIC-access helpers leave the bit alone */
+static int set_cmd_in_flight(void)
+{
+    if (cmd_hold_awake)
+        return 0;
+    csr_set(CSR_GP_CNTRL, GP_MAC_ACCESS_REQ);
+    if (poll_bit(CSR_GP_CNTRL, GP_MAC_CLOCK_READY,
+                 GP_MAC_CLOCK_READY | GP_GOING_TO_SLEEP, 15000) < 0) {
+        csr_clear(CSR_GP_CNTRL, GP_MAC_ACCESS_REQ);
+        why("failed to wake the card for a host command");
+        return IWL_ERR_IO;
+    }
+    cmd_hold_awake = 1;
+    return 0;
+}
+
+static void clear_cmd_in_flight(void)
+{
+    if (!cmd_hold_awake)
+        return;
+    cmd_hold_awake = 0;
+    csr_clear(CSR_GP_CNTRL, GP_MAC_ACCESS_REQ);
+}
+
+static int enqueue_hcmd(struct iwl_hcmd *c)
+{
+    struct txq *t = &txq[CMD_QUEUE];
+    uint32_t group = (c->id >> 8) & 0xFF;
+    uint32_t hdr_len = group ? 8 : 4;
+    uint32_t len = c->len[0] + c->len[1];
+    uint32_t total = hdr_len + len;
+    uint32_t used = (t->write - t->read) & 0xFF;
+    uint32_t need = (c->flags & IWL_CMD_ASYNC) ? 2 : 1;
+    if (CMD_SLOTS - used < need) {
+        why("no space in the command queue");
+        return IWL_ERR_BUSY;
+    }
+    uint32_t w = t->write;
+    uint8_t *buf;
+    if (total <= CMD_INLINE_MAX) {
+        buf = cmd_bufs + (w & (CMD_SLOTS - 1)) * CMD_SLOT_SIZE;
+    } else {
+        /* Too large for the queue's own buffer: a buffer of its own,
+           mapped as the following TBs */
+        if (total > CMD_BIG_SIZE || cmd_big_owner >= 0) {
+            why("command 0x%x of %u bytes cannot be queued now", c->id, len);
+            return IWL_ERR_BUSY;
+        }
+        buf = cmd_big;
+        cmd_big_owner = (int)w;
+    }
+    buf[0] = (uint8_t)c->id;
+    buf[1] = (uint8_t)group;
+    put16(buf + 2, (CMD_QUEUE << 8) | w);
+    if (group) {
+        put16(buf + 4, len);
+        buf[6] = 0;
+        buf[7] = (uint8_t)(c->id >> 16);
+    }
+    if (c->len[0])
+        memcpy(buf + hdr_len, c->data[0], c->len[0]);
+    if (c->len[1])
+        memcpy(buf + hdr_len + c->len[0], c->data[1], c->len[1]);
+
+    uint32_t tb0_len = total < SCRATCH_SIZE ? total : SCRATCH_SIZE;
+    memcpy(scratch_at(CMD_QUEUE, w), buf, tb0_len);
+    uint8_t *tfd = tfd_at(CMD_QUEUE, w);
+    memset(tfd, 0, TFD_SIZE);
+    tfd_add_tb(tfd, phys(scratch_at(CMD_QUEUE, w)), tb0_len);
+    uint32_t at = phys(buf) + SCRATCH_SIZE;
+    for (uint32_t rest = total - tb0_len; rest;) {
+        uint32_t n = rest < TB_MAX_LEN ? rest : TB_MAX_LEN;
+        if (tfd_add_tb(tfd, at, n) < 0) {
+            why("command 0x%x does not fit in one descriptor", c->id);
+            if (cmd_big_owner == (int)w)
+                cmd_big_owner = -1;
+            return IWL_ERR_BUSY;
+        }
+        at += n;
+        rest -= n;
+    }
+    cmd_meta[w & (CMD_SLOTS - 1)].id = c->id;
+    cmd_meta[w & (CMD_SLOTS - 1)].flags = (uint8_t)c->flags;
+
+    int r = set_cmd_in_flight();
+    if (r < 0) {
+        if (cmd_big_owner == (int)w)
+            cmd_big_owner = -1;
+        return r;
+    }
+    if (t->read == t->write)
+        t->stamp = pit_ticks();
+    t->write = (w + 1) & 0xFF;
+    dma_barrier();
+    csr_wr(HBUS_TARG_WRPTR, t->write | (CMD_QUEUE << 8));
+    return (int)w;
+}
+
+/* A response came back for the command at its sequence's index */
+static void hcmd_complete(const uint8_t *pkt, uint32_t len)
+{
+    static int warned;
+    uint16_t seq = get16(pkt + 6);
+    uint32_t q = (seq >> 8) & 0x1F;
+    uint32_t idx = seq & 0xFF;
+    struct txq *t = &txq[CMD_QUEUE];
+    if (q != CMD_QUEUE) {
+        if (warned++ < 4)
+            say("[wifi] response 0x%x for queue %u ignored\n", pkt[4], q);
+        return;
+    }
+    uint32_t used = (t->write - t->read) & 0xFF;
+    if (((idx - t->read) & 0xFF) >= used) {
+        if (warned++ < 4)
+            say("[wifi] response 0x%x for command %u, which is not in flight\n",
+                pkt[4], idx);
+        return;
+    }
+    if (sync_cmd.active && idx == sync_cmd.idx) {
+        uint32_t plen = len - 4;
+        if (sync_cmd.resp) {
+            uint32_t n = plen < sync_cmd.cap ? plen : sync_cmd.cap;
+            memcpy(sync_cmd.resp, pkt + 8, n);
+        }
+        sync_cmd.len = plen;
+        sync_cmd.got_resp = 1;
+        sync_cmd.done = 1;
+    }
+    tfd_at(CMD_QUEUE, idx)[3] = 0;
+    if (cmd_big_owner == (int)idx)
+        cmd_big_owner = -1;
+    /* Answers come in order, one per command: anything skipped means
+       the firmware lost track */
+    uint32_t freed = ((idx + 1) - t->read) & 0xFF;
+    if (freed > 1) {
+        say("[wifi] HCMD skipped: answer to %u while %u was the oldest\n",
+            idx, t->read);
+        force_nmi();
+    }
+    t->read = (idx + 1) & 0xFF;
+    t->stamp = pit_ticks();
+    if (t->read == t->write)
+        clear_cmd_in_flight();
+}
+
+static void service(void);
+
+int iwl_send_cmd(struct iwl_hcmd *c)
+{
+    if (fw_err)
+        return IWL_ERR_FW;
+    if (hw_gone)
+        return IWL_ERR_GONE;
+    if (!fw_running || !hw_up) {
+        why("no firmware is running to take command 0x%x", c->id);
+        return IWL_ERR_STATE;
+    }
+    if (rfkill_set() && !(c->flags & IWL_CMD_SEND_IN_RFKILL))
+        return IWL_ERR_RFKILL;
+    if (c->flags & IWL_CMD_ASYNC) {
+        int r = enqueue_hcmd(c);
+        return r < 0 ? r : IWL_OK;
+    }
+    if (sync_cmd.active)
+        return IWL_ERR_BUSY;
+
+    sync_cmd.active = 1;
+    sync_cmd.done = 0;
+    sync_cmd.got_resp = 0;
+    sync_cmd.len = 0;
+    sync_cmd.resp = (c->flags & IWL_CMD_WANT_RESP) ? c->resp : 0;
+    sync_cmd.cap = c->resp_cap;
+    sync_cmd.idx = txq[CMD_QUEUE].write;
+    int r = enqueue_hcmd(c);
+    if (r < 0) {
+        sync_cmd.active = 0;
+        return r;
+    }
+
+    struct waiter w;
+    wait_begin(&w, CMD_TIMEOUT_MS);
+    int result = IWL_ERR_TIMEOUT;
+    do {
+        service();
+        if (fw_err) {
+            result = IWL_ERR_FW;
+            break;
+        }
+        if (hw_gone) {
+            result = IWL_ERR_GONE;
+            break;
+        }
+        if (sync_cmd.done) {
+            result = IWL_OK;
+            break;
+        }
+        if (!(c->flags & IWL_CMD_SEND_IN_RFKILL) && rfkill_set()) {
+            st.rfkill = 1;
+            result = IWL_ERR_RFKILL;
+            break;
+        }
+    } while (wait_more(&w));
+    sync_cmd.active = 0;
+    c->resp_len = sync_cmd.len;
+
+    if (result == IWL_ERR_TIMEOUT) {
+        say("[wifi] command 0x%x: no answer within %u ms\n", c->id,
+            (uint32_t)CMD_TIMEOUT_MS);
+        why("command 0x%x got no answer within %u ms", c->id,
+            (uint32_t)CMD_TIMEOUT_MS);
+        /* An NMI makes the firmware write its error log, which says
+           what it was doing instead */
+        force_nmi();
+        struct waiter w2;
+        wait_begin(&w2, 200);
+        do {
+            service();
+        } while (!fw_err && !hw_gone && wait_more(&w2));
+        fw_err = 1;
+        return IWL_ERR_TIMEOUT;
+    }
+    if (result == IWL_OK && (c->flags & IWL_CMD_WANT_RESP) && !sync_cmd.got_resp)
+        return IWL_ERR_IO;
+    return result;
+}
+
+int iwl_send_cmd_pdu(uint32_t id, const void *data, uint32_t len,
+                     uint32_t flags)
+{
+    struct iwl_hcmd c;
+    memset(&c, 0, sizeof(c));
+    c.id = id;
+    c.data[0] = data;
+    c.len[0] = len;
+    c.flags = flags;
+    return iwl_send_cmd(&c);
+}
+
+/* ===================================================================
+ * Transport: firmware load
+ * =================================================================== */
+
+static int load_chunk(uint32_t dst, const uint8_t *src, uint32_t n)
+{
+    memcpy(fw_bounce, src, n);
+    dma_barrier();
+    /* Leftovers of an earlier chunk must not look like this one done */
+    csr_wr(CSR_FH_INT_STATUS, FH_INT_TX_MASK);
+    csr_wr(CSR_INT, INT_FH_TX);
+    if (nic_grab() < 0)
+        return IWL_ERR_IO;
+    csr_wr(FH_TCSR_CONFIG(FH_SRVC_CHNL), 0);           /* pause */
+    csr_wr(FH_SRVC_SRAM_ADDR(FH_SRVC_CHNL), dst);
+    csr_wr(FH_TFDIB_CTRL0(FH_SRVC_CHNL), phys(fw_bounce));
+    csr_wr(FH_TFDIB_CTRL1(FH_SRVC_CHNL), n);           /* address bits 35:32 = 0 */
+    csr_wr(FH_TCSR_BUF_STS(FH_SRVC_CHNL), FH_TX_BUF_STS_LOAD);
+    csr_wr(FH_TCSR_CONFIG(FH_SRVC_CHNL),
+           FH_TX_CONFIG_ENABLE | FH_TX_CIRQ_HOST_ENDTFD);
+    nic_release();
+
+    struct waiter w;
+    wait_begin(&w, CHUNK_TIMEOUT_MS);
+    do {
+        uint32_t inta = csr_rd(CSR_INT);
+        if (inta == 0xFFFFFFFF) {
+            hw_gone = 1;
+            why("the card stopped answering during the firmware load");
+            return IWL_ERR_GONE;
+        }
+        if ((inta & INT_FH_TX) || (csr_rd(CSR_FH_INT_STATUS) & FH_INT_TX_MASK)) {
+            csr_wr(CSR_FH_INT_STATUS, FH_INT_TX_MASK);
+            csr_wr(CSR_INT, INT_FH_TX);
+            return IWL_OK;
+        }
+    } while (wait_more(&w));
+    return IWL_ERR_TIMEOUT;
+}
+
+static int load_section(const char *image, int i, const struct fw_section *s)
+{
+    uint32_t chunk = s->len < fw_chunk_max ? s->len : fw_chunk_max;
+    for (uint32_t off = 0; off < s->len; off += chunk) {
+        uint32_t dst = s->addr + off;
+        uint32_t n = s->len - off < chunk ? s->len - off : chunk;
+        int ext = dst >= FH_MEM_EXT_START && dst <= FH_MEM_EXT_END;
+        if (ext)
+            prph_set_bits(LMPM_CHICK, 1);
+        int r = load_chunk(dst, s->data + off, n);
+        if (ext)
+            prph_clear_bits(LMPM_CHICK, 1);
+        if (r == IWL_ERR_TIMEOUT)
+            why("%s image, section %d: the chunk of %u bytes to 0x%x was not "
+                "acknowledged within %u ms", image, i, n, dst,
+                (uint32_t)CHUNK_TIMEOUT_MS);
+        if (r < 0)
+            return r;
+    }
+    return IWL_OK;
+}
+
+static int load_image(const char *name, const struct fw_image *img)
+{
+    for (int i = 0; i < img->n; i++) {
+        const struct fw_section *s = &img->sec[i];
+        /* A single-CPU image ends at the separator */
+        if (!s->len || s->addr == FW_SEP_CPU1_CPU2 || s->addr == FW_SEP_PAGING)
+            break;
+        int r = load_section(name, i, s);
+        if (r < 0)
+            return r;
+    }
+    csr_wr(CSR_RESET, 0);       /* the firmware's CPU out of reset: go */
+    return IWL_OK;
+}
+
+/* ===================================================================
+ * Transport: start of an image
+ * =================================================================== */
+
+/* The radio and PHY description for CSR_HW_IF_CONFIG_REG: MAC step and
+   dash from the chip, the radio's from the firmware's PHY_SKU */
+static void nic_config(void)
+{
+    uint32_t radio_type = fw.phy_sku & 0x3;
+    uint32_t radio_step = (fw.phy_sku >> 2) & 0x3;
+    uint32_t radio_dash = (fw.phy_sku >> 4) & 0x3;
+    uint32_t v = (st.hw_rev & 0xF) | (radio_type << 10) | (radio_step << 14) |
+                 (radio_dash << 12) | HW_IF_RADIO_SI;
+    csr_wr(CSR_HW_IF_CONFIG_REG,
+           (csr_rd(CSR_HW_IF_CONFIG_REG) & ~HW_IF_NIC_CONFIG_MASK) | v);
+    /* against the card staying in reset after an early PCIe power-off */
+    prph_set_bits_mask(APMG_PS_CTRL_REG, APMG_PS_EARLY_PWR_OFF_RESET_DIS,
+                       ~APMG_PS_EARLY_PWR_OFF_RESET_DIS);
+}
+
+static int nic_init(void)
+{
+    int r = apm_init();
+    if (r < 0)
+        return r;
+    prph_set_bits_mask(APMG_PS_CTRL_REG, 0, ~APMG_PS_PWR_SRC_MASK);  /* VMAIN */
+    nic_config();
+    r = rx_init();
+    if (r < 0)
+        return r;
+    r = tx_init();
+    if (r < 0)
+        return r;
+    /* Shadow registers: the RX and TX write pointers become plain writes,
+       even with the card asleep */
+    csr_set(CSR_MAC_SHADOW_REG_CTRL, 0x800FFFFF);
+    return access_failed ? IWL_ERR_IO : IWL_OK;
+}
+
+static int start_fw(const char *name, const struct fw_image *img,
+                    int run_in_rfkill)
+{
+    if (!hw_up) {
+        why("the transport is not started");
+        return IWL_ERR_STATE;
+    }
+    if (prepare_card_hw() < 0)
+        return IWL_ERR_IO;
+    st.rfkill = rfkill_set();
+    if (st.rfkill && !run_in_rfkill) {
+        why("the radio is switched off (hardware RF-kill switch)");
+        return IWL_ERR_RFKILL;
+    }
+    csr_wr(CSR_INT, 0xFFFFFFFF);
+    int r = nic_init();
+    if (r < 0)
+        return r;
+    /* The RF-kill handshake bits cleared, and once more for good
+       measure, as the reference driver does */
+    csr_wr(CSR_UCODE_DRV_GP1_CLR, GP1_SW_BIT_RFKILL);
+    csr_wr(CSR_UCODE_DRV_GP1_CLR, GP1_CMD_BLOCKED);
+    csr_wr(CSR_INT, 0xFFFFFFFF);
+    csr_wr(CSR_UCODE_DRV_GP1_CLR, GP1_SW_BIT_RFKILL);
+    csr_wr(CSR_UCODE_DRV_GP1_CLR, GP1_SW_BIT_RFKILL);
+    memset(&alive, 0, sizeof(alive));
+    memset(&crash, 0, sizeof(crash));
+    fw_err = 0;
+    return load_image(name, img);
+}
+
+/* ===================================================================
+ * Firmware errors
+ * =================================================================== */
+
+static const char *error_name(uint32_t id)
+{
+    static const struct {
+        uint32_t id;
+        const char *name;
+    } names[] = {
+        { 0x34, "NMI_INTERRUPT_WDG" },
+        { 0x35, "SYSASSERT" },
+        { 0x37, "UCODE_VERSION_MISMATCH" },
+        { 0x38, "BAD_COMMAND" },
+        { 0x3C, "NMI_INTERRUPT_DATA_ACTION_PT" },
+        { 0x3D, "FATAL_ERROR" },
+        { 0x46, "NMI_TRM_HW_ERR" },
+        { 0x4C, "NMI_INTERRUPT_TRM" },
+        { 0x54, "NMI_INTERRUPT_BREAK_POINT" },
+        { 0x5C, "NMI_INTERRUPT_WDG_RXF_FULL" },
+        { 0x64, "NMI_INTERRUPT_WDG_NO_RBD_RXF_FULL" },
+        { 0x66, "NMI_INTERRUPT_HOST" },
+        { 0x7C, "NMI_INTERRUPT_ACTION_PT" },
+        { 0x84, "NMI_INTERRUPT_UNKNOWN" },
+        { 0x86, "NMI_INTERRUPT_INST_ACTION_PT" },
+    };
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (names[i].id == id)
+            return names[i].name;
+    return "ADVANCED_SYSASSERT";
+}
+
+/* The firmware crashed (SW_ERR) or the DMA engine did (HW_ERR): read
+   the error log while the card still holds it */
+static void firmware_crashed(int hw_error)
+{
+    if (fw_err)
+        return;
+    fw_err = 1;
+    why(hw_error ? "hardware (DMA) error reported by the card"
+                 : "the firmware crashed");
+    if (alive.errlog < ERRLOG_MIN_ADDR) {
+        say("[wifi] firmware error, no valid error log pointer (0x%x)\n",
+            alive.errlog);
+        return;
+    }
+    uint32_t log[ERRLOG_DWORDS];
+    if (sram_rd(alive.errlog, log, ERRLOG_DWORDS) < 0)
+        return;
+    crash.read = 1;
+    crash.valid = log[0];
+    crash.id = log[1];
+    crash.pc = log[2];
+    crash.blink1 = log[3];
+    crash.blink2 = log[4];
+    crash.ilink1 = log[5];
+    crash.ilink2 = log[6];
+    crash.data1 = log[7];
+    crash.data2 = log[8];
+    crash.data3 = log[9];
+    crash.major = log[16];
+    crash.minor = log[17];
+    crash.hcmd = log[23];
+    st.fw_error_id = crash.id;
+    if (!crash.valid)
+        say("[wifi] firmware error log at 0x%x is empty\n", alive.errlog);
+    say("[wifi] %s image error log: 0x%08x %s, pc 0x%08x, blink1 0x%08x, "
+        "blink2 0x%08x, ilink1 0x%08x, ilink2 0x%08x\n",
+        cur_ucode == UCODE_INIT ? "INIT" : "runtime", crash.id, error_name(crash.id),
+        crash.pc, crash.blink1, crash.blink2, crash.ilink1, crash.ilink2);
+    say("[wifi] error log: data1 0x%08x, data2 0x%08x, data3 0x%08x, "
+        "last command 0x%08x, firmware %u.%u\n", crash.data1, crash.data2,
+        crash.data3, crash.hcmd, crash.major, crash.minor);
+    if (alive.umac_errlog >= ERRLOG_MIN_ADDR) {
+        uint32_t u[UMAC_ERRLOG_DWORDS];
+        if (sram_rd(alive.umac_errlog, u, UMAC_ERRLOG_DWORDS) == 0 && u[0])
+            say("[wifi] UMAC error log: 0x%08x, blink1 0x%08x, blink2 0x%08x, "
+                "data1 0x%08x\n", u[1], u[2], u[3], u[6]);
+    }
+}
+
+/* ===================================================================
+ * Serving the card: interrupt causes and received packets
+ * =================================================================== */
+
+static void service(void)
+{
+    if (!regs || hw_gone || !hw_up)
+        return;
+    uint32_t inta = csr_rd(CSR_INT);
+    if (inta == 0xFFFFFFFF || (inta & 0xFFFFFFF0) == 0xA5A5A5A0) {
+        hw_gone = 1;
+        why("the card stopped answering (CSR_INT reads 0x%08x)", inta);
+        return;
+    }
+    if (inta) {
+        csr_wr(CSR_INT, inta);
+        if (inta & (INT_FH_RX | INT_SW_RX | INT_RX_PERIODIC))
+            csr_wr(CSR_FH_INT_STATUS, FH_INT_RX_MASK);
+        if (inta & INT_FH_TX)
+            csr_wr(CSR_FH_INT_STATUS, FH_INT_TX_MASK);
+        if (inta & (INT_SW_ERR | INT_HW_ERR))
+            firmware_crashed((inta & INT_HW_ERR) != 0);
+        if (inta & INT_RF_KILL)
+            st.rfkill = rfkill_set();
+        if (inta & INT_CT_KILL)
+            say("[wifi] the card reports a critical temperature\n");
+    }
+    /* RX by the status block, not by the cause bit: the interrupt can
+       come before the block is written, the block is what counts */
+    rx_process();
+}
+
+static void handle_alive(const uint8_t *p, uint32_t len)
+{
+    alive.seen = 1;
+    alive.len = len;
+    if (len != 44 && len != 64 && len != 68)
+        return;
+    alive.status = get16(p);
+    alive.errlog = get32(p + 20);
+    alive.evlog = get32(p + 24);
+    alive.scd_base = get32(p + 40);
+    if (len == 64)
+        alive.umac_errlog = get32(p + 56);
+    else if (len == 68)
+        alive.umac_errlog = get32(p + 60);
+}
+
+static void phydb_store(const uint8_t *p, uint32_t len);
+
+static void handle_notification(uint32_t id, const uint8_t *p, uint32_t len,
+                                uint16_t seq)
+{
+    switch (id) {
+    case MVM_ALIVE:
+        handle_alive(p, len);
+        return;
+    case INIT_COMPLETE_NOTIF:
+        init_complete = 1;
+        return;
+    case CALIB_RES_NOTIF_PHY_DB:
+        /* only the INIT image's results make the PHY DB */
+        if (cur_ucode == UCODE_INIT)
+            phydb_store(p, len);
+        return;
+    case REPLY_ERROR:
+        if (len >= 8)
+            say("[wifi] the firmware rejected command 0x%x (error type 0x%x, "
+                "sequence 0x%x)\n", p[4], get32(p), get16(p + 6));
+        return;
+    case TX_CMD: {
+        /* The TX response: frames up to the scheduler's SSN are done */
+        uint32_t q = (seq >> 8) & 0x1F;
+        if (len < 36 || q == CMD_QUEUE || q >= NUM_QUEUES)
+            return;
+        uint32_t at = 36 + 4 * (uint32_t)p[0];
+        if (len >= at + 4)
+            tx_reclaim((int)q, get32(p + at) & 0xFFF);
+        break;
+    }
+    case CARD_STATE_NOTIFICATION:
+        if (len >= 4 && (get32(p) & 0x0F))
+            say("[wifi] card state: 0x%x\n", get32(p));
+        return;
+    }
+    for (int i = 0; i < NOTIF_HANDLERS; i++)
+        if (notif_handlers[i].fn && notif_handlers[i].id == id)
+            notif_handlers[i].fn(id, p, len, seq);
+}
+
+static void handle_packet(const uint8_t *pkt, uint32_t len)
+{
+    uint8_t cmd = pkt[4];
+    uint32_t id = cmd | ((uint32_t)pkt[5] << 8);
+    uint16_t seq = get16(pkt + 6);
+    /* The firmware side first (ALIVE and friends), then the transport:
+       a response with bit 15 clear completes the command it answers,
+       except TX responses, which point at a data queue */
+    handle_notification(id, pkt + 8, len - 4, seq);
+    if (!(seq & SEQ_RX_FRAME) && cmd != TX_CMD)
+        hcmd_complete(pkt, len);
+}
+
+int iwl_notif_register(uint32_t id, iwl_notif_fn fn)
+{
+    for (int i = 0; i < NOTIF_HANDLERS; i++)
+        if (!notif_handlers[i].fn || notif_handlers[i].id == id) {
+            notif_handlers[i].id = id;
+            notif_handlers[i].fn = fn;
+            return IWL_OK;
+        }
+    return IWL_ERR_BUSY;
+}
+
+/* ===================================================================
+ * The firmware file
+ * =================================================================== */
+
+static int add_section(struct fw_image *img, const uint8_t *d, uint32_t len)
+{
+    if (len < 4 || img->n >= FW_SECTIONS_MAX)
+        return -1;
+    img->sec[img->n].addr = get32(d);
+    img->sec[img->n].data = d + 4;
+    img->sec[img->n].len = len - 4;
+    img->n++;
+    return 0;
+}
+
+/* "<a>+<b>" - the sizes of the sections an image loads */
+static void image_sizes(char *out, uint32_t cap, const struct fw_image *img)
+{
+    uint32_t n = 0;
+    out[0] = '\0';
+    for (int i = 0; i < img->n; i++) {
+        const struct fw_section *s = &img->sec[i];
+        if (!s->len || s->addr == FW_SEP_CPU1_CPU2 || s->addr == FW_SEP_PAGING)
+            break;
+        fmt(out + n, cap - n, i ? "+%u" : "%u", s->len);
+        n = strlen(out);
+    }
+}
+
+static int parse_firmware(void)
+{
+    uint32_t size;
+    const uint8_t *d = initrd_find(FW_FILE, &size);
+    if (!d) {
+        why("there is no %s in the initrd", FW_FILE);
+        return IWL_ERR_BADFW;
+    }
+    memset(&fw, 0, sizeof(fw));
+    fw.file = d;
+    fw.size = size;
+    fw.n_cpu = 1;
+    if (size < FW_HEADER_SIZE || get32(d) != 0 || get32(d + 4) != FW_MAGIC) {
+        why("%s is not a TLV firmware file", FW_FILE);
+        return IWL_ERR_BADFW;
+    }
+    uint32_t ver = get32(d + 72), build = get32(d + 76);
+    fw.major = ver;
+    fw.minor = build;
+    fw.local = 0;
+
+    uint32_t p = FW_HEADER_SIZE;
+    while (size - p >= 8) {
+        uint32_t type = get32(d + p), len = get32(d + p + 4);
+        const uint8_t *v = d + p + 8;
+        if (len > size - p - 8) {
+            why("%s: TLV %u at offset %u runs past the end", FW_FILE, type, p);
+            return IWL_ERR_BADFW;
+        }
+        int bad = 0;
+        switch (type) {
+        case TLV_SEC_RT:
+            bad = add_section(&fw.rt, v, len);
+            break;
+        case TLV_SEC_INIT:
+            bad = add_section(&fw.init, v, len);
+            break;
+        case TLV_FLAGS:
+            bad = len < 4;
+            if (!bad)
+                fw.flags = get32(v);
+            break;
+        case TLV_API_CHANGES_SET:
+            bad = len < 8;
+            if (!bad && get32(v) == 0)
+                fw.api0 = get32(v + 4);
+            break;
+        case TLV_ENABLED_CAPA:
+            bad = len < 8;
+            if (!bad && get32(v) == 0)
+                fw.capa0 = get32(v + 4);
+            break;
+        case TLV_PHY_SKU:
+            bad = len < 4;
+            if (!bad)
+                fw.phy_sku = get32(v);
+            break;
+        case TLV_DEF_CALIB:
+            bad = len < 12 || get32(v) >= 4;
+            if (!bad) {
+                fw.calib_flow[get32(v)] = get32(v + 4);
+                fw.calib_event[get32(v)] = get32(v + 8);
+            }
+            break;
+        case TLV_NUM_OF_CPU:
+            bad = len < 4 || get32(v) < 1 || get32(v) > 2;
+            if (!bad)
+                fw.n_cpu = get32(v);
+            break;
+        case TLV_FW_VERSION:
+            if (len >= 12) {
+                fw.major = get32(v);
+                fw.minor = get32(v + 4);
+                fw.local = get32(v + 8);
+            }
+            break;
+        }
+        if (bad) {
+            why("%s: TLV %u at offset %u is malformed", FW_FILE, type, p);
+            return IWL_ERR_BADFW;
+        }
+        uint32_t step_len = 8 + ((len + 3) & ~3u);
+        p = step_len > size - p ? size : p + step_len;
+    }
+    if (p != size) {
+        why("%s: %u stray bytes at the end", FW_FILE, size - p);
+        return IWL_ERR_BADFW;
+    }
+    uint32_t api = (fw.api0 & API_NEW_VERSION) ? ver : (ver >> 8) & 0xFF;
+    if (api < UCODE_API_MIN || api > UCODE_API_MAX) {
+        why("%s has API %u; this driver knows %u..%u", FW_FILE, api,
+            (uint32_t)UCODE_API_MIN, (uint32_t)UCODE_API_MAX);
+        return IWL_ERR_BADFW;
+    }
+    if (fw.n_cpu != 1) {
+        why("%s is a dual-CPU image, which the 3160 does not use", FW_FILE);
+        return IWL_ERR_BADFW;
+    }
+    if (!fw.init.n || !fw.rt.n || !fw.init.sec[0].len || !fw.rt.sec[0].len) {
+        why("%s lacks the INIT or the runtime image", FW_FILE);
+        return IWL_ERR_BADFW;
+    }
+    fmt(st.fw_version, sizeof(st.fw_version), "%u.%x.%u",
+        fw.major, fw.minor, fw.local);
+    char a[48], b[48];
+    image_sizes(a, sizeof(a), &fw.init);
+    image_sizes(b, sizeof(b), &fw.rt);
+    say("[wifi] firmware %s: %u bytes, init %s B, runtime %s B\n",
+        st.fw_version, size, a, b);
+    return IWL_OK;
+}
+
+/* ===================================================================
+ * Probe and DMA memory
+ * =================================================================== */
+
+static int find_card(struct pci_dev *dev)
+{
+    return pci_find_device(INTEL_VENDOR, 0x08B3, dev) ||
+           pci_find_device(INTEL_VENDOR, 0x08B4, dev);
+}
+
+static uint32_t cfg_rd(int off)
+{
+    return pci_config_read(pdev.bus, pdev.slot, pdev.func, off);
+}
+
+static void cfg_wr(int off, uint32_t v)
+{
+    pci_config_write(pdev.bus, pdev.slot, pdev.func, off, v);
+}
+
+/* The PCI Express capability: whether ASPM L1 is on (link control)
+   decides a bit in APM init. (LTR, which would add LTR_CONFIG, is left
+   out: that command is optional and this firmware does not list it.) */
+static void read_pcie_cap(void)
+{
+    if (!((cfg_rd(0x04) >> 16) & 0x10))
+        return;
+    int p = (int)(cfg_rd(0x34) & 0xFC);
+    for (int n = 0; p && n < 48; n++) {
+        uint32_t v = cfg_rd(p);
+        if ((v & 0xFF) == 0x10) {
+            aspm_l1 = (cfg_rd(p + 0x10) & 0x2) != 0;
+            return;
+        }
+        p = (int)((v >> 8) & 0xFC);
+    }
+}
+
+static int probe(void)
+{
+    if (!find_card(&pdev)) {
+        st.stage = IWL_STAGE_NO_CARD;
+        why("no Intel Wireless 3160 on the PCI bus");
+        return IWL_ERR_NOCARD;
+    }
+    st.bus = pdev.bus;
+    st.slot = pdev.slot;
+    st.func = pdev.func;
+    st.device = pdev.device;
+    if (pdev.bar[0] & 1) {
+        why("BAR0 is not a memory window");
+        return IWL_ERR_IO;
+    }
+    uint64_t addr = pdev.bar[0] & ~0xFULL;
+    if (((pdev.bar[0] >> 1) & 0x3) == 0x2)
+        addr |= (uint64_t)pdev.bar[1] << 32;
+    if (!addr) {
+        why("the firmware gave the card no address");
+        return IWL_ERR_IO;
+    }
+    pci_enable_bus_master(&pdev);       /* memory decoding and DMA */
+    if (MAP_PHYS(addr, BAR_SIZE) < 0) {
+        why("could not map the card's registers");
+        return IWL_ERR_IO;
+    }
+    regs = (volatile uint8_t *)(uintptr_t)addr;
+    /* PCI retry timeout 0: keeps PCI TX retries from interfering with
+       the processor's C3 state. A byte register, written in its dword. */
+    cfg_wr(0x40, cfg_rd(0x40) & ~0x0000FF00u);
+    disable_interrupts();
+    /* Polled: INTx off, no MSI. (The status half is written as 0, which
+       clears nothing - its bits are write-1-to-clear.) */
+    cfg_wr(0x04, (cfg_rd(0x04) & 0xFFFF) | 0x400);
+    st.hw_rev = csr_rd(CSR_HW_REV);
+    if (st.hw_rev == 0xFFFFFFFF) {
+        hw_gone = 1;
+        why("the card does not answer (HW_REV reads 0xffffffff)");
+        return IWL_ERR_GONE;
+    }
+    read_pcie_cap();
+    say("[wifi] Intel Wireless 3160 at %02x:%02x.%x, hw rev 0x%x\n",
+        pdev.bus, pdev.slot, pdev.func, st.hw_rev);
+    st.stage = IWL_STAGE_PROBED;
+    return IWL_OK;
+}
+
+static int alloc_dma(void)
+{
+    kw_buf = dma_alloc(PAGE_SIZE);
+    bc_tables = dma_alloc(NUM_QUEUES * BC_TABLE_STRIDE);
+    rx_bd = dma_alloc(RX_QUEUE_SIZE * 4);
+    rx_status = dma_alloc(16);
+    cmd_bufs = dma_alloc(CMD_SLOTS * CMD_SLOT_SIZE);
+    cmd_big = dma_alloc(CMD_BIG_SIZE);
+    if (!kw_buf || !bc_tables || !rx_bd || !rx_status || !cmd_bufs || !cmd_big)
+        return IWL_ERR_NOMEM;
+    fw_chunk_max = FH_CHUNK_MAX;
+    fw_bounce = dma_alloc(FH_CHUNK_MAX);
+    if (!fw_bounce) {
+        /* a page at a time is slower, but loads the same */
+        fw_chunk_max = PAGE_SIZE;
+        fw_bounce = dma_alloc(PAGE_SIZE);
+        if (!fw_bounce)
+            return IWL_ERR_NOMEM;
+    }
+    for (int i = 0; i < RX_QUEUE_SIZE; i++)
+        if (!(rx_buf[i] = dma_alloc(RX_BUF_SIZE)))
+            return IWL_ERR_NOMEM;
+    for (int q = 0; q < NUM_QUEUES; q++) {
+        txq[q].tfds = dma_alloc(TFD_QUEUE_SIZE * TFD_SIZE);
+        /* 256 first-TB areas for every queue, the command queue too:
+           they are indexed by the ring index */
+        txq[q].scratch = dma_alloc(TFD_QUEUE_SIZE * SCRATCH_SIZE);
+        if (!txq[q].tfds || !txq[q].scratch)
+            return IWL_ERR_NOMEM;
+    }
+    return IWL_OK;
+}
+
+/* ===================================================================
+ * Firmware side: the PHY DB
+ * =================================================================== */
+
+static struct phydb_entry *phydb_slot(uint32_t type, const uint8_t *data,
+                                      uint32_t len)
+{
+    switch (type) {
+    case PHY_DB_CFG:
+        return &phydb_cfg;
+    case PHY_DB_CALIB_NCH:
+        return &phydb_nch;
+    case PHY_DB_CALIB_CHG_PAPD:
+    case PHY_DB_CALIB_CHG_TXP: {
+        if (len < 2)
+            return 0;
+        uint32_t group = get16(data);
+        if (group >= PHY_DB_GROUPS)
+            return 0;
+        return type == PHY_DB_CALIB_CHG_PAPD ? &phydb_papd[group]
+                                             : &phydb_txp[group];
+    }
+    }
+    return 0;
+}
+
+static void phydb_reset(void)
+{
+    phydb_used = 0;
+    memset(&phydb_cfg, 0, sizeof(phydb_cfg));
+    memset(&phydb_nch, 0, sizeof(phydb_nch));
+    memset(phydb_papd, 0, sizeof(phydb_papd));
+    memset(phydb_txp, 0, sizeof(phydb_txp));
+    st.calib_results = 0;
+}
+
+/* One calibration result from the INIT image, kept whole (the group id
+   at its start included) to be sent back as it came */
+static void phydb_store(const uint8_t *p, uint32_t len)
+{
+    if (len < 4)
+        return;
+    uint32_t type = get16(p), dlen = get16(p + 2);
+    const uint8_t *data = p + 4;
+    if (dlen > len - 4) {
+        say("[wifi] calibration result of type %u is cut short\n", type);
+        return;
+    }
+    struct phydb_entry *e = phydb_slot(type, data, dlen);
+    if (!e) {
+        say("[wifi] calibration result of type %u ignored\n", type);
+        return;
+    }
+    /* A later result for the same slot replaces the earlier one; in
+       place when it fits */
+    if (!e->present || dlen > e->len) {
+        if (phydb_used + dlen > PHY_DB_POOL_SIZE) {
+            say("[wifi] calibration results exceed %u bytes; one dropped\n",
+                (uint32_t)PHY_DB_POOL_SIZE);
+            return;
+        }
+        e->off = phydb_used;
+        phydb_used += dlen;
+    }
+    memcpy(phydb_pool + e->off, data, dlen);
+    e->len = (uint16_t)dlen;
+    e->present = 1;
+    st.calib_results++;
+}
+
+static int phydb_send_one(uint32_t type, const struct phydb_entry *e)
+{
+    uint8_t head[4];
+    put16(head, type);
+    put16(head + 2, e->present ? e->len : 0);
+    struct iwl_hcmd c;
+    memset(&c, 0, sizeof(c));
+    c.id = PHY_DB_CMD;
+    c.data[0] = head;
+    c.len[0] = 4;
+    c.data[1] = phydb_pool + e->off;
+    c.len[1] = e->present ? e->len : 0;
+    return iwl_send_cmd(&c);
+}
+
+/* To the runtime image, in this order: configuration, non-channel
+   calibration, then the per-channel-group ones */
+static int phydb_send_all(void)
+{
+    int r = phydb_send_one(PHY_DB_CFG, &phydb_cfg);
+    if (r < 0)
+        return r;
+    if ((r = phydb_send_one(PHY_DB_CALIB_NCH, &phydb_nch)) < 0)
+        return r;
+    for (int i = 0; i < PHY_DB_GROUPS; i++)
+        if (phydb_papd[i].present && phydb_papd[i].len &&
+            (r = phydb_send_one(PHY_DB_CALIB_CHG_PAPD, &phydb_papd[i])) < 0)
+            return r;
+    for (int i = 0; i < PHY_DB_GROUPS; i++)
+        if (phydb_txp[i].present && phydb_txp[i].len &&
+            (r = phydb_send_one(PHY_DB_CALIB_CHG_TXP, &phydb_txp[i])) < 0)
+            return r;
+    return IWL_OK;
+}
+
+/* ===================================================================
+ * Firmware side: the NVM
+ * =================================================================== */
+
+/* Bytes read, 0 at the end of a section, IWL_ERR_REJECTED when the
+   section is not there; any other error is the firmware's or the
+   card's and ends the read */
+static int nvm_read_chunk(uint32_t section, uint32_t offset, uint8_t *out)
+{
+    uint8_t req[8];
+    req[0] = 0;                 /* read */
+    req[1] = 0;                 /* target: the cache */
+    put16(req + 2, section);
+    put16(req + 4, offset);
+    put16(req + 6, NVM_CHUNK);
+    struct iwl_hcmd c;
+    memset(&c, 0, sizeof(c));
+    c.id = NVM_ACCESS_CMD;
+    c.data[0] = req;
+    c.len[0] = sizeof(req);
+    c.flags = IWL_CMD_WANT_RESP | IWL_CMD_SEND_IN_RFKILL;
+    c.resp = nvm_resp;
+    c.resp_cap = sizeof(nvm_resp);
+    int r = iwl_send_cmd(&c);
+    if (r < 0)
+        return r;
+    if (c.resp_len < 8)
+        return IWL_ERR_REJECTED;
+    uint32_t r_off = get16(nvm_resp), r_len = get16(nvm_resp + 2);
+    uint32_t status = get16(nvm_resp + 6);
+    if (status) {
+        /* past the end of a section that filled whole chunks */
+        if (offset && status == 1)
+            return 0;
+        return IWL_ERR_REJECTED;
+    }
+    if (r_off != offset || r_len > NVM_CHUNK || 8 + r_len > c.resp_len ||
+        8 + r_len > sizeof(nvm_resp))
+        return IWL_ERR_REJECTED;
+    memcpy(out, nvm_resp + 8, r_len);
+    return (int)r_len;
+}
+
+static int nvm_read(void)
+{
+    uint32_t size_read = 0;
+    memset(nvm_sec, 0, sizeof(nvm_sec));
+    for (uint32_t s = 0; s < NVM_SECTIONS; s++) {
+        uint32_t off = 0;
+        int ret = NVM_CHUNK, absent = 0;
+        while (ret == NVM_CHUNK) {
+            if (size_read + off + NVM_CHUNK > NVM_BUF_SIZE) {
+                absent = 1;
+                break;
+            }
+            ret = nvm_read_chunk(s, off, nvm_buf + size_read + off);
+            if (ret == IWL_ERR_REJECTED) {
+                absent = 1;
+                break;
+            }
+            if (ret < 0) {
+                why("reading NVM section %u at offset %u failed", s, off);
+                return ret;
+            }
+            off += (uint32_t)ret;
+        }
+        if (absent)
+            continue;
+        nvm_sec[s].off = size_read;
+        nvm_sec[s].len = off;
+        nvm_sec[s].present = 1;
+        size_read += off;
+    }
+    if (!size_read)
+        say("[wifi] the NVM is blank\n");
+    return IWL_OK;
+}
+
+static const uint8_t nvm_channel_list[IWLWIFI_MAX_CHANNELS] = {
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
+    36, 40, 44, 48, 52, 56, 60, 64,
+    100, 104, 108, 112, 116, 120, 124, 128, 132, 136, 140, 144,
+    149, 153, 157, 161, 165,
+};
+
+static uint16_t channel_flags(int idx, uint32_t ch, uint16_t nf)
+{
+    uint16_t f = 0;
+    if (nf & NVM_CH_40MHZ) {
+        if (idx < 14) {
+            if (ch <= 9)
+                f |= IWLWIFI_CHAN_HT40_PLUS;
+            if (ch >= 5)
+                f |= IWLWIFI_CHAN_HT40_MINUS;
+        } else if (ch <= 165) {
+            f |= ((idx - 14) % 2 == 0) ? IWLWIFI_CHAN_HT40_PLUS
+                                       : IWLWIFI_CHAN_HT40_MINUS;
+        }
+    }
+    if (!(nf & NVM_CH_80MHZ))
+        f |= IWLWIFI_CHAN_NO_80MHZ;
+    if (!(nf & NVM_CH_160MHZ))
+        f |= IWLWIFI_CHAN_NO_160MHZ;
+    if (!(nf & NVM_CH_IBSS) || !(nf & NVM_CH_ACTIVE))
+        f |= IWLWIFI_CHAN_NO_IR;
+    if (nf & NVM_CH_RADAR)
+        f |= IWLWIFI_CHAN_RADAR;
+    if (nf & NVM_CH_INDOOR_ONLY)
+        f |= IWLWIFI_CHAN_INDOOR;
+    if ((nf & NVM_CH_GO_CONCURRENT) && (f & IWLWIFI_CHAN_NO_IR))
+        f |= IWLWIFI_CHAN_IR_CONCURRENT;
+    return f;
+}
+
+static int nvm_parse(void)
+{
+    if (!nvm_sec[NVM_SEC_HW].present || !nvm_sec[NVM_SEC_HW].len ||
+        !nvm_sec[NVM_SEC_SW].present || !nvm_sec[NVM_SEC_SW].len) {
+        why("the NVM's HW or SW section is missing or empty");
+        return IWL_ERR_REJECTED;
+    }
+    if (!nvm_sec[NVM_SEC_CALIB].present) {
+        why("the NVM's calibration section is missing");
+        return IWL_ERR_REJECTED;
+    }
+    const uint8_t *hw = nvm_buf + nvm_sec[NVM_SEC_HW].off;
+    const uint8_t *sw = nvm_buf + nvm_sec[NVM_SEC_SW].off;
+    if (nvm_sec[NVM_SEC_HW].len < NVM_HW_ADDR_OFF + 6 ||
+        nvm_sec[NVM_SEC_SW].len < NVM_SW_CHANNELS_OFF + 2 * IWLWIFI_MAX_CHANNELS) {
+        why("the NVM's HW or SW section is too short");
+        return IWL_ERR_REJECTED;
+    }
+    /* The address is stored with its bytes swapped in pairs */
+    const uint8_t *a = hw + NVM_HW_ADDR_OFF;
+    st.mac[0] = a[1];
+    st.mac[1] = a[0];
+    st.mac[2] = a[3];
+    st.mac[3] = a[2];
+    st.mac[4] = a[5];
+    st.mac[5] = a[4];
+    st.mac_valid = 1;
+    st.nvm_version = get16(sw);
+    st.radio_cfg = get16(sw + 2);
+    st.sku = get16(sw + 4);
+
+    int n = 0, n24 = 0, n5 = 0;
+    for (int i = 0; i < IWLWIFI_MAX_CHANNELS; i++) {
+        uint16_t nf = get16(sw + NVM_SW_CHANNELS_OFF + 2 * i);
+        if (i >= 14 && !(st.sku & NVM_SKU_BAND_52))
+            continue;
+        if (!(nf & NVM_CH_VALID))
+            continue;
+        uint32_t ch = nvm_channel_list[i];
+        struct iwlwifi_channel *c = &channels[n++];
+        c->number = (uint16_t)ch;
+        if (i < 14) {
+            c->band = IWLWIFI_BAND_24;
+            c->freq = (uint16_t)(ch == 14 ? 2484 : 2407 + 5 * ch);
+            n24++;
+        } else {
+            c->band = IWLWIFI_BAND_5;
+            c->freq = (uint16_t)(5000 + 5 * ch);
+            n5++;
+        }
+        c->max_power = DEFAULT_MAX_TX_POWER;
+        c->nvm_flags = nf;
+        c->flags = channel_flags(i, ch, nf);
+    }
+    st.n_channels = n;
+    st.n_24ghz = n24;
+    st.n_5ghz = n5;
+    return IWL_OK;
+}
+
+/* ===================================================================
+ * Firmware side: waits and commands
+ * =================================================================== */
+
+static int wait_alive(void)
+{
+    struct waiter w;
+    wait_begin(&w, ALIVE_TIMEOUT_MS);
+    do {
+        service();
+        if (fw_err)
+            return IWL_ERR_FW;
+        if (hw_gone)
+            return IWL_ERR_GONE;
+        if (alive.seen)
+            break;
+    } while (wait_more(&w));
+    if (!alive.seen) {
+        why("no ALIVE from the firmware within %u ms", (uint32_t)ALIVE_TIMEOUT_MS);
+        return IWL_ERR_TIMEOUT;
+    }
+    if (alive.len != 44 && alive.len != 64 && alive.len != 68) {
+        why("ALIVE of an unknown length (%u bytes)", alive.len);
+        return IWL_ERR_FW;
+    }
+    if (alive.status != ALIVE_STATUS_OK) {
+        why("the loaded firmware is not valid (ALIVE status 0x%x)", alive.status);
+        return IWL_ERR_FW;
+    }
+    return IWL_OK;
+}
+
+static uint32_t valid_tx_ant(void)
+{
+    return (fw.phy_sku >> 16) & 0xF;
+}
+
+static uint32_t valid_rx_ant(void)
+{
+    return (fw.phy_sku >> 20) & 0xF;
+}
+
+static int send_u32(uint32_t id, uint32_t v)
+{
+    uint8_t b[4];
+    put32(b, v);
+    return iwl_send_cmd_pdu(id, b, 4, 0);
+}
+
+static int send_bt_config(void)
+{
+    uint8_t b[8];
+    put32(b, 1);                /* BT_COEX_NW: the antenna is shared */
+    put32(b + 4, 0x17);         /* MPLUT, MPLUT boost, SYNC2SCO, high band */
+    return iwl_send_cmd_pdu(BT_CONFIG, b, sizeof(b), 0);
+}
+
+static int send_phy_cfg(int ucode)
+{
+    uint8_t b[12];
+    /* The NVM of a 7000-family card gives no antenna masks, so the
+       firmware's own are the ones in force */
+    put32(b, fw.phy_sku);
+    put32(b + 4, fw.calib_flow[ucode]);
+    put32(b + 8, fw.calib_event[ucode]);
+    return iwl_send_cmd_pdu(PHY_CONFIGURATION_CMD, b, sizeof(b), 0);
+}
+
+/* Smart FIFO off while nothing is associated. The values are what the
+   reference driver sends for this firmware: with its API read as 0 it
+   takes the SF_INIT_OFF state and the "BSS" table of full-on timers. */
+static int send_sf_cfg(void)
+{
+    static const uint32_t full_on[5][2] = {
+        { 2016, 320 }, { 2016, 320 }, { 10016, 2016 }, { 2016, 320 },
+        { 2016, 320 },
+    };
+    uint8_t b[92];
+    memset(b, 0, sizeof(b));
+    put32(b, 3);                /* SF_INIT_OFF */
+    put32(b + 4, 4096);
+    put32(b + 8, 8192);
+    for (int i = 0; i < 10; i++)
+        put32(b + 12 + 4 * i, 1000000);
+    for (int i = 0; i < 5; i++) {
+        put32(b + 52 + 8 * i, full_on[i][0]);
+        put32(b + 52 + 8 * i + 4, full_on[i][1]);
+    }
+    return iwl_send_cmd_pdu(REPLY_SF_CFG_CMD, b, sizeof(b), IWL_CMD_ASYNC);
+}
+
+static int send_scd_queue_cfg(int q, int enable, int fifo, int sta_id,
+                              int tid)
+{
+    uint8_t b[12];
+    memset(b, 0, sizeof(b));
+    b[1] = (uint8_t)sta_id;
+    b[2] = (uint8_t)tid;
+    b[3] = (uint8_t)q;
+    b[4] = (uint8_t)enable;
+    b[6] = (uint8_t)fifo;
+    b[7] = FRAME_LIMIT;
+    return iwl_send_cmd_pdu(SCD_QUEUE_CFG, b, sizeof(b), 0);
+}
+
+int iwl_txq_enable(int queue, int fifo, int sta_id, int tid)
+{
+    if (queue < 0 || queue >= NUM_QUEUES || queue == CMD_QUEUE)
+        return IWL_ERR_STATE;
+    txq_enable_transport(queue, 0);
+    int r = send_scd_queue_cfg(queue, 1, fifo, sta_id, tid);
+    if (r < 0)
+        txq[queue].active = 0;
+    return r;
+}
+
+int iwl_txq_disable(int queue)
+{
+    if (queue < 0 || queue >= NUM_QUEUES || queue == CMD_QUEUE ||
+        !txq[queue].active)
+        return IWL_ERR_STATE;
+    int r = send_scd_queue_cfg(queue, 0, 0, 0, 0);
+    txq[queue].active = 0;
+    memset(txq[queue].tfds, 0, TFD_QUEUE_SIZE * TFD_SIZE);
+    txq[queue].read = txq[queue].write = 0;
+    return r;
+}
+
+/* The auxiliary station: what the firmware sends scan probes as */
+static int add_aux_sta(void)
+{
+    int r = iwl_txq_enable(AUX_QUEUE, AUX_FIFO, 0, MAX_TID_COUNT);
+    if (r < 0)
+        return r;
+    uint8_t b[44], resp[16];
+    memset(b, 0, sizeof(b));
+    put32(b + 4, AUX_MAC_INDEX);                /* mac_id_n_color */
+    b[16] = AUX_STA_ID;
+    put32(b + 40, 1u << AUX_QUEUE);             /* tfd_queue_msk */
+    struct iwl_hcmd c;
+    memset(&c, 0, sizeof(c));
+    c.id = ADD_STA;
+    c.data[0] = b;
+    c.len[0] = sizeof(b);
+    c.flags = IWL_CMD_WANT_RESP;
+    c.resp = resp;
+    c.resp_cap = sizeof(resp);
+    r = iwl_send_cmd(&c);
+    if (r < 0)
+        return r;
+    if (c.resp_len != 4 || (get32(resp) & 0xFF) != ADD_STA_SUCCESS) {
+        why("ADD_STA for the aux station answered %u bytes, status 0x%x",
+            c.resp_len, c.resp_len >= 4 ? get32(resp) : 0);
+        return IWL_ERR_REJECTED;
+    }
+    return IWL_OK;
+}
+
+static int add_phy_contexts(void)
+{
+    /* On the first 2.4 GHz channel the NVM allows (the contexts move to
+       a real channel later) */
+    const struct iwlwifi_channel *ch = 0;
+    for (int i = 0; i < st.n_channels && !ch; i++)
+        if (channels[i].band == IWLWIFI_BAND_24)
+            ch = &channels[i];
+    if (!ch && st.n_channels)
+        ch = &channels[0];
+    if (!ch) {
+        why("the NVM lists no channel at all");
+        return IWL_ERR_REJECTED;
+    }
+    for (uint32_t i = 0; i < NUM_PHY_CTX; i++) {
+        uint8_t b[36];
+        memset(b, 0, sizeof(b));
+        put32(b, i);                            /* id, color 0 */
+        put32(b + 4, FW_CTXT_ACTION_ADD);
+        b[16] = ch->band == IWLWIFI_BAND_24 ? PHY_BAND_24 : PHY_BAND_5;
+        b[17] = (uint8_t)ch->number;
+        b[18] = 0;                              /* 20 MHz */
+        b[19] = 0;
+        put32(b + 20, valid_tx_ant());
+        /* one RX antenna: no diversity, both counts 1 */
+        put32(b + 24, (valid_rx_ant() << 1) | (1u << 10) | (1u << 12));
+        int r = iwl_send_cmd_pdu(PHY_CONTEXT_CMD, b, sizeof(b), 0);
+        if (r < 0)
+            return r;
+    }
+    return IWL_OK;
+}
+
+static int send_power_table(void)
+{
+    uint8_t b[4];
+    put16(b, 0x0001);           /* power save allowed (the default scheme) */
+    put16(b + 2, 0);
+    return iwl_send_cmd_pdu(POWER_TABLE_CMD, b, sizeof(b), 0);
+}
+
+/* ===================================================================
+ * Bring-up
+ * =================================================================== */
+
+#define STEP(name, expr) do {                           \
+        step = (name);                                  \
+        int r_ = (expr);                                \
+        if (r_ < 0)                                     \
+            return r_;                                  \
+    } while (0)
+
+/* The INIT image: NVM, calibration, the PHY DB */
+static int run_init(void)
+{
+    phydb_reset();
+    init_complete = 0;
+    cur_ucode = UCODE_INIT;
+
+    STEP("loading the INIT image", start_fw("INIT", &fw.init, 1));
+    STEP("starting the INIT image", wait_alive());
+    say("[wifi] INIT image alive (status 0x%x)\n", alive.status);
+    st.stage = IWL_STAGE_INIT_ALIVE;
+    STEP("starting the command queue (INIT)", tx_start());
+    fw_running = 1;
+
+    /* With the radio switched off, the command is dropped, not failed */
+    step = "BT_CONFIG (INIT)";
+    int r = send_bt_config();
+    if (r < 0 && r != IWL_ERR_RFKILL)
+        return r;
+    STEP("reading the NVM", nvm_read());
+    STEP("parsing the NVM", nvm_parse());
+    char mac[18];
+    mac_text(mac, st.mac);
+    say("[wifi] NVM: MAC %s, %d channels (2.4 GHz %d, 5 GHz %d)\n", mac,
+        st.n_channels, st.n_24ghz, st.n_5ghz);
+    if (st.nvm_version != NVM_VERSION_3160)
+        say("[wifi] NVM version 0x%x (the 3160's is 0x%x); going on\n",
+            st.nvm_version, (uint32_t)NVM_VERSION_3160);
+    st.stage = IWL_STAGE_NVM_READ;
+
+    if (rfkill_set()) {
+        st.rfkill = 1;
+        step = "calibration (INIT)";
+        why("the radio is switched off (hardware RF-kill switch)");
+        return IWL_ERR_RFKILL;
+    }
+    /* The antennas first: calibration runs on them */
+    STEP("TX_ANT_CONFIGURATION (INIT)",
+         send_u32(TX_ANT_CONFIGURATION_CMD, valid_tx_ant()));
+    STEP("PHY_CONFIGURATION (INIT)", send_phy_cfg(UCODE_INIT));
+
+    step = "calibration (INIT)";
+    struct waiter w;
+    wait_begin(&w, CALIB_TIMEOUT_MS);
+    do {
+        service();
+        if (fw_err)
+            return IWL_ERR_FW;
+        if (hw_gone)
+            return IWL_ERR_GONE;
+        if (init_complete)
+            break;
+        if (rfkill_set()) {
+            st.rfkill = 1;
+            why("the radio was switched off while calibrating");
+            return IWL_ERR_RFKILL;
+        }
+    } while (wait_more(&w));
+    if (!init_complete) {
+        if (rfkill_set()) {
+            st.rfkill = 1;
+            why("the radio was switched off while calibrating");
+            return IWL_ERR_RFKILL;
+        }
+        why("INIT_COMPLETE did not come within %u ms", (uint32_t)CALIB_TIMEOUT_MS);
+        return IWL_ERR_TIMEOUT;
+    }
+    say("[wifi] calibration done: %d results\n", st.calib_results);
+    st.stage = IWL_STAGE_CALIBRATED;
+    return IWL_OK;
+}
+
+/* The runtime image, configured to idle: the "minimal safe" set, in
+   the reference driver's order */
+static int run_runtime(void)
+{
+    cur_ucode = UCODE_REGULAR;
+    STEP("loading the runtime image", start_fw("runtime", &fw.rt, 0));
+    STEP("starting the runtime image", wait_alive());
+    say("[wifi] runtime image alive\n");
+    st.stage = IWL_STAGE_RT_ALIVE;
+    STEP("starting the command queue (runtime)", tx_start());
+    fw_running = 1;
+
+    STEP("SF_CFG", send_sf_cfg());
+    STEP("TX_ANT_CONFIGURATION", send_u32(TX_ANT_CONFIGURATION_CMD, valid_tx_ant()));
+    STEP("BT_CONFIG", send_bt_config());
+    /* The calibration results before PHY_CONFIGURATION */
+    STEP("sending the PHY DB", phydb_send_all());
+    STEP("PHY_CONFIGURATION", send_phy_cfg(UCODE_REGULAR));
+    STEP("adding the aux station", add_aux_sta());
+    STEP("adding the PHY contexts", add_phy_contexts());
+    STEP("POWER_TABLE", send_power_table());
+    /* An async command may still be in the queue; let it drain, so that
+       the card is truly idle and a late failure lands here */
+    step = "draining the command queue";
+    struct waiter w;
+    wait_begin(&w, CMD_TIMEOUT_MS);
+    do {
+        service();
+        if (fw_err)
+            return IWL_ERR_FW;
+        if (hw_gone)
+            return IWL_ERR_GONE;
+        if (txq[CMD_QUEUE].read == txq[CMD_QUEUE].write)
+            break;
+    } while (wait_more(&w));
+    if (txq[CMD_QUEUE].read != txq[CMD_QUEUE].write) {
+        why("commands still unanswered after %u ms", (uint32_t)CMD_TIMEOUT_MS);
+        return IWL_ERR_TIMEOUT;
+    }
+    st.stage = IWL_STAGE_READY;
+    return IWL_OK;
+}
+
+static int bringup(void)
+{
+    STEP("powering the card up (INIT)", start_hw());
+    int r = run_init();
+    if (r < 0)
+        return r;
+    /* INIT done: the card stopped and started again, then the runtime
+       image */
+    stop_device();
+    STEP("powering the card up (runtime)", start_hw());
+    return run_runtime();
+}
+
+/* "[ !! ] Wi-Fi: <step>: <reason>[; firmware error ...]" - once */
+static void report_failure(int err)
+{
+    char *e = st.last_error;
+    uint32_t cap = sizeof(st.last_error);
+    const char *what = reason[0] ? reason :
+                       err == IWL_ERR_TIMEOUT ? "timed out" :
+                       err == IWL_ERR_FW ? "the firmware crashed" :
+                       err == IWL_ERR_NOMEM ? "out of memory for DMA structures" :
+                       err == IWL_ERR_RFKILL ?
+                           "the radio is switched off (hardware RF-kill switch)" :
+                       "failed";
+    if (step[0])
+        fmt(e, cap, "%s: %s", step, what);
+    else
+        fmt(e, cap, "%s", what);
+    if (crash.read) {
+        uint32_t n = strlen(e);
+        fmt(e + n, cap - n, "; firmware error 0x%x %s, pc 0x%x, blink1 0x%x, "
+            "blink2 0x%x", crash.id, error_name(crash.id), crash.pc,
+            crash.blink1, crash.blink2);
+    }
+    st.stage = err == IWL_ERR_RFKILL ? IWL_STAGE_RFKILL : IWL_STAGE_FAILED;
+    say("[ !! ] Wi-Fi: %s\n", e);
+}
+
+int iwlwifi_run(void)
+{
+    reason[0] = '\0';
+    step = "";
+    st.last_error[0] = '\0';
+    st.fw_error_id = 0;
+    int r = IWL_OK;
+    if (!probed) {
+        step = "finding the card";
+        r = probe();
+        if (r == IWL_ERR_NOCARD)
+            return r;
+        if (r == IWL_OK)
+            probed = 1;
+    }
+    if (r == IWL_OK && !fw_parsed) {
+        step = "reading the firmware file";
+        r = parse_firmware();
+        if (r == IWL_OK) {
+            fw_parsed = 1;
+            st.stage = IWL_STAGE_FW_LOADED;
+        }
+    }
+    if (r == IWL_OK && !dma_ready) {
+        step = "allocating DMA memory";
+        r = alloc_dma();
+        if (r == IWL_OK)
+            dma_ready = 1;
+        else
+            why("out of memory for DMA structures");
+    }
+    if (r == IWL_OK)
+        r = bringup();
+    if (r < 0) {
+        report_failure(r);
+        stop_device();
+        return r;
+    }
+    char mac[18];
+    mac_text(mac, st.mac);
+    say("[ OK ] Wi-Fi: Intel Wireless 3160, MAC %s, firmware ready\n", mac);
+    return IWL_OK;
+}
+
+/* The running card: notifications taken in, the switch and the
+   firmware watched */
+void iwlwifi_poll(void)
+{
+    if (st.stage != IWL_STAGE_READY)
+        return;
+    reason[0] = '\0';
+    step = "running";
+    service();
+    int err = 0;
+    if (hw_gone) {
+        err = IWL_ERR_GONE;
+    } else if (fw_err) {
+        err = IWL_ERR_FW;
+    } else if (rfkill_set()) {
+        st.rfkill = 1;
+        why("the radio was switched off (hardware RF-kill switch)");
+        err = IWL_ERR_RFKILL;
+    } else {
+        struct txq *t = &txq[CMD_QUEUE];
+        if (t->read != t->write &&
+            (pit_ticks() - t->stamp) * 10 > CMDQ_WATCHDOG_MS) {
+            why("the command queue is stuck (no answer for %u ms)",
+                (uint32_t)CMDQ_WATCHDOG_MS);
+            force_nmi();
+            err = IWL_ERR_TIMEOUT;
+        }
+    }
+    if (err) {
+        report_failure(err);
+        stop_device();
+    }
+}
+
+static void iwl_thread(void *arg)
+{
+    (void)arg;
+    int r = iwlwifi_run();
+    for (;;) {
+        if (r == IWL_OK) {
+            iwlwifi_poll();
+            if (st.stage == IWL_STAGE_READY) {
+                task_sleep(POLL_INTERVAL_MS);
+                continue;
+            }
+            if (st.stage != IWL_STAGE_RFKILL)
+                return;         /* stopped by an error; said so */
+            r = IWL_ERR_RFKILL;
+        }
+        if (r != IWL_ERR_RFKILL)
+            return;
+        /* Wait for the switch, then start over from INIT: calibration
+           was skipped (or the card stopped) while it was off */
+        while (rfkill_set())
+            task_sleep(500);
+        st.rfkill = 0;
+        say("[wifi] the radio switch is on; starting the card again\n");
+        r = iwlwifi_run();
+    }
+}
+
+void iwlwifi_start(void)
+{
+    struct pci_dev dev;
+    if (!find_card(&dev)) {
+        st.stage = IWL_STAGE_NO_CARD;
+        printk("[ -- ] Wi-Fi: no Intel Wireless 3160\n");
+        return;
+    }
+    /* The firmware takes a second or two: not on the boot's time */
+    task_create("iwlwifi", iwl_thread, 0);
+}
+
+/* ===================================================================
+ * State for the rest of the system
+ * =================================================================== */
+
+const struct iwlwifi_state *iwlwifi_state(void)
+{
+    return &st;
+}
+
+const char *iwlwifi_stage_name(int stage)
+{
+    switch (stage) {
+    case IWL_STAGE_NONE:       return "not started";
+    case IWL_STAGE_NO_CARD:    return "no card";
+    case IWL_STAGE_PROBED:     return "card found";
+    case IWL_STAGE_FW_LOADED:  return "firmware file read";
+    case IWL_STAGE_INIT_ALIVE: return "INIT image running";
+    case IWL_STAGE_NVM_READ:   return "NVM read";
+    case IWL_STAGE_CALIBRATED: return "calibrated";
+    case IWL_STAGE_RT_ALIVE:   return "runtime image running";
+    case IWL_STAGE_READY:      return "ready (idle)";
+    case IWL_STAGE_RFKILL:     return "radio switched off";
+    case IWL_STAGE_FAILED:     return "failed";
+    }
+    return "?";
+}
+
+int iwlwifi_channels(struct iwlwifi_channel *out, int max)
+{
+    int n = st.n_channels < max ? st.n_channels : max;
+    for (int i = 0; i < n; i++)
+        out[i] = channels[i];
+    return st.n_channels;
+}

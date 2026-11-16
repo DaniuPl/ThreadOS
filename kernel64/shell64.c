@@ -53,6 +53,7 @@
 #include "../kernel/include/hwinfo.h"
 #include "../kernel/include/hda.h"
 #include "../kernel/include/bt.h"
+#include "../kernel/include/iwlwifi.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/tcp.h"
@@ -137,6 +138,7 @@ static void cmd_help(void)
     printk("            fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("          hardware - what is in this machine, disks, font\n");
     printk("          bt [scan|test] - Bluetooth\n");
+    printk("          wifi - the Wi-Fi card and its firmware\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          install - ThreadOS onto this machine's disk\n");
     printk("            (the whole screen; 'install text [whole]' - here)\n");
@@ -464,6 +466,38 @@ static void cmd_mouse(void)
     mouse_get(&x, &y, &b);
     printk("mouse: x=%u y=%u buttons=%u wheel=%s\n", (uint32_t)x,
            (uint32_t)y, (uint32_t)b, mouse_has_wheel() ? "yes" : "no");
+}
+
+/* 'wifi': how far the Wi-Fi driver got, and what it knows. The driver
+   reports in the boot log too; this is for asking again later. */
+static void cmd_wifi(void)
+{
+    const struct iwlwifi_state *s = iwlwifi_state();
+    if (s->stage == IWL_STAGE_NO_CARD || s->stage == IWL_STAGE_NONE) {
+        printk("wifi: %s\n", s->stage == IWL_STAGE_NO_CARD
+               ? "there is no Intel Wireless 3160 in this machine"
+               : "the driver has not started");
+        return;
+    }
+    printk("wifi: Intel Wireless 3160 (8086:%x) at %x:%x.%x, hw rev 0x%x\n",
+           (uint32_t)s->device, (uint32_t)s->bus, (uint32_t)s->slot,
+           (uint32_t)s->func, s->hw_rev);
+    printk("  state:    %s%s\n", iwlwifi_stage_name(s->stage),
+           s->rfkill ? " (radio switch off)" : "");
+    if (s->fw_version[0])
+        printk("  firmware: %s\n", s->fw_version);
+    if (s->mac_valid) {
+        const uint8_t *m = s->mac;
+        printk("  MAC:      %x:%x:%x:%x:%x:%x\n",
+               m[0], m[1], m[2], m[3], m[4], m[5]);
+        printk("  NVM:      version 0x%x, SKU 0x%x; %d channels "
+               "(2.4 GHz %d, 5 GHz %d)\n", (uint32_t)s->nvm_version,
+               (uint32_t)s->sku, s->n_channels, s->n_24ghz, s->n_5ghz);
+    }
+    if (s->calib_results)
+        printk("  calibration: %d results\n", s->calib_results);
+    if (s->last_error[0])
+        printk("  last error: %s\n", s->last_error);
 }
 
 static void cmd_bt(const char *arg)
@@ -1128,6 +1162,8 @@ static void execute(const char *line)
         cmd_bt("");
     } else if (starts_with(line, "bt ")) {
         cmd_bt(line + 3);
+    } else if (!strcmp(line, "wifi")) {
+        cmd_wifi();
     } else if (!strcmp(line, "font")) {
         fonts_command("");
     } else if (starts_with(line, "font ")) {

@@ -98,7 +98,7 @@ SHARED64 := string serial printk locale bootsplash mb2 fbcon vga pic pit pmm hea
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
-            e1000 rtl8168 virtio_net netdev smp
+            e1000 rtl8168 virtio_net netdev smp iwlwifi
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -542,7 +542,8 @@ VERSION_CODE_FILE := $(BUILD)/version-code.txt
 $(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERSION_LABEL)" ] || echo "$(VERSION_LABEL)" > $(VERSION_FILE); } && { [ "$$(cat $(VERSION_CODE_FILE) 2>/dev/null)" = "$(VERSION)" ] || echo "$(VERSION)" > $(VERSION_CODE_FILE); })
 
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
-             $(VERSION_FILE) $(VERSION_CODE_FILE)
+             $(VERSION_FILE) $(VERSION_CODE_FILE) \
+             third_party/iwlwifi/iwlwifi-3160-17.ucode
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
@@ -609,6 +610,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    libctest=$(BUILD)/user64/libctest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
+	    iwl3160.ucode=third_party/iwlwifi/iwlwifi-3160-17.ucode \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)
 	@echo "Done: $@ ($$(stat -c%s $@) B)"
 
