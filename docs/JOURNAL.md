@@ -7735,3 +7735,22 @@ works and is checked by `make test`.
       bundle then with Mozilla's followed by that root in PEM as
       Python's ssl module writes it. A root the system does not trust
       is still refused.
+
+- [x] **The same roots for the browser** (user/ucert.h, user/httpget.c,
+      user/gweb.c, scripts/tests/t_trust.py, scripts/ptest.py)
+      The browser fetches through httpget, which runs the system's own
+      TLS and trusted a dozen roots built into the code and roots.der.
+      It now reads Mozilla's bundle out of the initrd too and decodes
+      the PEM into DER where it lies (cert_load_system), so the browser
+      and curl trust the same roots; gweb does the same.
+
+      t_trust needs a root the test holds the key for in the system's
+      bundle, so it makes an initrd of its own - the build's, with the
+      test's root added to the end of cacert.pem. With the build's
+      initrd both httpget and curl refuse the test's server; with the
+      test's, both accept it with no roots.der and no --cacert. It also
+      sees the bundle in the build's initrd unchanged.
+
+      A full run had filled the session's disk: every test process left
+      its GRUB boot disc behind (fifty megabytes, hundreds of them). The
+      disc now goes when the test that made it ends.

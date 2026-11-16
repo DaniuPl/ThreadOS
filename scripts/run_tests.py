@@ -33,7 +33,7 @@ GROUPS = [
     "kthreads", "proccores", "lockless", "tlb", "faults", "config", "settings", "netbar", "winmgr", "manywin", "maxwin", "clock", "gterm", "terminal", "gtermlive", "gtermsh", "alttab", "clip", "gtermsel", "winkeys", "snap", "desks", "gedit", "gcode", "gtasks", "sysbar", "files", "filetree", "screenshot", "colours", "wheel", "scale", "look", "bar", "udraw", "motion", "notify", "island", "usbmedia", "appear", "apps", "lock", "session", "polish", "wall", "icons", "users", "usersgui", "login", "multiuser", "gfx64", "desktop1",
     "desktop2", "desktop64", "gui64", "gterm64", "acpi64", "consoles64",
     "usbkbd64", "arm64boot", "arm64core", "arm64threads", "iso", "uefi", "threadboot", "fat", "install", "ginstal", "wholedisk", "disks", "stick", "sound", "aes", "wpa", "usbdisk", "bt", "intelusb", "screenoff", "pointer", "usbnet", "rtl8168",
-    "libc", "pthread", "sqlite", "socket", "random", "zlib", "mbedtls", "curl", "fonts", "browser", "web", "webform", "webtools", "webjs", "webui", "websvg", "webp", "webcompat", "webcss", "webfetch", "webfont", "isoinstall", "wc", "update"
+    "libc", "pthread", "sqlite", "socket", "random", "zlib", "mbedtls", "curl", "trust", "fonts", "browser", "web", "webform", "webtools", "webjs", "webui", "websvg", "webp", "webcompat", "webcss", "webfetch", "webfont", "isoinstall", "wc", "update"
 ]
 
 

@@ -6,10 +6,11 @@
  *   2. is it valid according to the system clock,
  *   3. does it lead a chain of signatures to a certificate we trust.
  *
- * A trust store is a concatenation of certificates in DER. Some of
- * them are built into the system (caroots.h - the roots of public CAs),
- * and more can be added with a "roots.der" file on disk - useful for
- * one's own certificates on a local network.
+ * A trust store is a concatenation of certificates in DER. The
+ * system's are Mozilla's (cert_load_system: cacert.pem in the initrd),
+ * a few are built into the code as well (caroots.h), and more can be
+ * added with a "roots.der" file on disk - useful for one's own
+ * certificates on a local network.
  */
 
 #ifndef THREADOS_UCERT_H
@@ -268,6 +269,63 @@ static inline uint32_t cert_load_roots(const char *path, uint8_t *buf,
     }
     sys_close(fd);
     return total;
+}
+
+/* PEM certificates turned into the DER concatenation a trust store is.
+   Decoded where they lie: Base64 is longer than what it encodes, so the
+   writing never overtakes the reading. Whatever is not between BEGIN
+   and END CERTIFICATE lines - the bundle's comments, other kinds of
+   block - is passed over. Returns the bytes of DER. */
+static inline uint32_t cert_pem_to_der(uint8_t *buf, uint32_t n)
+{
+    static const char begin[] = "-----BEGIN CERTIFICATE-----";
+    const uint32_t blen = sizeof(begin) - 1;
+    uint32_t in = 0, out = 0;
+    while (in < n) {
+        /* the next BEGIN line */
+        int at_line = in == 0 || buf[in - 1] == '\n';
+        uint32_t k = 0;
+        while (at_line && k < blen && in + k < n && buf[in + k] == begin[k])
+            k++;
+        if (k < blen) {
+            in++;
+            continue;
+        }
+        in += blen;
+        while (in < n && buf[in] != '\n')
+            in++;
+        /* the Base64 up to the END line, a byte out for every eight bits */
+        uint32_t acc = 0;
+        int bits = 0;
+        while (in < n && buf[in] != '-') {
+            uint8_t c = buf[in++];
+            int v = c >= 'A' && c <= 'Z' ? c - 'A'
+                  : c >= 'a' && c <= 'z' ? c - 'a' + 26
+                  : c >= '0' && c <= '9' ? c - '0' + 52
+                  : c == '+' ? 62 : c == '/' ? 63 : -1;
+            if (v < 0)
+                continue;                /* line ends, padding */
+            acc = (acc << 6 | (uint32_t)v) & 0xFFFFFF;
+            bits += 6;
+            if (bits >= 8) {
+                bits -= 8;
+                buf[out++] = (uint8_t)(acc >> bits);
+            }
+        }
+    }
+    return out;
+}
+
+/* The system's roots: Mozilla's, as curl.se publishes them
+   (third_party/cacert), in the initrd as cacert.pem - the same file
+   musl's programs find at /etc/ssl/certs/ca-certificates.crt, so both
+   kinds of TLS trust the same roots. As DER; 0 when there is none. */
+static inline uint32_t cert_load_system(uint8_t *buf, uint32_t max)
+{
+    int64_t n = sys_initrd_read("cacert.pem", buf, max);
+    if (n <= 0)
+        return 0;
+    return cert_pem_to_der(buf, (uint32_t)n);
 }
 
 #endif

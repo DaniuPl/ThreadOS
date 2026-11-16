@@ -48,6 +48,13 @@ struct sink_state {
     uint32_t written;
 };
 
+
+/* The roots a server's chain may end in: the system's (cert_load_system
+   reads Mozilla's bundle, 200 KB of PEM, into this before decoding it)
+   and the disk's own roots.der after them */
+#define ROOTS_MAX (320 * 1024)
+static uint8_t roots[ROOTS_MAX];
+
 static void body_sink(const char *data, uint32_t len, void *arg)
 {
     struct sink_state *st = arg;
@@ -113,7 +120,6 @@ static void run_batch(const char *list_file, struct cookie_jar *jar,
     static struct http_conn conn;
     static char host[256], path[2048], cookie_line[4096], st_name[300];
     static char last_host[256];
-    static uint8_t roots[16384];
     int roots_loaded = 0;
     uint32_t last_ip = 0, count = 0, ok = 0;
     struct http_result res;
@@ -141,7 +147,9 @@ static void run_batch(const char *list_file, struct cookie_jar *jar,
                             &tls))
             continue;
         if (tls && !roots_loaded) {
-            uint32_t rl = cert_load_roots("roots.der", roots, sizeof(roots));
+            uint32_t rl = cert_load_system(roots, sizeof(roots));
+            rl += cert_load_roots("roots.der", roots + rl,
+                                  (uint32_t)sizeof(roots) - rl);
             http_set_roots(roots, rl, 1);
             roots_loaded = 1;
         }
@@ -359,10 +367,12 @@ void _start(int argc, char **argv)
         }
     }
 
-    static uint8_t roots[16384];
     if (use_tls) {
-        /* The built-in roots are always there; from disk we add our own */
-        uint32_t roots_len = cert_load_roots("roots.der", roots, sizeof(roots));
+        /* The system's roots, then our own from the disk; a few built
+           into the code are always there besides */
+        uint32_t roots_len = cert_load_system(roots, sizeof(roots));
+        roots_len += cert_load_roots("roots.der", roots + roots_len,
+                                     (uint32_t)sizeof(roots) - roots_len);
         http_set_roots(roots, roots_len, !insecure);
         if (insecure)
             print("[httpget] WARNING: -k, the certificate will not be checked\n");

@@ -3592,6 +3592,9 @@ def boot_disc(append=None):
     key = (cmdline, text)
     if key not in _boot_discs:
         work = tempfile.mkdtemp(prefix="bootdisc")
+        # Fifty megabytes a disc, and a full run makes hundreds: gone
+        # with the test that made it, or the run fills the disk
+        atexit.register(shutil.rmtree, work, True)
         iso = os.path.join(work, "boot.iso")
         if not make_iso64(os.path.join(work, "root"), iso,
                           graphics=not text, text=text, cmdline=cmdline):

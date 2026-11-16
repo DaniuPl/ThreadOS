@@ -115,14 +115,17 @@ static void rebuild_addr(void)
 
 static void fetch(void)
 {
-    static uint8_t roots[16384];
+    /* Mozilla's bundle is read into it as PEM before it is decoded */
+    static uint8_t roots[320 * 1024];
     static int roots_loaded;
 
     if (cur_tls && !roots_loaded) {
-        /* The built-in public CA roots plus any of our own from disk. A
+        /* The system's public CA roots plus any of our own from disk. A
            certificate that does not hold up ends the connection - just
            as in a real browser. */
-        uint32_t n = cert_load_roots("roots.der", roots, sizeof(roots));
+        uint32_t n = cert_load_system(roots, sizeof(roots));
+        n += cert_load_roots("roots.der", roots + n,
+                             (uint32_t)sizeof(roots) - n);
         http_set_roots(roots, n, 1);
         roots_loaded = 1;
     }
