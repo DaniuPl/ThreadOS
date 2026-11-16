@@ -44,12 +44,14 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 HW = os.path.join(ROOT, "tests", "hw")
 UCODE = os.path.join(ROOT, "third_party", "iwlwifi", "iwlwifi-3160-17.ucode")
 
-# (argument, what it is, the least number of ok/FAIL lines a full run prints)
+# (argument, what it is, the number of ok/FAIL lines a full run prints:
+# the model's checks for that scenario, counted in tests/hw/iwl_model.c -
+# fewer means the run stopped before the end)
 SCENARIOS = (
     ("ok", "everything right", 34),
-    ("nofw-ack", "a firmware chunk never acknowledged", 10),
+    ("nofw-ack", "a firmware chunk never acknowledged", 9),
     ("assert", "the runtime firmware crashes", 14),
-    ("rfkill", "the radio switch off", 10),
+    ("rfkill", "the radio switch off", 9),
 )
 
 

@@ -7754,3 +7754,39 @@ works and is checked by `make test`.
       A full run had filled the session's disk: every test process left
       its GRUB boot disc behind (fifty megabytes, hundreds of them). The
       disc now goes when the test that made it ends.
+
+- [x] **An idle desktop draws almost nothing** (kernel/desktop.c,
+      kernel/include/desktop.h, kernel64/shell64.c,
+      scripts/tests/t_motion.py)
+      The compositor drew every frame whole - the background, the icons,
+      every window, the dock, the cursor - and then compared the whole
+      screen with what the card had, to send it nothing: an idle frame
+      at 800x600 cost QEMU most of its time, and motion's "a small share
+      of the second" failed at 59-71%. A frame that would be the last
+      one again is now not drawn: the last one sent the card nothing,
+      no input has come, and no program has changed a window, posted a
+      notification or been typed to since (scene_changed(), bumped from
+      every place outside the loop that changes what is shown). What
+      moves changes the screen every frame and is drawn every frame;
+      what changes with time alone - the clock, the bar hiding, the end
+      of a notification - is caught by the frame drawn anyway five times
+      a second. An idle desktop now spends 13% of the second drawing, at
+      46 frames a second. 'screen' says how many frames were drawn.
+
+      t_motion's checks of the frames' cost pass now, and it also sees
+      that at most half of an idle desktop's frames are drawn; the whole
+      suite, which reads the screen everywhere, runs on it.
+
+- [x] **The Wi-Fi driver against its model, and into GROUPS**
+      (scripts/tests/t_iwlwifi.py, scripts/run_tests.py)
+      Stage one of the Intel Wireless 3160 driver had not been run
+      against the model of the card. Run, it does everything the model
+      asks in all four scenarios - the whole bring-up with 300
+      notifications through the receive ring, a firmware chunk never
+      acknowledged, the runtime firmware crashing, the radio switched
+      off - with nothing the sanitizers see and no rule of the
+      specifications broken. Two scenarios were held to ten checks where
+      the model makes nine (counted in tests/hw/iwl_model.c: the end, the
+      error returned, two milestones, the scenario's own three or four,
+      and the rules), so they could never pass; the counts are the
+      model's now, and t_iwlwifi is in GROUPS.
