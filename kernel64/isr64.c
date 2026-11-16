@@ -1,9 +1,7 @@
 /* Common interrupt handling in long mode
  *
- * The role is the same as in the 32-bit kernel: a processor exception
- * stops the system with a diagnostic, and a hardware interrupt goes to
- * the handler registered by a driver. The only differences are the
- * register frame and the fact that addresses are 64-bit.
+ * A processor exception stops the system with a diagnostic, and a
+ * hardware interrupt goes to the handler registered by a driver.
  */
 
 #include <stddef.h>
@@ -82,11 +80,10 @@ static void isr64_dispatch(struct regs *r);
  * kernel takes nothing new: the lock is recursive. */
 /* --- the fault causes that need no big kernel lock -------------------
  *
- * The same list as in the 32-bit kernel (kernel/exec.c): heap, stack
- * and anonymous memory in the mapping area. A frame, four kilobytes of
- * zeros and one entry in a table - and all three have locks of their
- * own. Everything else reaches for the disk or for the task list and
- * goes in as before.
+ * Heap, stack and anonymous memory in the mapping area. A frame, four
+ * kilobytes of zeros and one entry in a table - and all three have
+ * locks of their own. Everything else reaches for the disk or for the
+ * task list and goes in as before.
  *
  * Returns 1 when it dealt with the fault.
  */
@@ -125,9 +122,107 @@ static int demand_page_nolock(uint64_t addr)
     return 1;
 }
 
-int isr64_demand_page(uint64_t addr)
+/* A fresh zeroed page at 'page', writable and with no execute
+   permission - there is no code in a program's data, and if there were,
+   the processor would not run it. Mapped only where nothing is yet:
+   another core may be faulting on the same page through the path
+   above. 1 = the page is there now, whoever brought it. */
+static int fresh_page(uint64_t page, uint32_t *count)
 {
-    return demand_page_nolock(addr);
+    uint32_t frame = pmm_alloc_frame();
+    if (!frame)
+        return 0;
+    memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
+    if (paging64_map_if_absent(page, frame, PG_USER | PG_WRITE | PG_NX)) {
+        (*count)++;
+        return 1;
+    }
+    pmm_free_frame(frame);
+    return paging64_lookup(page) != 0;
+}
+
+/* The program's own page that is not there (see paging64.h). A fault
+ * from ring 3 comes here, and so does the kernel before it touches a
+ * buffer a program passed to a system call: a program may well hand
+ * over memory it asked for and never touched, and that memory is still
+ * its own. */
+int isr64_page_in(uint64_t addr)
+{
+    uint64_t page = addr & ~0xFFFULL;
+
+    /* A page that went out to disk. We fetch it back - as far as the
+       program is concerned nothing happened beyond a moment's delay. */
+    if (paging64_swap_in(paging64_current_space(), addr))
+        return 1;
+    if (paging64_lookup(page))
+        return 0;           /* it is there - whatever stopped it, not absence */
+
+    /* A page of a file mapped into memory.
+     *
+     * The bytes come from disk only now - through the block layer, by
+     * the numbers worked out when the mapping was set up. We do not
+     * step into file system code here: it has one shared buffer for a
+     * block, and a page fault can land in the middle of any file
+     * operation.
+     *
+     * The tail of the last page is zeroed out - a file ends where it
+     * ends.
+     *
+     * A writable mapping gets write permission and the PG_FILE flag;
+     * without it the page is read-only and an attempted write has to
+     * end in a fault rather than in data quietly getting lost. */
+    uint32_t first = 0, remaining = 0, write = 0;
+    if (task64_mmap_find(addr, &first, &remaining, &write)) {
+        uint32_t frame = pmm_alloc_frame();
+        if (!frame)
+            return 0;
+        uint8_t *dst = (uint8_t *)(uintptr_t)frame;
+        memset(dst, 0, PAGE_SIZE);
+        for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
+                             remaining > b * FS_BLOCK; b++) {
+            uint32_t block = task64_mmap_block(addr, first + b);
+            if (!block)
+                break;
+            blk_read(fs_block_lba(block), FS_BLOCK / 512,
+                     dst + b * FS_BLOCK);
+        }
+        uint64_t right = PG_USER | PG_NX;
+        if (write)
+            right |= PG_WRITE | PG_FILE;
+        if (paging64_map_if_absent(page, frame, right)) {
+            mmap_pages++;
+            return 1;
+        }
+        pmm_free_frame(frame);
+        return paging64_lookup(page) != 0;
+    }
+
+    /* Anonymous memory the process asked for in the mapping area.
+     *
+     * The same bargain as the heap: asking reserved addresses and
+     * nothing more, and the page appears the moment somebody touches
+     * it. This is what a thread's stack is made of, so it has to come
+     * AFTER the mapped-file case - both live in the same area, and a
+     * file has contents while this has zeros. */
+    if (task64_in_mmap(addr))
+        return fresh_page(page, &mmap_pages);
+
+    /* The stack, which has just grown downwards.
+     *
+     * A program gets four pages to start with and we add the rest under
+     * its fingers - exactly like the heap. The limit is there so that a
+     * wild pointer does not quietly turn into a mapped page: below it a
+     * page fault stays a fault. */
+    if (addr < USER64_STACK_TOP && addr >= USER64_STACK_TOP - USER64_STACK_MAX)
+        return fresh_page(page, &stack_pages);
+
+    /* A heap page the program asked for but which does not exist yet.
+     * This is not an error but the moment memory becomes real: asking
+     * for a megabyte cost zero, and payment is due only for the pages
+     * actually used. */
+    if (task64_in_heap(addr))
+        return fresh_page(page, &heap_pages);
+    return 0;
 }
 
 /* How many page faults were served without the big kernel lock, and
@@ -200,128 +295,18 @@ static void isr64_dispatch(struct regs *r)
             paging64_handle_cow(read_cr2()))
             return;
 
-        /* A page that went out to disk. We fetch it back and let the
-         * instruction be repeated - as far as the program is concerned
-         * nothing happened beyond a moment's delay. */
-        if (r->int_no == 14 && !(r->err_code & 0x01) &&
-            paging64_swap_in(paging64_current_space(), read_cr2()))
-            return;
-
-        /* A page of a file mapped into memory.
-         *
-         * The bytes come from disk only now - through the block layer,
-         * by the numbers worked out when the mapping was set up. We do
-         * not step into file system code here: it has one shared buffer
-         * for a block, and a page fault can land in the middle of any
-         * file operation.
-         *
-         * The tail of the last page is zeroed out - a file ends where
-         * it ends.
-         *
-         * A writable mapping gets write permission and the PG_FILE
-         * flag; without it the page is read-only and an attempted write
-         * has to end in a fault rather than in data quietly getting
-         * lost. */
-        if (r->int_no == 14 && (r->cs & 3) == 3) {
+        /* A page that is not there. For a program that may be a page of
+         * its own that it has simply not touched yet (isr64_page_in).
+         * The kernel gets here only on a program's page that went out
+         * to disk while a system call was using it - it was there when
+         * the call checked the pointer - so for the kernel the disk is
+         * the only answer. */
+        if (r->int_no == 14 && !(r->err_code & 0x01)) {
             uint64_t addr = read_cr2();
-            uint32_t first = 0, remaining = 0, write = 0;
-            if (task64_mmap_find(addr, &first, &remaining, &write) &&
-                paging64_lookup(addr & ~0xFFFULL) == 0) {
-                uint32_t frame = pmm_alloc_frame();
-                if (frame) {
-                    uint8_t *dst = (uint8_t *)(uintptr_t)frame;
-                    memset(dst, 0, PAGE_SIZE);
-                    for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
-                                         remaining > b * FS_BLOCK; b++) {
-                        uint32_t block = task64_mmap_block(addr, first + b);
-                        if (!block)
-                            break;
-                        blk_read(fs_block_lba(block), FS_BLOCK / 512,
-                                 dst + b * FS_BLOCK);
-                    }
-                    uint64_t right = PG_USER | PG_NX;
-                    if (write)
-                        right |= PG_WRITE | PG_FILE;
-                    if (paging64_map(addr & ~0xFFFULL, frame, right) == 0) {
-                        mmap_pages++;
-                        return;
-                    }
-                    pmm_free_frame(frame);
-                }
-            }
-        }
-
-        /* Anonymous memory the process asked for in the mapping area.
-         *
-         * The same bargain as the heap: asking reserved addresses and
-         * nothing more, and the page appears the moment somebody
-         * touches it. This is what a thread's stack is made of, so it
-         * has to come AFTER the mapped-file case - both live in the
-         * same area, and a file has contents while this has zeros. */
-        if (r->int_no == 14 && (r->cs & 3) == 3) {
-            uint64_t addr = read_cr2();
-            if (task64_in_mmap(addr) &&
-                paging64_lookup(addr & ~0xFFFULL) == 0) {
-                uint32_t frame = pmm_alloc_frame();
-                if (frame) {
-                    memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
-                    if (paging64_map(addr & ~0xFFFULL, frame,
-                                     PG_USER | PG_WRITE | PG_NX) == 0) {
-                        mmap_pages++;
-                        return;
-                    }
-                    pmm_free_frame(frame);
-                }
-            }
-        }
-
-        /* The stack, which has just grown by one page downwards.
-         *
-         * A program gets four pages to start with and we add the rest
-         * under its fingers - exactly like the heap. The limit is there
-         * so that a wild pointer does not quietly turn into a mapped
-         * page: below it a page fault stays a fault. */
-        if (r->int_no == 14 && (r->cs & 3) == 3) {
-            uint64_t addr = read_cr2();
-            if (addr < USER64_STACK_TOP &&
-                addr >= USER64_STACK_TOP - USER64_STACK_MAX &&
-                paging64_lookup(addr & ~0xFFFULL) == 0) {
-                uint32_t frame = pmm_alloc_frame();
-                if (frame) {
-                    memset((void *)(uintptr_t)frame, 0, 4096);
-                    if (paging64_map(addr & ~0xFFFULL, frame,
-                                     PG_USER | PG_WRITE | PG_NX) == 0) {
-                        stack_pages++;
-                        return;
-                    }
-                    pmm_free_frame(frame);
-                }
-            }
-        }
-
-        /* A touch of a heap page the program asked for but which does
-         * not exist yet. This is not an error but the moment memory
-         * becomes real: asking for a megabyte cost zero, and payment is
-         * due only for the pages actually used.
-         *
-         * Writable and with no execute permission - there is no code in
-         * a program's data, and if there were, the processor would not
-         * run it. */
-        if (r->int_no == 14 && (r->cs & 3) == 3) {
-            uint64_t addr = read_cr2();
-            if (task64_in_heap(addr) &&
-                paging64_lookup(addr & ~0xFFFULL) == 0) {
-                uint32_t frame = pmm_alloc_frame();
-                if (frame) {
-                    memset((void *)(uintptr_t)frame, 0, 4096);
-                    if (paging64_map(addr & ~0xFFFULL, frame,
-                                     PG_USER | PG_WRITE | PG_NX) == 0) {
-                        heap_pages++;
-                        return;
-                    }
-                    pmm_free_frame(frame);
-                }
-            }
+            if ((r->cs & 3) == 3
+                    ? isr64_page_in(addr)
+                    : paging64_swap_in(paging64_current_space(), addr))
+                return;
         }
 
         /* An exception from ring 3 is the PROGRAM's error, not the
@@ -399,7 +384,9 @@ static void isr64_dispatch(struct regs *r)
 
     if (r->int_no >= IRQ_BASE && r->int_no < IRQ_BASE + 16) {
         int irq = (int)(r->int_no - IRQ_BASE);
-        /* EOI before the handler - just as in the 32-bit kernel */
+        /* EOI before the handler: the timer's may switch tasks and not
+           come back here for a while, and until the PIC hears the EOI
+           it sends nothing more */
         pic_send_eoi(irq);
         random_add_interrupt(irq);
         if (irq_handlers[irq])

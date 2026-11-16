@@ -1,4 +1,4 @@
-# Building both kernels and running the tests that matter most.
+# Building the kernels and running the tests that matter most.
 #
 # By hand only. The project is built and tested locally, in QEMU - the
 # full suite is a hundred virtual machines, twenty minutes on four cores
@@ -32,6 +32,9 @@ jobs:
       - name: threadboot - our own EFI loader
         run: make efi
 
+      - name: The ARM64 kernel (QEMU virt)
+        run: make kernelarm64
+
       - name: The hybrid disc (BIOS + UEFI)
         run: make iso64
 
@@ -52,8 +55,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential \
-            qemu-system-x86 grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-            ovmf clang lld python3 openssl libssl-dev
+            qemu-system-x86 qemu-system-arm grub-pc-bin grub-efi-amd64-bin \
+            xorriso mtools ovmf clang lld python3 openssl libssl-dev
           # FreeType and fontTools are what the TrueType test compares
           # the kernel's glyphs with
           python3 -m pip install --user freetype-py fonttools
@@ -62,6 +65,7 @@ jobs:
         run: |
           make -j$(nproc)
           make efi
+          make kernelarm64
 
       # The network groups stand a DNS server of their own on the
       # host's port 53, because that is where QEMU's user network sends
@@ -71,7 +75,7 @@ jobs:
       - name: Let an unprivileged process bind port 53
         run: sudo sysctl -w net.ipv4.ip_unprivileged_port_start=53
 
-      # A cross-section rather than everything: booting both kernels,
+      # A cross-section rather than everything: booting the kernels,
       # ring 3, the filesystem, the disc, the two authenticated ciphers,
       # WPA2, USB storage, the sound card, the desktop and the network.
       # The first run of this took six minutes on a runner with two
@@ -81,7 +85,7 @@ jobs:
       - name: The groups that cover the most ground
         if: github.event_name != 'schedule'
         run: |
-          make test J=2 T=k64core,k64shell,k64disk,libc,pthread,sqlite,socket,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,ush,tls64,net64,desktop64,files,ginstal,stick
+          make test J=2 T=k64core,k64shell,k64proc,k64disk,tfs,arm64boot,arm64core,arm64threads,libc,pthread,sqlite,socket,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,http,tls64,net64,desktop64,files,ginstal,stick
 
       - name: Everything, once a night
         if: github.event_name == 'schedule'

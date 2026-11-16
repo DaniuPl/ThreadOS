@@ -7,8 +7,7 @@
  * growing".
  *
  * Drawn the way the desktop draws, in the theme's colours, asked for
- * every time so that a switch of the theme is followed at once. One
- * program for both kernels (uapi.h).
+ * every time so that a switch of the theme is followed at once.
  */
 
 #include "udraw.h"

@@ -85,9 +85,8 @@ static uint64_t *ensure(uint64_t *table, int idx, uint64_t extra)
 
 /* --- The lock on the page tables -------------------------------------
  *
- * The same reasoning as in the 32-bit kernel (kernel/paging.c): a page
- * fault no longer takes the big kernel lock for the causes that only
- * need a frame and one entry, so the tables need a lock of their own.
+ * A page fault no longer takes the big kernel lock for the causes that
+ * only need a frame and one entry, so the tables need a lock of their own.
  * One for the whole kernel; the section under it is a walk of four
  * levels and a single write.
  *
@@ -325,51 +324,98 @@ uint64_t paging64_unmap(uint64_t virt)
     return phys;
 }
 
-/* Is the page visible to ring 3? Access rights are the intersection
-   over all four levels, so the USER bit has to be on each of them -
-   exactly as the processor checks it. */
-static int user_page(uint64_t *top, uint64_t va)
+/* The entry that gives ring 3 this page, or 0 when ring 3 cannot reach
+   it. Access rights are the intersection over all four levels, so the
+   USER bit has to be on each of them - exactly as the processor checks
+   it. The ban on running code works the other way round, one level is
+   enough for it, so the entry handed back carries PG_NX when any of the
+   four does. */
+static uint64_t user_entry(uint64_t *top, uint64_t va)
 {
     uint64_t e = top[(va >> 39) & 0x1FF];
     if (!(e & PTE_PRESENT) || !(e & PG_USER))
         return 0;
+    uint64_t nx = e & PG_NX;
     e = table_at(e)[(va >> 30) & 0x1FF];
     if (!(e & PTE_PRESENT) || !(e & PG_USER))
         return 0;
+    nx |= e & PG_NX;
     e = table_at(e)[(va >> 21) & 0x1FF];
     if (!(e & PTE_PRESENT) || !(e & PG_USER))
         return 0;
     if (e & PTE_HUGE)
-        return 1;
+        return e | nx;
+    nx |= e & PG_NX;
     e = table_at(e)[(va >> 12) & 0x1FF];
-    return (e & PTE_PRESENT) && (e & PG_USER);
+    if (!(e & PTE_PRESENT) || !(e & PG_USER))
+        return 0;
+    return e | nx;
 }
 
-/* Is the whole range visible to ring 3?
+/* Is the whole range the program's own?
  *
  * The kernel has no right to believe a pointer supplied by a program:
  * a process could slip in the address of its own page tables or of
  * kernel memory and have them printed out for it.
  *
- * A page of the heap, the stack or anonymous memory that the program
- * has not touched yet does not exist until it is touched - and that is
- * no error: ring 3 touching it takes a page fault that makes it. A
- * system call about to write into such a page (a read into a buffer
- * fresh from malloc) makes it the same way, or a correct program would
- * be told its own memory is not its own. */
-int paging64_user_range(uint64_t virt, uint64_t len)
+ * A page that is not there yet may still be the program's. Its heap,
+ * its stack and its mapping area cost nothing until they are touched,
+ * and a buffer handed to read() is very often memory nobody has touched
+ * yet - a fresh megabyte from malloc gets its pages one at a time. So
+ * such a page is brought in now, exactly as the program's own first
+ * touch would bring it; what the fault handler would refuse stays
+ * refused, and the USER bit is checked afterwards all the same. The
+ * kernel's own space has no program in it, and nothing is brought in
+ * there.
+ *
+ * 'write' is for a buffer the kernel is about to write into. Write
+ * protection holds for the kernel too, so a read-only page (the
+ * program's code, its constants) would stop the whole system with a
+ * fault in the middle of a system call. A page shared after a fork is
+ * split here, before the write: a split that finds no free frame is
+ * then the call's failure, not a fault the kernel cannot get out of. */
+static int user_access(uint64_t virt, uint64_t len, int write)
 {
     uint64_t *top = root_now();
     if (!top || len == 0)
         return len == 0;
     if (virt + len < virt)                   /* the counter wrapped around */
         return 0;
+    int program = (uint64_t)(uintptr_t)top != (uint64_t)(uintptr_t)pml4;
 
-    for (uint64_t va = virt & ~0xFFFULL; va < virt + len; va += 4096)
-        if (!user_page(top, va) &&
-            !(isr64_demand_page(va) && user_page(top, va)))
+    for (uint64_t va = virt & ~0xFFFULL; va < virt + len; va += 4096) {
+        uint64_t e = user_entry(top, va);
+        if (!e && program && isr64_page_in(va))
+            e = user_entry(top, va);
+        if (!e)
             return 0;
+        if (write && !(e & PG_WRITE) &&
+            (!(e & PG_COW) || !paging64_handle_cow(va)))
+            return 0;
+    }
     return 1;
+}
+
+int paging64_user_range(uint64_t virt, uint64_t len)
+{
+    return user_access(virt, len, 0);
+}
+
+int paging64_user_writable(uint64_t virt, uint64_t len)
+{
+    return user_access(virt, len, 1);
+}
+
+/* The page is looked up like any other pointer first: code can be in
+   the swap file like the rest of a program, and has to come back. That
+   also gives an untouched heap or stack address its page - and that
+   page, like every page of data, may not be run, which is the answer. */
+int paging64_user_code(uint64_t virt)
+{
+    if (!user_access(virt, 1, 0))
+        return 0;
+    uint64_t e = user_entry(root_now(), virt);
+    return e && !(e & PG_NX);
 }
 
 /* --- Process address spaces --------------------------------------

@@ -1,4 +1,4 @@
-/* The 64-bit kernel's shell
+/* The kernel's shell
  *
  * An ordinary kernel thread: it reads characters from the keyboard,
  * assembles lines out of them and runs commands. There are no
@@ -31,6 +31,7 @@
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/pmm.h"
+#include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
 #include "../kernel/include/initrd.h"
 #include "../kernel/include/blk.h"
@@ -52,11 +53,14 @@
 #include "../kernel/include/hwinfo.h"
 #include "../kernel/include/hda.h"
 #include "../kernel/include/bt.h"
+#include "../kernel/include/iwlwifi.h"
 #include "../kernel/include/fbcon.h"
 #include "../kernel/include/net.h"
+#include "../kernel/include/tcp.h"
 #include "../kernel/include/video.h"
 #include "../kernel/include/desktop.h"
 #include "../kernel/include/vga.h"
+#include "../kernel/include/mouse.h"
 
 /* As long as a program's whole argument may be (ARG_LEN): a URL with a
    query, handed to curl, is past eighty characters soon enough */
@@ -124,8 +128,8 @@ static void cmd_help(void)
     printk("Commands: help, ps, mem, set, ls, disk, fls, pwd, cd <dir>,\n");
     printk("          mkdir <dir>, cat <file>, write <file> <text>,\n");
     printk("          rm <file>, cp <source> <target>, uptime, date,\n");
-    printk("          run <program>, clear,\n");
-    printk("          ifconfig, arp, ping <address>, dns <ip>,\n");
+    printk("          run <program>, clear, df, format [N]\n");
+    printk("          ifconfig, arp, netstat, ping <address>, dns <ip>,\n");
     printk("          gfx, desktop,\n");
     printk("          reboot, poweroff, smp, smpmem, smpthreads\n");
     printk("          runw <prog> - a program on any core\n");
@@ -136,6 +140,7 @@ static void cmd_help(void)
     printk("            fatsum, fatput, fatcopy, fatmkdir, fatrm\n");
     printk("          hardware - what is in this machine, disks, font\n");
     printk("          bt [scan|test] - Bluetooth\n");
+    printk("          wifi - the Wi-Fi card and its firmware\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          format [N] - the whole disk, or partition N, as TFS\n");
     printk("          install - ThreadOS onto this machine's disk\n");
@@ -254,7 +259,9 @@ static void cmd_fls(void)
 
 static void cmd_cat(const char *name)
 {
-    static char buf[512];
+    /* On the stack, not static: four consoles have a shell each, and a
+       cat on one of them must not print what another one read */
+    char buf[512];
 
     if (!fs_ready()) {
         printk("cat: there is no filesystem\n");
@@ -453,6 +460,49 @@ static void cmd_cp(char *rest)
 /* 'bt' - what the adapter is, 'bt skan [s]' - who is in range,
    'bt test' - the packet parser against recorded packets, which is the
    only part of Bluetooth that can be checked without an adapter. */
+/* Where the pointer is. A test reads this line to see where a movement
+   of the hand put the pointer (scripts/tests/t_mouse.py), so its form
+   stays as it is. */
+static void cmd_mouse(void)
+{
+    int x, y, b;
+    mouse_get(&x, &y, &b);
+    printk("mouse: x=%u y=%u buttons=%u wheel=%s\n", (uint32_t)x,
+           (uint32_t)y, (uint32_t)b, mouse_has_wheel() ? "yes" : "no");
+}
+
+/* 'wifi': how far the Wi-Fi driver got, and what it knows. The driver
+   reports in the boot log too; this is for asking again later. */
+static void cmd_wifi(void)
+{
+    const struct iwlwifi_state *s = iwlwifi_state();
+    if (s->stage == IWL_STAGE_NO_CARD || s->stage == IWL_STAGE_NONE) {
+        printk("wifi: %s\n", s->stage == IWL_STAGE_NO_CARD
+               ? "there is no Intel Wireless 3160 in this machine"
+               : "the driver has not started");
+        return;
+    }
+    printk("wifi: Intel Wireless 3160 (8086:%x) at %x:%x.%x, hw rev 0x%x\n",
+           (uint32_t)s->device, (uint32_t)s->bus, (uint32_t)s->slot,
+           (uint32_t)s->func, s->hw_rev);
+    printk("  state:    %s%s\n", iwlwifi_stage_name(s->stage),
+           s->rfkill ? " (radio switch off)" : "");
+    if (s->fw_version[0])
+        printk("  firmware: %s\n", s->fw_version);
+    if (s->mac_valid) {
+        const uint8_t *m = s->mac;
+        printk("  MAC:      %x:%x:%x:%x:%x:%x\n",
+               m[0], m[1], m[2], m[3], m[4], m[5]);
+        printk("  NVM:      version 0x%x, SKU 0x%x; %d channels "
+               "(2.4 GHz %d, 5 GHz %d)\n", (uint32_t)s->nvm_version,
+               (uint32_t)s->sku, s->n_channels, s->n_24ghz, s->n_5ghz);
+    }
+    if (s->calib_results)
+        printk("  calibration: %d results\n", s->calib_results);
+    if (s->last_error[0])
+        printk("  last error: %s\n", s->last_error);
+}
+
 static void cmd_bt(const char *arg)
 {
     while (*arg == ' ')
@@ -667,6 +717,85 @@ static void read_word(char *out, int max)
     printk("\n");
 }
 
+/* Formatting, and the asking that has to come before it.
+ *
+ * The startup path will not touch a disk that has anything on it, and
+ * says so with a pointer to this command - so this is how a disk with a
+ * Windows on it becomes a disk with TFS on it, or how one partition of
+ * it does while the rest stays. It is deliberately a thing one has to
+ * mean: the confirmation is a word typed out, not a key. */
+static void cmd_format(const char *arg)
+{
+    if (!confirm_admin_action("format"))
+        return;
+    if (!blk_present()) {
+        printk("format: there is no disk\n");
+        return;
+    }
+
+    int which = 0;                 /* 0 = the whole disk */
+    for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
+        which = which * 10 + (*p - '0');
+
+    printk("Disk: %s, %u MiB\n", blk_name(), blk_sectors() / 2048);
+    int np = part_scan();
+    if (np > 0) {
+        printk("It has %u partition(s) - a %s table:\n", (uint32_t)np,
+               part_is_gpt() ? "GPT" : "MBR");
+        for (int i = 0; i < np; i++) {
+            struct partition pt;
+            if (!part_get(i, &pt))
+                break;
+            printk("  %u: %u MiB, %s %s\n", (uint32_t)(i + 1),
+                   (uint32_t)(pt.sectors / 2048), pt.kind, pt.label);
+        }
+    }
+
+    if (which > 0) {
+        struct partition pt;
+        if (which > np || !part_get(which - 1, &pt)) {
+            printk("format: there is no partition %u\n", (uint32_t)which);
+            return;
+        }
+        printk("\nTHIS WILL ERASE PARTITION %u (%u MiB, %s %s).\n",
+               (uint32_t)which, (uint32_t)(pt.sectors / 2048), pt.kind,
+               pt.label);
+        printk("The rest of the disk and the partition table stay untouched.\n");
+    } else if (np > 0) {
+        printk("\nTHIS WILL ERASE THE WHOLE DISK - the partition table "
+               "and ALL %u partition(s) above.\n", (uint32_t)np);
+        printk("To take just one, type 'format N'.\n");
+    } else {
+        printk("\nTHIS WILL ERASE THE WHOLE DISK, with everything on it.\n");
+    }
+    printk("Type YES (in capitals) to do it: ");
+
+    char answer[8];
+    read_word(answer, (int)sizeof(answer));
+    if (strcmp(answer, "YES") != 0) {
+        printk("format: nothing was erased\n");
+        return;
+    }
+    if (fs_format_now(which))
+        printk("format: done - %s is a ThreadOS TFS now\n",
+               which ? "this partition" : "the whole disk");
+    else
+        printk("format: it did not work\n");
+}
+
+static void cmd_df(void)
+{
+    uint32_t used, total;
+    fs_usage(&used, &total);
+    if (!total) {
+        printk("df: there is no disk\n");
+        return;
+    }
+    uint32_t kib = FS_BLOCK / 1024;
+    printk("disk: %u KiB, used %u KiB, free %u KiB (blocks of %u B)\n",
+           total * kib, used * kib, (total - used) * kib, FS_BLOCK);
+}
+
 /* Installing onto the machine's own disk.
  *
  * Reading and printing first, then a person saying yes, and only then
@@ -754,74 +883,6 @@ static void cmd_install_text(int mode, int disk)
     install_do();
 }
 
-/* Formatting, and the asking that has to come before it.
- *
- * The startup path will not touch a disk that has anything on it, so
- * this is the only way a disk with a Windows on it becomes a disk with
- * TFS on it - and it is deliberately a thing one has to mean. The
- * confirmation is the word, typed out: a key to press is something a
- * person does by reflex, and a word is something they have to decide
- * to type. */
-static void cmd_format(const char *arg)
-{
-    if (!confirm_admin_action("format"))
-        return;
-    if (!blk_present()) {
-        printk("format: there is no disk\n");
-        return;
-    }
-
-    int which = 0;                 /* 0 = the whole disk */
-    for (const char *p = arg; *p >= '0' && *p <= '9'; p++)
-        which = which * 10 + (*p - '0');
-
-    printk("Disk: %s, %u MiB\n", blk_name(), blk_sectors() / 2048);
-    int np = part_scan();
-    if (np > 0) {
-        printk("It has %u partition(s) - a %s table:\n", (uint32_t)np,
-               part_is_gpt() ? "GPT" : "MBR");
-        for (int i = 0; i < np; i++) {
-            struct partition pt;
-            if (!part_get(i, &pt))
-                break;
-            printk("  %u: %u MiB, %s %s\n", (uint32_t)(i + 1),
-                   (uint32_t)(pt.sectors / 2048), pt.kind, pt.label);
-        }
-    }
-
-    if (which > 0) {
-        struct partition pt;
-        if (which > np || !part_get(which - 1, &pt)) {
-            printk("format: there is no partition %u\n", (uint32_t)which);
-            return;
-        }
-        printk("\nTHIS WILL ERASE PARTITION %u (%u MiB, %s %s).\n",
-               (uint32_t)which, (uint32_t)(pt.sectors / 2048), pt.kind,
-               pt.label);
-        printk("The rest of the disk and the partition table stay untouched.\n");
-    } else if (np > 0) {
-        printk("\nTHIS WILL ERASE THE WHOLE DISK - the partition table "
-               "and ALL %u partition(s) above.\n", (uint32_t)np);
-        printk("To take just one, type 'format N'.\n");
-    } else {
-        printk("\nTHIS WILL ERASE THE WHOLE DISK, with everything on it.\n");
-    }
-    printk("Type YES (in capitals) to do it: ");
-
-    char answer[8];
-    read_word(answer, (int)sizeof(answer));
-
-    if (strcmp(answer, "YES") != 0) {
-        printk("format: nothing was erased\n");
-        return;
-    }
-    if (fs_format_now(which))
-        printk("format: done - %s is a ThreadOS TFS now\n",
-               which ? "this partition" : "the whole disk");
-    else
-        printk("format: it did not work\n");
-}
-
 static void execute(const char *line);
 
 static void cmd_whoami(void)
@@ -839,12 +900,20 @@ static void cmd_login(const char *name)
     }
     printk("password: ");
     read_secret(password, sizeof(password));
-    if (user_login(name, password) < 0) {
-        memset(password, 0, sizeof(password));
+    int rc = user_login(name, password);
+    memset(password, 0, sizeof(password));
+    /* The password was right but the account has nowhere to start:
+       saying "invalid password" here would send the person to retype
+       the one thing that was correct. */
+    if (rc == USER_LOGIN_NO_HOME) {
+        printk("login: '%s' cannot sign in - its home folder cannot be opened\n",
+               name);
+        return;
+    }
+    if (rc < 0) {
         printk("login: invalid account or password\n");
         return;
     }
-    memset(password, 0, sizeof(password));
     printk("logged in as %s\n", user_current_name());
 }
 
@@ -1094,10 +1163,14 @@ static void execute(const char *line)
         cmd_beep(argument(line, sizeof("beep ") - 1));
     } else if (!strcmp(line, "hardware")) {
         hwinfo_print();
+    } else if (!strcmp(line, "mouse")) {
+        cmd_mouse();
     } else if (!strcmp(line, "bt")) {
         cmd_bt("");
     } else if (starts_with(line, "bt ")) {
         cmd_bt(line + 3);
+    } else if (!strcmp(line, "wifi")) {
+        cmd_wifi();
     } else if (!strcmp(line, "font")) {
         fonts_command("");
     } else if (starts_with(line, "font ")) {
@@ -1113,6 +1186,16 @@ static void execute(const char *line)
         cmd_format(which ? which : "");
     } else if (starts_with(line, "disks read")) {
         hwinfo_disk_read(line + sizeof("disks read") - 1);
+    } else if (!strcmp(line, "df")) {
+        cmd_df();
+    } else if (!strcmp(line, "netstat")) {
+        tcp_dump();
+    } else if (!strcmp(line, "crash")) {
+        /* A kernel write to an address nothing maps: the page fault
+           handler's report, and the stop after it, are what is asked
+           for. Canonical, so that it is a page fault and not a general
+           protection fault. */
+        *(volatile uint32_t *)(uintptr_t)0x00007E0000000000ULL = 1;
     } else if (!strcmp(line, "install")) {
         if (!install_graphical()) {
             printk("install: the desktop is running, and the installer needs "
@@ -1253,7 +1336,9 @@ static void execute(const char *line)
             printk("runw: give a program name (see 'ls')\n");
             return;
         }
-        static char progw[16];
+        /* Every console has a shell of its own, so nothing a command
+           keeps may be static - see 'run' below */
+        char progw[16];
         int pw = 0;
         while (name[pw] && name[pw] != ' ' && pw < (int)sizeof(progw) - 1) {
             progw[pw] = name[pw];
@@ -1297,19 +1382,25 @@ static void execute(const char *line)
         }
         /* The rest of the line is the program's arguments - the shell
            only splits it into words, and what comes of them is the
-           program's business */
-        static struct args64 args;
-        args.argc = 0;
-        for (int i = 4; line[i] && args.argc < ARG_MAX; ) {
+           program's business. Four kilobytes are too many for the
+           shell's stack, so they are borrowed from the heap; the spawn
+           copies them before it returns. */
+        struct args64 *args = kmalloc(sizeof(*args));
+        if (!args) {
+            printk("run: no memory for the arguments\n");
+            return;
+        }
+        args->argc = 0;
+        for (int i = 4; line[i] && args->argc < ARG_MAX; ) {
             while (line[i] == ' ')
                 i++;
             if (!line[i])
                 break;
             int k = 0;
             while (line[i] && line[i] != ' ' && k < ARG_LEN - 1)
-                args.v[args.argc][k++] = line[i++];
-            args.v[args.argc][k] = '\0';
-            args.argc++;
+                args->v[args->argc][k++] = line[i++];
+            args->v[args->argc][k] = '\0';
+            args->argc++;
             while (line[i] && line[i] != ' ')
                 i++;
         }
@@ -1318,14 +1409,18 @@ static void execute(const char *line)
         uint32_t pages_before = isr64_heap_pages();
         uint32_t stack_before = isr64_stack_pages();
         uint32_t files_before = isr64_mmap_pages();
-        int id = proc64_spawn(name, args.argc ? &args : 0, 0);
+        int id = proc64_spawn(name, args->argc ? args : 0, 0);
+        kfree(args);
         if (id < 0) {
             printk("run: could not start '%s'\n", name);
             return;
         }
-        /* The shell waits for its child - exactly as a program would do
-           through a system call. It does not respond in the meantime,
-           and that is how it should be. */
+        /* The shell waits for its child - THIS child. A program started
+           with 'runw' is the shell's child too, and nobody waits for it;
+           waiting for "any" child took the first of those to end for
+           this one, and gave the prompt back while this one still ran.
+           It does not respond in the meantime, and that is how it
+           should be. */
         keyboard64_set_intr_target(id);   /* from now on Ctrl+C goes to it */
         int code = 0;
         int done;

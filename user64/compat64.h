@@ -1,20 +1,17 @@
 /* A compatibility dictionary for 64-bit programs
  *
  * The cryptography, TLS, HTTP, DNS and the HTML parser live in the
- * headers in user/ and know nothing about the processor mode - they
+ * headers in user/ and know nothing about the kernel underneath - they
  * compute on bytes. They do talk to the kernel through a handful of
  * names, though: connect, send, receive, what time is it, how many
  * ticks, open a file.
  *
  * Those names are the contract. What stands behind them is the
- * kernel's business - and this file is the whole difference between
- * one side and the other, exactly like kernel64/compat64.c on the
- * kernel's side.
- *
- * The difference in the shape of the calls comes from the fact that in
- * long mode the arguments travel in registers rather than in structures
- * pointed to by ECX: there are more registers and most descriptions
- * fitted in directly.
+ * kernel's business - and this file translates them into the calls of
+ * usys64.h, exactly like kernel64/compat64.c on the kernel's side.
+ * Those calls take their arguments in registers, and most descriptions
+ * fit in them directly; the shape the shared code expects is put
+ * together here.
  */
 
 #ifndef THREADOS_COMPAT64_H
@@ -42,7 +39,7 @@ static inline int32_t sys_user(struct user_ctl *ctl)
 
 /* --- Files --------------------------------------------------------
  *
- * The 64-bit kernel knows two things about opening: whether a missing
+ * The kernel knows two things about opening: whether a missing
  * file is created (OPEN64_CREATE), and whether an existing one is
  * emptied first (OPEN64_TRUNC). Reading and writing are not flags
  * there - every descriptor does both - so the flags are translated
@@ -84,9 +81,8 @@ static inline int32_t u_open(const char *name, int flags)
 
 /* --- Who is at the machine -----------------------------------------
  *
- * The same three calls as in protected mode, only the arguments travel
- * in registers: the password goes with its length, because that is how
- * every text does in long mode. */
+ * Three calls, with the arguments in registers: the password goes with
+ * its length, because that is how every text travels to the kernel. */
 #define LEVEL_ADMIN 0
 #define LEVEL_PLAIN 1
 
@@ -136,7 +132,7 @@ static inline int32_t sys_snd_set(int32_t volume, int32_t mute)
     return (int32_t)syscall64(SYS64_SND_SET, volume, mute);
 }
 
-/* Semaphores: the same three calls, the same meaning */
+/* Semaphores (kernel/sem.c): get, wait, post */
 static inline int32_t sys_sem_get(int key, int initial)
 {
     return (int32_t)syscall64(SYS64_SEM_GET, key, initial);
@@ -286,8 +282,8 @@ static inline int32_t sys_install_step(int32_t n)
     return (int32_t)syscall64(SYS64_INSTALL_STEP, n, 0);
 }
 
-/* The same bump allocator as in protected mode: it only allocates,
-   which is enough for a program that reads a file into memory once.
+/* A bump allocator: it only allocates, which is enough for a program
+   that reads a file into memory once.
    A program built against the C library (libc/, THREADOS_LIBC) has the
    real malloc, and this one would collide with it. */
 #ifndef THREADOS_LIBC
@@ -299,7 +295,7 @@ static inline void *malloc(uint32_t size)
 }
 #endif
 
-/* The clipboard - the same two calls as in protected mode */
+/* The clipboard: text in, text out */
 #define CLIP_MAX 512
 
 static inline int32_t sys_clip_set(const char *text, uint32_t len)
@@ -360,14 +356,6 @@ static inline uint32_t sys_getticks(void)
 
 /* --- Printing numbers ----------------------------------------------- */
 
-/* Waiting for any of our own children. In the 32-bit kernel this is
-   called sys_waitany, in the 64-bit one sys_wait - the shared code says
-   it with one word, and this file translates it to the right side. */
-static inline int64_t sys_wait_child(int *code)
-{
-    return sys_wait(code);
-}
-
 /* A file of the initrd, read into 'buf': how many bytes, -1 = none */
 static inline int64_t sys_initrd_read(const char *name, void *buf,
                                       uint64_t max)
@@ -420,10 +408,9 @@ static inline int ustreq(const char *a, const char *b)
 
 /* --- UDP ------------------------------------------------------------
  *
- * The shape here is different: in long mode the socket, the address,
- * the port and the timeout travel in one description, because that read
- * better than packing them into registers. The program does not have to
- * know about it. */
+ * The socket, the address, the port and the timeout travel to the
+ * kernel in one description, because that reads better than packing
+ * them into registers. The program does not have to know about it. */
 
 static inline int32_t udp_open(uint32_t port)
 {
@@ -491,6 +478,18 @@ static inline int32_t tcp_recv(int32_t conn, void *buf, uint32_t max,
 static inline void tcp_close(int32_t conn)
 {
     sys_tcp_close((int)conn);
+}
+
+/* The server's side: a port to listen on, and the connections that
+   come to it - each one then talks through tcp_send and tcp_recv */
+static inline int32_t tcp_listen(uint32_t port)
+{
+    return (int32_t)sys_tcp_listen((uint16_t)port);
+}
+
+static inline int32_t tcp_accept(int32_t listener, uint32_t timeout_ms)
+{
+    return (int32_t)sys_tcp_accept((int)listener, timeout_ms);
 }
 
 /* --- Our own address ------------------------------------------------ */

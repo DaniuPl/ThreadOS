@@ -45,6 +45,16 @@ const char *bt_version(void);
    heard, or -1 when there is no adapter. */
 int bt_scan(uint32_t seconds);
 
+/* The same search in a thread of its own, for whoever cannot wait for
+   it - a program asking through a system call. 0 = it started; -1 =
+   no adapter, or a search is running already. */
+int bt_scan_start(void);
+int bt_scanning(void);
+
+/* Everything above, in one structure for a program (bt_info.h) */
+struct bt_info;
+void bt_info_fill(struct bt_info *out);
+
 int bt_found(void);
 const char *bt_found_addr(int i);
 const char *bt_found_name(int i);

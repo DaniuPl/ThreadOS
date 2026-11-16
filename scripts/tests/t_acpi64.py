@@ -7,9 +7,9 @@ itself and that is the whole assertion - the rest of the test only
 brings the system to the point where it can be asked for it.
 
 The road to it leads through the firmware's tables: RSDP, the table
-list, the FADT and the _S5_ object in AML bytecode. The same acpi.c file
-serves both kernels - in long mode the only difference is that the
-tables are added to the mapping by different code.
+list, the FADT and the _S5_ object in AML bytecode (kernel/acpi.c). The
+only part that depends on the processor mode is adding the tables to
+the mapping.
 """
 
 import os
@@ -48,9 +48,15 @@ def main():
             check("the ACPI tables were found at boot",
                   re.search(r"ACPI: tables from '\S", start) is not None)
             q.wait_serial("thread64>", timeout=30)
-            q.type_line("help")
-            check("'poweroff' is in the list of commands",
-                  "poweroff" in q.wait_serial("Commands:", timeout=20))
+            # Only what 'help' printed counts: the boot already said
+            # 'poweroff' (the ACPI line above), and the first console's
+            # greeting is the same listing. The wait is for its last line.
+            listing = q.command("help", "'install text [whole]' - here)",
+                                timeout=20)
+            check("'help' lists the commands, 'poweroff' among them",
+                  "Commands: help," in listing
+                  and "reboot, poweroff" in listing
+                  and "'install text [whole]' - here)" in listing)
             q.type_line("poweroff")
             check("'poweroff' really switches the machine off",
                   q.wait_exit(timeout=25))

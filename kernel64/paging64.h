@@ -71,9 +71,26 @@ int paging64_file_dirty(uint64_t virt);
    the file */
 void paging64_file_clean(uint64_t virt);
 
-/* Is the whole range accessible to ring 3 (the USER bit at every level
-   of the tables)? For checking pointers from a program. */
+/* Is the whole range the program's to read (paging64_user_range) or to
+   write into (paging64_user_writable)? For checking pointers from a
+   program: the USER bit at every level of the tables, and for writing
+   a writable page as well. Pages the program owns but has not touched
+   yet are brought in on the way, so after a yes the kernel may use the
+   whole range at once. */
 int paging64_user_range(uint64_t virt, uint64_t len);
+int paging64_user_writable(uint64_t virt, uint64_t len);
+
+/* Is this an address ring 3 may run code at - the program's own, and
+   not marked as data? For an entry point a program supplies. */
+int paging64_user_code(uint64_t virt);
+
+/* What a fault from ring 3 would do at this address of the current
+   program: bring a page back from the swap file or from a mapped file,
+   or give it a fresh one in its heap, its stack or its mapping area.
+   1 = the page is there now, 0 = the address is none of those. It
+   lives with the page fault handler, in kernel64/isr64.c; the two
+   checks above call it for the pages a program has not touched yet. */
+int isr64_page_in(uint64_t addr);
 
 /* Process address spaces. Kernel memory is common to every one of
    them - only the program's gigabyte is private. */

@@ -96,7 +96,7 @@ comments in this codebase are a paragraph long because the fault they
 describe cost a day to find; that is the right length for such a
 comment.
 
-## One kernel
+## One kernel for the PC, and an ARM64 one beside it
 
 ThreadOS is a 64-bit system. Everything that does not depend on the
 processor mode lives in `kernel/`; paging, interrupts, context switching
@@ -105,7 +105,11 @@ in `kernel/` and add it to `SHARED64` in the `Makefile`.
 
 There used to be a 32-bit kernel built from the same `kernel/` files. It
 was removed in November 2026 (see the journal). Do not bring back 32-bit
-code paths or `#ifdef __x86_64__` branches.
+code paths or `#ifdef __x86_64__` branches for a 32-bit build.
+
+A few files of `kernel/` (`string.c`, `heap.c`, and the `io.h` and
+`spinlock.h` headers) are built for the ARM64 kernel as well, and a
+change to them has to build and pass there too.
 
 ## Libraries: use them, bring them in properly
 
@@ -115,7 +119,8 @@ libraries are welcome. Bringing one in means:
 
 - **a pinned upstream release in `third_party/<name>/`** (or its release
   archive), built from source by the `Makefile`. Nothing is downloaded
-  at build time, and no prebuilt binaries are committed;
+  at build time, and no prebuilt binaries are committed (device
+  firmware, which exists only as its vendor's binary, is the exception);
 - **the code stays exactly as upstream published it.** ThreadOS changes
   go into `libc/overlay/`, a patch directory next to the code that uses
   the library (like `apps/browser/patches/`), or wrapper code of our own,
@@ -160,7 +165,7 @@ found later.
 
 ## Reporting a bug
 
-Please say which kernel (32- or 64-bit), how it was started (the QEMU
+Please say which kernel (x86-64 or ARM64), how it was started (the QEMU
 command line or the real machine), and attach the serial log - the
 system writes almost everything worth knowing there. `hardware` and
 `disks` from inside the system are worth more than a description of the

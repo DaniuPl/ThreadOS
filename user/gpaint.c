@@ -10,8 +10,6 @@
  * pixels cannot be read back, and a picture that cannot be read back
  * cannot be saved. So the brush paints into the program's own copy,
  * and only the part that changed goes to the window.
- *
- * One program for both kernels (uapi.h).
  */
 
 #include "udraw.h"

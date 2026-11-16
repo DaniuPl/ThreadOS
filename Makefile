@@ -24,7 +24,7 @@ BUILD   := build
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
 
 .PHONY: all iso64 initrd64 libc64 browser run run-iso64-uefi test fuzz clean \
-        kernel64 efi stick run-stick
+        kernel64 efi stick run-stick kernelarm64 run-arm64
 
 all: kernel64
 
@@ -103,7 +103,7 @@ SHARED64 := string serial printk locale bootsplash mb2 fbcon vga pic pit pmm hea
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
-            e1000 rtl8168 virtio_net netdev smp random hid
+            e1000 rtl8168 virtio_net netdev smp random hid iwlwifi
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -135,10 +135,9 @@ $(BUILD)/64/switch64.o: boot64/switch64.S | $(BUILD)/64
 $(BUILD)/64/syscall64_stub.o: boot64/syscall64.S | $(BUILD)/64
 	$(CC) -m64 -c $< -o $@
 
-# The long-mode user programs. They build just like the 32-bit ones,
-# only with a different linker script and their own syscall library -
-# in long mode the kernel is entered with the syscall instruction, not
-# through an interrupt gate.
+# The long-mode user programs: their own linker script and their own
+# syscall library - the kernel is entered with the syscall instruction,
+# not through an interrupt gate.
 INITRD64 := $(BUILD)/initrd64.img
 # The user programs are built with SSE - on x86-64 it is part of the
 # calling convention, and the kernel can already save and restore those
@@ -210,11 +209,10 @@ $(BUILD)/user64/%.elf: user64/%.c user64/usys64.h user64/user64.ld \
                        $(USER_HEADERS) Makefile | $(BUILD)/user64
 	$(CC) $(USER64_CFLAGS) -T user64/user64.ld $< -o $@
 
-# The programs shared by both kernels: the cryptography, TLS, HTTP and
-# DNS live in user/ and know nothing about the processor mode. They
-# speak to the kernel through user/uapi.h, which picks the right side -
-# hence this second rule, building the same sources again, this time
-# for 64 bits.
+# The programs in user/: the cryptography, TLS, HTTP, DNS and most of
+# the desktop's programs know nothing about the processor. They speak
+# to the kernel through user/uapi.h - hence a rule of their own next to
+# the one for user64/.
 $(BUILD)/user64/%.elf: user/%.c user/uapi.h user64/usys64.h \
                        user64/compat64.h user64/user64.ld $(USER_HEADERS) \
                        Makefile | $(BUILD)/user64
@@ -783,7 +781,8 @@ VERSION_CODE_FILE := $(BUILD)/version-code.txt
 $(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERSION_LABEL)" ] || echo "$(VERSION_LABEL)" > $(VERSION_FILE); } && { [ "$$(cat $(VERSION_CODE_FILE) 2>/dev/null)" = "$(VERSION)" ] || echo "$(VERSION)" > $(VERSION_CODE_FILE); })
 
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
-             $(VERSION_FILE) $(VERSION_CODE_FILE)
+             $(VERSION_FILE) $(VERSION_CODE_FILE) \
+             third_party/iwlwifi/iwlwifi-3160-17.ucode
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
@@ -857,6 +856,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    mbedtest=$(BUILD)/user64/mbedtest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    update=$(BUILD)/user64/update.elf \
+	    iwl3160.ucode=third_party/iwlwifi/iwlwifi-3160-17.ucode \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)
 	@echo "Done: $@ ($$(stat -c%s $@) B)"
 
@@ -990,6 +990,50 @@ $(EFI_OUT): boot/efi/efiboot.c boot/efi/efi.h | $(BUILD)
 	@echo "Done: $@"
 
 efi: $(EFI_OUT)
+
+# --- The ARM64 kernel ------------------------------------------------
+#
+# A third kernel, for QEMU's virt machine: the first stage of the port a
+# phone or a tablet will run. For now it is its own small directories
+# (bootarm64/, kernelarm64/) plus the shared files that already build
+# for it; the rest of kernel/ follows as it stops assuming x86. clang
+# builds it because one clang targets every architecture, while the gcc
+# on a PC targets only its own - the reason it builds threadboot too.
+KERNELARM := $(BUILD)/threados-arm64.elf
+CFLAGSARM := --target=aarch64-none-elf -std=gnu11 -ffreestanding \
+             -fno-stack-protector -fno-pic -mgeneral-regs-only \
+             -mstrict-align -Wall -Wextra -Wshadow -O2 -g
+OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
+             $(BUILD)/arm64/uart.o $(BUILD)/arm64/fdt.o \
+             $(BUILD)/arm64/string.o $(BUILD)/arm64/vectors.o \
+             $(BUILD)/arm64/exceptions.o $(BUILD)/arm64/mmu.o \
+             $(BUILD)/arm64/gic.o $(BUILD)/arm64/timer.o \
+             $(BUILD)/arm64/pmm.o $(BUILD)/arm64/heap.o \
+             $(BUILD)/arm64/thread.o $(BUILD)/arm64/switch.o \
+             $(BUILD)/arm64/smp.o
+
+$(BUILD)/arm64:
+	mkdir -p $@
+
+$(BUILD)/arm64/%.o: bootarm64/%.S | $(BUILD)/arm64
+	clang $(CFLAGSARM) -c $< -o $@
+
+$(BUILD)/arm64/%.o: kernelarm64/%.c $(wildcard kernelarm64/*.h) | $(BUILD)/arm64
+	clang $(CFLAGSARM) -c $< -o $@
+
+$(BUILD)/arm64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/arm64
+	clang $(CFLAGSARM) -c $< -o $@
+
+$(KERNELARM): $(OBJSARM) kernelarm64/linker.ld
+	ld.lld -nostdlib -static -T kernelarm64/linker.ld $(OBJSARM) -o $@
+
+kernelarm64: $(KERNELARM)
+	@echo "Done: $(KERNELARM) (AArch64, QEMU virt)"
+
+# The serial port is the whole console for now; Ctrl-A X leaves QEMU
+run-arm64: $(KERNELARM)
+	qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 512 -smp 2 \
+	    -nographic -kernel $(KERNELARM)
 
 # UEFI firmware for QEMU. The same files run-iso64-uefi uses.
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd

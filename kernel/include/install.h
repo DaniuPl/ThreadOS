@@ -25,8 +25,8 @@
  */
 
 /* What was found, in a shape a program in ring 3 can be handed.
- * The layout must match struct install_info in user/usys.h and
- * user64/usys64.h - it goes through a syscall.
+ * The layout must match struct install_info in
+ * user64/compat64.h - it goes through a syscall.
  */
 #define INST_NAME 24
 

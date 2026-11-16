@@ -13,7 +13,7 @@
  *
  * What is NOT here and why:
  *
- *   usys.h - the system calls. Those are two instructions apiece,
+ *   uapi.h - the system calls. Those are two instructions apiece,
  *   written straight into the code; putting them through the library's
  *   jump table would cost more than it saved.
  *

@@ -237,7 +237,7 @@ def main():
             q.wait_serial("thread64>", timeout=120)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=40)
-            q.wait_desktop(40)
+            q.wait_desktop()
             q.mouse_home()
             q.type_line("run udtest")
             time.sleep(4)

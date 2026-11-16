@@ -23,10 +23,8 @@
  *      glyph. That fraction IS the anti-aliasing: nothing is sampled,
  *      the area is computed.
  *
- * All of it in integers. The 64-bit kernel is built without SSE and
- * the 32-bit one without libgcc - no floating point and no 64-bit
- * division - so the few divisions that need 64 bits go through div64()
- * below.
+ * All of it in integers: the kernel is built without SSE, so there is
+ * no floating point to be had.
  *
  * The file is read with every offset checked against its length. Fonts
  * are files, and files come from disks and networks; a bad one has to
@@ -67,14 +65,6 @@ static int inside(const struct ttf_font *f, uint32_t off, uint32_t n)
                          ((uint32_t)(c) << 8) | (uint32_t)(d))
 
 /* --- fixed point ------------------------------------------------------- */
-
-/* A signed 64-bit division without libgcc. Long division, one bit at a
-   time - slow by the standards of a divide instruction and irrelevant
-   next to the cost of drawing: it runs a few times per row of a glyph. */
-static int64_t div64(int64_t a, int64_t b)
-{
-    return a / b;
-}
 
 /* FreeType's FT_MulFix: a * b / 65536, rounded, the sign applied to
    the magnitude - so -x rounds exactly as x does */
@@ -604,8 +594,8 @@ static void line(int32_t x0, int32_t y0, int32_t x1, int32_t y1)
         /* x where the edge enters and leaves this row, each computed
            from the end points rather than accumulated, so no error
            builds up along a tall edge */
-        int32_t xa = x0 + (int32_t)div64(dx * (top - y0), dy_all);
-        int32_t xb = x0 + (int32_t)div64(dx * (bot - y0), dy_all);
+        int32_t xa = x0 + (int32_t)(dx * (top - y0) / dy_all);
+        int32_t xb = x0 + (int32_t)(dx * (bot - y0) / dy_all);
         int32_t d = (bot - top) * 256 * dir;     /* the row's share, 1/65536 */
         int32_t *a = acc + row * STRIDE;
 

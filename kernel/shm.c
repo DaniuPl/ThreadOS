@@ -2,9 +2,9 @@
  *
  * A region is a contiguous block of physical frames from the PMM,
  * allocated on the first use of a given key. Every process can map it
- * into its own space (process_shm in exec.c), so different processes
- * see the same memory. Regions live until the system stops - cleaning
- * up a process passes their frames by (shm_is_shared).
+ * into its own space (proc64_shm in kernel64/proc64.c), so different
+ * processes see the same memory. Regions live until the system stops -
+ * cleaning up a process passes their frames by (shm_is_shared).
  */
 
 #include <stdint.h>
@@ -45,7 +45,7 @@ uint32_t shm_get(int key, uint32_t size)
         if (!phys)
             break;
         /* The region lies in the identity mapping, so the physical
-           address is also the virtual one here - in both kernels */
+           address is also the virtual one here */
         memset((void *)(uintptr_t)phys, 0, pages * 4096);
         regions[i].used = 1;
         regions[i].key = key;

@@ -20,12 +20,12 @@
  * shown is what the kernel has. Changing a setting needs admin: the
  * first change asks for the password, in the window, and the right is
  * given back as soon as that one change is written.
- *
- * One program for both kernels (uapi.h).
  */
 
 #include "udraw.h"
 #include "ulocale.h"
+#include "pciinfo.h"
+#include "ubt.h"
 
 /* Small enough to open in the cascade's third place on a 640x480
    screen, between the bar and the dock */
@@ -33,8 +33,10 @@
 #define H0 340
 
 #define SIDE_W 150            /* the sections, down the left */
-#define SIDE_Y0 48            /* the first section's top */
-#define SIDE_H 30
+#define SIDE_Y0 44            /* the first section's top */
+#define SIDE_H 22             /* thirteen of them have to fit in 340 */
+#define ICON 16               /* a section's coloured square */
+#define SIDE_TEXT_X 36        /* a section's name, right of its square */
 #define PANE_X 170            /* the open section, right of them */
 #define HEAD_BASE 32          /* its name, in bold */
 #define PANE_Y0 52            /* the first setting's top */
@@ -62,30 +64,54 @@
 #define KEY_COPY  0x1A
 #define KEY_PASTE 0x1B
 
-#define SEC_GENERAL 0
-#define SEC_LOOK    1
-#define SEC_DISPLAY 2
+/* In groups, the way a Mac lays them out: the radios and the network,
+   sound, how the machine looks and locks, the pointer and the files,
+   and the machine itself. Updates comes last because only the 64-bit
+   system has it, so every other section is in the same place in both. */
+#define SEC_WIFI    0
+#define SEC_BT      1
+#define SEC_NET     2
 #define SEC_SOUND   3
-#define SEC_NET     4
-#define SEC_FILES   5
-#define SEC_ABOUT   6
-#define SEC_REGION  7
-#define SEC_UPDATES 8
-#define SEC_N       9
+#define SEC_GENERAL 4
+#define SEC_LOOK    5
+#define SEC_DISPLAY 6
+#define SEC_LOCK    7
+#define SEC_MOUSE   8
+#define SEC_FILES   9
+#define SEC_REGION  10
+#define SEC_ABOUT   11
+#define SEC_UPDATES 12
+#define SEC_N       13
 
-static const char *const sections[SEC_N] = {
-    "General", "Appearance", "Display", "Sound", "Network", "Files",
-    "About", "Region", "Updates"
+static const char *const sections[] = {
+    "Wi-Fi", "Bluetooth", "Network", "Sound", "General", "Appearance",
+    "Display", "Screen Lock", "Mouse", "Files", "Region", "About", "Updates"
+};
+/* A line under the last of each group */
+static int group_ends(int i)
+{
+    return i == SEC_NET || i == SEC_SOUND || i == SEC_LOCK ||
+           i == SEC_REGION;
+}
+/* Each section's square and the letter on it */
+static const uint32_t section_colour[] = {
+    0x0A84FF, 0x0A84FF, 0x0A84FF, 0xFF375F, 0x8E8E93, 0x3A3A3C,
+    0x0A84FF, 0x3A3A3C, 0x8E8E93, 0x1E8CF0, 0x34A853, 0x8E8E93, 0xFF9500
+};
+static const char *const section_letter[] = {
+    "W", "B", "N", "S", "G", "A", "D", "L", "M", "F", "R", "i", "U"
 };
 
 static int win = -1;
 static int cw = W0, ch = H0;
-static int section;
+static int section = SEC_GENERAL;       /* where it opens */
 static struct ud_look l;
 
 /* --- the settings, as the kernel has them ---------------------------- */
 
-#define MAXCFG 16
+/* Room for every setting there is: with sixteen, the seventeenth -
+   the language - was never read, and Region showed no language chosen */
+#define MAXCFG 32
 static struct cfg_entry cfg[MAXCFG];
 static int ncfg;
 
@@ -395,11 +421,10 @@ static void try_password(void)
     } else {
         if (for_update) {
             update_start(for_update);
-            sys_drop();
         } else {
-        said = outcome(sys_cfg_set(want_name, want_value), want_name,
-                       want_value);
-        sys_drop();
+            said = outcome(sys_cfg_set(want_name, want_value), want_name,
+                           want_value);
+            sys_drop();
         }
     }
     for (int i = 0; i < plen; i++)
@@ -439,6 +464,7 @@ static void fields_from_settings(void)
 #define A_MUTE    6
 #define A_BEEP    7
 #define A_TOGGLE  8               /* name flips between 0 and 1 */
+#define A_BT_SEARCH 12
 #define A_UPDATE_CHECK   9
 #define A_UPDATE_INSTALL 10
 #define A_UPDATE_ROLLBACK 11
@@ -758,7 +784,7 @@ static void draw_about(void)
     info(i++, "System", "ThreadOS");
     info(i++, "Kernel", "64-bit, long mode");
     /* The release number travels in the initrd (the update program
-       reads it from there too); the 32-bit system is not released */
+       reads it from there too) */
     char v[16];
     int64_t n = sys_initrd_read("version", v, sizeof(v) - 1);
     if (n > 0) {
@@ -806,6 +832,164 @@ static void draw_region(void)
     row_name(y, "Language");
     chips(y + CTRL_DY, 2, languages, language_values, "language");
     note(y + ROW_H, "Clock, calculator and file sizes follow these formats.");
+}
+
+/* What wireless cards are called, for the ones a laptop of the last
+   ten years is likely to have. Anything else is shown by its numbers. */
+static const struct { uint16_t vendor, device; const char *name; } wifi_names[] = {
+    { 0x8086, 0x08B1, "Intel Wireless 7260" },
+    { 0x8086, 0x08B2, "Intel Wireless 7260" },
+    { 0x8086, 0x08B3, "Intel Wireless 3160" },
+    { 0x8086, 0x08B4, "Intel Wireless 3160" },
+    { 0x8086, 0x095A, "Intel Wireless 7265" },
+    { 0x8086, 0x095B, "Intel Wireless 7265" },
+    { 0x8086, 0x3165, "Intel Wireless 3165" },
+    { 0x8086, 0x24F3, "Intel Wireless 8260" },
+    { 0x8086, 0x24FD, "Intel Wireless 8265" },
+    { 0x8086, 0x2526, "Intel Wireless-AC 9260" },
+    { 0x8086, 0x2723, "Intel Wi-Fi 6 AX200" },
+    { 0x8086, 0x2725, "Intel Wi-Fi 6E AX210" },
+    { 0x10EC, 0xB822, "Realtek RTL8822BE" },
+    { 0x10EC, 0xC821, "Realtek RTL8821CE" },
+    { 0x10EC, 0x8179, "Realtek RTL8188EE" },
+    { 0x168C, 0x003E, "Qualcomm Atheros QCA6174" },
+    { 0x168C, 0x0042, "Qualcomm Atheros QCA9377" },
+    { 0x14E4, 0x43A0, "Broadcom BCM4360" },
+    { 0x14E4, 0x43B1, "Broadcom BCM4352" },
+};
+
+static void put_hex4(char *out, int at, uint32_t v)
+{
+    for (int i = 0; i < 4; i++)
+        out[at + i] = "0123456789abcdef"[(v >> (12 - 4 * i)) & 0xF];
+    out[at + 4] = 0;
+}
+
+static void draw_wifi(void)
+{
+    /* A wireless card is a network controller of the "other" kind,
+       class 02, subclass 80 - every one of them, whoever made it */
+    struct pci_info p;
+    int found = 0;
+    for (int i = 0; sys_pci_info(i, &p) == 1 && i < 256; i++) {
+        if (((p.class_code >> 24) & 0xFF) != 0x02 ||
+            ((p.class_code >> 16) & 0xFF) != 0x80)
+            continue;
+        found = 1;
+        break;
+    }
+    if (!found) {
+        row_name(PANE_Y0, "No Wi-Fi card was found in this machine.");
+        note(PANE_Y0 + 22, "A cable in the network port works (Network).");
+        return;
+    }
+    const char *name = "A wireless network card";
+    for (unsigned k = 0; k < sizeof(wifi_names) / sizeof(wifi_names[0]); k++)
+        if (wifi_names[k].vendor == p.vendor &&
+            wifi_names[k].device == p.device)
+            name = wifi_names[k].name;
+    char id[12];
+    put_hex4(id, 0, p.vendor);
+    id[4] = ':';
+    put_hex4(id, 5, p.device);
+    info(0, "Card", name);
+    info(1, "PCI ID", id);
+    info(2, "Status", "no driver for this card yet");
+    int y = PANE_Y0 + 3 * INFO_H + 10;
+    note(y, "Wi-Fi cannot be turned on until there is one: the card");
+    note(y + 14, "needs its maker's firmware and a driver of its own.");
+    note(y + 36, "Until then: the network port, or a USB network adapter.");
+}
+
+static struct bt_info bti;
+
+static void draw_bluetooth(void)
+{
+    if (sys_bt(BT_INFO, &bti) != 0) {
+        row_name(PANE_Y0, "Bluetooth is there in the 64-bit system only.");
+        return;
+    }
+    if (!bti.present) {
+        info(0, "Bluetooth", "no adapter");
+        /* The reason is a sentence, longer than the value column */
+        note(PANE_Y0 + INFO_H + 6, bti.why);
+        note(PANE_Y0 + INFO_H + 24,
+             "'hardware' in the terminal lists every USB device.");
+        return;
+    }
+    info(0, "Bluetooth", "on");
+    info(1, "Address", bti.address);
+    info(2, "Name", bti.name[0] ? bti.name : "(none)");
+    info(3, "Version", bti.version);
+    int y = PANE_Y0 + 4 * INFO_H + 8;
+    if (bti.scanning) {
+        ud_text_l(win, PANE_X, ud_baseline(y, CHIP_H, UD_PX),
+                  "Searching for devices nearby...", l.dim, UD_SANS, UD_PX);
+    } else {
+        button(PANE_X, y, 150, "Search for devices", A_BT_SEARCH, 0);
+    }
+    y += CHIP_H + 10;
+    if (!bti.found && !bti.scanning) {
+        note(y, "No devices found yet.");
+        return;
+    }
+    for (int i = 0; i < bti.found && y + INFO_H < ch - NOTE_DY - 12; i++) {
+        char rssi[12];
+        int v = bti.dev_rssi[i], at = 0;
+        if (v < 0) {
+            rssi[at++] = '-';
+            v = -v;
+        }
+        put_str(rssi, put_num(rssi, at, (uint32_t)v), " dBm");
+        int base = ud_baseline(y, 18, UD_PX);
+        ud_text(win, PANE_X, base,
+                bti.dev_name[i][0] ? bti.dev_name[i] : bti.dev_addr[i],
+                l.text, UD_SANS, UD_PX);
+        ud_text(win, PANE_X + 220, base, rssi, l.dim, UD_SANS, UD_PX);
+        y += 18;
+    }
+}
+
+static void draw_lockscreen(void)
+{
+    static const char *const offs[5] = { "Never", "1 min", "5 min", "10 min",
+                                         "30 min" };
+    static const char *const off_values[5] = { "0", "60", "300", "600",
+                                               "1800" };
+    int y = PANE_Y0;
+    row_name(y, "Turn the screen off when inactive for");
+    chips(y + CTRL_DY, 5, offs, off_values, "screenoff");
+
+    y += ROW_H;
+    check_box(y, "Dim the screen before it turns off",
+              same(setting("screendim"), "1"), "screendim");
+    y += CHIP_H + 8;
+    check_box(y, "Ask for the password when it comes back",
+              same(setting("lockoff"), "1"), "lockoff");
+
+    y += CHIP_H + 16;
+    note(y, "Any key or movement brings the screen back, and goes");
+    note(y + 14, "no further: a click there opens nothing.");
+    note(y + 34, "Ctrl+Alt+L locks the screen at once.");
+    note(y + 48, "The panel's light stays on - there is no driver for it yet.");
+}
+
+static void draw_mouse(void)
+{
+    static const char *const speeds[5] = { "Slow", "Normal", "Fast", "Faster",
+                                           "Fastest" };
+    static const char *const speed_values[5] = { "50", "100", "150", "200",
+                                                 "300" };
+    int y = PANE_Y0;
+    row_name(y, "Pointer speed");
+    chips(y + CTRL_DY, 5, speeds, speed_values, "pointer");
+
+    y += ROW_H;
+    check_box(y, "Natural scrolling", same(setting("natural"), "1"),
+              "natural");
+    note(y + CHIP_H + 4, "The content follows the fingers, as on a phone;");
+    note(y + CHIP_H + 18, "without it, the wheel moves the view.");
+    note(y + CHIP_H + 40, "A touchpad moves the same pointer as a mouse.");
 }
 
 static void draw_updates(void)
@@ -864,20 +1048,32 @@ static void draw(void)
     for (int i = 0; i < SEC_N; i++) {
         int y = SIDE_Y0 + i * SIDE_H;
         if (i == section)
-            ud_round(win, 8, y + 2, SIDE_W - 16, SIDE_H - 4, 8, l.accent);
-        ud_text_l(win, 20, ud_baseline(y, SIDE_H, UD_PX), sections[i],
-                  i == section ? l.on_accent : l.text, UD_SANS, UD_PX);
+            ud_round(win, 6, y + 1, SIDE_W - 12, SIDE_H - 2, 6, l.accent);
+        /* The square with its letter, the way a Mac marks each one */
+        int iy = y + (SIDE_H - ICON) / 2;
+        ud_round(win, 12, iy, ICON, ICON, 4, section_colour[i]);
+        ud_text_mid_l(win, 12, iy, ICON, ICON, section_letter[i], 0xFFFFFF,
+                      UD_BOLD, 11);
+        ud_text_l(win, SIDE_TEXT_X, ud_baseline(y, SIDE_H, UD_PX),
+                  sections[i], i == section ? l.on_accent : l.text, UD_SANS,
+                  UD_PX);
+        if (group_ends(i) && i < SEC_N - 1)
+            ud_fill(win, 14, y + SIDE_H, SIDE_W - 28, 1, l.line);
         hot(0, y, SIDE_W, SIDE_H, A_SECTION, i, (const char *)0,
             (const char *)0);
     }
 
     ud_text_l(win, PANE_X, HEAD_BASE, sections[section], l.text, UD_BOLD, 16);
     switch (section) {
+    case SEC_WIFI:    draw_wifi(); break;
+    case SEC_BT:      draw_bluetooth(); break;
+    case SEC_NET:     draw_network(); break;
+    case SEC_SOUND:   draw_sound(); break;
     case SEC_GENERAL: draw_general(); break;
     case SEC_LOOK:    draw_look(); break;
     case SEC_DISPLAY: draw_display(); break;
-    case SEC_SOUND:   draw_sound(); break;
-    case SEC_NET:     draw_network(); break;
+    case SEC_LOCK:    draw_lockscreen(); break;
+    case SEC_MOUSE:   draw_mouse(); break;
     case SEC_FILES:   draw_files(); break;
     case SEC_REGION:  draw_region(); break;
     case SEC_UPDATES: draw_updates(); break;
@@ -963,6 +1159,9 @@ static void click(int x, int y)
             break;
         case A_BEEP:
             sys_snd_beep(440, 200);
+            break;
+        case A_BT_SEARCH:
+            sys_bt(BT_SEARCH, (struct bt_info *)0);
             break;
         case A_UPDATE_CHECK:
             update_start(UPDATE_CHECK);

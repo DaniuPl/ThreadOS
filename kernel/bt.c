@@ -26,6 +26,7 @@
 
 #include <stdint.h>
 #include "include/bt.h"
+#include "include/bt_info.h"
 #include "include/usbhc.h"
 #include "include/task.h"
 #include "include/printk.h"
@@ -252,14 +253,9 @@ void bt_event(const uint8_t *pkt, int len)
                              ? names[v] : "?";
             while (*nm)
                 *w++ = *nm++;
-            *w++ = ',';
-            *w++ = ' ';
-            *w++ = 'w';
-            *w++ = 'y';
-            *w++ = 't';
-            *w++ = 'w';
-            *w++ = '.';
-            *w++ = ' ';
+            const char *by = ", maker ";
+            while (*by)
+                *w++ = *by++;
             *w++ = hexdigit((maker >> 12) & 15);
             *w++ = hexdigit((maker >> 8) & 15);
             *w++ = hexdigit((maker >> 4) & 15);
@@ -398,16 +394,64 @@ int bt_acl_receive(uint16_t *handle, uint8_t *packet_boundary,
     return len;
 }
 
+/* --- events arrive in pieces ------------------------------------------
+ *
+ * The interrupt endpoint carries one packet at a time, and a packet is
+ * at most its endpoint's size: 64 bytes on Intel's adapters, 16 on
+ * many others. An event can be 257 bytes - the answer to Read Local
+ * Name alone is 254 - so it comes in several. Its second byte says how
+ * long the whole is, and pieces are gathered until it is all there.
+ * Taking each packet for a whole event, as this driver used to, reads
+ * a name cut short and then parses the rest of it as events of its
+ * own.
+ *
+ * Every event starts a transfer of its own, so a piece never carries
+ * the end of one event and the start of the next; and a piece shorter
+ * than a full packet ends a transfer, so an event still short of its
+ * length after one was damaged on the way and is dropped rather than
+ * glued to whatever comes next.
+ */
+static uint8_t ev[2 + 255];
+static int ev_have;
+
+/* One piece. 1 = it completed an event, which has been handled. */
+static int ev_piece(const uint8_t *p, int n, int maxpacket)
+{
+    if (n <= 0)
+        return 0;
+    if (ev_have + n > (int)sizeof(ev)) {
+        ev_have = 0;                     /* longer than any event can be */
+        return 0;
+    }
+    memcpy(ev + ev_have, p, (uint32_t)n);
+    ev_have += n;
+    if (ev_have >= 2 && ev_have >= 2 + ev[1]) {
+        bt_event(ev, 2 + ev[1]);
+        ev_have = 0;
+        return 1;
+    }
+    if (n < maxpacket)
+        ev_have = 0;
+    return 0;
+}
+
+/* One look at the event endpoint: -1 error, 0 nothing yet, 1 a piece
+   arrived, 2 a piece arrived and completed an event. */
+static int poll_event(void)
+{
+    int n = usbhc_int_in(dev, ep_events, report, ep_maxpacket);
+    if (n <= 0)
+        return n < 0 ? -1 : 0;
+    return ev_piece(report, n, ep_maxpacket) ? 2 : 1;
+}
+
 /* Reads whatever the adapter has to say, for up to 'ms' milliseconds.
    Every event goes through the same parser the test uses. */
 static void pump(uint32_t ms)
 {
-    for (uint32_t i = 0; i < ms / 10 + 1; i++) {
-        int n = usbhc_int_in(dev, ep_events, report, ep_maxpacket);
-        if (n > 0)
-            bt_event(report, n);
-        task_sleep(10);
-    }
+    for (uint32_t i = 0; i < ms / 10 + 1; i++)
+        if (poll_event() <= 0)
+            task_sleep(10);
 }
 
 /* A command and the answer to it. 1 = the adapter said it worked. */
@@ -417,15 +461,12 @@ static int command(uint16_t opcode, const uint8_t *params, int plen,
     if (send_command(opcode, params, plen) < 0)
         return 0;
     for (uint32_t i = 0; i < ms / 10 + 1; i++) {
-        int n = usbhc_int_in(dev, ep_events, report, ep_maxpacket);
-        if (n > 0) {
-            bt_event(report, n);
-            if (last_opcode == opcode && last_status == 0)
-                return 1;
-            if (last_opcode == opcode)
-                return 0;
-        }
-        task_sleep(10);
+        int got = poll_event();
+        if (got == 2 && last_opcode == opcode)
+            return last_status == 0;
+        /* A piece that arrived means more may be right behind it */
+        if (got <= 0)
+            task_sleep(10);
     }
     return 0;
 }
@@ -451,10 +492,14 @@ static int find_adapter(const uint8_t *cfg, int total)
         if (dtype == 0x04 && i + 8 < total) {
             /* class 0xE0 = wireless, subclass 1 = radio frequency,
                protocol 1 = Bluetooth. The second interface of the same
-               device carries voice and has alternate settings; we do
-               not touch it. */
+               device carries voice, and it has the SAME class - the
+               transport specification gives both interfaces 0xE0/1/1.
+               So only the first one counts. Taking the last instead, as
+               this did, threw away the event endpoint just found and
+               ended on an interface with nothing but isochronous ones:
+               every real adapter came out as "no adapter". */
             if (cfg[i + 5] == 0xE0 && cfg[i + 6] == 0x01 &&
-                cfg[i + 7] == 0x01 && cfg[i + 3] == 0) {
+                cfg[i + 7] == 0x01 && cfg[i + 3] == 0 && found < 0) {
                 iface = cfg[i + 2];
                 found = iface;
                 have_events = 0;
@@ -493,63 +538,113 @@ static int find_adapter(const uint8_t *cfg, int total)
     return found;
 }
 
+/* Is the device in this socket an adapter, and if so, wake it. 1 = it
+   is ours now. 0 = not an adapter, or one that would not wake - and
+   then 'gave_up' says which step stopped it. */
+static int bt_port;
+
+static int try_port(int port)
+{
+    int d = usbhc_attach(port);
+    if (d < 0)
+        return 0;
+
+    if (usbhc_descriptor(d, 0x02, 0, desc_buf, 9) < 9)
+        return 0;
+    int total = desc_buf[2] | (desc_buf[3] << 8);
+    if (total > (int)sizeof(desc_buf))
+        total = (int)sizeof(desc_buf);
+    if (usbhc_descriptor(d, 0x02, 0, desc_buf, total) < total)
+        return 0;
+
+    if (find_adapter(desc_buf, total) < 0)
+        return 0;
+
+    /* From here on it IS an adapter, and a step that fails is worth
+       naming: "no adapter" would send a person looking for one. */
+    uint8_t cfg_value = desc_buf[5];
+    if (usbhc_request(d, 0x00, 0x09, cfg_value, 0) < 0)
+        return give_up("an adapter is there, but would not take its "
+                       "configuration");
+    if (usbhc_int_endpoint(d, ep_events, ep_maxpacket, ep_interval) < 0)
+        return give_up("an adapter is there, but its event endpoint "
+                       "could not be set up");
+    acl_ready = ep_acl_maxpacket > 0 &&
+                usbhc_bulk_endpoint(d, ep_acl_in, ep_acl_out,
+                                    ep_acl_maxpacket) == 0;
+
+    dev = d;
+    ev_have = 0;
+    usbhc_claim(port);
+
+    /* Reset first, always: an adapter the firmware has already talked
+       to is in a state we know nothing about. */
+    if (!command(OP_RESET, (const uint8_t *)0, 0, 2000)) {
+        dev = -1;
+        return give_up("the adapter did not answer HCI Reset");
+    }
+
+    static const uint8_t all_events[8] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1F, 0xFF, 0x00 };
+    command(OP_SET_EVENT_MASK, all_events, 8, 1000);
+    command(OP_READ_BDADDR, (const uint8_t *)0, 0, 1000);
+    command(OP_READ_LOCAL_NAME, (const uint8_t *)0, 0, 1000);
+    command(OP_READ_VERSION, (const uint8_t *)0, 0, 1000);
+
+    bt_port = port;
+    present = 1;
+    printk("[ OK ] Bluetooth: %s%s%s (port %d, %s)\n",
+           have_addr ? bt_address() : "an adapter with no address",
+           have_name && local_name[0] ? ", " : "",
+           have_name ? local_name : "", port + 1, usbhc_name());
+    return 1;
+}
+
+/* An adapter can appear after the walk at start-up: a laptop powers
+   its radio on when the firmware's wireless switch says so, and that
+   can come seconds late. The sockets are watched anyway, for sticks;
+   an adapter is one more thing to recognise in them. */
+static int on_plug(int port)
+{
+    if (present)
+        return 0;
+    return try_port(port);
+}
+
+static void on_unplug(int port)
+{
+    if (!present || port != bt_port)
+        return;
+    present = 0;
+    acl_ready = 0;
+    dev = -1;
+    have_addr = have_name = have_version = 0;
+    nseen = 0;
+    give_up("the adapter went away (switched off, or unplugged)");
+}
+
 int bt_init(void)
 {
+    static int watching;
+
     if (present)
         return 1;
     if (!usbhc_init())
         return give_up("there is no USB controller");
-
-    for (int port = 0; port < usbhc_ports(); port++) {
-        int d = usbhc_attach(port);
-        if (d < 0)
-            continue;
-
-        if (usbhc_descriptor(d, 0x02, 0, desc_buf, 9) < 9)
-            continue;
-        int total = desc_buf[2] | (desc_buf[3] << 8);
-        if (total > (int)sizeof(desc_buf))
-            total = (int)sizeof(desc_buf);
-        if (usbhc_descriptor(d, 0x02, 0, desc_buf, total) < total)
-            continue;
-
-        int iface = find_adapter(desc_buf, total);
-        if (iface < 0)
-            continue;
-
-        uint8_t cfg_value = desc_buf[5];
-        if (usbhc_request(d, 0x00, 0x09, cfg_value, 0) < 0)
-            continue;
-        if (usbhc_int_endpoint(d, ep_events, ep_maxpacket, ep_interval) < 0)
-            continue;
-        acl_ready = ep_acl_maxpacket > 0 &&
-                    usbhc_bulk_endpoint(d, ep_acl_in, ep_acl_out,
-                                        ep_acl_maxpacket) == 0;
-
-        dev = d;
-        usbhc_claim(port);
-
-        /* Reset first, always: an adapter the firmware has already
-           talked to is in a state we know nothing about. */
-        if (!command(OP_RESET, (const uint8_t *)0, 0, 2000)) {
-            dev = -1;
-            return give_up("the adapter did not answer HCI Reset");
-        }
-
-        static const uint8_t all_events[8] = {
-            0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x1F, 0xFF, 0x00 };
-        command(OP_SET_EVENT_MASK, all_events, 8, 1000);
-        command(OP_READ_BDADDR, (const uint8_t *)0, 0, 1000);
-        command(OP_READ_LOCAL_NAME, (const uint8_t *)0, 0, 1000);
-        command(OP_READ_VERSION, (const uint8_t *)0, 0, 1000);
-
-        present = 1;
-        printk("[ OK ] Bluetooth: %s%s%s (port %d, %s)\n",
-               have_addr ? bt_address() : "an adapter with no address",
-               have_name && local_name[0] ? ", " : "",
-               have_name ? local_name : "", port + 1, usbhc_name());
-        return 1;
+    if (!watching) {
+        usbhc_on_plug(on_plug);
+        usbhc_on_unplug(on_unplug);
+        usbhc_watch();
+        watching = 1;
     }
+
+    gave_up = (const char *)0;
+    for (int port = 0; port < usbhc_ports(); port++)
+        if (try_port(port))
+            return 1;
+    /* An adapter that stopped half way has already said where */
+    if (gave_up)
+        return 0;
     return give_up("there is no Bluetooth adapter on the USB bus");
 }
 
@@ -582,11 +677,80 @@ const char *bt_version(void)
     return have_version ? version : "unknown";
 }
 
+/* One search at a time: two would send their commands down the same
+   control pipe and read each other's answers. The bar's card and the
+   Settings window can both ask. */
+static volatile int scanning, scan_pending;
+
+static int scan(uint32_t seconds);
+
 int bt_scan(uint32_t seconds)
 {
-    if (!present)
+    if (!present || scanning)
         return -1;
+    scanning = 1;
+    int n = scan(seconds);
+    scanning = 0;
+    return n;
+}
 
+static void scan_thread(void *arg)
+{
+    (void)arg;
+    bt_scan(4);
+    scan_pending = 0;
+}
+
+int bt_scan_start(void)
+{
+    if (!present || scanning || scan_pending)
+        return -1;
+    scan_pending = 1;
+    if (!task_create("btscan", scan_thread, (void *)0)) {
+        scan_pending = 0;
+        return -1;
+    }
+    return 0;
+}
+
+int bt_scanning(void)
+{
+    return scanning || scan_pending;
+}
+
+static void put_text(char *dst, int room, const char *src)
+{
+    int i = 0;
+    while (src && src[i] && i < room - 1) {
+        dst[i] = src[i];
+        i++;
+    }
+    dst[i] = 0;
+}
+
+void bt_info_fill(struct bt_info *o)
+{
+    memset(o, 0, sizeof(*o));
+    o->present = present;
+    o->scanning = bt_scanning();
+    if (!present) {
+        put_text(o->why, sizeof(o->why), bt_why());
+        return;
+    }
+    put_text(o->address, sizeof(o->address), bt_address());
+    put_text(o->name, sizeof(o->name), have_name ? local_name : "");
+    put_text(o->version, sizeof(o->version), bt_version());
+    int n = nseen < BT_INFO_DEVICES ? nseen : BT_INFO_DEVICES;
+    o->found = n;
+    for (int i = 0; i < n; i++) {
+        put_text(o->dev_addr[i], sizeof(o->dev_addr[i]), bt_found_addr(i));
+        put_text(o->dev_name[i], sizeof(o->dev_name[i]), seen[i].name);
+        o->dev_rssi[i] = seen[i].rssi;
+    }
+}
+
+static int scan(uint32_t seconds)
+{
     nseen = 0;
 
     /* Passive scanning: we listen, we do not ask. An interval of 0x0010
@@ -709,6 +873,70 @@ void bt_selftest(void)
     for (int i = 0; i < nseen; i++)
         printk("    %s  %s%s%d dBm\n", bt_found_addr(i), bt_found_name(i),
                bt_found_name(i)[0] ? "  " : "", bt_found_rssi(i));
+
+    /* Read Local Name's answer the way an adapter with 16-byte packets
+       sends it: 254 bytes in sixteen pieces, the name crossing the
+       first. Taken a packet at a time, it reads as its first ten
+       letters and fifteen events of nonsense. */
+    static const char long_name[] = "ThreadOS laptop adapter";
+    static uint8_t whole[2 + 252];
+    memset(whole, 0, sizeof(whole));
+    whole[0] = 0x0E;
+    whole[1] = 252;
+    whole[2] = 0x01;
+    whole[3] = 0x14;
+    whole[4] = 0x0C;
+    memcpy(whole + 6, long_name, sizeof(long_name) - 1);
+    have_name = 0;
+    ev_have = 0;
+    int events = 0;
+    for (int at = 0; at < (int)sizeof(whole); at += 16) {
+        int n = (int)sizeof(whole) - at < 16 ? (int)sizeof(whole) - at : 16;
+        events += ev_piece(whole + at, n, 16);
+    }
+    printk("  name from 16-byte pieces: %s (%u event)\n", bt_name(),
+           (uint32_t)events);
+
+    /* A transfer that ends short of its event's length was damaged on
+       the way: what came is dropped, and the next event is read clean
+       instead of being glued onto the remains. */
+    have_addr = 0;
+    ev_piece(whole, 16, 16);
+    ev_piece(whole + 16, 5, 16);
+    ev_piece(ev_addr, (int)sizeof(ev_addr), 16);
+    printk("  after a cut-off event, the next one read: %s\n", bt_address());
+    ev_have = 0;
+
+    /* How the Bluetooth half of an Intel Wireless 3160 describes itself
+       (8087:07dc): the HCI interface, then the voice interface with the
+       same class and six alternate settings. Every adapter has that
+       second interface; one that reads as "no adapter" here is how
+       every real adapter used to read. */
+#define VOICE_ALT(n, mps) 9, 4, 1, n, 2, 0xE0, 0x01, 0x01, 0, \
+                          7, 5, 0x03, 0x01, mps, 0, 1, \
+                          7, 5, 0x83, 0x01, mps, 0, 1
+    static const uint8_t intel_cfg[] = {
+        9, 2, 177, 0, 2, 1, 0, 0xE0, 50,
+        9, 4, 0, 0, 3, 0xE0, 0x01, 0x01, 0,
+        7, 5, 0x81, 0x03, 64, 0, 1,
+        7, 5, 0x02, 0x02, 64, 0, 1,
+        7, 5, 0x82, 0x02, 64, 0, 1,
+        VOICE_ALT(0, 0), VOICE_ALT(1, 9), VOICE_ALT(2, 17),
+        VOICE_ALT(3, 25), VOICE_ALT(4, 33), VOICE_ALT(5, 49) };
+#undef VOICE_ALT
+    /* The parser fills the live adapter's endpoints; they are put back */
+    int keep[6] = { ep_events, ep_maxpacket, ep_interval, ep_acl_in,
+                    ep_acl_out, ep_acl_maxpacket };
+    int iface = find_adapter(intel_cfg, (int)sizeof(intel_cfg));
+    printk("  Intel 3160 configuration: interface %d, events on endpoint "
+           "%d (%d bytes), data in %d / out %d\n", iface, ep_events,
+           ep_maxpacket, ep_acl_in, ep_acl_out);
+    ep_events = keep[0];
+    ep_maxpacket = keep[1];
+    ep_interval = keep[2];
+    ep_acl_in = keep[3];
+    ep_acl_out = keep[4];
+    ep_acl_maxpacket = keep[5];
 
     /* And what it does NOT prove, said out loud rather than left to be
        assumed from a row of green ticks. */

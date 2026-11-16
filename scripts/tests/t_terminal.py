@@ -224,7 +224,7 @@ def main():
             q.wait_serial("[net] DHCP", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
-            check("(64) the desktop came up", q.wait_desktop(30))
+            check("(64) the desktop came up", q.wait_desktop())
             session(q, "(64)", "x86-64 (long mode)",
                     r"Memory: (\d+) KiB RAM")
         finally:

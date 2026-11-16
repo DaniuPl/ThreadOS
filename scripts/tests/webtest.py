@@ -426,7 +426,7 @@ def run(title, sections, search=False):
             q.wait_serial("[net] DHCP", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
-            check("the desktop comes up", q.wait_desktop(30))
+            check("the desktop comes up", q.wait_desktop())
             sw, sh = q.size()
             w0, h0 = define(SRC, "W0"), define(SRC, "H0")
             wx, wy = cascade(2, w0 + 2, h0 + TITLE_H + 2, w=sw, h=sh)

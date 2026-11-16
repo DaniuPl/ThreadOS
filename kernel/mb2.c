@@ -16,8 +16,6 @@
 #include "include/mb2.h"
 #include "include/string.h"
 
-#define MULTIBOOT_BOOTLOADER_MAGIC 0x2BADB002
-
 #define TAG_END      0
 #define TAG_CMDLINE  1
 #define TAG_MODULE   3
@@ -140,10 +138,6 @@ const struct mb2_framebuffer *mb2_framebuffer(void)
 
 const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr)
 {
-    if (magic == MULTIBOOT_BOOTLOADER_MAGIC) {
-        kind = "Multiboot 1";
-        return (const struct multiboot_info *)(uintptr_t)addr;
-    }
     if (magic != MULTIBOOT2_BOOTLOADER_MAGIC)
         return (const struct multiboot_info *)0;
 

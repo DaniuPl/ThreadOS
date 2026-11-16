@@ -96,7 +96,7 @@ def main():
             q.command("write note hello-from-the-disk", "write:")
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
-            check("the desktop comes up in graphics mode", q.wait_desktop(30))
+            check("the desktop comes up in graphics mode", q.wait_desktop())
 
             # The mouse is relative: first push the cursor into the
             # corner, so as to know where it is at all.
@@ -315,7 +315,7 @@ def main():
             q2.wait_serial("thread64>", timeout=60)
             q2.type_line("desktop")
             q2.wait_serial("The desktop is starting", timeout=30)
-            check("the desktop comes up a second time", q2.wait_desktop(30))
+            check("the desktop comes up a second time", q2.wait_desktop())
 
             q2.mouse_home()
             q2.launch_dock("gmon")                # the "Monitor" tile

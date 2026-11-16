@@ -1,7 +1,7 @@
 /* ThreadOS 64 user programs
  *
- * The same address as in the 32-bit kernel (1 GiB), and for the same
- * reason: below it lies the identity mapping of physical memory.
+ * Programs start at 1 GiB, because below it lies the identity mapping
+ * of physical memory.
  * USER64_BASE in kernel64/elf64.h has to agree with this.
  *
  * The sections are page-aligned, because the kernel grants access

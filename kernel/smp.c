@@ -553,9 +553,7 @@ int smp_init(void)
     *counter = 0;
 
     /* The secondary core takes the same page tables the kernel walks:
-       in long mode it will not start at all without them, and in
-       protected mode it would start, only user program addresses
-       would mean nothing to it. */
+       long mode will not start at all without them. */
     uint32_t off_cr3 = (uint32_t)((uint8_t *)&ap_cr3 - ap_trampoline);
     uintptr_t cr3;
     __asm__ volatile("movq %%cr3, %0" : "=r"(cr3));

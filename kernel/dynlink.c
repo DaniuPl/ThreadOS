@@ -7,7 +7,7 @@
  * the name of the function that belongs there. Putting one together
  * with the other is the whole of binding.
  *
- * The library is linked at a FIXED address (USER_LIB_BASE) rather than
+ * The library is linked at a FIXED address (USER64_LIB_BASE) rather than
  * an arbitrary one. That simplifies the matter by a whole layer: the
  * addresses in its symbol table are already final, so the library
  * itself has no relocations to settle. There are two prices for this
@@ -15,10 +15,6 @@
  * always visible at the same address. A real system does not do this,
  * because it wants many of them and wants to randomise the addresses -
  * but a real system has a linker in user space for that.
- *
- * ELF structures differ between processor modes in field width but not
- * in layout - hence one set of names and an #ifdef over the
- * definitions.
  */
 
 #include <stdint.h>

@@ -78,7 +78,7 @@ def desktop():
                 time.sleep(0.5)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=40)
-            q.wait_desktop(40)
+            q.wait_desktop()
             q.mouse_home()
             w, h = q.size()
             # The kernel's two demonstration windows out of the way
@@ -144,8 +144,8 @@ def installer():
 
 
 def sharp():
-    """The 32-bit kernel on a 1920x1080 screen that says nothing about
-    itself: the panel's height gives one and a half"""
+    """The system on a 1920x1080 screen that says nothing about itself:
+    the panel's height gives one and a half"""
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
         f.truncate(16 * 1024 * 1024)

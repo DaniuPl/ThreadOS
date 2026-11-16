@@ -35,6 +35,7 @@
 #include "include/string.h"
 #include "include/pit.h"
 #include "include/io.h"
+#include "include/pmm.h"
 
 /* The registers sit in memory, so they have to be mapped first. The
    address comes from a BAR rather than from anything fixed - that is
@@ -67,7 +68,24 @@
 #define CMD_INTE        0x0004
 
 #define STS_HCH         0x0001      /* the controller is stopped */
+#define STS_HSE         0x0004      /* host system error: it lost the bus */
 #define STS_CNR         0x0800      /* the controller is not ready yet */
+#define STS_HCE         0x1000      /* host controller error: it gave up */
+
+/* The USB Legacy Support capability, in the controller's own registers */
+#define LEG_ID          1
+#define LEG_BIOS_OWNED  (1u << 16)
+#define LEG_OS_OWNED    (1u << 24)
+/* In its control word: what to keep (the reserved bits) when switching
+   every SMI enable off, and the three SMI events to acknowledge */
+#define LEG_SMI_KEEP    ((0x7u << 1) | (0xFFu << 5) | (0x7u << 17))
+#define LEG_SMI_EVENTS  (0x7u << 29)
+
+/* Intel's port routing, in the PCI configuration of its xHCI */
+#define INTEL_XUSB2PR    0xD0       /* USB 2.0 wires: 1 = to xHCI */
+#define INTEL_USB2PRM    0xD4       /* ...which of them may be moved */
+#define INTEL_USB3_PSSEN 0xD8       /* SuperSpeed terminations on */
+#define INTEL_USB3PRM    0xDC       /* ...which of them may be switched */
 
 #define PORT_CCS        (1u << 0)   /* something is plugged in */
 #define PORT_PED        (1u << 1)   /* the port is enabled */
@@ -103,11 +121,17 @@
 #define TRB_TC          (1u << 1)   /* the jump flips the cycle bit */
 
 #define CODE_OK      1
+#define CODE_NO_SLOTS   9           /* every device slot is taken */
 #define CODE_SHORT      13          /* less arrived than we asked for - that is not an error */
 
-#define SLOTS          4           /* this many devices at once is enough for us */
+/* Devices at once. Four was enough for a keyboard and a stick in QEMU;
+   a laptop has a webcam, a card reader, a fingerprint reader and the
+   Bluetooth half of its wireless card on this bus before anybody plugs
+   anything in, and the fifth device simply got no slot. */
+#define SLOTS          16
 #define TRB_CHAIN      16          /* of which the last is a jump back to the start */
 #define CTX_BYTES      2112        /* the largest possible context set */
+#define DEV_CTX_BYTES  2048        /* a device context: 32 contexts of 64 B at most */
 
 struct trb {
     volatile uint32_t p0, p1, status, control;
@@ -128,12 +152,28 @@ static volatile uint32_t *doorbells;
 static int nports;
 static int ctx_size = 32;        /* 32 or 64 B per context - HCCPARAMS1 says which */
 
-static uint64_t dcbaa[SLOTS + 1] __attribute__((aligned(64)));
-static struct trb cmd_trb[TRB_CHAIN] __attribute__((aligned(64)));
-static struct trb evt_trb[TRB_CHAIN] __attribute__((aligned(64)));
+/* Where these lie matters to a real controller, though not to QEMU's:
+   a context may not cross a page, and a ring may not cross 64 KiB
+   (table 6-1 of the specification). Aligning each to its own size
+   keeps every one inside. An input context is 2112 bytes, so each
+   gets a page; two 2048-byte device contexts share one. */
+static uint64_t dcbaa[SLOTS + 1] __attribute__((aligned(256)));
+static struct trb cmd_trb[TRB_CHAIN] __attribute__((aligned(256)));
+static struct trb evt_trb[TRB_CHAIN] __attribute__((aligned(256)));
 static uint32_t erst[4] __attribute__((aligned(64)));
-static uint8_t dev_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
-static uint8_t in_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
+static uint8_t dev_ctx[SLOTS][DEV_CTX_BYTES] __attribute__((aligned(4096)));
+static uint8_t in_ctx[SLOTS][4096] __attribute__((aligned(4096)));
+
+/* Scratchpad pages: memory the controller keeps state of its own in.
+   QEMU's asks for none. Intel's ask for dozens, and one that asked and
+   got nothing has nowhere to put a device - it fails the first Enable
+   Slot or stops with an internal error, and every socket on the
+   machine looks empty. The array of their addresses goes into entry 0
+   of the context array, which is why slots are counted from 1. */
+#define SCRATCH_MAX 256
+static uint64_t scratch[SCRATCH_MAX] __attribute__((aligned(2048)));
+static int nscratch;
+
 /* Transfer rings: [0] endpoint zero, [1] the first interrupt one, [2]
    bulk in, [3] bulk out, [4] and [5] two more interrupt ones. A ring
    per endpoint, because that is what the controller expects: it keeps
@@ -146,7 +186,7 @@ static uint8_t in_ctx[SLOTS][CTX_BYTES] __attribute__((aligned(64)));
 #define RINGS 6
 #define INT_EPS 3
 static int int_ring(int k) { return k == 0 ? 1 : 3 + k; }
-static struct trb ep_trb[SLOTS][RINGS][TRB_CHAIN] __attribute__((aligned(64)));
+static struct trb ep_trb[SLOTS][RINGS][TRB_CHAIN] __attribute__((aligned(256)));
 
 static struct ring cmd_pier;
 static struct ring ep_pier[SLOTS][RINGS];
@@ -162,7 +202,7 @@ static int slot_speed[SLOTS];  /* what speed the device answered at */
  * devices have two reads in flight at once, and one buffer means each
  * one's report lands where the other is about to read it - which shows
  * up as a keyboard that goes silent the moment a mouse is plugged in. */
-static uint8_t buf[SLOTS][512] __attribute__((aligned(64)));
+static uint8_t buf[SLOTS][512] __attribute__((aligned(512)));
 static uint8_t ibuf[SLOTS][INT_EPS][64] __attribute__((aligned(64)));
 
 /* Transfers that have finished, waiting for the device they belong to.
@@ -202,8 +242,9 @@ static void wr(uintptr_t addr, uint32_t v)
     *(volatile uint32_t *)addr = v;
 }
 
-/* 64-bit registers may be written in two halves, and that is exactly
-   what we do - otherwise the same code would not work in 32-bit mode */
+/* 64-bit registers may be written in two halves, low half first
+   (xHCI 5.1), and that is what we do: it needs nothing but the 32-bit
+   access every other register gets */
 static void wr64(uintptr_t addr, uint64_t v)
 {
     wr(addr, (uint32_t)v);
@@ -273,11 +314,14 @@ static void ring_setup(struct ring *p, struct trb *trb)
 static struct spinlock ring_lock = SPINLOCK_FREE;
 static volatile uint32_t cmd_turn;
 
-static void insert(struct ring *p, uint64_t param, uint32_t status,
-                 uint32_t control)
+/* Puts a TRB into a ring; returns where it went, which is how the
+   controller's answer to a command names the command. */
+static uint64_t insert(struct ring *p, uint64_t param, uint32_t status,
+                       uint32_t control)
 {
     irqflags_t flags = spin_lock_irq(&ring_lock);
     struct trb *t = &p->trb[p->index];
+    uint64_t at = fiz(t);
 
     t->p0 = (uint32_t)param;
     t->p1 = (uint32_t)(param >> 32);
@@ -294,6 +338,7 @@ static void insert(struct ring *p, uint64_t param, uint32_t status,
         p->cycle ^= 1;
     }
     spin_unlock_irq(&ring_lock, flags);
+    return at;
 }
 
 /* Takes one event off the event ring. 1 = there was one. */
@@ -333,11 +378,21 @@ static void sort_events(void)
     irqflags_t flags = spin_lock_irq(&ring_lock);
 
     while (event(&t)) {
-        if ((int)((t.control >> 10) & 0x3F) != TRB_EV_TRANSFER) {
+        int kind = (int)((t.control >> 10) & 0x3F);
+        /* Only a command's answer is kept for later. Port changes are
+           dropped here on purpose: the sockets are watched by reading
+           their registers. Kept, they filled this queue - a laptop's
+           controller sends one for every device that attaches and
+           another for every port reset - until the answer to a command
+           found no room and was lost, and from the seventh device or
+           so every command "never finished". */
+        if (kind == TRB_EV_COMMAND) {
             if (other_n < OTHERS)
                 other_q[other_n++] = t;
             continue;
         }
+        if (kind != TRB_EV_TRANSFER)
+            continue;
         int s = (int)((t.control >> 24) & 0xFF);
         if (s < 1 || s > SLOTS)
             continue;
@@ -413,20 +468,31 @@ static int wait_slot(int slot, struct comp *out, uint32_t ms)
     return 0;
 }
 
-static int wait_for(int kind, struct trb *result, uint32_t ms)
+/* Waits for the answer to the command placed at 'trb'. An answer to
+   any other command can only be a late one - commands take turns, so
+   the one that timed out before this is the only other candidate -
+   and taking it for this one's would hand a caller a slot number it
+   never asked for. It is thrown away. */
+static int wait_command(uint64_t trb, struct trb *result, uint32_t ms)
 {
     uint32_t az = pit_ticks() + (ms + 9) / 10 + 1;
     while (pit_ticks() < az) {
         sort_events();
-        for (int i = 0; i < other_n; i++) {
-            if ((int)((other_q[i].control >> 10) & 0x3F) != kind)
-                continue;
-            *result = other_q[i];
-            for (int j = i + 1; j < other_n; j++)
+        irqflags_t flags = spin_lock_irq(&ring_lock);
+        int found = 0;
+        while (other_n > 0 && !found) {
+            struct trb t = other_q[0];
+            for (int j = 1; j < other_n; j++)
                 other_q[j - 1] = other_q[j];
             other_n--;
-            return 1;
+            if ((t.p0 | ((uint64_t)t.p1 << 32)) == trb) {
+                *result = t;
+                found = 1;
+            }
         }
+        spin_unlock_irq(&ring_lock, flags);
+        if (found)
+            return 1;
         io_wait();
     }
     return 0;
@@ -453,10 +519,10 @@ static int command(uint64_t param, uint32_t control, struct trb *reply)
         io_wait();
     }
 
-    insert(&cmd_pier, param, 0, control);
+    uint64_t at = insert(&cmd_pier, param, 0, control);
     doorbells[0] = 0;                      /* the command ring doorbell */
 
-    if (!wait_for(TRB_EV_COMMAND, &t, 1000)) {
+    if (!wait_command(at, &t, 1000)) {
         cmd_turn = 0;
         return -1;
     }
@@ -516,6 +582,128 @@ const char *xhci_why(void)
     return gave_up;
 }
 
+/* And why the last device could not be greeted - for the list of
+   sockets in 'hardware', where "something is in socket 7 and did not
+   answer" is only half of what a person needs to know. */
+static const char *attach_failed;
+
+const char *xhci_attach_why(void)
+{
+    return attach_failed;
+}
+
+static int attach_fail(const char *why)
+{
+    attach_failed = why;
+    /* A controller that gave up says so in its status, and then that is
+       the reason, whatever step noticed it first */
+    if (base && (rd(op + OP_USBSTS) & (STS_HCE | STS_HSE)))
+        attach_failed = "the controller stopped with an internal error";
+    return -1;
+}
+
+/* --- taking the controller from the firmware --------------------------
+ *
+ * A laptop's firmware drives this controller itself, so that a USB
+ * keyboard works in its menus, and through System Management Mode it
+ * can go on doing so after the system has started: an SMI on every
+ * event, handled behind our back. The way to ask for the controller is
+ * the USB Legacy Support capability in the controller's own registers:
+ * set "OS owned", wait for the firmware to drop "BIOS owned", and
+ * switch its SMIs off. QEMU's controller has no such capability, so
+ * none of this ever ran before a laptop. Linux waits a second and then
+ * takes the controller anyway; so do we.
+ */
+static void take_from_firmware(void)
+{
+    uint32_t at = (rd(base + CAP_HCCPARAMS1) >> 16) << 2;
+
+    for (int hops = 0; at && at < 0x10000 && hops < 32; hops++) {
+        uintptr_t cap = base + at;
+        uint32_t v = rd(cap);
+        if ((v & 0xFF) == LEG_ID) {
+            if (v & LEG_BIOS_OWNED) {
+                wr(cap, v | LEG_OS_OWNED);
+                for (int i = 0; i < 100 && (rd(cap) & LEG_BIOS_OWNED); i++)
+                    wait_ms(10);
+                if (rd(cap) & LEG_BIOS_OWNED) {
+                    printk("[ !! ] xHCI: the firmware would not let go, "
+                           "taking the controller anyway\n");
+                    wr(cap, (rd(cap) & ~LEG_BIOS_OWNED) | LEG_OS_OWNED);
+                }
+            }
+            /* Every SMI enable off, every pending SMI acknowledged */
+            wr(cap + 4, (rd(cap + 4) & LEG_SMI_KEEP) | LEG_SMI_EVENTS);
+            return;
+        }
+        uint32_t next = (v >> 8) & 0xFF;
+        if (!next)
+            return;
+        at += next << 2;
+    }
+}
+
+/* --- Intel's shared ports ---------------------------------------------
+ *
+ * On Intel chipsets from Panther Point (2012) to Wildcat Point (2015)
+ * the USB 2.0 wires of every socket run to two controllers, EHCI and
+ * xHCI, and registers in the xHCI's PCI configuration say which of the
+ * two has them. Firmware may leave them with EHCI, for systems that
+ * know nothing newer, and then this controller sees an empty socket
+ * where the webcam, the Bluetooth adapter and every USB 2.0 stick are.
+ * The mask registers next to them say which sockets may be moved;
+ * Linux moves exactly those, and so do we. Only where an Intel EHCI is
+ * there too: on chipsets without one these offsets are something else.
+ */
+static void route_intel_ports(const struct pci_dev *d)
+{
+    struct pci_dev ehci;
+
+    if (d->vendor != 0x8086 || !pci_find_class(0x0C, 0x03, 0x20, &ehci) ||
+        ehci.vendor != 0x8086)
+        return;
+
+    uint32_t ss = pci_config_read(d->bus, d->slot, d->func, INTEL_USB3PRM);
+    pci_config_write(d->bus, d->slot, d->func, INTEL_USB3_PSSEN, ss);
+    uint32_t hs = pci_config_read(d->bus, d->slot, d->func, INTEL_USB2PRM);
+    pci_config_write(d->bus, d->slot, d->func, INTEL_XUSB2PR, hs);
+    printk("[ OK ] xHCI: Intel's shared sockets taken over from EHCI "
+           "(USB 2.0: %x, USB 3.0: %x)\n",
+           pci_config_read(d->bus, d->slot, d->func, INTEL_XUSB2PR),
+           pci_config_read(d->bus, d->slot, d->func, INTEL_USB3_PSSEN));
+}
+
+/* Gives the controller the scratchpad pages it asks for (see scratch[]
+   above). 0 = it could not be done. */
+static int give_scratchpad(void)
+{
+    uint32_t hcs2 = rd(base + CAP_HCSPARAMS2);
+    /* Ten bits split in two: the high five at 25:21, the low five at
+       31:27. A driver reading only the low half gives a controller that
+       wants 34 pages two of them. */
+    int want = (int)((((hcs2 >> 21) & 0x1F) << 5) | ((hcs2 >> 27) & 0x1F));
+
+    if (!want)
+        return 1;
+    /* The pages are the controller's own size, which is 4 KiB in every
+       one we know of - bit 0 of PAGESIZE says so */
+    if (!(rd(op + OP_PAGESIZE) & 1))
+        return give_up("the controller does not use 4 KiB pages");
+    if (want > SCRATCH_MAX)
+        return give_up("the controller wants more scratchpad memory "
+                       "than this driver keeps");
+    while (nscratch < want) {
+        uint32_t page = pmm_alloc_frame();
+        if (!page)
+            return give_up("no memory left for the controller's "
+                           "scratchpad");
+        memset((void *)(uintptr_t)page, 0, 4096);
+        scratch[nscratch++] = page;
+    }
+    dcbaa[0] = fiz(scratch);
+    return 1;
+}
+
 int xhci_init(void)
 {
     struct pci_dev dev;
@@ -547,7 +735,13 @@ int xhci_init(void)
     nports = (int)((hcs1 >> 24) & 0xFF);
     if (nports > 32)
         nports = 32;
+    int max_slots = (int)(hcs1 & 0xFF);
     ctx_size = (rd(base + CAP_HCCPARAMS1) & 0x4) ? 64 : 32;
+
+    /* The firmware lets go first, and the sockets come over to us,
+       before anything here touches the controller */
+    take_from_firmware();
+    route_intel_ports(&dev);
 
     /* Stop and zero the controller - after the BIOS it may be in any
        state, and reset is the only state we know */
@@ -569,7 +763,10 @@ int xhci_init(void)
         for (int e = 0; e < RINGS; e++)
             ring_setup(&ep_pier[s][e], ep_trb[s][e]);
 
-    wr(op + OP_CONFIG, SLOTS);
+    if (!give_scratchpad())
+        return 0;
+
+    wr(op + OP_CONFIG, (uint32_t)(max_slots < SLOTS ? max_slots : SLOTS));
     wr64(op + OP_DCBAAP, fiz(dcbaa));
 
     ring_setup(&cmd_pier, cmd_trb);
@@ -594,6 +791,9 @@ int xhci_init(void)
         wait_ms(1);
     if (rd(op + OP_USBSTS) & STS_HCH)
         return give_up("the controller will not start after the reset");
+    if (rd(op + OP_USBSTS) & (STS_HCE | STS_HSE))
+        return give_up("the controller stopped with an internal error "
+                       "as soon as it started");
 
     /* Port power: without it nothing on a port will ever report in */
     for (int i = 0; i < nports; i++) {
@@ -601,7 +801,25 @@ int xhci_init(void)
         if (!(v & PORT_PP))
             wr(port_reg(i), portsc_safe(v) | PORT_PP);
     }
-    wait_ms(20);
+
+    /* Then let the sockets say what is in them. A device that saw the
+       reset, or that was just moved over from EHCI, takes a while to
+       attach again: QEMU's do it at once, real ones within a hundred
+       milliseconds or so. The walk across the sockets at start-up is
+       made once, so a device that reports in a moment after it is a
+       device nobody greets - wait until the sockets have not changed
+       for 100 ms, a second at most. */
+    uint32_t was = 0;
+    int still = 0;
+    for (int t = 0; t < 100 && still < 10; t++) {
+        uint32_t now = 0;
+        for (int i = 0; i < nports; i++)
+            if (rd(port_reg(i)) & PORT_CCS)
+                now |= 1u << i;
+        still = (t > 0 && now == was) ? still + 1 : 0;
+        was = now;
+        wait_ms(10);
+    }
     return 1;
 }
 
@@ -696,8 +914,11 @@ int xhci_attach(int port)
 {
     if (!base || port < 0 || port >= nports)
         return -1;
+    attach_failed = (const char *)0;
+    if (!(rd(port_reg(port)) & PORT_CCS))
+        return -1;                       /* nothing in it: not a failure */
     if (!port_reset(port))
-        return -1;
+        return attach_fail("the socket did not come out of its reset");
 
     int speed = (int)((rd(port_reg(port)) >> PORT_SPEED_SH) & 0xF);
     return xhci_address(port, 0, speed, 0, 0);
@@ -712,26 +933,34 @@ int xhci_address(int port, uint32_t route, int speed, int tt_slot,
 {
     if (!base || port < 0 || port >= nports)
         return -1;
+    attach_failed = (const char *)0;
 
     struct trb reply;
-    if (command(0, (uint32_t)TRB_ENABLE_SLOT << 10, &reply) != CODE_OK)
-        return -1;
+    int code = command(0, (uint32_t)TRB_ENABLE_SLOT << 10, &reply);
+    if (code == CODE_NO_SLOTS)
+        return attach_fail("the controller has no device slot left");
+    if (code != CODE_OK)
+        return attach_fail(code < 0 ? "the controller did not answer "
+                                      "Enable Slot"
+                                    : "the controller refused a slot");
     int slot = (int)(reply.control >> 24);
     if (slot < 1 || slot > SLOTS)
-        return -1;
+        return attach_fail("the controller gave a slot out of range");
 
     int maxpacket = packet_for_speed(speed);
 
     dcbaa[slot] = fiz(dev_ctx[slot - 1]);
-    memset(dev_ctx[slot - 1], 0, CTX_BYTES);
+    memset(dev_ctx[slot - 1], 0, DEV_CTX_BYTES);
     ring_setup(&ep_pier[slot - 1][0], ep_trb[slot - 1][0]);
 
     slot_speed[slot - 1] = speed;
     make_input(slot, port, speed, maxpacket, route, tt_slot, tt_port);
     if (command(fiz(in_ctx[slot - 1]),
                   ((uint32_t)TRB_ADDRESS_DEV << 10) | ((uint32_t)slot << 24),
-                  (struct trb *)0) != CODE_OK)
-        return -1;
+                  (struct trb *)0) != CODE_OK) {
+        xhci_release(slot);
+        return attach_fail("the device would not take an address");
+    }
 
     /* The first eight bytes of the device descriptor say how large the
        packets endpoint zero accepts are. At full speed that is
@@ -739,15 +968,23 @@ int xhci_address(int port, uint32_t route, int speed, int tt_slot,
        told, otherwise longer answers fall apart across packets. */
     uint8_t setup[8] = { 0x80, 0x06, 0x00, 0x01, 0x00, 0x00, 8, 0x00 };
     uint8_t info8[8];
-    if (xhci_control(slot, setup, info8, 8, 1) < 8)
-        return -1;
-    if (info8[7] && info8[7] != maxpacket) {
+    if (xhci_control(slot, setup, info8, 8, 1) < 8) {
+        xhci_release(slot);
+        return attach_fail("the device did not say what it is");
+    }
+    /* A SuperSpeed device writes the size as a power of two: 9 means
+       512. Taken as it stands, a USB 3.0 stick got endpoint zero
+       packets of nine bytes. */
+    int mps0 = info8[7];
+    if (speed >= 4)
+        mps0 = info8[7] < 16 ? 1 << info8[7] : 0;
+    if (mps0 && mps0 != maxpacket) {
         uint8_t *we = in_ctx[slot - 1];
         uint32_t *control = info(we, 0);
         control[0] = 0;
         control[1] = 0x2;             /* we correct endpoint zero only */
         uint32_t *punkt0 = info(we, 2);
-        punkt0[1] = (punkt0[1] & 0xFFFFu) | ((uint32_t)info8[7] << 16);
+        punkt0[1] = (punkt0[1] & 0xFFFFu) | ((uint32_t)mps0 << 16);
         command(fiz(we),
                   ((uint32_t)TRB_EVAL_CTX << 10) | ((uint32_t)slot << 24),
                   (struct trb *)0);

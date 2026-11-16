@@ -50,6 +50,19 @@ def read_rows(q, ox, oy, cols, rows):
                         base=TERM_BASE, px=TERM_PX)
 
 
+def wait_rows(q, ok, geom, tries=20):
+    """Polls the window until what it shows passes the test 'ok'. The
+    terminal redraws its whole window on every pass, so one picture can
+    catch it halfway through - with the line drawn last still missing."""
+    seen = []
+    for _ in range(tries):
+        seen = read_rows(q, **geom)
+        if ok(seen):
+            return seen
+        time.sleep(0.5)
+    return seen
+
+
 def blue_at(at, x, y):
     """The accent of a selection's field"""
     return near(at(x, y), theme("dark")["accent"], 40)
@@ -90,8 +103,8 @@ def main():
             # lands on the fourth line of the session (0: the greeting
             # wrapped over two, 2: the echoed command, 3: the output).
             q.type_line("date")
-            time.sleep(3)
-            rows = read_rows(q, **geom)
+            rows = wait_rows(q, lambda rs: any(r.startswith("2030-")
+                                               for r in rs), geom)
             line_no = next((i for i, r in enumerate(rows)
                             if r.startswith("2030-")), -1)
             check("the program's output is in the window", line_no >= 0)
@@ -120,10 +133,10 @@ def main():
                           for dx in range(0, 8) for dy in (0, 2)))
 
             # --- and letting go copied it --------------------------------
+            # (the line being typed is the window's bottom row)
             q.sendkey("shift-insert")
-            time.sleep(1.5)
-            rows = read_rows(q, **geom)
-            typed_line = [r for r in rows if r][-1]
+            rows = wait_rows(q, lambda rs: wanted in rs[-1], geom)
+            typed_line = rows[-1]
             check("what is pasted is exactly what was under the mouse "
                   "('%s' w '%s')" % (wanted, typed_line),
                   wanted in typed_line)
@@ -142,9 +155,9 @@ def main():
             q.mouse_goto(600, 380)
             time.sleep(1)
             q.sendkey("shift-insert")
-            time.sleep(1.5)
-            rows = read_rows(q, **geom)
-            typed_line = [r for r in rows if r][-1]
+            rows = wait_rows(q, lambda rs: "date" in rs[-1]
+                             and "2030-" in rs[-1], geom)
+            typed_line = rows[-1]
             check("a selection across two lines takes both ('%s')"
                   % typed_line,
                   "date" in typed_line and "2030-" in typed_line)

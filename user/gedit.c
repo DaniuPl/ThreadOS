@@ -20,9 +20,6 @@
  * where the caret is, and - when the editor needs a file name - the
  * question, typed into the same line. A dialogue box would be a second
  * window to move, focus and close, for one line of text.
- *
- * Nothing here depends on the processor mode: it is one piece of code
- * compiled for both kernels.
  */
 
 #include "uapi.h"

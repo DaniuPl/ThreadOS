@@ -1,7 +1,6 @@
-/* The linker script for the 64-bit kernel. The same layout as the
-   32-bit one: the image at 1 MiB, the Multiboot 2 header at the start.
-   GRUB loads the ELF64 image and leaves us in protected mode - long
-   mode we enter ourselves (boot64/boot64.S). */
+/* The linker script for the kernel: the image at 1 MiB, the Multiboot 2
+   header at the start. GRUB loads the ELF64 image and leaves us in
+   protected mode - long mode we enter ourselves (boot64/boot64.S). */
 
 ENTRY(_start)
 

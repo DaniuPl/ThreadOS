@@ -186,7 +186,7 @@ def sixty_four():
             q.wait_serial("thread64>", timeout=60)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
-            q.wait_desktop(40)
+            q.wait_desktop()
             time.sleep(4)
             q.mouse_home()
 
@@ -345,7 +345,7 @@ def main():
                   not is_accent(at(MX + MENU_W - 12, e0 + 2 * MENU_ROW)))
             # The start menu remains separate and closed.
             check("and nothing hangs from the mark on the bar",
-                  menu_entry(q, MENU_X0, MENU_Y, 0) == "")
+                  menu_entry(q, MENU_X0, menu_top(), 0) == "")
 
             # Refresh closes the context menu without launching a program.
             q.mouse_goto(MX + 60, MY + MENU_PAD + 2 * MENU_ROW +
@@ -407,7 +407,7 @@ def main():
             # The application launcher is a different menu and still runs apps.
             q.open_menu()
             q.mouse_goto(MENU_X0 + 60,
-                         MENU_Y + MENU_PAD + MENU_ROW + MENU_ROW // 2)
+                         menu_y(MENU_ITEMS[1]))
             time.sleep(0.5)
             q.mouse_click()
             time.sleep(4)

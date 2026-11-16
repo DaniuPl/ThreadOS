@@ -5,17 +5,13 @@
  * later one with the same key gets the same semaphore. A mutex is a
  * semaphore that starts with one.
  *
- * Waiting differs between the two kernels and nothing else does. The
- * 32-bit one can put a task to sleep until somebody wakes it, so a
- * waiter goes into a FIFO queue and sem_post wakes the longest-waiting
- * one - the same way pipe.c waits. The 64-bit one has no such call
- * yet, so a waiter sleeps a tick at a time and looks again - the way
- * pipe64.c waits. Either way a process being killed stops waiting: a
+ * The scheduler has no call that puts a task to sleep until somebody
+ * wakes it, so a waiter sleeps a tick at a time and looks again - the
+ * way pipe64.c waits. A process being killed stops waiting: a
  * semaphore must not be the thing that keeps a dead process alive.
  *
  * Ported from the thread-synchronisation work on an older branch
- * (claude/custom-os-skeleton-wow4s7, 9743c31), which had only the
- * single-core 32-bit kernel to run on.
+ * (claude/custom-os-skeleton-wow4s7, 9743c31).
  */
 
 #include <stdint.h>
@@ -26,7 +22,6 @@
 #include "../kernel64/task64.h"
 
 #define MAX_SEM     16              /* different semaphores at once */
-#define SEM_WAITERS 8               /* the queue on one of them */
 
 struct sem {
     int used;

@@ -3,9 +3,10 @@
 
 #include <stdint.h>
 
-/* The bootloader information structure (Multiboot 1).
-   The fields above mmap_* are of no use to us yet, but they have to be
-   present so that the offsets line up. */
+/* The bootloader information structure, in the shape Multiboot 1 gave
+   it. mb2.c fills it in from the Multiboot 2 tags, so the rest of the
+   kernel reads one form. Not every field is used, but they keep the
+   layout the specification describes. */
 struct multiboot_info {
     uint32_t flags;
     uint32_t mem_lower;     /* KiB of memory below 1 MiB (flag bit 0) */
@@ -24,7 +25,7 @@ struct multiboot_info {
 #define MULTIBOOT_FLAG_MODS (1 << 3)
 #define MULTIBOOT_FLAG_MMAP (1 << 6)
 
-/* A module loaded by the bootloader (e.g. an initrd from QEMU's -initrd) */
+/* A module loaded by the bootloader (the initrd) */
 struct multiboot_mod {
     uint32_t start;
     uint32_t end;

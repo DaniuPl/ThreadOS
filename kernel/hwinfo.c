@@ -82,6 +82,7 @@ void hwinfo_print(void)
        anybody can act on, while "the controller sits above 4 GiB" is. */
     if (usbhc_why())
         printk("          (%s)\n", usbhc_why());
+    usbhc_print_devices();
     for (int i = 0; i < usbmass_count(); i++)
         printk("          USB disk: %s, %u sectors of 512 B (%u MiB)\n",
                usbmass_name(i), usbmass_sectors(i),

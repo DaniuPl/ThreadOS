@@ -338,9 +338,9 @@ static int step_wipe(int n)
    whole disk puts it first - nothing else is left to boot; installing
    beside another system puts it last, so the machine goes on starting
    what it did and ThreadOS is one choice in its menu (F12, mostly).
-   1 = nothing could be done here: a 32-bit kernel, a start through a
-   BIOS, or firmware that refused - the files are written all the same,
-   and the disc's menu can still add the entry. */
+   1 = nothing could be done here: a start through a BIOS, or firmware
+   that refused - the files are written all the same, and the disc's
+   menu can still add the entry. */
 static int step_boot_entry(void)
 {
     plan.entry = -1;

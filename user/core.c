@@ -10,10 +10,9 @@
  * the machine never gets back. The terminal starts 'core ls -l' when
  * 'ls -l' is typed; the kernel's shell can do the same by hand.
  *
- * Everything goes through the system calls any program has, on both
- * kernels (uapi.h) - which is the point: what the terminal shows is what
- * a program is allowed to see, and a refusal is the kernel's, said in
- * words.
+ * Everything goes through the system calls any program has (uapi.h) -
+ * which is the point: what the terminal shows is what a program is
+ * allowed to see, and a refusal is the kernel's, said in words.
  */
 
 #include "uapi.h"
@@ -63,7 +62,7 @@ static void pad(const char *s, int w)
         say(" ");
 }
 
-/* --- what differs between the two kernels -------------------------- */
+/* --- the directory and where we stand ------------------------------ */
 
 static int read_entry(int i, char *name, int max, uint32_t *size, int *dir)
 {

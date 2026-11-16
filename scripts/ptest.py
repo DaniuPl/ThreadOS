@@ -9,6 +9,7 @@ file, because every one needs its own machine, and those start in
 parallel.
 """
 
+import atexit
 import base64
 import http.server
 import json
@@ -67,8 +68,8 @@ def _menu_items():
                         "kernel", "desktop.c")
     with open(full) as fh:
         m = re.search(r"menu_items\[\] = \{([^}]*)\}", fh.read())
-    # WEB_APP is the browser, a different program on each kernel
-    # (kernel/desktop.c); by the 32-bit name here
+    # WEB_APP is the browser (kernel/desktop.c), named gweb here as the
+    # tests name its tile
     return [name or "gweb" for name in
             re.findall(r'"([^"]+)"|\bWEB_APP\b', m.group(1))]
 
@@ -77,11 +78,22 @@ MENU_ITEMS = _menu_items()
 MENU_X0 = 6                 # the menu opened from the bar hangs here
 
 
+def menu_top(want=None, h=None):
+    """Where the menu opened from the bar really hangs: at MENU_Y when it
+    fits there, and higher - never above the bar - when it would reach
+    into the dock (menu_at() in kernel/desktop.c). The thirteen programs
+    and the system's five do not fit under MENU_Y on a 640x480 screen."""
+    hgt = (2 * MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP +
+           len(SESSION_ITEMS) * SESS_ROW)
+    bottom = work_bottom(want=want, h=SCREEN_H if h is None else h)
+    return max(BAR_H, min(MENU_Y, bottom - hgt))
+
+
 def menu_y(name, top=None):
     """The middle of the menu entry with the given name, in the menu
     opened from the mark on the bar - or one standing at 'top'."""
     idx = MENU_ITEMS.index(name)
-    t = MENU_Y if top is None else top
+    t = menu_top() if top is None else top
     return t + MENU_PAD + idx * MENU_ROW + MENU_ROW // 2
 
 
@@ -102,7 +114,7 @@ def session_y(name, top=None):
     """The middle of one of the system entries, below the programs and
     the line between them"""
     idx = SESSION_ITEMS.index(name)
-    t = MENU_Y if top is None else top
+    t = menu_top() if top is None else top
     return (t + MENU_PAD + len(MENU_ITEMS) * MENU_ROW + MENU_SEP +
             idx * SESS_ROW + SESS_ROW // 2)
 
@@ -260,6 +272,41 @@ MTOOLS_ENV = dict(os.environ, MTOOLS_SKIP_CHECK="1")
 
 def mtools_ok():
     return shutil.which("mformat") is not None
+
+
+_LOADER_DIR = None
+
+
+def uefi_loader():
+    """The UEFI loader of the build under test: the BOOTX64.EFI next to
+    its kernel, not build/ in the repository, which may be another build
+    altogether. A build made without one gets one built here, into a
+    directory of its own - never into build/, whose images other groups
+    may be booting at that moment. None when there is nothing to build
+    it with; with the tools there, a loader that does not compile is a
+    failed check, not a machine to skip."""
+    global _LOADER_DIR
+    near = os.path.join(os.path.dirname(os.path.abspath(KERNEL64)),
+                        "BOOTX64.EFI")
+    if os.path.exists(near):
+        return near
+    if not (shutil.which("clang") and shutil.which("lld-link")):
+        return None
+    if _LOADER_DIR is None:
+        _LOADER_DIR = tempfile.mkdtemp()
+        atexit.register(shutil.rmtree, _LOADER_DIR, True)
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        made = subprocess.run(["make", "BUILD=" + _LOADER_DIR, "efi"],
+                              cwd=root, stdout=subprocess.PIPE,
+                              stderr=subprocess.STDOUT, text=True,
+                              errors="replace")
+        path = os.path.join(_LOADER_DIR, "BOOTX64.EFI")
+        check("the UEFI loader builds", os.path.exists(path))
+        if not os.path.exists(path):
+            print("      " + "\n      ".join(
+                made.stdout.strip().splitlines()[-15:]))
+    path = os.path.join(_LOADER_DIR, "BOOTX64.EFI")
+    return path if os.path.exists(path) else None
 
 
 def _mt(args, quiet=True):
@@ -774,9 +821,14 @@ GSET_PASS_H = _kernel_define(_GS, "PASS_H")
 GSET_SW_W = _kernel_define(_GS, "SW_W")
 GSET_SW_H = _kernel_define(_GS, "SW_H")
 GSET_SW_GAP = _kernel_define(_GS, "SW_GAP")
-GSET_SECTIONS = ["General", "Appearance", "Display", "Sound", "Network",
-                 "Files", "About", "Region"]
+GSET_SIDE_TEXT_X = _kernel_define(_GS, "SIDE_TEXT_X")
+# In the order down the left; Updates is last, being the 64-bit
+# system's alone, so that the rest stand in the same place in both
+GSET_SECTIONS = ["Wi-Fi", "Bluetooth", "Network", "Sound", "General",
+                 "Appearance", "Display", "Screen Lock", "Mouse", "Files",
+                 "Region", "About"]
 GSET_SECTIONS64 = GSET_SECTIONS + ["Updates"]
+GSET_OPENS_ON = "General"
 
 
 def gset_section(name):
@@ -1140,8 +1192,8 @@ DOCK_N = len(DOCK_APPS)         # the programs in a dock nobody configured
 
 
 def dock_index(app):
-    """Where a program's tile is in the dock, by its name - 'gweb' for
-    the browser on either kernel"""
+    """Where a program's tile is in the dock, by its name - 'gweb' or
+    'web' for the browser"""
     return DOCK_APPS.index("gweb" if app == "web" else app)
 
 
@@ -1982,7 +2034,7 @@ class Qemu:
     def __init__(self, kernel, initrd=None, disk=None, hostfwd_port=None,
                  append=None, ram_mib=None, sata=False, nvme=False,
                  usbkbd=False, usbmouse=False, no_i8042=False,
-                 cdrom=None, serial=None, qemu="qemu-system-i386",
+                 cdrom=None, serial=None, qemu="qemu-system-x86_64",
                  uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
                  usbhub=False, behind_hub=False, usbnic=False,
                  nic="rtl8139", cpus=None, devices=None, edid=None,
@@ -2108,6 +2160,17 @@ class Qemu:
             # last few years actually is. Everything has to arrive over
             # USB or not at all.
             cmd += ["-machine", "pc,i8042=off"]
+        # A machine started at its text shell from a disc made for it
+        # (boot_disc) has its console on the framebuffer: GRUB gives the
+        # 64-bit kernel one even when asked for text. Every line it
+        # writes also goes to the serial port, so that is where the
+        # screen is read from - and a port is opened for it when the
+        # test did not ask for one.
+        self.text_on_serial = (not cdrom and not esp and not uefi and
+                               "nodesktop" in (append or "").split())
+        if self.text_on_serial and not serial:
+            serial = tempfile.mktemp(suffix=".log")
+            self._own_serial = serial
         self.serial_path = serial
         if serial:
             # When the console draws on the framebuffer, there is nothing
@@ -2132,8 +2195,7 @@ class Qemu:
             # by itself, the machine will not get.
             cmd += ["-drive", f"file=fat:rw:{esp},format=raw,media=disk"]
         if cdrom:
-            # Booting as from a real board: the kernel is loaded by GRUB, not by
-# QEMU
+            # Booting as from a real board: the kernel is loaded by GRUB
             cmd += ["-cdrom", cdrom, "-boot", "d"]
         elif not esp and not uefi:
             # Under UEFI firmware with no disc and no stick the machine
@@ -2226,6 +2288,11 @@ class Qemu:
                          "arguments": {"command-line": command}})
 
     def screen(self):
+        if getattr(self, "text_on_serial", False):
+            # The last twenty-five lines the console wrote - what a text
+            # screen would show
+            lines = self.serial().replace("\r", "").split("\n")
+            return "\n".join(ln.rstrip() for ln in lines[-25:]).rstrip()
         self.hmp(f'pmemsave {VGA_ADDR} {VGA_BYTES} "{self.dump_path}"')
         raw = open(self.dump_path, "rb").read()
         lines = []
@@ -2233,6 +2300,14 @@ class Qemu:
             chars = raw[y * 160:(y + 1) * 160:2]
             lines.append(chars.decode("cp437", "replace").rstrip())
         return "\n".join(lines).rstrip()
+
+    def boot_grace(self):
+        """What is left of the first minute after a machine started off a
+        disc made for it. GRUB and the kernel's own checks take longer
+        than QEMU loading a kernel itself used to, the more so with
+        several machines at once - and a test written against that faster
+        start waits for the same things, only later."""
+        return max(0.0, getattr(self, "_boot_until", 0) - time.time())
 
     def wait_for(self, text, timeout=30):
         """Waits until the given text appears on the VGA screen.
@@ -2242,7 +2317,7 @@ class Qemu:
         does. The wait is for a THING TO HAPPEN, so waiting longer
         weakens nothing - it only stops a busy host from being reported
         as a broken kernel."""
-        deadline = time.time() + timeout
+        deadline = time.time() + timeout + self.boot_grace()
         while time.time() < deadline:
             screen = self.screen()
             if text in screen:
@@ -2514,7 +2589,8 @@ class Qemu:
     def launch_menu(self, name):
         """Starts a program from the menu, by the name it runs under"""
         self.open_menu()
-        self.click(MENU_X0 + 60, menu_y(name))
+        self.click(MENU_X0 + 60,
+                   menu_y(name, top=menu_top(h=self.size()[1])))
         self.n_win += 1
 
     def launch_dock(self, k, n_w=None, **kw):
@@ -2852,9 +2928,9 @@ class Qemu:
         """Section i's name down the left: on the accent when open"""
         t = theme("dark" if dark else "light")
         top = GSET_SIDE_Y0 + i * GSET_SIDE_H
-        return self.read_ui(cx + 20, cy + ui_font_baseline_in(UD_PX, top,
-                                                              GSET_SIDE_H),
-                            GSET_SIDE_W - 24, px=UD_PX,
+        return self.read_ui(cx + GSET_SIDE_TEXT_X,
+                            cy + ui_font_baseline_in(UD_PX, top, GSET_SIDE_H),
+                            GSET_SIDE_W - GSET_SIDE_TEXT_X - 4, px=UD_PX,
                             fg=t["accent_text" if chosen else "app_text"],
                             screen=screen)
 
@@ -3372,9 +3448,19 @@ class Qemu:
                 return fresh           # the prompt is back: it is done
             time.sleep(0.3)
         return self.serial()[start:]
+    def frame_rate(self):
+        """How many frames a second the desktop draws now, by its own
+        count ('screen' in the kernel's shell, which must have the keys);
+        None when it does not say. Everything the desktop shows for a
+        while is timed in its frames, which an emulated machine draws
+        more slowly than fifty a second - so a test that holds such a
+        while to a bound in seconds works it out from this."""
+        said = self.command("screen", " a second", timeout=15)
+        m = re.search(r"frames:\s+(\d+) a second", said)
+        return int(m.group(1)) if m and int(m.group(1)) > 0 else None
 
     def wait_serial(self, text, timeout=20):
-        deadline = time.time() + timeout
+        deadline = time.time() + timeout + self.boot_grace()
         while time.time() < deadline:
             out = self.serial()
             if text in out:
@@ -3403,8 +3489,9 @@ class Qemu:
             self.proc.wait(timeout=20)
         except subprocess.TimeoutExpired:
             pass
-        for p in (self.qmp_path, self.dump_path):
-            if os.path.exists(p):
+        for p in (self.qmp_path, self.dump_path,
+                  getattr(self, "_own_serial", None)):
+            if p and os.path.exists(p):
                 os.unlink(p)
 
 
@@ -3455,25 +3542,27 @@ def summary():
 
 
 
-def make_iso64(workdir, iso, graphics=False, text=False, cmdline=""):
+def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
+               kernel=None, initrd=None):
     """Assembles a disc with the 64-bit kernel and its initrd.
 
-    The 64-bit kernel cannot be started through -kernel: QEMU loads only
-    Multiboot 1 images that way, and this is Multiboot 2. So every test
-    has to build a disc with GRUB, and until now every one did it on its
-    own. 'graphics' turns graphics mode on from the loader (the desktop
-    and the console on the framebuffer). 'text' demands text mode: GRUB
-    gives a framebuffer of its own accord and the console then draws in
-    it instead of in the VGA character memory the tests look for at
-    0xB8000.
+    The kernel cannot be started through -kernel: QEMU loads only
+    Multiboot 1 images that way, and this is Multiboot 2. So a disc with
+    GRUB on it it is. 'graphics' turns graphics mode on from the loader
+    (the desktop and the console on the framebuffer). 'text' demands
+    text mode: GRUB gives a framebuffer of its own accord and the console
+    then draws in it instead of in the VGA character memory the tests
+    look for at 0xB8000. 'cmdline' is what the kernel is started with.
 
     Returns True when the disc was created.
     """
+    kernel = kernel or KERNEL64
+    initrd = initrd if initrd is not None else INITRD64
     os.makedirs(workdir + "/boot/grub", exist_ok=True)
-    shutil.copy(KERNEL64, workdir + "/boot/threados64.bin")
+    shutil.copy(kernel, workdir + "/boot/threados64.bin")
     mod = ""
-    if INITRD64 and os.path.exists(INITRD64):
-        shutil.copy(INITRD64, workdir + "/boot/initrd64.img")
+    if initrd and os.path.exists(initrd):
+        shutil.copy(initrd, workdir + "/boot/initrd64.img")
         mod = "    module2 /boot/initrd64.img initrd64\n"
     header = ("insmod all_video\nset gfxpayload=keep\n" if graphics
                 else "set gfxpayload=text\n" if text else "")
@@ -3512,14 +3601,22 @@ def boot_disc(append=None):
 
 
 def no64():
-    """The reason a 64-bit test cannot be run, or None when it can. Every
-    64-bit group asks the same question."""
+    """Every group asks this before it starts a machine, and it used to
+    answer with a reason to skip. There is no other kernel to test now:
+    without the image, GRUB to put it on a disc or QEMU to start it,
+    nothing a group checks can be checked - and a group that checked
+    nothing must not pass. So the group ends here, failed (its own
+    'if reason: SKIPPED' is never reached), and None means it can run."""
+    reason = None
     if KERNEL64 is None or not os.path.exists(KERNEL64):
-        return "no 64-bit image (make kernel64)"
-    if shutil.which("grub-mkrescue") is None:
-        return "no grub-mkrescue"
-    if shutil.which("qemu-system-x86_64") is None:
-        return "no qemu-system-x86_64"
+        reason = "no 64-bit image '%s' (make)" % KERNEL64
+    elif shutil.which("grub-mkrescue") is None:
+        reason = "no grub-mkrescue"
+    elif shutil.which("qemu-system-x86_64") is None:
+        reason = "no qemu-system-x86_64"
+    if reason:
+        check("the machine can be started: " + reason, False)
+        sys.exit(summary())
     return None
 
 
@@ -3638,3 +3735,81 @@ class TfsImage:
         taken_not_held = [b for b in range(self.data_start, self.nblocks)
                           if self.taken(b) and b not in held]
         return taken_not_held, past, free_but_held
+# --- the ARM64 kernel -------------------------------------------------
+#
+# It is booted straight from its ELF image (QEMU's virt loads one with
+# -kernel) and says everything on the serial port, so none of the x86
+# machinery above applies. The image is built next to the x86 ones.
+
+ARM64_IMAGE = os.path.join(os.path.dirname(os.path.abspath(KERNEL)),
+                           "threados-arm64.elf")
+ARM64_READY = "The ARM64 kernel is ready."
+
+
+def noarm64():
+    """The reason an ARM64 test cannot be run, or None when it can"""
+    if not os.path.exists(ARM64_IMAGE):
+        return "no ARM64 image (make kernelarm64)"
+    if shutil.which("qemu-system-aarch64") is None:
+        return "no qemu-system-aarch64 (apt install qemu-system-arm)"
+    return None
+
+
+def arm64_boot(machine="virt", cpu="cortex-a72", mib=256, cores=1,
+               append=None, timeout=30):
+    """Runs the ARM64 kernel until it says it is ready or that it is
+    stopping (or the time is up) and returns everything it said, with
+    the carriage returns taken out"""
+    log = tempfile.mktemp(suffix=".log")
+    cmd = ["qemu-system-aarch64", "-machine", machine, "-cpu", cpu,
+           "-m", str(mib), "-smp", str(cores), "-display", "none",
+           "-no-reboot", "-monitor", "none", "-serial", "file:" + log,
+           "-kernel", ARM64_IMAGE]
+    if append:
+        cmd += ["-append", append]
+    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.PIPE)
+    text = ""
+    try:
+        deadline = time.time() + timeout
+        while time.time() < deadline and p.poll() is None:
+            if os.path.exists(log):
+                with open(log, "rb") as f:
+                    text = f.read().decode(errors="replace")
+                if ARM64_READY in text or "stopping" in text:
+                    break
+            time.sleep(0.2)
+    finally:
+        if p.poll() is None:
+            p.kill()
+        p.wait()
+        if os.path.exists(log):
+            with open(log, "rb") as f:
+                text = f.read().decode(errors="replace")
+            os.unlink(log)
+    return text.replace("\r", "")
+
+
+def said_line(text, start):
+    """The first line of 'text' that starts so, or 'no line'"""
+    return next((l for l in text.splitlines() if l.startswith(start)),
+                "no line")
+
+
+def arm64_image_end():
+    """Where the ARM64 kernel ends in memory, .bss and all: the highest
+    end of its loadable segments, read from the ELF file's own program
+    headers rather than from anything the kernel says"""
+    with open(ARM64_IMAGE, "rb") as f:
+        elf = f.read()
+    if elf[:4] != b"\x7fELF" or elf[4] != 2:
+        return None
+    phoff, = struct.unpack_from("<Q", elf, 0x20)
+    phentsize, phnum = struct.unpack_from("<HH", elf, 0x36)
+    end = 0
+    for i in range(phnum):
+        p_type, _, _, _, p_paddr, _, p_memsz = struct.unpack_from(
+            "<IIQQQQQ", elf, phoff + i * phentsize)
+        if p_type == 1:                      # PT_LOAD
+            end = max(end, p_paddr + p_memsz)
+    return end

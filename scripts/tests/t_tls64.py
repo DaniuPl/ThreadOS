@@ -305,7 +305,7 @@ def main():
             q2.command("dns 10.0.2.2", "DNS server set")
             q2.type_line("desktop")
             q2.wait_serial("The desktop is starting", timeout=30)
-            check("the desktop comes up before the browser", q2.wait_desktop(30))
+            check("the desktop comes up before the browser", q2.wait_desktop())
 
             src = "apps/browser/web.cpp"
             w0, h0 = define(src, "W0"), define(src, "H0")

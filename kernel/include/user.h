@@ -37,6 +37,11 @@ int user_account_add(const char *name, const char *password, int level,
 int user_account_delete(const char *name, const char *admin_password);
 int user_account_set_level(const char *name, int level,
                            const char *admin_password);
+/* 0 when signed in. The two failures are different faults: a wrong
+   name or password is put right by typing it again, a home folder that
+   cannot be opened is not. */
+#define USER_LOGIN_DENIED  (-1)
+#define USER_LOGIN_NO_HOME (-2)
 int user_login(const char *name, const char *password);
 void user_session_guest(void);
 int user_reauth(const char *password);

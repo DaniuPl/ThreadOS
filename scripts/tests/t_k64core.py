@@ -117,6 +117,21 @@ def main():
             check("a finished thread goes from the list",
                   "did its work" in zombie
                   and "tasks on the list: 4" in zombie)
+
+            # The disk this machine gets is blank: the file system is laid
+            # down on it at the first boot, through the AHCI controller's
+            # DMA, and the line about the disk names that controller
+            dsk = q23.wait_serial("+ TFS", timeout=40)
+            check("TFS formatted the blank disk through AHCI",
+                  "TFS: an empty disk formatted" in dsk
+                  and "Disk AHCI (SATA, DMA) + TFS ready" in dsk)
+            # The machine is started without -smp: one core, and the
+            # system says so instead of reporting cores it woke
+            cores = q23.wait_serial("Processors:", timeout=40)
+            m = re.search(r"Processors: (\d+)([^\n]*)", cores)
+            check("on one core the system says so outright",
+                  m is not None and m.group(1) == "1"
+                  and "woken" not in m.group(2))
         finally:
             q23.close()
     finally:

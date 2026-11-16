@@ -6,6 +6,7 @@
 #include "include/fs.h"
 #include "include/string.h"
 #include "include/pit.h"
+#include "include/printk.h"
 #include "include/task.h"
 #define THREADOS_UAPI_H
 #include "../user/usha1.h"
@@ -518,6 +519,26 @@ int user_current_passwordless(void)
     return i >= 0 && hash_matches(&db.account[i], "");
 }
 
+/* The first use of a legacy credential replaces it with a salted hash.
+   On a fresh disk that first use - 'sudo' or 'login' at the text shell,
+   before any profile setup - is also the first write of the account
+   database, and that ends the pending setup: from then on the desktop
+   asks this account to sign in instead of offering the setup. So the
+   account gets what user_accounts_load gives one migrated from a legacy
+   settings file. Without the home folder every sign-in stopped in
+   user_login, and the settings file kept the old credential. The home
+   comes first: a disk that cannot hold it keeps the setup pending
+   rather than an account nobody can sign in to. */
+static void upgrade_legacy_hash(struct account *a, const char *password)
+{
+    int bootstrap = setup_pending;
+    if (bootstrap && ensure_home(a) < 0)
+        return;
+    set_hash(a, password);
+    if (db_save() == 0 && bootstrap)
+        forget_legacy_password();
+}
+
 static int attempt_allowed(void)
 {
     uint32_t now = pit_ticks();
@@ -549,10 +570,8 @@ static int password_try(const char *name, const char *password, int admin_only)
     if (found >= 0) {
         wrong = 0;
         struct account *a = &db.account[found];
-        if (a->hash_kind == USER_HASH_LEGACY) {
-            set_hash(a, password);
-            db_save();
-        }
+        if (a->hash_kind == USER_HASH_LEGACY)
+            upgrade_legacy_hash(a, password);
         return found;
     }
     if (++wrong >= 3) {
@@ -593,10 +612,8 @@ int user_password_current_ok(const char *password)
         return user_password_ok(password);
     if (i >= 0 && hash_matches(&db.account[i], password)) {
         wrong = 0;
-        if (db.account[i].hash_kind == USER_HASH_LEGACY) {
-            set_hash(&db.account[i], password);
-            db_save();
-        }
+        if (db.account[i].hash_kind == USER_HASH_LEGACY)
+            upgrade_legacy_hash(&db.account[i], password);
         return 1;
     }
     if (++wrong >= 3) {
@@ -609,10 +626,10 @@ int user_password_current_ok(const char *password)
 int user_login(const char *name, const char *password)
 {
     if (!name || !password)
-        return -1;
+        return USER_LOGIN_DENIED;
     int i = password_try(name, password, 0);
     if (i < 0)
-        return -1;
+        return USER_LOGIN_DENIED;
     struct account *a = &db.account[i];
     /* Login runs in kernel context, whose task UID can differ from the
        account session used to launch ring 3 programs. */
@@ -634,7 +651,11 @@ int user_login(const char *name, const char *password)
         (ensure_home(a) < 0 || fs_chdir(FS_ROOT, path, &home) < 0)) {
         set_current_uid(old_uid);
         set_current_level(old_level);
-        return -1;
+        /* The password was right. Calling this a wrong one sent people
+           back to type it again, which can never help. */
+        printk("[user] '%s': the password is right, but the home folder "
+               "%s cannot be opened\n", a->name, path);
+        return USER_LOGIN_NO_HOME;
     }
     if (old_uid != a->uid && old_uid != 127)
         kill_uid(old_uid);

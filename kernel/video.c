@@ -75,6 +75,11 @@ static int edid_mm_w, edid_mm_h;     /* the panel's size, when it says */
 static int vid_bpp = 8;
 static int vid_bypp = 1;             /* bytes per pixel: 1, 3 or 4 */
 static uint32_t palette_rgb[256];    /* the software palette (0x00RRGGBB) */
+/* The framebuffer the loader handed over (video_adopt_lfb), and the
+   mode it was in when it did */
+static int lfb_from_loader;
+static uint32_t lfb_addr, lfb_bytes;
+static int loader_w, loader_h;
 
 int video_w(void) { return vid_w; }
 int video_h(void) { return vid_h; }
@@ -343,6 +348,60 @@ void video_native(int *w, int *h)
     *h = edid_h;
 }
 
+/* --- Setting the mode ourselves: the Bochs/QEMU interface ------------ */
+
+static uint32_t dispi_lfb;          /* 0 = the mode is not ours to change */
+
+/* Does the interface answer at all? Its ID register reads 0xB0C0 to
+   0xB0C5; where nothing sits behind the port it reads as all ones. */
+static int dispi_present(void)
+{
+    outw(VBE_INDEX, 0);
+    return (inw(VBE_DATA) & 0xFFF0) == 0xB0C0;
+}
+
+/* The buffer of QEMU's standard VGA - when the loader's framebuffer is
+   that very buffer. A machine where the loader drew on some other card
+   keeps the loader's mode. 0 = not this card. */
+static uint32_t bochs_lfb(void)
+{
+    struct pci_dev d;
+    if (pci_find_device(0x1234, 0x1111, &d) < 0 || (d.bar[0] & 1))
+        return 0;
+    uint32_t lfb = d.bar[0] & 0xFFFFFFF0u;
+    if (!lfb || lfb != lfb_addr || !dispi_present())
+        return 0;
+    return lfb;
+}
+
+/* What w x h comes to on the card. 0x0 is the panel's own mode: what
+   its EDID says, or without one the mode the loader found it in - on a
+   laptop that is the panel's own anyway - and 640x480 when nothing
+   says. The card's memory holds what it holds - 16 MiB by default,
+   which is 2560x1600 and a little more. Past that, the largest mode of
+   the same shape that fits. */
+static void mode_wanted(int *w, int *h)
+{
+    if (*w <= 0 || *h <= 0) {
+        *w = edid_w ? edid_w : loader_w ? loader_w : 640;
+        *h = edid_w ? edid_h : loader_w ? loader_h : 480;
+    }
+    while ((uint32_t)*w * (uint32_t)*h * 4 > 16u * 1024 * 1024 && *w > 640) {
+        *h = *h * 7 / 8;
+        *w = *w * 7 / 8;
+    }
+}
+
+/* Is the screen in that mode already? The interface sets widths in
+   eights (dispi_mode), so a mode it set is the wanted one rounded down.
+   A mode the loader set is whatever it is - 1366 columns, say - and
+   only the same size is the same mode: rounded first, it would never be
+   the one wanted, and would be set anew on every start. */
+static int mode_is(int w, int h)
+{
+    return h == phys_h && (w == phys_w || (w & ~7) == phys_w);
+}
+
 static int dispi_mode(uint32_t lfb, int w, int h);
 
 int video_init_vesa(int w, int h)
@@ -350,15 +409,26 @@ int video_init_vesa(int w, int h)
     /* When the loader has already set a mode, we leave it alone: its
        buffer works on any hardware, while the Bochs/QEMU interface
        only works on a virtual machine. We merely add a working
-       buffer so that the compositor does not flicker. */
+       buffer so that the compositor does not flicker.
+
+       Except on that virtual machine. GRUB sets a mode on every start
+       of this kernel and says nothing about the panel's size, so if
+       the loader's mode were final there, the EDID would never be read
+       - and with it the panel's density - and the 'resolution' setting
+       could change nothing, at start or later. There the mode is taken
+       over: the EDID read, and the mode set anew when another one is
+       wanted. The loader's stays when it is the one wanted. */
     if (video_have_loader_lfb()) {
-        /* The loader set the mode and may not have said how large the
-           panel is (GRUB does not; ThreadBoot does, kernel/mb2.c). On
-           the standard VGA the panel's EDID is there to be read all
-           the same - and without its size the scale is a guess from
-           the panel's height. */
-        if (!edid_mm_w || !edid_mm_h)
+        uint32_t own = bochs_lfb();
+        if (own) {
             read_edid();
+            int nw = w, nh = h;
+            mode_wanted(&nw, &nh);
+            if (mode_is(nw, nh))
+                dispi_lfb = own;
+            else if (dispi_mode(own, w, h) == 0)
+                return 0;
+        }
         decide_scale();
         take_buffers();
         /* A panel whose size does not divide by the scale has a strip
@@ -374,31 +444,18 @@ int video_init_vesa(int w, int h)
     }
 
     uint32_t lfb = pci_find_vga_lfb();
-    if (!lfb)
+    if (!lfb || !dispi_present())
         return -1;
     read_edid();
     return dispi_mode(lfb, w, h);
 }
 
 /* Sets a mode through the Bochs/QEMU interface: w x h, or for 0x0 the
-   panel's own mode when it says what that is, and 640x480 when it does
-   not */
-static uint32_t dispi_lfb;          /* 0 = the mode is not ours to change */
-
+   panel's own (mode_wanted) */
 static int dispi_mode(uint32_t lfb, int w, int h)
 {
-    if (w <= 0 || h <= 0) {
-        w = edid_w ? edid_w : 640;
-        h = edid_h ? edid_h : 480;
-    }
-    /* The card's memory holds what it holds - 16 MiB by default, which
-       is 2560x1600 and a little more. Past that, the largest mode of
-       the same shape that fits. */
-    while ((uint32_t)w * h * 4 > 16u * 1024 * 1024 && w > 640) {
-        h = h * 7 / 8;
-        w = w * 7 / 8;
-    }
-    w &= ~7;
+    mode_wanted(&w, &h);
+    w &= ~7;                 /* the interface takes widths in eights */
     if (MAP_FB(lfb, (uint32_t)w * h * 4) < 0)
         return -1;
 
@@ -412,6 +469,12 @@ static int dispi_mode(uint32_t lfb, int w, int h)
     vid_bpp = 32; vid_bypp = 4;
     front = (uint8_t *)(uintptr_t)lfb;
     dispi_lfb = lfb;
+    /* The mode is the kernel's now, whoever set the one before - which
+       is what 'hardware' says of the screen. The framebuffer console
+       keeps the loader's geometry: it draws nothing once the desktop
+       has the screen (vga_screen_taken), and the desktop is what sets
+       a mode here. */
+    lfb_from_loader = 0;
 
     decide_scale();
     take_buffers();
@@ -461,17 +524,18 @@ static uint32_t dispi_under_loader(void)
 }
 
 /* Another mode while the screen runs - where the mode is ours to set
-   (the Bochs/QEMU interface). 1 = changed, 0 = it already was, -1 = it
-   cannot be. */
+   (the Bochs/QEMU interface, also when the loader set the first one);
+   anywhere else the loader's mode stays what it is.
+   1 = changed, 0 = it already was, -1 = it cannot be. */
 int video_set_mode(int w, int h)
 {
     if (!dispi_lfb)
         dispi_lfb = dispi_under_loader();
     if (!dispi_lfb)
         return -1;
-    int nw = w > 0 && h > 0 ? w : (edid_w ? edid_w : 640);
-    int nh = w > 0 && h > 0 ? h : (edid_h ? edid_h : 480);
-    if ((nw & ~7) == phys_w && nh == phys_h)
+    int nw = w, nh = h;
+    mode_wanted(&nw, &nh);
+    if (mode_is(nw, nh))
         return 0;
     drop_buffers();
     if (dispi_mode(dispi_lfb, w, h) < 0)
@@ -510,14 +574,15 @@ int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp)
     shadow_valid = 0;
     lfb_addr = addr;
     lfb_bytes = pitch * (uint32_t)h;
+    loader_w = w;
+    loader_h = h;
     lfb_from_loader = 1;
     set_default_palette();
     return 0;
 }
 
 /* The buffer usually lies high, outside the memory the kernel manages -
-   once paging is on it has to be glued onto the mapping. Called right
-   after paging_init, before we write anything on it. */
+   it has to be glued onto the mapping before we write anything on it */
 int video_map_lfb(void)
 {
     if (!lfb_from_loader)

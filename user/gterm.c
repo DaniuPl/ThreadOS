@@ -20,13 +20,9 @@
  * the directory - and the prompt says so at once, which is the whole
  * point of a prompt.
  *
- * There is exactly one thing here that depends on the processor mode:
- * how a command is started and its output captured. In protected mode
- * the kernel has a syscall that does it (spawn with a redirect, and a
- * whole pipeline in one call); in long mode there is fork, dup2, exec
- * and pipe, and the terminal builds it out of those itself. Everything
- * else - the ring of lines, the editing, the history, the drawing - is
- * one piece of code compiled twice.
+ * A command is started and its output captured with fork, dup2, exec
+ * and pipe: the kernel has no call that does it in one go, so the
+ * terminal builds even a whole pipeline out of those itself.
  */
 
 #include "udraw.h"

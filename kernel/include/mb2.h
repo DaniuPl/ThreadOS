@@ -6,20 +6,21 @@
 
 /* Multiboot 2
  *
- * The kernel image carries both headers at once: QEMU with -kernel
- * understands only the older one, GRUB prefers the newer. The loader
- * says in the magic which form it used - and this is the only place in
- * the kernel that has to know about it.
+ * The kernel image carries a Multiboot 2 header, and GRUB and
+ * threadboot (boot/efi/efiboot.c) both start it that way. The loader's
+ * information is a sequence of tags; this is the only place in the
+ * kernel that reads them.
  *
- * Information from the newer form is copied into the same structure
- * the rest of the kernel has used from the start. That way neither the
- * PMM, nor the initrd, nor the command line handling sees a difference.
+ * What they say is copied into the structure of the older form, the
+ * one the rest of the kernel has used from the start. That way neither
+ * the PMM, nor the initrd, nor the command line handling has to walk
+ * tags.
  */
 
 #define MULTIBOOT2_BOOTLOADER_MAGIC 0x36D76289
 
-/* Recognises the form of the loader's information and hands it back in
-   one uniform shape. NULL = the magic belongs to no known form. */
+/* Reads the loader's information and hands it back in one uniform
+   shape. NULL = the magic is not Multiboot 2's. */
 const struct multiboot_info *mb2_info(uint32_t magic, uint32_t addr);
 
 /* The framebuffer supplied by the loader (a graphics mode with direct

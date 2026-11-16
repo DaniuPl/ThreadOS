@@ -22,11 +22,6 @@
  * the tree is read by walking: into every folder that is open in it,
  * one readdir each, and back to where the list is. That is a handful
  * of system calls twice a second, for a tree a person opened by hand.
- *
- * The one thing that depends on the processor mode is reading a
- * directory: protected mode hands back the size in the return value,
- * long mode fills in a structure. Everything else - the list, the
- * clicking, the drawing - is one piece of code compiled twice.
  */
 
 #include "uapi.h"
@@ -733,7 +728,7 @@ static void delete_chosen(void)
     if (in_trash) {
         ask_line[p++] = '?';
     } else {
-        const char *end = polish ? "\" do Kosza?" : "' to Trash?";
+        const char *end = polish ? " do Kosza?" : " to Trash?";
         for (int i = 0; end[i] && p < (int)sizeof(ask_line) - 1; i++)
             ask_line[p++] = end[i];
     }

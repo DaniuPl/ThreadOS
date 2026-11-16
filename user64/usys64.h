@@ -49,6 +49,8 @@
 #define SYS64_TCP_SEND    29
 #define SYS64_TCP_RECV    30
 #define SYS64_TCP_CLOSE   31
+#define SYS64_TCP_LISTEN  90
+#define SYS64_TCP_ACCEPT  91
 #define SYS64_WIN_CREATE 32
 #define SYS64_WIN_RECT   33
 #define SYS64_WIN_TEXT   34
@@ -93,6 +95,7 @@
 #define SYS64_UPDATE_ALLOWED 80
 #define SYS64_PCI_INFO 81
 #define SYS64_UPDATE_ROLLBACK 82
+#define SYS64_BT 99
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40
@@ -334,6 +337,19 @@ static inline int64_t sys_tcp_recv(int conn, void *buf, uint64_t max)
 static inline int64_t sys_tcp_close(int conn)
 {
     return syscall64(SYS64_TCP_CLOSE, conn, 0);
+}
+
+/* Listening on a port: the socket connections arrive at, or -1 */
+static inline int64_t sys_tcp_listen(uint16_t port)
+{
+    return syscall64(SYS64_TCP_LISTEN, port, 0);
+}
+
+/* The next connection that came to a listening socket, waiting for one
+   at most timeout_ms; -1 when nobody came */
+static inline int64_t sys_tcp_accept(int listener, uint32_t timeout_ms)
+{
+    return syscall64(SYS64_TCP_ACCEPT, listener, (int64_t)timeout_ms);
 }
 
 /* An address from the string "10.0.2.2"; -1 when that is not an
@@ -696,8 +712,8 @@ static inline int64_t win_poll(int win, struct win_event *ev)
     return syscall64(SYS64_WIN_POLL, win, (int64_t)(uintptr_t)ev);
 }
 
-/* The task list, one row per call - the same struct as in protected
-   mode, because one program reads it on both kernels. */
+/* The task list, one row per call - the layout of struct psinfo64 in
+   kernel64/task64.h, which hands it over as it stands. */
 #define PS_NAME_MAX 16
 struct psinfo {
     int pid;

@@ -5,13 +5,13 @@
 
 /* Kernel threads in long mode
  *
- * The same idea as in the 32-bit kernel: a circular list, preemption
- * on every timer tick, a main thread that never sleeps and serves as
- * the idle thread. The only difference is the context switch - six
- * registers instead of four and eight bytes each.
+ * A circular list, preemption on every timer tick, and an idle thread
+ * for when nobody else wants the processor. The context switch
+ * (boot64/switch64.S) saves the six registers the calling convention
+ * leaves to the callee.
  *
- * There are no processes here yet: no address spaces, no descriptors,
- * no signals. That comes together with ring 3.
+ * A process - an address space, descriptors, signals - is a task with
+ * more of it filled in (proc64.c, signal64.c).
  */
 
 struct task64;
@@ -63,6 +63,12 @@ void task64_thread_setup(struct task64 *t, uint64_t clear_tid, uint64_t fs);
 /* Waits for any of our own children to end. Returns its number and
    writes out the exit code; -1 = there is nothing to wait for. */
 int task64_wait(int *code);
+
+/* Waits for the one child with this number, and forgets the traces of
+   the caller's other finished children: for a waiter that starts
+   children it never collects (the kernel shell's 'runw'). Returns the
+   number, or -1 when that child is gone without a trace. */
+int task64_wait_for(int id, int *code);
 
 /* The deepest living descendant of a task - it is the one holding the
    console and the one Ctrl+C belongs to, not the shell waiting for it */
@@ -211,8 +217,7 @@ int  task64_count(void);            /* how many tasks are on the list */
 void task64_dump(void);
 
 /* The task list as a program sees it - the layout matches struct
-   psinfo in user/usys.h, because one program reads it on both
-   kernels. */
+   psinfo in user64/usys64.h, which hands it to ring 3 as it is. */
 #define PS_NAME_MAX64 16
 struct psinfo64 {
     int pid;

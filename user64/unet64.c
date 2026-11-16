@@ -80,7 +80,7 @@ void _start(int argc, char **argv)
     if (s < 0)
         err("I cannot open a UDP socket", s);
 
-    static const char body[] = "datagram z ring 3";
+    static const char body[] = "datagram from ring 3";
     struct udp_info o;
     o.sock = (int)s;
     o.ip = addrs[0];
@@ -90,7 +90,12 @@ void _start(int argc, char **argv)
     if (sys_udp_send(&o, body, ustrlen(body)) < 0)
         err("sending the datagram did not work", -1);
 
+    /* The address is cleared before the receive: it still holds our own
+       from the send, and the sender printed below has to be the one the
+       kernel writes back, not what was left there */
     o.sock = (int)s;
+    o.ip = 0;
+    o.port = 0;
     o.timeout = 3000;
     int64_t got = sys_udp_recv(&o, buf, sizeof(buf));
     if (got <= 0)
@@ -104,7 +109,7 @@ void _start(int argc, char **argv)
 
     n = put(0, "[unet64] the datagram came back to me (");
     n = putn(n, (uint64_t)got);
-    n = put(n, " B) od ");
+    n = put(n, " B) from ");
     n = put_ip(n, o.ip);
     n = put(n, "\n");
     out[n] = 0;

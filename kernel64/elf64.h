@@ -5,11 +5,10 @@
 
 /* Loading ELF64 programs into user space
  *
- * The 32-bit kernel does the same thing in exec.c, but there every
- * process gets its own address space. Here the space is for now a
- * single common one, so loading comes down to three things: check the
- * header, allocate frames for the segments and map them with the
- * permissions the ELF itself supplies.
+ * Every process gets its own address space (paging64_new_space), and
+ * loading into it comes down to three things: check the header,
+ * allocate frames for the segments and map them with the permissions
+ * the ELF itself supplies.
  *
  * The permissions come straight from the file: a segment without the
  * "executable" bit gets execution forbidden (the NX bit), a segment

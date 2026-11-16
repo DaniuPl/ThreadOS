@@ -56,7 +56,14 @@ void signal64_deliver(struct regs *r)
     uint64_t frame = (r->rsp - sizeof(struct regs)) & ~0xFULL;
     uint64_t sp = frame - 8;
 
-    if (!paging64_user_range(sp, sizeof(struct regs) + 8)) {
+    /* The frame goes below anything the program has put on its stack,
+       so it may well land in a page the stack has not grown into yet -
+       that one is brought in now, as the program's own push would bring
+       it. The check is the one for WRITING: the kernel writes the frame
+       itself, and a stack pointer aimed at the program's code, or at a
+       page still shared after a fork, must end in a refusal or a copy
+       here rather than in a kernel fault in the middle of the copy. */
+    if (!paging64_user_writable(sp, sizeof(struct regs) + 8)) {
         printk("[kernel] signal %d: no room on the program's stack\n", sig);
         task64_kill_current("no stack for the signal");
     }

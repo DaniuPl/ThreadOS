@@ -6711,6 +6711,390 @@ works and is checked by `make test`.
       two WOFF2s from the web, a variable font among them. make fuzz has
       the Brotli and WOFF parsers too.
 
+- [x] **ARM64, stage one: a kernel that boots on QEMU's virt machine**
+      (bootarm64/boot.S, kernelarm64/, kernel/string.c,
+      tests/fuzz/fdt_harness.c, scripts/tests/t_arm64boot.py)
+      The start of a port to the processors phones and tablets run on,
+      for now on QEMU only. A third kernel, built by clang (one clang
+      targets every architecture; the PC's gcc does not), in its own
+      two directories the way kernel64/ is. boot.S keeps core 0 and
+      parks the rest, leaves EL2 for EL1 when started there (64-bit
+      EL1, the timer readable from it, SCTLR in a known state), sets a
+      stack and clears .bss. kmain talks through the PL011 UART and
+      finds out the machine rather than assuming it: the level it was
+      entered at, the core from MIDR_EL1, and the memory ranges and
+      cores from the device tree QEMU leaves at the start of RAM.
+      kernel/string.c is the first shared file it builds; its x86
+      string instructions now sit behind an #if, with plain loops for
+      the rest - byte loads, because with the MMU off every access is
+      to Device memory, where an unaligned one is a fault (the kernel
+      is built with -mstrict-align for the same reason).
+
+      t_arm64boot builds two different machines - a Cortex-A72 with
+      256 MiB and two cores started in EL1, a Cortex-A53 with 1 GiB and
+      four cores started in EL2 - and the kernel has to report each as
+      QEMU built it: the level it entered at and that it runs at EL1,
+      the core's name, the memory, the cores. Broken on purpose - the
+      memory or the cores printed as fixed numbers, EL2 never left, the
+      root's #size-cells ignored, cpu-map counted as a core, the part
+      number read from the wrong bits of MIDR - it fails each time. It
+      skips without qemu-system-aarch64, which the CI test job now
+      installs. The tree
+      reader also runs on the host (make fuzz) against trees written in
+      Python from the specification, in virt's layout - two memory
+      ranges and one-cell sizes among them - and against damaged
+      copies under ASan and UBSan. That found the first bug before the
+      kernel ever ran: a header claiming more bytes than were there was
+      believed, and now the caller says how much room there is.
+
+- [x] **ARM64, stage two: exceptions, the MMU, the GIC and the timer**
+      (bootarm64/vectors.S, kernelarm64/exceptions.c, mmu.c, gic.c,
+      timer.c, scripts/tests/t_arm64core.py)
+      What makes the ARM64 kernel a machine that can be relied on before
+      it runs anything. The vector table's sixteen slots each save two
+      registers and jump to a common part that saves the rest with ELR
+      and SPSR, calls C and puts it all back - ELR included, so a
+      handler can step over what trapped. Faults are named on the
+      serial port from ESR and FAR (a data abort says what was read or
+      written, where, and which fault at which level), because on a
+      real board that is all there will be. The MMU maps every address
+      to itself, but gives each range its kind: the first gigabyte as
+      Device memory in 2 MiB blocks, never executable, with the first
+      block left out so a null pointer is a fault rather than a read of
+      the flash; RAM, from the device tree, as Normal write-back memory
+      in 1 GiB blocks, which also lifts the Device-memory rules stage
+      one had to live by. The GICv2's two halves and the address of
+      each come from the device tree; a GICv3 is recognised and declined
+      in words. The virtual timer ticks a hundred times a second, each
+      deadline the last plus the interval, so lateness does not add up.
+      The device tree's /chosen/bootargs is read too, and asks for two
+      self-tests.
+
+      t_arm64core asks each part for the one thing that proves it: a
+      breakpoint caught, named, stepped over, with a value left in x9
+      still there afterwards; a read of address 0x10 - the flash with
+      the MMU off - stopped by a translation fault at level 2 that
+      names the address, with nothing running after it; the GIC found
+      at virt's addresses; a hundred ticks taking a second by the
+      counter, from EL1 and from EL2; a GICv3 machine declined. Broken
+      on purpose - x9 not restored, the breakpoint not stepped over,
+      block 0 mapped, the M or C bit left off, the timer re-armed twice
+      as far, the CPU interface not read from the tree, a GICv3 driven
+      as a v2 - it fails each time. One thing it cannot see: leaving
+      out the clearing of CNTVOFF_EL2 passes, because QEMU resets it to
+      0 anyway. The device tree harness now also holds the GIC (v2 and
+      v3) and the command line to what the trees were made with.
+
+- [x] **ARM64, stage three: pages, the shared heap, threads, every core**
+      (kernelarm64/pmm.c, thread.c, smp.c, bootarm64/switch.S,
+      kernel/include/io.h, kernel/include/spinlock.h, kernel/heap.c,
+      scripts/tests/t_arm64threads.py)
+      The first shared code beyond string.c. kernel/heap.c is the x86
+      kernels' heap, built for ARM unchanged but for its last-resort
+      halt; what it stood on was x86 only. io.h now keeps its ports for
+      x86 and gives ARM just the interrupt flag, read and restored
+      through DAIF; spinlock.h makes its lock from the compiler's
+      atomics on ARM (an exclusive load and store, acquire and release)
+      next to the unchanged xchg. The ARM printk is now called printk,
+      so shared code that prints builds as it is, and takes a lock once
+      the MMU is on - before that, exclusives are not promised to work.
+      Under the heap, a page allocator behind kernel/include/pmm.h, fed
+      from the device tree and keeping back everything from the start
+      of RAM to the end of the kernel's .bss.
+
+      Threads: a switch that saves only what a callee must (x19-x30 and
+      sp), one round-robin list and one lock for every core, held across
+      the switch and released by whatever runs next - so a thread is
+      never picked up by a second core before its registers are saved.
+      The timer marks its core, and on the way out of the interrupt the
+      core switches on the interrupted thread's own stack. An exiting
+      thread is marked dead by the next one on its core, and thread_join
+      gives its stack back. Sleeping is by the counter. Every further
+      core is started through PSCI's CPU_ON - hvc or smc, as the device
+      tree's /psci says, at the MPIDRs the tree lists - enters at
+      secondary_entry with its MMU off, comes down from EL2 the same
+      way the first did, switches on the MMU over the same tables, sets
+      up its own GIC CPU interface and its own timer, and becomes that
+      core's idle thread.
+
+      t_arm64threads runs one core, two through hvc, and four started
+      in EL2 through smc. The pages must be the RAM's, the ones kept
+      back exactly those up to the kernel's end as the ELF file's
+      program headers give it, and the 1 GiB machine must have exactly
+      196608 more free than the 256 MiB one. The heap hands out 2000
+      blocks, each filled and read back, none overlapping, all freed.
+      Every core comes up. Four threads that never yield each get at
+      least a tenth of the time, between them run on every core, and
+      give back every byte when joined; the main thread's half-second
+      sleep ends on time. Broken on purpose - no preemption, PSCI
+      always by hvc, a further core without its timer or its GIC
+      interface, nothing or not the .bss kept back, sleepers never
+      woken, stacks not freed, MPIDRs not read from the tree, an exiting
+      thread never marked dead - it fails each time. A per-thread "on
+      which core" mark the first version had was dropped: with it
+      removed the test still passed, because the lock held across the
+      switch already guarantees it. The x86 groups that use the changed
+      headers (boot, shell, process, swap, k64core, k64proc, smp, locks,
+      kthreads, lockless) pass on both kernels, with no new warnings.
+
+- [x] **USB and Bluetooth on a real Intel laptop** (kernel/xhci.c,
+      kernel/usbhc.c, kernel/bt.c, kernel/hwinfo.c,
+      tests/hw/xhci_model.c, scripts/tests/t_intelusb.py, new checks
+      in t_bt and t_xhci)
+      On the IdeaPad, Bluetooth said there was no adapter, and it would
+      have said so on every machine: every USB Bluetooth adapter has a
+      second interface, for voice, with the same class as the first
+      (0xE0/1/1, as the transport specification gives both), and the
+      driver took the LAST such interface for the adapter. That threw
+      away the event endpoint it had just found and left only
+      isochronous ones, so every real adapter read as "no adapter".
+      QEMU has no Bluetooth device, and the recorded packets the test
+      used never included a configuration. Now the first interface
+      counts, and `bt test` reads an Intel 3160's own 177-byte
+      configuration to prove it.
+
+      Below it, the xHCI driver had five things QEMU never asks for and
+      an Intel controller of those years does:
+      - scratchpad pages: the controller says how many it wants (34 in
+        the model, the count split across two fields of HCSPARAMS2) and
+        one that gets none fails its first Enable Slot or stops with an
+        internal error - every socket then looks empty;
+      - the firmware's ownership: the USB Legacy Support capability is
+        now asked (OS owned, wait for BIOS owned to clear, Linux's one
+        second, then take it anyway) and the firmware's SMIs turned off
+        before the controller is touched;
+      - Intel's shared sockets: from Panther Point to Wildcat Point the
+        USB 2.0 wires go to EHCI or xHCI as XUSB2PR says, and firmware
+        may leave them with EHCI - the webcam, the Bluetooth adapter and
+        every USB 2.0 stick then sit in sockets this controller sees as
+        empty. They are moved as the mask registers allow, as Linux
+        does, and only where an Intel EHCI is there too;
+      - four device slots, when a laptop has four internal devices
+        before anything is plugged in. Sixteen now, and contexts and
+        rings are aligned so that none crosses a page or 64 KiB
+        (table 6-1; QEMU does not care, a real controller may);
+      - port change events kept in the queue meant for commands' answers:
+        two per device at start-up filled its eight places, and the
+        answer to the next command was dropped. They are dropped instead
+        (the sockets are watched through their registers), and a
+        command's answer is matched to the command by the TRB's address.
+      Two smaller ones came out on the way: a USB 3.0 device gives its
+      endpoint zero size as a power of two (9 = 512), which was used as
+      it stood; and the walk at start-up now waits until the sockets
+      have been still for 100 ms, since a real device reattaches a while
+      after the reset.
+
+      Bluetooth events longer than one USB packet (Read Local Name's
+      answer is 254 bytes; packets are 64 bytes on Intel's adapters and
+      16 on many others) are gathered by their length byte; a transfer
+      that ends short of its event is dropped rather than glued to the
+      next. An adapter that appears after the walk - a radio the
+      firmware switches on late - is found through the socket watcher.
+      A step that fails on an adapter says which step ("would not take
+      its configuration", "did not answer HCI Reset") instead of "no
+      adapter". And `hardware` lists every socket: IDs, the class of the
+      device or of its first interface, the speed, or why something that
+      is there did not answer - the first thing to ask of a laptop where
+      something on the internal bus does not work.
+
+      No emulator has any of this, so tests/hw/xhci_model.c is the
+      machine: an Intel xHCI (8086:9cb1, Wildcat Point-LP) the firmware
+      left running and owns, wanting 34 scratchpad pages, with an Intel
+      EHCI beside it holding the USB 2.0 sockets; a webcam, a card
+      reader, a fingerprint reader, a mouse and a touchscreen, with
+      their real descriptors; the 3160's Bluetooth in socket 8 sending
+      HCI events in 64-byte packets; a USB 3.0 stick in socket 10.
+      The controller runs only while the driver waits, so a run is the
+      same every time, and holds the driver to the specification:
+      contexts and rings in place, endpoints described as the device
+      describes them, the event ring read, a doorbell for every
+      transfer. kernel/xhci.c, usbhc.c and bt.c, compiled as they are
+      under ASan and UBSan, have to find the adapter, read its address,
+      name and version, scan three devices nearby, give all seven
+      devices an address, and list them; and, with the radio switched
+      on late, find it through the watcher. Broken on purpose - the
+      voice interface taken, no scratchpad, the count read from one
+      field, no handoff, SMIs left on, the sockets left with EHCI, four
+      slots, the USB 3.0 size taken as it stands, input contexts across
+      pages, no watcher, no interface class - the test fails each time.
+      t_xhci boots ten devices on one controller with the keyboard in
+      the last socket, which has to type and be listed; t_bt checks the
+      3160's configuration and events gathered from 16-byte pieces.
+
+      What is still not proven is the laptop itself: the model is
+      written from the documents, not from the chip. A boot with
+      `hardware` on the IdeaPad will say which socket the adapter is in,
+      or what stopped it.
+
+- [x] **The screen goes dark, and Settings laid out like a Mac's**
+      (kernel/desktop.c, kernel/mouse.c, kernel/config.c, kernel/bt.c,
+      kernel64/syscall64.c, user/gsettings.c, user/ubt.h,
+      scripts/tests/t_screenoff.py, scripts/tests/t_pointer.py)
+      Nothing touched for 'screenoff' seconds (ten minutes unless set)
+      and the desktop goes black; for the last ten seconds - the last
+      half of a shorter wait - it is dimmed first, the warning a person
+      reading gets in time to move the mouse. Any key, movement or click
+      brings it back, and that one goes no further: a click on a dark
+      screen does not start the program under the pointer, and a key
+      does not land in a field. With 'lockoff' the lock goes up as the
+      screen goes dark, so the moment in between is not an open desktop.
+      While dark nothing is drawn at all - one black frame, and then the
+      loop only watches for somebody. Black is what it can do: switching
+      a laptop panel's backlight off needs the graphics chip's
+      registers, and there is no driver for them yet, which Settings says.
+      Whether somebody is there is a counter the mouse driver moves on
+      every packet - movement, buttons, the wheel, a push against the
+      edge - and every key the desktop sees.
+
+      The pointer has two settings of its own: its speed, a share of
+      the hand's movement from a quarter to four times with the part of
+      a pixel carried to the next movement, so that slow still moves;
+      and natural scrolling, the wheel turned round in the one place
+      every window reads it. The desktop passes both on once a second,
+      so the driver never parses text in an interrupt.
+
+      Settings has its sections in groups down the left, each with a
+      coloured square, the way a Mac shows them: Wi-Fi, Bluetooth and
+      Network; Sound; General, Appearance, Display and Screen Lock;
+      Mouse, Files and Region; About and Updates. Four are new. Screen
+      Lock holds the three settings above. Mouse holds the speed and the
+      scrolling. Bluetooth shows the adapter - its address, name and
+      version - or why there is none, and searches for devices nearby
+      in a kernel thread (SYS64_BT), one search at a time between it and
+      the bar's card. Wi-Fi names the card it finds on PCI (an IdeaPad's
+      is an Intel Wireless 3160) and says plainly that there is no
+      driver for it yet. The window used to read sixteen settings, and
+      the seventeenth - the language - was never shown as chosen; it
+      reads thirty-two. The settings file had room for 512 bytes and cut
+      off what did not fit; it has 1024.
+
+      t_screenoff sets twelve seconds and reads the screen against the
+      aurora it computes: dimmed (darker, not black) between three and
+      eleven seconds, black after; a movement brings the aurora back; a
+      click on the Files tile of a dark screen opens nothing and the same
+      click on a lit one opens Files; with 'lockoff' it comes back
+      locked and the password opens it with Files still there; with 0 it
+      stays lit. t_pointer pushes the pointer into the corner and moves
+      it fifty by forty: at 100 % that is where it is, at 200 % twice as
+      far, at 50 % half; at the top of a list the wheel turned away does
+      nothing, and with natural scrolling it moves the list down and the
+      other way brings it back.
+
+- [x] **One kernel for the PC: the 32-bit one is gone**
+      (Makefile, boot/, kernel/, kernel64/, user/, user64/,
+      scripts/ptest.py, scripts/run_tests.py, scripts/tests/,
+      .github/workflows/build.yml, AGENTS.md, CONTRIBUTING.md, README.md)
+      The PC system is the long-mode kernel and nothing else. The 32-bit
+      kernel - its boot code, kmain, shell, system calls, tasks, paging,
+      interrupts, exec, pipes and signals - is removed, and so are the
+      programs only it could run (user/usys.h, the three linker scripts
+      and thirty-four programs nothing built any more). Every `#if` on
+      the processor in shared code is resolved to the x86-64 side; the
+      ARM64 branches of io.h and string.c stay. Two kernels meant every
+      change to shared code was made and tested twice, and nobody boots
+      the 32-bit one; the second target is now the ARM64 kernel. The
+      programs that tests still needed - faults, deep, udpecho, udptest,
+      tcpserv, gdeaf and mkwall - are built for 64 bits through uapi.h.
+
+      Every test group boots the 64-bit kernel now. A test that names no
+      disc and no disk gets a GRUB disc made for the kernel under test
+      (ptest.boot_disc, kept for the run), and a text-mode screen is read
+      off the serial port, because the 64-bit kernel draws its consoles
+      on the framebuffer. Groups that only existed for the 32-bit kernel
+      went into their 64-bit counterparts or, where those already
+      covered the same, away: http32, net32 and tls32 became `http` and
+      parts of `net64` and `tls64`; boot, shell, process, ush, fork,
+      signals, protect, lazymem, swap, consoles, acpi, ahci and usbkbd
+      went into k64core, k64shell, k64proc, k64disk, consoles64, acpi64,
+      swap64 and usbkbd64. CI runs k64proc and http where it ran the
+      removed groups.
+
+      Moving the tests found real bugs in the 64-bit kernel:
+
+      * A start with no disk (the Live system) could not sign in at
+        all: user_login insisted on /home/<name>. Without a file system
+        the session starts in the root.
+      * The kernel shell's `run` kept the program's name and arguments
+        in statics shared by the four console shells, and waited for
+        any child - a finished `runw` program would do - so it reported
+        the wrong program and gave the prompt back early. It waits for
+        its own child now (task64_wait_for). A process killed by a
+        signal or an exception now writes back its writable file
+        mappings, as an exit does.
+      * A system call accepted only buffer pages that were already
+        present, so read() into memory a program had asked for but not
+        touched failed (gimg got 776 bytes of a JPEG).
+        paging64_user_range brings such pages in as the program's own
+        first touch would; paging64_user_writable checks a buffer the
+        kernel writes into, because read() into a program's own code
+        stopped the whole machine with a kernel page fault. The ELF
+        loader's relocations and a signal frame go through the same
+        check.
+      * SYS64_TCP_RECV refused anything over 1400 bytes, which broke
+        every TLS record longer than that. Listening and accepting
+        from ring 3 had never been there on the 64-bit side; it is
+        (SYS64_TCP_LISTEN, SYS64_TCP_ACCEPT), and a connection to a
+        dead program's port no longer reuses the listener's own entry.
+      * On a fresh disk the first `sudo` saved the bootstrap admin but
+        made neither /home/admin nor /system.cfg, so every later sign-in
+        failed with "wrong password". It makes both now, as the boot-time
+        migration does, and a missing home is called that - in the
+        kernel log, in the shell and on the lock screen - instead of a
+        wrong password.
+      * The desktop cut window titles at 23 characters, could not read
+        /desktop.icons when the session was the guest's (it is readable
+        by every account and written only by administrators), opened a
+        search result in the root by a bare name, labelled the accounts
+        manager "Code", and placed the bar's menu by MENU_Y even when it
+        had been moved up to fit. Paint's wallpaper message did not fit
+        its card.
+      * Under GRUB on QEMU's standard VGA the EDID was never read and
+        the 'resolution' setting was ignored, because GRUB always hands
+        over a framebuffer. The kernel takes that mode over now.
+      * swap.sys shrank at every boot of the same disk: the free space
+        was measured while the old file still counted as used.
+      * Only the boot core turned write protection on. Every other core
+        enabled paging without CR0.WP, so its kernel wrote straight
+        through a read-only or copy-on-write page of a program - into
+        the frame the parent still shared. boot64/ap64.S sets it too.
+      * The kernel's thread self-test said "[ OK ]" when the threads had
+        never run; it says "[ !! ]".
+      * Files asked "Move 'report.txt'' to Trash?".
+
+      A review of the moved tests also tightened them: checks that could
+      not fail (a wait that returned the whole log, a program that
+      printed once and was then "seen running", vacuous preconditions)
+      now can, fixed sleeps became polls, waits read the whole line they
+      assert, no64() fails instead of skipping. Coverage the 32-bit
+      groups had and the 64-bit ones lacked is back: wild64 hands the
+      kernel a kernel pointer in 31 pointer-taking calls, each next to
+      an honest twin; fork64 has the kernel write into a page the child
+      still shares; heap64 checks that fresh heap and mapping pages come
+      zeroed, both through a fault and through a read() into them;
+      udpecho and udptest send UDP between two processes; faults runs
+      two processes over 9000 pages each with an exact checksum; swap64
+      boots the same disk twice and wants the same swap size. Tests
+      that need a UEFI loader take the one next to the kernel under test
+      instead of rebuilding build/ during a run, and Polish words used
+      as ordinary file names and messages are English.
+
+      What has not been seen working yet: many of the groups above
+      passed while the fixes were made (multiuser, wall, users, colours,
+      tls64, http, k64proc, consoles64, k64disk, mmap, swap64, files,
+      desktop1, notify), but the last round of changes was only built,
+      with every changed test compiled, because the QEMU runs were
+      stopped - without KVM they take hours here. Before trusting this,
+      run at least k64shell, faults, tlb, consoles64, net, net64,
+      k64proc, k64disk, mmap, multiuser, wall, users, icons, apps,
+      session, scale, swap64, mouse, gterm, gterm64, nvme, tfs,
+      foreigndisk, e1000, virtio, lock, look, config, desktop64,
+      bootsplash, desks, bar, clock, maxwin, xhci, terminal, filetree,
+      files, gtermlive, lockless and proccores. Known and left: a boot
+      through threadboot under OVMF stops before the first switch to a
+      new thread, which may be the kernel's fault and not only the
+      environment's; the shell's `disk` still has one buffer for all
+      four consoles; Paint's other messages are too wide for the card.
+
 - [x] **Libraries are welcome** (AGENTS.md, CONTRIBUTING.md, README.md)
       Rule 6 used to say "no new dependencies", so features that a library
       already does well had to be written again here: Brotli, WOFF2,
@@ -7296,3 +7680,35 @@ works and is checked by `make test`.
       come back when it has gone; t_island sees a loudness key take a
       notification's place and give it back; t_apps reads Paint's notes
       from the island.
+
+- [x] **desktop-main and this line, merged into main** (everything)
+      Two lines of work had left main at the start of November. One
+      (desktop-main) brought the ARM64 kernel to its third stage, USB and
+      Bluetooth on a real Intel laptop, the screen going dark when idle
+      with Settings laid out like a Mac's, and stage one of a driver for
+      the Intel Wireless 3160; the other brought threads, sockets,
+      SQLite, zlib, curl and Mbed TLS, FreeType and HarfBuzz, the
+      kernel's random numbers, the island and USB media keys. Both had
+      removed the 32-bit kernel, each in its own way, and found the same
+      bugs on the way.
+
+      The merge keeps every feature of both. Where both had fixed the
+      same thing, the more complete fix stays: desktop-main's page-in of
+      a program's own memory for system calls (swap, mapped files and a
+      copy-on-write split before the kernel writes, not only fresh
+      pages) and its EDID and 'resolution' handling under GRUB; this
+      line's sockets (listen and accept among them), its shell and its
+      account handling. desktop-main's fixes this line lacked come
+      along: swap.sys no longer shrinking at every boot, a killed
+      program's mappings written back like an exiting one's. System call
+      numbers had collided - SYS64_BT moved to 99, TCP_LISTEN and
+      TCP_ACCEPT are the socket set's 90 and 91 - and both lines had
+      added a 'format' command, which is now there once.
+
+      The test groups both lines had moved over to the 64-bit kernel are
+      this line's versions, which had been run against this kernel at
+      800x600; desktop-main's had not been run since its last changes.
+      Its new groups (arm64boot, arm64core, arm64threads, intelusb,
+      screenoff, pointer) are in GROUPS, t_settings and t_xhci carry its
+      new checks, and make fuzz reads the ARM64 device tree as well.
+      t_iwlwifi stays out of GROUPS until the driver passes it.

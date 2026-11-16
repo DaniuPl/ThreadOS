@@ -40,9 +40,8 @@
 #define SYS64_TCP_SEND    29
 #define SYS64_TCP_RECV    30
 #define SYS64_TCP_CLOSE   31
-
-/* Desktop windows. The compositor is the same as in the 32-bit
-   kernel - these calls are only the way to it from ring 3. */
+/* Desktop windows. The compositor is kernel/desktop.c - these calls
+   are only the way to it from ring 3. */
 #define SYS64_WIN_CREATE 32  /* a1=cw, a2=ch, a3=title -> winid or -1 */
 #define SYS64_WIN_RECT   33  /* a1=winid, a2=&{x,y,w,h,color} -> 0/-1 */
 #define SYS64_WIN_TEXT   34  /* a1=winid, a2=&{x,y,color,text} -> 0/-1 */
@@ -133,9 +132,8 @@
 #define SYS64_NOTIFY   70
 /* A background as a small picture: a1=&cmd {bg, dark, w, h, out} */
 #define SYS64_BG_PREVIEW 71
-/* The settings, as the 32-bit kernel hands them out (SYS_CFG_GET/SET):
-   a1=index, a2=&struct cfg_entry -> 0/-1; a1=name, a2=value -> 0, -1,
-   or -2 for a plain user */
+/* The settings (kernel/config.c): a1=index, a2=&struct cfg_entry ->
+   0/-1; a1=name, a2=value -> 0, -1, or -2 for a plain user */
 #define SYS64_CFG_GET  72
 #define SYS64_CFG_SET  73
 /* What stands behind a descriptor: a1=fd, a2=&{int32 kind; uint32 size;
@@ -156,6 +154,9 @@
 #define SYS64_UPDATE_ALLOWED 80
 #define SYS64_PCI_INFO 81 /* a1=index, a2=&struct pci_info -> 1/0/-1 */
 #define SYS64_UPDATE_ROLLBACK 82 /* restore the previous installed system */
+/* Bluetooth: a1 = 0 fills *(struct bt_info *)a2, a1 = 1 starts a search
+   in the background -> 0 / -1 */
+#define SYS64_BT 99
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

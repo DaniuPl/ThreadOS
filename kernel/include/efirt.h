@@ -5,7 +5,7 @@
 
 /* The firmware's runtime services, after the loader has gone
  * (kernel64/efirt.c) - for one thing only: putting an installed system
- * into the machine's boot menu. The 32-bit kernel has none of it.
+ * into the machine's boot menu.
  */
 
 /* A GPT partition, the way a UEFI device path names it */

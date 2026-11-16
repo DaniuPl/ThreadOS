@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Checks the ThreadOS parsers against corrupted data.
 
-Five fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
+Six fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
 packet path in the kernel (net.c + tcp.c), the kernel's TrueType
 reader (ttf.c), because a font is a file and files come from anywhere,
 the kernel's HID report descriptor reader (hid.c), because a descriptor
-comes from whatever is plugged in, and Mbed TLS's certificate and key parsers, which curl hands whatever a
-server sends. In the kernel an error does
+comes from whatever is plugged in, Mbed TLS's certificate and key
+parsers, which curl hands whatever a server sends, and the ARM64
+kernel's device tree reader (kernelarm64/fdt.c), because the tree is
+the firmware's and the firmware is somebody else's. In the kernel an error does
 not end in the death of a process but in the system going down, so it
 is all the more worth looking for.
 
@@ -25,6 +27,7 @@ Usage: python3 scripts/fuzz_parsers.py [number_of_cases]
 import os
 import random
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -37,20 +40,15 @@ CASES = int(sys.argv[1]) if len(sys.argv) > 1 else 400
 
 
 def build(workdir):
-    """Compiles the harness. The userspace headers pull in 'uapi.h', and
-    that one picks the entry into the kernel appropriate for the
-    processor mode - on the host neither of them makes sense. So we
+    """Compiles the harness. The userspace headers pull in 'uapi.h', the
+    entry into the kernel, which makes no sense on the host. So we
     substitute a stub: a directory of symlinks to the real headers, and
     instead of the entry into the kernel a file with types and small
-    details only.
-
-    We stub 'usys.h' under its own name too - the parsers should no
-    longer call it directly, but if one of them went back to the old
-    habit, better it hit a stub than a syscall."""
+    details only."""
     inc = os.path.join(workdir, "include")
     os.makedirs(inc, exist_ok=True)
 
-    stubbed = ("usys.h", "uapi.h")
+    stubbed = ("uapi.h",)
     for name in os.listdir(os.path.join(ROOT, "user")):
         if name.endswith(".h") and name not in stubbed:
             os.symlink(os.path.join(ROOT, "user", name),
@@ -222,6 +220,171 @@ def mbedtls_seeds(workdir):
                 if out.returncode == 0:
                     bucket.append(out.stdout)
     return pub, priv
+def build_fdt(workdir):
+    """The ARM64 kernel's fdt.c, straight out of kernelarm64/, with the
+    shared string.c it uses. Nothing to stub: it reads memory and
+    nothing else."""
+    binary = os.path.join(workdir, "fharness")
+    cmd = ["gcc", "-I", os.path.join(ROOT, "kernelarm64"), "-fno-builtin",
+           "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+           "-fno-omit-frame-pointer", "-g", "-O1", "-Wall", "-Wextra",
+           "-o", binary, os.path.join(FUZZ, "fdt_harness.c"),
+           os.path.join(ROOT, "kernelarm64", "fdt.c"),
+           os.path.join(ROOT, "kernel", "string.c")]
+    out = subprocess.run(cmd, capture_output=True, text=True)
+    if out.returncode != 0:
+        print(out.stderr[:3000])
+        raise SystemExit("the device tree harness could not be built")
+    return binary
+
+
+def make_fdt(mem_mib, cores, size_cells=2, more_memory=None, gic=2,
+             bootargs=None, psci="hvc"):
+    """A flattened device tree laid out the way QEMU's virt machine lays
+    out its own: a UART, an interrupt controller (with a child node of
+    its own), a memory node, the cores under /cpus next to a cpu-map
+    that is not a core, and /chosen. Written from the specification
+    (v17), not by the code under test."""
+    strings, names = bytearray(), {}
+    st = bytearray()
+
+    def name_at(n):
+        if n not in names:
+            names[n] = len(strings)
+            strings.extend(n.encode() + b"\0")
+        return names[n]
+
+    def pad(b):
+        return b + b"\0" * (-len(b) % 4)
+
+    def begin(n):
+        st.extend(struct.pack(">I", 1) + pad(n.encode() + b"\0"))
+
+    def end():
+        st.extend(struct.pack(">I", 2))
+
+    def prop(n, v):
+        st.extend(struct.pack(">III", 3, len(v), name_at(n)) + pad(v))
+
+    def cells(*v):
+        return b"".join(struct.pack(">I", x) for x in v)
+
+    def reg(base, size):
+        if size_cells == 2:
+            return cells(base >> 32, base & 0xFFFFFFFF, size >> 32,
+                         size & 0xFFFFFFFF)
+        return cells(base >> 32, base & 0xFFFFFFFF, size)
+
+    def memory(base, size):
+        begin("memory@%x" % base)
+        prop("reg", reg(base, size))
+        prop("device_type", b"memory\0")
+        end()
+
+    begin("")
+    prop("#address-cells", cells(2))
+    prop("#size-cells", cells(size_cells))
+    prop("compatible", b"linux,dummy-virt\0")
+    begin("pl011@9000000")
+    prop("reg", reg(0x09000000, 0x1000))
+    prop("compatible", b"arm,pl011\0arm,primecell\0")
+    end()
+    begin("intc@8000000")
+    if gic == 2:
+        # The name it is known by is not the first in the list
+        prop("compatible", b"arm,arm-v8-gic\0arm,cortex-a15-gic\0")
+        prop("reg", reg(0x08000000, 0x10000) + reg(0x08010000, 0x10000))
+        begin("v2m@8020000")
+        prop("compatible", b"arm,gic-v2m-frame\0")
+        prop("reg", reg(0x08020000, 0x1000))
+        end()
+    else:
+        prop("compatible", b"arm,gic-v3\0")
+        prop("reg", reg(0x08000000, 0x10000) + reg(0x080A0000, 0xF60000))
+    end()
+    memory(0x40000000, mem_mib << 20)
+    if more_memory:
+        memory(*more_memory)
+    begin("cpus")
+    prop("#address-cells", cells(1))
+    prop("#size-cells", cells(0))
+    begin("cpu-map")
+    begin("socket0")
+    end()
+    end()
+    for i in range(cores):
+        # virt's MPIDRs: eight cores to a cluster, the cluster in Aff1
+        begin("cpu@%d" % i)
+        prop("device_type", b"cpu\0")
+        prop("reg", cells((i // 8) << 8 | i % 8))
+        end()
+    end()
+    if psci:
+        begin("psci")
+        prop("compatible", b"arm,psci-1.0\0arm,psci-0.2\0arm,psci\0")
+        prop("method", psci.encode() + b"\0")
+        end()
+    begin("chosen")
+    if bootargs is not None:
+        prop("bootargs", bootargs.encode() + b"\0")
+    prop("stdout-path", b"/pl011@9000000\0")
+    end()
+    end()
+    st.extend(struct.pack(">I", 9))
+
+    reserve = b"\0" * 16
+    off_struct = 40 + len(reserve)
+    off_strings = off_struct + len(st)
+    total = off_strings + len(strings)
+    header = struct.pack(">10I", 0xD00DFEED, total, off_struct, off_strings,
+                         40, 17, 16, 0, len(strings), len(st))
+    return header + reserve + bytes(st) + bytes(strings)
+
+
+_GIC2 = " gic=v2 dist=0x8000000 cpu=0x8010000"
+FDT_TREES = [
+    ("256 MiB and two cores", make_fdt(256, 2),
+     "r=0 mem=256 MiB base=0x40000000 cpus=2" + _GIC2 +
+     " args=- psci=hvc ids=0,1"),
+    ("a gigabyte, four cores, smc and a command line",
+     make_fdt(1024, 4, bootargs="selftest=brk quiet", psci="smc"),
+     "r=0 mem=1024 MiB base=0x40000000 cpus=4" + _GIC2 +
+     " args=selftest=brk quiet psci=smc ids=0,1,2,3"),
+    # More cores than are kept: all counted, the first eight's MPIDRs
+    # kept, and nothing written past them
+    ("nine cores", make_fdt(256, 9),
+     "r=0 mem=256 MiB base=0x40000000 cpus=9" + _GIC2 +
+     " args=- psci=hvc ids=0,1,2,3,4,5,6,7"),
+    # One-cell sizes, and memory in two places, the second above 4 GiB
+    ("two memory ranges, one-cell sizes, no PSCI",
+     make_fdt(512, 1, size_cells=1, more_memory=(0x100000000, 2048 << 20),
+              psci=None),
+     "r=0 mem=2560 MiB base=0x40000000 cpus=1" + _GIC2 +
+     " args=- psci=- ids=0"),
+    # The redistributors are its second range: not a CPU interface
+    ("a GICv3", make_fdt(256, 1, gic=3),
+     "r=0 mem=256 MiB base=0x40000000 cpus=1 gic=v3 dist=0x8000000 "
+     "cpu=0x0 args=- psci=hvc ids=0"),
+    ("a tree cut short", make_fdt(256, 2)[:-40],
+     "r=-1 mem=0 MiB base=0x0 cpus=0 gic=v0 dist=0x0 cpu=0x0 args=- "
+     "psci=- ids="),
+]
+
+
+def fdt_layouts(binary, workdir):
+    """The undamaged trees, held to what they were made with. Returns
+    (name, got, want) for every one that differs."""
+    wrong = []
+    path = os.path.join(workdir, "tree.dtb")
+    for name, tree, want in FDT_TREES:
+        with open(path, "wb") as f:
+            f.write(tree)
+        run = subprocess.run([binary, path], capture_output=True, text=True,
+                             timeout=30)
+        got = run.stdout.strip()
+        if run.returncode != 0 or got != want:
+            wrong.append((name, got or run.stderr[:300], want))
+    return wrong
 
 
 def fonts():
@@ -500,18 +663,33 @@ def main():
         tbinary = build_ttf(workdir)
         mbinaries = build_mbedtls(workdir)
         hbinary = build_hid(workdir)
+        fbinary = build_fdt(workdir)
         corpus = seeds(workdir)
         corpus["frames"] = frames()
         corpus["ttf"] = fonts()
         corpus["hid"] = hid_seeds()
+        corpus["fdt"] = [t for _, t, want in FDT_TREES
+                         if want.startswith("r=0")]
         corpus["mbedtls-x509crt"] = list(corpus["x509"])
         corpus["mbedtls-pubkey"], corpus["mbedtls-privkey"] = \
             mbedtls_seeds(workdir)
         print("the harness is built, cases per parser: %d" % CASES)
+        wrong = fdt_layouts(fbinary, workdir)
+        print("  device trees against what they were made with: %d wrong"
+              % len(wrong))
+        for name, got, want in wrong:
+            failures.append(("fdtlayout", name,
+                             "got  %s\nwant %s" % (got, want)))
         bad = gif_pixels(binary)
         print("  GIFs against Pillow's reading of them: %d wrong" % len(bad))
         for b in bad:
             failures.append(("gifpixels", b, "the pixels differ"))
+        wrong = fdt_layouts(fbinary, workdir)
+        print("  device trees against what they were made with: %d wrong"
+              % len(wrong))
+        for name, got, want in wrong:
+            failures.append(("fdtlayout", name,
+                             "got  %s\nwant %s" % (got, want)))
         wrong = cookie_dates(binary, rng)
         print("  cookie dates against Python's calendar: %d wrong"
               % len(wrong))
@@ -534,6 +712,8 @@ def main():
                     cmd = [hbinary, path]
                 elif parser in mbinaries:
                     cmd = [mbinaries[parser], path]
+                elif parser == "fdt":
+                    cmd = [fbinary, path]
                 else:
                     cmd = [binary, parser, path]
                 run = subprocess.run(cmd, capture_output=True, timeout=30)

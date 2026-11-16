@@ -42,6 +42,11 @@ from ptest import near as ptest_near
 # The cascade: slot 2 is the first application window, at (94,54);
 # gsettings asks for a GSET_W x GSET_H content buffer.
 WX, WY, WW, WH = 94, 54, GSET_W + 2, GSET_H + 12
+# Down the settings' left side stand the sections, a square with a
+# letter in each row, as far down as here (in the content). Below them
+# that side is the window's bare background - which is where a point
+# near a window's left edge is read.
+SIDE_END = GSET_SIDE_Y0 + len(GSET_SECTIONS64) * GSET_SIDE_H
 
 
 def near(px, v):
@@ -177,8 +182,11 @@ def main():
             # --- the top: the whole screen ------------------------------
             drag(q, half + 150, BAR_H + 4, 320, 20)
             w, h, at = q.screen_raw()
+            # (low enough to be below the sections down its left side)
+            low = deck - 20
             check("a window dragged to the top takes the whole screen",
-                  is_win(at(20, 300)) and is_win(at(w - 3, 300)))
+                  low - BAR_H - CONTENT_DY > SIDE_END and
+                  is_win(at(20, low)) and is_win(at(w - 3, low)))
             check("but it does not run over the dock",
                   not is_win(at(320, h - 4)))
 
@@ -200,9 +208,12 @@ def main():
             check("and it is its own width (%d px, not half "
                   "nor the whole screen)" % wide, abs(wide - (WW - 4)) <= 6)
             # After four drags, three snaps and a restore it is still a
-            # window: a lit title bar with its own body under it
+            # window: a lit title bar with its own body under it (read
+            # at the right of the open section's pane, low down, where
+            # nothing is drawn on the background - the left side holds
+            # the sections all the way down)
             check("the window survived four drags and still has the focus",
-                  is_win(at(x0 + 20, ty + TITLE_H + GSET_H - 30)))
+                  is_win(at(x0 + wide - 20, ty + TITLE_H + GSET_H - 30)))
 
             # --- what all of it is for: two windows side by side --------
             # The settings to the right, the terminal to the left. The
@@ -223,11 +234,16 @@ def main():
             check("and the settings the right (a window's background)",
                   is_win(at(half + 100, 300)))
             # (a little further right than left: the terminal has the
-            # focus, and its shadow falls on the settings beside it)
+            # focus, and its shadow falls on the settings beside it;
+            # and low, below the settings' sections - but above the name
+            # of the dock's tile under the pointer, which stands over
+            # the windows' lowest rows)
+            low = deck - 40
             check("and they do not overlap - the border is in the middle",
+                  low - BAR_H - CONTENT_DY > SIDE_END and
                   ptest_near(at(half - 10, deck - 30),
                              theme("dark")["app_field"], 3) and
-                  is_win(at(half + 20, 300)))
+                  is_win(at(half + 20, low)))
         finally:
             q.close()
     finally:

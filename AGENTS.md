@@ -7,8 +7,8 @@ This one is shorter and lists the commands.
 
 ## What this is
 
-ThreadOS is a hobby x86-64 operating system written in C and assembly.
-It is one 64-bit long-mode kernel: `kernel/` holds the code that does
+ThreadOS is a hobby operating system written in C and assembly. The PC
+system is one 64-bit long-mode kernel: `kernel/` holds the code that does
 not depend on the CPU mode (drivers, filesystems, network, desktop),
 `kernel64/` and `boot64/` hold paging, interrupts, context switching,
 the syscall entry and the entry into long mode. Ring 3 programs live in
@@ -20,11 +20,23 @@ There used to be a 32-bit kernel as well. It was removed; names that
 came with it (`kernel/include/task.h`, for one) are still used by the
 shared code and answered by `kernel64/compat64.c`.
 
+A second kernel for ARM64 (`bootarm64/` + `kernelarm64/`, QEMU's `virt`
+machine, built with clang) is at its third stage: it boots, reads the
+device tree, catches exceptions, runs with the MMU on, takes timer
+interrupts through a GICv2, preempts kernel threads and runs them on
+every core it wakes through PSCI. Of `kernel/` it builds `string.c` and
+`heap.c` so far, on `kernel/include/io.h` and `spinlock.h`, which have
+an AArch64 branch next to the x86 one; the rest follows as shared code
+stops assuming x86. Its tests are `arm64boot`, `arm64core` and
+`arm64threads`.
+
 ## Commands
 
 ```sh
 make -j8                      # kernel + initrd (build/threados64.bin, build/initrd64.img)
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
+make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld)
+make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
 make iso64 stick              # hybrid disc and USB image
 make run                      # boot the desktop in QEMU
 make test                     # full suite: 100+ QEMU groups, ~20-30 min with -j4
@@ -67,13 +79,19 @@ real. Use a separate `BUILD=` directory for experiments.
    compare (`t_polish`, `t_libc`, `scripts/tests/js/`).
 4. **Comments explain *why*,** not what. Match the comment density and the
    tone of the surrounding code.
-5. **There is one kernel, the 64-bit one.** Do not bring back 32-bit
-   code paths, `#ifdef __x86_64__` branches or `-m32` builds.
+5. **One PC kernel, the 64-bit one; shared code builds where it is
+   shared.** Do not bring back 32-bit code paths, `#ifdef __x86_64__`
+   branches for a 32-bit build, or `-m32` builds. `kernel/string.c`,
+   `kernel/heap.c`, `kernel/include/io.h` and `spinlock.h` are built for
+   ARM64 too: when you change them, run `make kernelarm64` and the ARM64
+   groups as well as the x86-64 build and tests.
 6. **Libraries are welcome; bring them in properly.** Do not rewrite what a
    good library already does. A new library must be:
    - **in the tree, built from source** by the `Makefile`: a pinned release
      in `third_party/<name>/` (or its upstream archive), never downloaded at
-     build time and never a prebuilt binary;
+     build time and never a prebuilt binary (firmware a device runs itself,
+     like `third_party/iwlwifi/`, is the one exception: it exists only as
+     its vendor's binary);
    - **unmodified.** Changes go into `libc/overlay/`, a patch directory
      next to the code that uses it (like `apps/browser/patches/`), or our
      own wrapper code;
@@ -112,7 +130,7 @@ changes.
 
 ## Before you finish
 
-- Both kernels build without new warnings.
+- The kernel builds without new warnings (and ARM64 too, when its shared files changed).
 - The test groups your change touches pass, plus any group that clicks on
   or reads the screen region you changed.
 - Notable changes get an entry at the end of [docs/JOURNAL.md](docs/JOURNAL.md).

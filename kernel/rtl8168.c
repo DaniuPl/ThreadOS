@@ -1,8 +1,8 @@
 /* Driver for the Realtek RTL8111/8168 gigabit card (PCIe)
  *
  * The registers are reachable two ways, through I/O ports (BAR0) and
- * through memory (BAR2); the ports need no mapping and are the same in
- * both kernels, so we take them, as for the RTL8139.
+ * through memory (BAR2); the ports need no mapping, so we take them, as
+ * for the RTL8139.
  *
  * Traffic goes through two rings of sixteen-byte descriptors. Unlike
  * the e1000's, a descriptor says itself who holds it: the OWN bit, set

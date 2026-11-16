@@ -11,16 +11,20 @@
 void video_init(void);
 
 /* Linear VESA mode (Bochs/QEMU DISPI), 32 bpp. Returns 0 or -1 (no
-   framebuffer) - in which case falling back to video_init() is wise. */
+   framebuffer) - in which case falling back to video_init() is wise.
+   With a framebuffer from the loader, that mode is kept - except on
+   QEMU's standard VGA, where it is taken over and w x h (0x0 = the
+   panel's own) set when it differs. */
 int video_init_vesa(int w, int h);
 
 /* Adopts the framebuffer set up by the bootloader (Multiboot 2). Works
-   on any hardware - unlike video_init_vesa, which reaches for the
-   Bochs/QEMU interface. 0 = adopted. */
+   on any hardware - unlike the Bochs/QEMU interface video_init_vesa
+   reaches for where it can. 0 = adopted. */
 int video_adopt_lfb(uint32_t addr, uint32_t pitch, int w, int h, int bpp);
 
 /* Gluing the buffer onto the page mapping - call right after paging_init */
 int video_map_lfb(void);
+/* 1 while the screen is in the mode the loader set */
 int video_have_loader_lfb(void);
 
 /* A text console drawn on the framebuffer (when there is no VGA text
@@ -61,7 +65,8 @@ void video_set_scale(int s);
    changes; the panel does not) */
 void video_rescale(void);
 /* Another mode while the screen runs (0x0 = the panel's own) - only
-   where the kernel set the mode itself. 1 changed, 0 already, -1 no. */
+   where the kernel can set the mode itself (the Bochs/QEMU interface).
+   1 changed, 0 already, -1 no. */
 int video_set_mode(int w, int h);
 int video_scale(void);
 

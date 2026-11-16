@@ -7,8 +7,6 @@
  * today. A click on a day picks it and the line at the bottom says
  * which day of the week it falls on - which is, most of the time, what
  * a calendar is opened to find out.
- *
- * One program for both kernels (uapi.h).
  */
 
 #include "udraw.h"
