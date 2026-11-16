@@ -102,7 +102,7 @@ def main():
                   + (f" ({m.group(2)}/{m.group(1)})" if m else ""),
                   m is not None and int(m.group(1)) >= 3
                   and m.group(1) == m.group(2)
-                  and pong.count("40 B od 10.0.2.2: seq=") == int(m.group(1)))
+                  and pong.count("40 B from 10.0.2.2: seq=") == int(m.group(1)))
             check("a command typed while ping ran is not lost, and runs "
                   "after it",
                   "DNS server set to 10.0.2.3" in pong
@@ -139,7 +139,7 @@ def main():
             # The loopback does not go out on the wire, so this attempt
             # checks the stack itself, not the network around it
             m = re.search(r"the datagram came back to me \((\d+) B\) "
-                          r"od (\d+\.\d+\.\d+\.\d+)", out)
+                          r"from (\d+\.\d+\.\d+\.\d+)", out)
             check("a datagram sent to itself comes back the same"
                   + (f" ({m.group(1)} B)" if m else ""),
                   m is not None and int(m.group(1)) > 0)
