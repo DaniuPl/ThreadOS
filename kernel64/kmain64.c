@@ -23,6 +23,7 @@
 #include "../kernel/include/printk.h"
 #include "../kernel/include/pic.h"
 #include "../kernel/include/pit.h"
+#include "../kernel/include/random.h"
 #include "../kernel/include/pmm.h"
 #include "../kernel/include/heap.h"
 #include "idt64.h"
@@ -357,6 +358,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     for (int i = 0; i < 200; i++)
         __asm__ volatile("hlt");
     printk("[ OK ] The timer ticks: %u -> %u ticks\n", start, pit_ticks());
+    /* After the wait: those 200 ticks were the first timed interrupts */
+    random_init();
 
     /* --- Threads ------------------------------------------------ */
     /* SSE has to be enabled BEFORE the scheduler: the first task gets

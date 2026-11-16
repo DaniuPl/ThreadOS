@@ -47,6 +47,7 @@
 #include "../kernel/include/pci.h"
 #include "../kernel/include/pci_info.h"
 #include "../kernel/include/rtc.h"
+#include "../kernel/include/random.h"
 
 #define USER_AUTH_WINDOW_TICKS 30000u
 static int auth_pid = -1;
@@ -813,6 +814,21 @@ static void handle(struct regs *r)
     case SYS64_UDP_PORT:
         r->rax = (uint64_t)(net_udp_pending((int)a1, net_owner()) < 0
                                 ? 0 : net_udp_port((int)a1));
+        return;
+    case SYS64_GETRANDOM:
+        if (a2 > 4096 || !paging64_user_range(a1, a2)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        while (!random_ready()) {
+            if (a3 & GETRANDOM_NOWAIT) {
+                r->rax = (uint64_t)-2;
+                return;
+            }
+            task64_sleep(10);
+        }
+        random_bytes((void *)(uintptr_t)a1, (uint32_t)a2);
+        r->rax = a2;
         return;
     case SYS64_CLOSE:
         r->rax = (uint64_t)(int64_t)task64_fd_close((int)a1);

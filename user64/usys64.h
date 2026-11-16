@@ -100,6 +100,7 @@
 #define SYS64_CORE      42
 #define SYS64_MMAP      43
 #define SYS64_THREAD    44
+#define SYS64_GETRANDOM 98
 
 #define NAME_MAX64 63
 
@@ -353,6 +354,14 @@ static inline int64_t uparse_ip(const char *s)
             return -1;
     }
     return *s ? -1 : (int64_t)ip;
+}
+
+/* Bytes fit for keys from the kernel's generator (at most 4096 a
+   call); waits until the generator is seeded. The number written, or
+   -1 for a buffer that is not the program's. */
+static inline int64_t sys_getrandom(void *buf, uint32_t len)
+{
+    return syscall64_3(SYS64_GETRANDOM, (int64_t)(uintptr_t)buf, len, 0);
 }
 
 /* Creates a pipe. It writes two numbers: fd[0] for reading, fd[1] for

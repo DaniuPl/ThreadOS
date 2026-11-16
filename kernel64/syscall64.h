@@ -214,6 +214,15 @@
 #define SYS64_UDP_POLL   96
 #define SYS64_UDP_PORT   97
 
+/* SYS64_GETRANDOM  a1=buffer, a2=length (at most 4096), a3=flags
+ *                  -> bytes written / -1 a bad buffer / -2 not seeded
+ *                  yet and GETRANDOM_NOWAIT asked not to wait for it
+ * Bytes fit for keys, from kernel/random.c. Until the pool is seeded
+ * the call waits, as Linux's getrandom does.
+ */
+#define SYS64_GETRANDOM  98
+#define GETRANDOM_NOWAIT 1
+
 #define FUTEX64_OP_WAIT    0
 #define FUTEX64_OP_WAKE    1
 #define FUTEX64_OP_REQUEUE 3

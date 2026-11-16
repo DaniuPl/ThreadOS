@@ -18,6 +18,7 @@
 #include "task64.h"
 #include "elf64.h"
 #include "isr64.h"
+#include "../kernel/include/random.h"
 #include "paging64.h"
 #include "signal64.h"
 #include "../kernel/include/pmm.h"
@@ -376,6 +377,7 @@ static void isr64_dispatch(struct regs *r)
        own APIC. On a secondary core this is the only interrupt that
        arrives at all. */
     if (r->int_no == 48) {
+        random_add_interrupt(16);
         smp_timer_tick();
         return;
     }
@@ -399,6 +401,7 @@ static void isr64_dispatch(struct regs *r)
         int irq = (int)(r->int_no - IRQ_BASE);
         /* EOI before the handler - just as in the 32-bit kernel */
         pic_send_eoi(irq);
+        random_add_interrupt(irq);
         if (irq_handlers[irq])
             irq_handlers[irq](r);
     }

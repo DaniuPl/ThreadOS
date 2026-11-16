@@ -7129,3 +7129,37 @@ works and is checked by `make test`.
       the test asks for less than 50%). Every idle frame still blits the whole
       background and compares the whole screen with what the card has;
       skipping a frame nothing changed in is what is left to do.
+
+- [x] **Random numbers from the kernel** (kernel/random.c,
+      kernel64/syscall64.c, libc/overlay/src/threados/syscall.c,
+      user/urand.h, libc/tests/randtest.c, scripts/tests/t_random.py)
+      TLS is next, and its keys are only as secret as the bytes they
+      are made of. Programs made their own: musl's getrandom() was a
+      xorshift over the time stamp counter and user/urand.h a hash of
+      the clock and the pid - both guessable, and urand.h handed a
+      forked child its parent's next bytes. The kernel now keeps a
+      pool, as Linux does: RDSEED and RDRAND when CPUID reports them,
+      and the cycle counter at every interrupt (the PIC's and each
+      core's APIC timer), hashed with BLAKE2s. Requests are answered
+      with ChaCha20 under a key that the first block of every request
+      replaces, so what was handed out cannot be worked out from what
+      is left; the key is renewed from the pool every 64 requests and
+      after 64 interrupts. Until the pool has a hardware source or 256
+      timed interrupts, SYS64_GETRANDOM waits (or says so, for
+      GRND_NONBLOCK). musl's getrandom() and getentropy() and
+      user/urand.h ask the kernel.
+
+      t_random compiles kernel/random.c itself on the host with a small
+      harness: BLAKE2s against Python's hashlib for every length up to
+      a few blocks fed in pieces of every size, ChaCha20 against RFC
+      8439 and a ChaCha20 written in the test (and the cryptography
+      package where installed), and random_bytes() modelled exactly,
+      key replacement included. On ThreadOS a megabyte from
+      getrandom() is judged on the host (bits, bytes and byte pairs
+      as often as chance allows, no repeated block, zlib cannot shrink
+      it); a forked child and its parent, and four threads, never get
+      the same bytes; two boots share nothing; QEMU's "max" processor
+      is seen to have RDSEED and RDRAND and the default one neither.
+      Breaking the key replacement, or compressing a full BLAKE2s block
+      before knowing it is the last, fails the test - the second still
+      passes the kernel's own self-test, which hashes only "abc".

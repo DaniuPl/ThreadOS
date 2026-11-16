@@ -1909,7 +1909,8 @@ class Qemu:
                  cdrom=None, serial=None, qemu="qemu-system-i386",
                  uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
                  usbhub=False, behind_hub=False, usbnic=False,
-                 nic="rtl8139", cpus=None, devices=None, edid=None):
+                 nic="rtl8139", cpus=None, devices=None, edid=None,
+                 cpu_model=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # The kernel is Multiboot 2, which QEMU's -kernel does not load:
@@ -1954,6 +1955,10 @@ class Qemu:
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
         if ram_mib:
             cmd += ["-m", str(ram_mib)]
+        if cpu_model:
+            # QEMU's default processor lacks RDRAND and RDSEED; "max"
+            # has every instruction QEMU can do
+            cmd += ["-cpu", cpu_model]
         if cpus:
             # More than one core. The firmware lists them in an ACPI
             # table, and the system wakes them with an INIT-SIPI signal

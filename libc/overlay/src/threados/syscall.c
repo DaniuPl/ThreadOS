@@ -47,6 +47,7 @@
 #include <time.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/random.h>
 #include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/sysinfo.h>
@@ -105,6 +106,7 @@ long __tos_open_virtual(const char *path);
 #define T_CORE      42
 #define T_FTRUNCATE 88
 #define T_FDINODE   89
+#define T_GETRANDOM 98
 
 #define T_FUTEX_WAIT    0
 #define T_FUTEX_WAKE    1
@@ -1046,28 +1048,24 @@ static long do_sigaction(int sig, const struct k_sigaction *act,
 	return 0;
 }
 
-static unsigned char rng_state_set;
-static unsigned long rng_state;
-
-static long do_getrandom(unsigned char *buf, size_t len)
+/* The kernel's generator (kernel/random.c), which serves a page at a
+   time. Linux answers whole for any size a program asks in practice,
+   and code that draws a key in one call counts on it. */
+static long do_getrandom(unsigned char *buf, size_t len, unsigned flags)
 {
-	touch(buf, len);
-	if (!rng_state_set) {
-		unsigned lo, hi;
-		__asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
-		rng_state = (((unsigned long)hi << 32) | lo) ^ 0x9E3779B97F4A7C15UL;
-		rng_state_set = 1;
+	size_t done = 0;
+	while (done < len) {
+		size_t n = len - done > T_CHUNK ? T_CHUNK : len - done;
+		touch(buf + done, n);
+		long r = tos(T_GETRANDOM, (long)(buf + done), (long)n,
+		             (flags & GRND_NONBLOCK) ? 1 : 0, 0);
+		if (r == -2)
+			return done ? (long)done : -EAGAIN;
+		if (r < 0)
+			return done ? (long)done : -EFAULT;
+		done += (size_t)r;
 	}
-	for (size_t i = 0; i < len; i++) {
-		unsigned lo, hi;
-		__asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
-		rng_state ^= lo;
-		rng_state ^= rng_state << 13;
-		rng_state ^= rng_state >> 7;
-		rng_state ^= rng_state << 17;
-		buf[i] = (unsigned char)(rng_state >> 24);
-	}
-	return len;
+	return (long)done;
 }
 
 static void copy_name(char *dst, const char *src)
@@ -1347,7 +1345,7 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	                                       (struct rlimit *)d);
 	case SYS_getrlimit:  return do_prlimit(a, 0, (struct rlimit *)b);
 	case SYS_setrlimit:  return 0;
-	case SYS_getrandom:  return do_getrandom((unsigned char *)a, b);
+	case SYS_getrandom:  return do_getrandom((unsigned char *)a, b, c);
 	case SYS_getcpu:
 		if (a) {
 			touch((void *)a, sizeof(unsigned));

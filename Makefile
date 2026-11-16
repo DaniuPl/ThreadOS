@@ -103,7 +103,7 @@ SHARED64 := string serial printk locale bootsplash mb2 fbcon vga pic pit pmm hea
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
-            e1000 rtl8168 virtio_net netdev smp
+            e1000 rtl8168 virtio_net netdev smp random
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -383,6 +383,11 @@ $(BUILD)/user64/nettest.elf: libc/tests/nettest.c $(LIBC64) libc/libc64.ld \
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/nettest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/nettest.o) -o $@
 
+$(BUILD)/user64/randtest.elf: libc/tests/randtest.c $(LIBC64) libc/libc64.ld \
+                              | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/randtest.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/randtest.o) -o $@
+
 # --- zlib ---------------------------------------------------------------
 # The release archive as zlib.net publishes it, unpacked into the build
 # directory; zconf.h comes ready-made, so there is no configure step,
@@ -568,6 +573,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
+               $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
                $(BUILD)/user64/update.elf
 
@@ -809,6 +815,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
+	    randtest=$(BUILD)/user64/randtest.elf \
 	    zlibtest=$(BUILD)/user64/zlibtest.elf \
 	    curl=$(BUILD)/user64/curl.elf \
 	    fonttest=$(BUILD)/user64/fonttest.elf \
