@@ -144,7 +144,8 @@ static void cmd_help(void)
     printk("          hardware - what is in this machine, disks, font\n");
     printk("          devices - every device and what drives it\n");
     printk("          bt [scan|test] - Bluetooth\n");
-    printk("          camera - the camera and what it can send\n");
+    printk("          camera [grab <mode> <n>] - the camera, its modes, "
+           "frames\n");
     printk("          wifi [scan|test] - the Wi-Fi card, the networks\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          format [N] - the whole disk, or partition N, as TFS\n");
@@ -1201,6 +1202,17 @@ static void execute(const char *line)
         devices_print();
     } else if (!strcmp(line, "camera")) {
         uvc_print();
+    } else if (starts_with(line, "camera grab ")) {
+        /* "camera grab <mode> <n>": for tests, as 'bt test' is */
+        const char *a = line + sizeof("camera grab ") - 1;
+        int mode = 0, count = 0;
+        while (*a >= '0' && *a <= '9')
+            mode = mode * 10 + (*a++ - '0');
+        while (*a == ' ')
+            a++;
+        while (*a >= '0' && *a <= '9')
+            count = count * 10 + (*a++ - '0');
+        uvc_grab(mode, count > 0 ? count : 1);
     } else if (!strcmp(line, "mouse")) {
         cmd_mouse();
     } else if (!strcmp(line, "bt")) {

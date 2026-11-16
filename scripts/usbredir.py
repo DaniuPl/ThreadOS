@@ -26,6 +26,12 @@ interface - instead: QEMU forwards a SET_INTERFACE as a packet of its
 own, not as a control transfer, and is told the new endpoints before
 the answer, as the protocol requires. What the guest set is kept in
 the device's requests as ("set_alt", interface, alternate).
+
+Isochronous IN: when QEMU starts a stream (the guest has queued its
+first TDs), a device with iso_packet(ep) is asked for one packet an
+interval - iso_rate(ep) of them a second - and they are sent in
+batches every ten milliseconds, as a camera sends them whether anybody
+reads or not, until QEMU stops the stream.
 """
 
 import socket
@@ -38,9 +44,10 @@ HELLO, DEVICE_CONNECT, RESET = 0, 1, 3
 INTERFACE_INFO, EP_INFO = 4, 5
 SET_CONFIGURATION, GET_CONFIGURATION, CONFIGURATION_STATUS = 6, 7, 8
 SET_ALT_SETTING, GET_ALT_SETTING, ALT_SETTING_STATUS = 9, 10, 11
+START_ISO_STREAM, STOP_ISO_STREAM, ISO_STREAM_STATUS = 12, 13, 14
 START_INTERRUPT, STOP_INTERRUPT, INTERRUPT_STATUS = 15, 16, 17
 CANCEL_DATA = 21
-CONTROL_PACKET, BULK_PACKET, INTERRUPT_PACKET = 100, 101, 103
+CONTROL_PACKET, BULK_PACKET, ISO_PACKET, INTERRUPT_PACKET = 100, 101, 102, 103
 
 CAP_CONNECT_DEVICE_VERSION, CAP_EP_INFO_MAX_PACKET_SIZE = 1, 4
 CAP_64BITS_IDS, CAP_32BITS_BULK_LENGTH = 5, 6
@@ -153,6 +160,7 @@ class Redir:
         self.ids64 = False           # once both hellos have said so
         self.configured = threading.Event()
         self.alts = {}               # interface -> the alternate in force
+        self.iso_on = {}             # IN endpoint -> streaming
         if hasattr(device, "attach"):
             device.attach(self)
         threading.Thread(target=self.serve, daemon=True).start()
@@ -294,6 +302,22 @@ class Redir:
             self.send(ALT_SETTING_STATUS,
                       struct.pack("<BBB", SUCCESS, body[0],
                                   self.alts.get(body[0], 0)), pid=pid)
+        elif kind == START_ISO_STREAM:
+            ep = body[0]
+            self.send(ISO_STREAM_STATUS, struct.pack("<BB", SUCCESS, ep),
+                      pid=pid)
+            if hasattr(self.device, "iso_packet") and not self.iso_on.get(ep):
+                self.iso_on[ep] = True
+                self.device.requests.append(("start_iso", ep))
+                threading.Thread(target=self.iso_sender, args=(ep,),
+                                 daemon=True).start()
+        elif kind == STOP_ISO_STREAM:
+            ep = body[0]
+            if self.iso_on.get(ep):
+                self.device.requests.append(("stop_iso", ep))
+            self.iso_on[ep] = False
+            self.send(ISO_STREAM_STATUS, struct.pack("<BB", SUCCESS, ep),
+                      pid=pid)
         elif kind == START_INTERRUPT:
             self.receiving.add(body[0])
             self.send(INTERRUPT_STATUS, struct.pack("<BB", SUCCESS, body[0]),
@@ -307,6 +331,26 @@ class Redir:
             # what the system that reset the device asked)
             self.device.requests.append(("reset",))
         # CANCEL_DATA needs no answer
+
+    def iso_sender(self, ep):
+        """One packet an interval, sent ten milliseconds' worth at a
+        time, paced by the clock rather than by how fast QEMU takes
+        them: QEMU keeps about sixty milliseconds and throws away what
+        comes on top"""
+        rate = self.device.iso_rate(ep)
+        start = time.monotonic()
+        sent = 0
+        while self.alive and self.iso_on.get(ep):
+            due = int((time.monotonic() - start) * rate)
+            while sent < due and self.iso_on.get(ep):
+                data = self.device.iso_packet(ep)
+                with self.lock:
+                    pid = self.next_id
+                    self.next_id += 1
+                self.send(ISO_PACKET, struct.pack("<BBH", ep, SUCCESS,
+                                                  len(data)), data, pid)
+                sent += 1
+            time.sleep(0.01)
 
     # --- for the test ------------------------------------------------
 

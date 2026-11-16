@@ -18,9 +18,19 @@ out, from its own descriptors and table, what a driver following the
 rule "the smallest alternate that carries it" must report: the
 independent expectation. bulk=True makes it a camera that streams over
 a bulk IN endpoint at alternate 0 instead, with no alternates at all.
+
+Once a mode is committed and an alternate chosen, it streams: one
+packet a millisecond (bInterval 4), each a UVC payload - a two-byte
+header with FID flipping every frame and EOF on a frame's last piece,
+then as much of the frame as the alternate's packets carry. YUY2 frames
+are a pattern that changes every frame; MJPEG frames are JPEGs Pillow
+writes, of a colour that changes every frame. The CRC-32 of every frame
+it finished sending is kept, for a test to find what the driver handed
+out among them.
 """
 
 import struct
+import zlib
 
 from usbredir import SUCCESS, STALL, SPEED_HIGH, TYPE_INTERRUPT, TYPE_ISO, \
     TYPE_BULK
@@ -63,6 +73,11 @@ class UvcCamera:
     def __init__(self, bulk=False, vendor=0x0C45, product=0x6366,
                  name="ThreadOS test camera"):
         self.bulk = bulk
+        self.redir = None
+        self.committed = None          # (format, frame) of the COMMIT
+        self.cur, self.off, self.fid, self.count = None, 0, 0, 0
+        self.sent_crcs = []
+        self.jpegs = {}
         self.vendor, self.product, self.name = vendor, product, name
         self.requests = []
         self.probe = bytearray(34)
@@ -115,7 +130,7 @@ class UvcCamera:
             for n, raw in enumerate(ALTS, 1):
                 vs += struct.pack("<BBBBBBBBB", 9, 4, 1, n, 1, 0x0E, 0x02, 0,
                                   0)
-                vs += struct.pack("<BBBBHB", 7, 5, 0x81, 0x05, raw, 1)
+                vs += struct.pack("<BBBBHB", 7, 5, 0x81, 0x05, raw, 4)
 
         iad = struct.pack("<BBBBBBBB", 8, 0x0B, 0, 2, 0x0E, 0x03, 0, 0)
         body = iad + vc + vs
@@ -134,7 +149,7 @@ class UvcCamera:
             eps.append((0x82, TYPE_BULK, 0, 1, 512))
         elif alt:
             raw = ALTS[alt - 1]
-            eps.append((0x81, TYPE_ISO, 1, 1, alt_bytes(raw)))
+            eps.append((0x81, TYPE_ISO, 4, 1, alt_bytes(raw)))
         return eps
 
     def string(self, index):
@@ -163,6 +178,8 @@ class UvcCamera:
                 self.requests.append(("set_" + which, length, bytes(data)))
                 if which == "probe":
                     self.probe[:len(data)] = data[:34]
+                elif len(data) >= 4:
+                    self.committed = (data[2], data[3])
                 return SUCCESS, b""
             if rtype == 0xA1 and req in (0x81, 0x82, 0x83, 0x87):  # GET_*
                 self.requests.append(("get_" + which, length))
@@ -176,6 +193,51 @@ class UvcCamera:
         if rtype & 0x80 == 0:                          # other OUT requests
             return SUCCESS, b""
         return STALL, b""
+
+    # --- streaming ------------------------------------------------------
+
+    def attach(self, redir):
+        self.redir = redir
+
+    def iso_rate(self, ep):
+        return 1000                   # bInterval 4 at high speed: 1 ms
+
+    def _frame(self):
+        mode = next((m for m in MODES if m[:2] == self.committed), None)
+        if not mode:
+            return b""
+        f, _, w, h, _, _ = mode
+        n = self.count
+        self.count += 1
+        if f == 2:                    # YUY2: a pattern of its own each time
+            return bytes((x * 7 + (x >> 9) * 3 + n * 29) & 0xFF
+                         for x in range(w * h * 2))
+        key = (w, h, n % 6)
+        if key not in self.jpegs:
+            import io
+            from PIL import Image
+            pic = Image.new("RGB", (w, h), ((n * 40) % 256, 90, 200 - n % 6))
+            b = io.BytesIO()
+            pic.save(b, "JPEG", quality=80)
+            self.jpegs[key] = b.getvalue()
+        return self.jpegs[key]
+
+    def iso_packet(self, ep):
+        alt = self.redir.alts.get(1, 0) if self.redir else 0
+        if not alt or not self.committed:
+            return b""
+        room = alt_bytes(ALTS[alt - 1]) - 2
+        if self.cur is None:
+            self.cur, self.off = self._frame(), 0
+        piece = self.cur[self.off:self.off + room]
+        self.off += len(piece)
+        last = self.off >= len(self.cur)
+        info = 0x80 | self.fid | (0x02 if last else 0)
+        if last:
+            self.sent_crcs.append(zlib.crc32(self.cur))
+            self.cur = None
+            self.fid ^= 1
+        return bytes([2, info]) + piece
 
     # --- for the test ---------------------------------------------------
 

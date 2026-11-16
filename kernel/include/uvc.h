@@ -78,4 +78,20 @@ const struct uvc_desc *uvc_desc(void);
 /* For 'camera' in the shell, and the Camera line of 'hardware' */
 void uvc_print(void);
 
+/* Pictures, one mode at a time (stage two). start: 0; -1 no such mode
+   or no camera; -2 no room on the bus; -3 the camera said no; -4 no
+   memory; -5 a bulk camera (it streams in a later stage); -6 busy. */
+int uvc_start(int mode);
+void uvc_stop(void);
+int uvc_streaming(void);
+/* The newest whole frame, if it is newer than *seq: its bytes (valid
+   until the next call) and its length, *seq updated; 0 when nothing
+   newer has come */
+const uint8_t *uvc_frame(uint32_t *len, uint32_t *seq);
+/* Frames finished, frames thrown away (torn, marked bad, the wrong
+   size), TDs lost */
+void uvc_counts(uint32_t *frames, uint32_t *dropped, uint32_t *lost);
+/* 'camera grab <mode> <n>': n frames, each with its length and CRC-32 */
+void uvc_grab(int mode, int n);
+
 #endif

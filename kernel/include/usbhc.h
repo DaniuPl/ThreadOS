@@ -90,6 +90,14 @@ int usbhc_bulk_endpoint(int dev, int in_ep, int out_ep, int maxpacket);
 
 /* Bulk transfers. They wait for the answer. The number of bytes moved,
    or -1. */
+/* An isochronous IN endpoint (a camera's): xHCI only, as the transfers
+   it needs are; on EHCI and UHCI every call says -1. See xhci.h. */
+int usbhc_iso_open(int dev, int ep, int raw_mps, int binterval);
+int usbhc_iso_start(int dev);
+int usbhc_iso_poll(int dev, void (*fn)(void *arg, const uint8_t *data,
+                                       int len, int lost), void *arg);
+int usbhc_iso_close(int dev);
+
 int usbhc_bulk_out(int dev, int ep, const void *data, int len);
 int usbhc_bulk_in(int dev, int ep, void *data, int len);
 

@@ -8141,3 +8141,32 @@ works and is checked by `make test`.
       needs exactly an alternate's size and one that no alternate
       carries - checks one 34-byte PROBE per mode and no COMMIT, and
       does it again for a camera with a bulk endpoint.
+
+- [ ] **The camera, stage two: pictures through isochronous transfers**
+      (kernel/xhci.c, kernel/include/xhci.h, kernel/usbhc.c,
+      kernel/uvc.c, kernel64/shell64.c, scripts/usbredir.py,
+      scripts/usbcam.py, scripts/tests/t_camera.py,
+      tests/hw/xhci_model.c)
+      A camera sends its picture as a steady stream: a packet (or up to
+      three at high speed) every service interval, on an isochronous
+      endpoint - no retries, no handshakes. The xHCI driver now keeps
+      such an endpoint supplied: a ring filled once with a TD for every
+      interval of about the next thirty milliseconds, each TD with its
+      own buffer, every one that comes back handed out and put straight
+      back where it was - TD i is always ring entry i and buffer i, so
+      the cycle bits alone say whose an entry is. Its events are sorted
+      away from the device's queue, where one would have been taken for
+      the answer to a control transfer; the event ring grew from 16
+      entries to 1024, since eight TDs a millisecond come back and the
+      controller is read every ten; stopping drops the endpoint, which
+      gives its share of the bus back. Over it, the UVC driver commits
+      a mode, opens the endpoint, moves the camera to the alternate
+      that carries it, and a thread puts frames together from the
+      payload headers (FID flips with each frame, EOF ends one, ERR
+      spoils one), three buffers so a reader never meets a torn frame.
+      'camera grab <mode> <n>' prints each frame's size and CRC-32.
+      usbredir.py learnt isochronous streams and usbcam.py streams YUY2
+      patterns and Pillow's JPEGs; t_camera takes three frames in each
+      format through QEMU's own xHCI and usb-redir and finds every
+      one's CRC among the frames the camera sent, an uncompressed one
+      exactly w x h x 2 bytes, with nothing dropped or lost.

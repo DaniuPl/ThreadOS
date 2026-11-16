@@ -283,6 +283,14 @@ uint32_t pmm_alloc_frame(void)
     return (uint32_t)(uintptr_t)(pool + 4096 * frames_given++);
 }
 
+/* Frames given back - by a camera's stream when it stops. The model's
+   pool only grows: a run is short, and what a driver gives back it
+   does not touch again */
+void pmm_free_frame(uint32_t addr)
+{
+    (void)addr;
+}
+
 /* --- the devices --------------------------------------------------------
  *
  * Their descriptors as those devices give them (lsusb -v of the real

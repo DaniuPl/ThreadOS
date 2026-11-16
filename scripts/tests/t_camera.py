@@ -24,8 +24,16 @@ as a real camera's is, which has to be read whole. The driver
 
   show it in 'devices' as working under uvc
 
+  take pictures: 'camera grab' in an uncompressed mode (YUY2 176x144)
+  and in MJPEG (160x120) - COMMIT, the endpoint, the alternate, the
+  isochronous stream through QEMU's xHCI and usb-redir - and every
+  frame it hands out must be whole: its CRC-32 one of the frames the
+  camera sent, an uncompressed one exactly w x h x 2 bytes; then back
+  to alternate 0 and the stream stopped
+
 and a second camera that streams over a bulk endpoint, with no
-alternates, is listed with 'bulk' for every mode.
+alternates, is listed with 'bulk' for every mode (and says it streams
+in a later stage).
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -108,10 +116,55 @@ def machine(bulk):
                         if "0c45:6366" in l and "usb socket" in l), "")
             check("'devices' shows it working under uvc ('%s')" % dev.strip(),
                   dev.rstrip().endswith("working (uvc)"))
+
+            if bulk:
+                out = q.command("camera grab 0 1", "camera: ", timeout=20)
+                check("a bulk camera does not stream yet, and says so",
+                      "a bulk camera" in out)
+            else:
+                for mode in (6, 3):
+                    grab(q, cam, mode, 3)
         finally:
             q.close()
     finally:
         r.close()
+
+
+def grab(q, cam, mode, n):
+    f, fr, w, h, _, _ = MODES[mode]
+    kind = "YUY2" if f == 2 else "MJPG"
+    before = len(cam.requests)
+    out = q.command("camera grab %d %d" % (mode, n), "frames, ", timeout=60)
+    frames = re.findall(r"frame (\d+): (\d+)x(\d+) (\w{4}), (\d+) bytes, "
+                        r"crc32 ([0-9a-f]+)", out)
+    summary_line = next((l for l in out.splitlines()
+                         if l.startswith("camera: ") and "frames" in l), "")
+    check("%s %dx%d: %d frames come (%s)" % (kind, w, h, n,
+                                            summary_line.strip()),
+          len(frames) == n and ("%d of %d frames" % (n, n)) in summary_line)
+    sent = set(cam.sent_crcs)
+    whole = [int(c, 16) in sent for *_, c in frames]
+    check("every one whole: its CRC-32 one the camera sent (%s)" % whole,
+          frames and all(whole))
+    if f == 2:
+        check("an uncompressed one exactly %d bytes (%s)" % (w * h * 2,
+              [int(b) for *_, b, _ in frames]),
+              frames and all(int(b) == w * h * 2 for *_, b, _ in frames))
+    else:
+        check("each a JPEG the camera sent, %s bytes"
+              % [int(b) for *_, b, _ in frames],
+              frames and all(int(b) > 100 for *_, b, _ in frames))
+    later = cam.requests[before:]
+    commits = [r for r in later if r[0] == "set_commit"]
+    alts = [r for r in later if r[0] == "set_alt"]
+    want_alt = next(int(m.group(1)) for m in [re.search(
+        r"alternate (\d+)", cam.expected()[mode])])
+    check("committed (%s), alternate %d and then 0 (%s), the stream "
+          "started and stopped"
+          % ([(c[2][2], c[2][3]) for c in commits], want_alt, alts),
+          len(commits) == 1 and commits[0][2][2:4] == bytes([f, fr]) and
+          [a[2] for a in alts] == [want_alt, 0] and
+          ("start_iso", 0x81) in later and ("stop_iso", 0x81) in later)
 
 
 def main():

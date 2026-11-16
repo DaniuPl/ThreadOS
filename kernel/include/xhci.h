@@ -80,4 +80,18 @@ int xhci_bulk_endpoint(int slot, int in_ep, int out_ep, int maxpacket);
 int xhci_bulk_out(int slot, int ep, const void *data, int len);
 int xhci_bulk_in(int slot, int ep, void *data, int len);
 
+/* An isochronous IN endpoint - a camera's - for one stream at a time.
+   open: declares it ('raw_mps' as the descriptor writes it, extra
+   transactions in bits 12:11): 0, -1, or -2 when the bus has no room.
+   start: fills the ring and starts it. poll: hands every TD that came
+   back to fn (data and length, or lost=1) and refills: the number
+   handed out. close: stops and drops it. lost: how often the ring ran
+   dry or a service interval passed with no TD. */
+int xhci_iso_open(int slot, int ep, int raw_mps, int binterval);
+int xhci_iso_start(int slot);
+int xhci_iso_poll(int slot, void (*fn)(void *arg, const uint8_t *data,
+                                        int len, int lost), void *arg);
+int xhci_iso_close(int slot);
+int xhci_iso_lost(void);
+
 #endif

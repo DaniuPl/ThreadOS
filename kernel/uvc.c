@@ -24,6 +24,11 @@
 #include "include/usbhc.h"
 #include "include/printk.h"
 #include "include/string.h"
+#include "include/spinlock.h"
+#include "include/task.h"
+#include "include/pit.h"
+#include "include/pmm.h"
+#include "include/gpt.h"
 
 #define CS_INTERFACE 0x24
 #define VC_HEADER    0x01
@@ -39,6 +44,7 @@
 #define SET_CUR 0x01
 #define GET_CUR 0x81
 #define VS_PROBE_CONTROL 0x01
+#define VS_COMMIT_CONTROL 0x02
 
 static uint32_t le32(const uint8_t *p)
 {
@@ -351,4 +357,297 @@ void uvc_print(void)
             printk(", payload %u B, alternate %d (%u B)\n", m->payload,
                    m->alt, m->alt_bytes);
     }
+}
+
+/* --- pictures ------------------------------------------------------------
+ *
+ * A frame comes in payloads: every isochronous packet starts with a
+ * header of its own (its length, then a bit field: FID, which flips
+ * with every frame; EOF on a frame's last payload; ERR when the camera
+ * knows the frame is bad) and goes on with a piece of the frame. The
+ * pieces are put together in the fill buffer; a frame ends at EOF or
+ * when FID flips, and only a whole one is handed out: a lost TD, an
+ * ERR, too many bytes or (uncompressed) the wrong number of them throw
+ * it away. The first frame after starting is thrown away too, as it
+ * began before anybody was listening.
+ *
+ * Three buffers: the pump fills one, the newest whole frame waits in
+ * the second, and the reader has the third; a reader takes the newest
+ * by swapping under a lock, so nothing is ever torn and nobody waits.
+ */
+
+static struct spinlock frames_lock = SPINLOCK_FREE;
+static uint8_t *fb[3];               /* fill, ready, read */
+static uint32_t fb_len[3], fb_pages, frame_max, frame_exact;
+static uint32_t ready_seq;           /* 0 = nothing ready yet */
+static int fill_bad, synced, fid = -1, after_eof;
+static volatile int streaming, pump_running;
+static int stream_mode = -1, stream_alt;
+static uint32_t n_frames, n_dropped, n_lost;
+
+static void frame_end(void)
+{
+    uint32_t len = fb_len[0];
+    int ok = synced && !fill_bad && len > 0;
+    const struct uvc_mode *m = &cam.modes[stream_mode];
+    if (ok && frame_exact && len != frame_exact)
+        ok = 0;                       /* an uncompressed frame is exact */
+    if (ok && m->fourcc == ('M' | 'J' << 8 | 'P' << 16 | (uint32_t)'G' << 24)) {
+        /* A JPEG starts with SOI; whatever a camera pads after EOI is
+           not the picture */
+        if (len < 4 || fb[0][0] != 0xFF || fb[0][1] != 0xD8)
+            ok = 0;
+        while (ok && len >= 2 && !(fb[0][len - 2] == 0xFF &&
+                                   fb[0][len - 1] == 0xD9))
+            len--;
+        if (len < 4)
+            ok = 0;
+    }
+    if (ok) {
+        irqflags_t f = spin_lock_irq(&frames_lock);
+        uint8_t *t = fb[0];
+        fb[0] = fb[1];
+        fb[1] = t;
+        fb_len[1] = len;
+        ready_seq++;
+        spin_unlock_irq(&frames_lock, f);
+        n_frames++;
+    } else if (synced && fb_len[0]) {
+        n_dropped++;
+    }
+    fb_len[0] = 0;
+    fill_bad = 0;
+}
+
+static void payload(void *arg, const uint8_t *d, int len, int lost)
+{
+    (void)arg;
+    if (lost) {
+        n_lost++;
+        fill_bad = 1;
+        return;
+    }
+    if (len == 0)
+        return;                       /* nothing in this interval */
+    int hl = d[0];
+    if (hl < 2 || hl > len) {
+        fill_bad = 1;
+        return;
+    }
+    int info = d[1], f = info & 1;
+    if (fid >= 0 && f != fid) {
+        /* a new frame: what came before ends here, if EOF did not end
+           it already */
+        if (!after_eof)
+            frame_end();
+        if (!synced) {
+            synced = 1;               /* from here on frames are whole */
+            fb_len[0] = 0;
+            fill_bad = 0;
+        }
+        after_eof = 0;
+    }
+    fid = f;
+    if (after_eof)
+        return;                       /* headers after the end of a frame */
+    if (info & 0x40)
+        fill_bad = 1;                 /* ERR: the camera says it is bad */
+    uint32_t n = (uint32_t)(len - hl);
+    if (fb_len[0] + n > frame_max) {
+        fill_bad = 1;
+    } else {
+        memcpy(fb[0] + fb_len[0], d + hl, n);
+        fb_len[0] += n;
+    }
+    if (info & 2) {
+        frame_end();
+        after_eof = 1;
+    }
+}
+
+static void pump(void *arg)
+{
+    (void)arg;
+    while (streaming) {
+        usbhc_iso_poll(cam_dev, payload, (void *)0);
+        task_sleep(1);
+    }
+    pump_running = 0;
+}
+
+static void frames_free(void)
+{
+    for (int k = 0; k < 3; k++) {
+        if (fb[k])
+            for (uint32_t p = 0; p < fb_pages; p++)
+                pmm_free_frame((uint32_t)(uintptr_t)fb[k] + p * 4096);
+        fb[k] = (uint8_t *)0;
+        fb_len[k] = 0;
+    }
+}
+
+int uvc_start(int mode)
+{
+    if (!present || mode < 0 || mode >= cam.nmodes)
+        return -1;
+    if (streaming)
+        return -6;
+    struct uvc_mode *m = &cam.modes[mode];
+    if (m->alt == 0)
+        return -5;
+    const struct uvc_alt *a = (const struct uvc_alt *)0;
+    for (int k = 0; k < cam.nalts; k++)
+        if (cam.alts[k].alt == m->alt)
+            a = &cam.alts[k];
+    if (!a)
+        return -2;
+
+    /* Asked again, and what the camera answers is what is committed:
+       the same bytes, as the specification wants */
+    int n = uvc_probe_size(cam.bcd_uvc);
+    uint8_t ask[48], got[48];
+    memset(ask, 0, sizeof(ask));
+    ask[0] = 1;
+    ask[2] = m->format;
+    ask[3] = m->frame;
+    ask[4] = (uint8_t)m->interval;
+    ask[5] = (uint8_t)(m->interval >> 8);
+    ask[6] = (uint8_t)(m->interval >> 16);
+    ask[7] = (uint8_t)(m->interval >> 24);
+    uint8_t setup[8] = { 0x21, SET_CUR, 0, VS_PROBE_CONTROL,
+                         cam.vs_iface, 0, (uint8_t)n, 0 };
+    memset(got, 0, sizeof(got));
+    if (usbhc_control(cam_dev, setup, ask, n, 0) < 0)
+        return -3;
+    setup[0] = 0xA1;
+    setup[1] = GET_CUR;
+    if (usbhc_control(cam_dev, setup, got, n, 1) < 26)
+        return -3;
+    setup[0] = 0x21;
+    setup[1] = SET_CUR;
+    setup[3] = VS_COMMIT_CONTROL;
+    if (usbhc_control(cam_dev, setup, got, n, 0) < 0)
+        return -3;
+
+    /* Room for a frame: what the camera says one can be, or what an
+       uncompressed one is */
+    int yuy2 = m->fourcc == ('Y' | 'U' << 8 | 'Y' << 16 | (uint32_t)'2' << 24);
+    frame_exact = yuy2 ? (uint32_t)m->w * m->h * 2 : 0;
+    frame_max = le32(got + 18);
+    if (frame_max < frame_exact)
+        frame_max = frame_exact;
+    if (!frame_max)
+        frame_max = (uint32_t)m->w * m->h * 2;
+    fb_pages = (frame_max + 4095) / 4096;
+    for (int k = 0; k < 3; k++) {
+        uint32_t at = pmm_alloc_contiguous(fb_pages);
+        if (!at) {
+            frames_free();
+            return -4;
+        }
+        fb[k] = (uint8_t *)(uintptr_t)at;
+    }
+
+    /* The endpoint first - a controller with no room says so here -
+       then the camera to that alternate, then the TDs */
+    int r = usbhc_iso_open(cam_dev, a->ep, a->raw_mps, a->interval);
+    if (r < 0) {
+        frames_free();
+        return r == -2 ? -2 : -1;
+    }
+    if (usbhc_request(cam_dev, 0x01, 0x0B, (uint16_t)m->alt, cam.vs_iface) < 0) {
+        usbhc_iso_close(cam_dev);
+        frames_free();
+        return -3;
+    }
+    ready_seq = 0;
+    fill_bad = synced = after_eof = 0;
+    fid = -1;
+    n_frames = n_dropped = n_lost = 0;
+    stream_mode = mode;
+    stream_alt = m->alt;
+    streaming = pump_running = 1;
+    usbhc_iso_start(cam_dev);
+    task_create("uvc", pump, (void *)0);
+    return 0;
+}
+
+void uvc_stop(void)
+{
+    if (!streaming)
+        return;
+    streaming = 0;
+    for (int i = 0; i < 300 && pump_running; i++)
+        task_sleep(1);
+    usbhc_iso_close(cam_dev);
+    /* Back to alternate 0: the camera stops, and its light goes out */
+    usbhc_request(cam_dev, 0x01, 0x0B, 0, cam.vs_iface);
+    frames_free();
+    stream_mode = -1;
+}
+
+int uvc_streaming(void)
+{
+    return streaming;
+}
+
+const uint8_t *uvc_frame(uint32_t *len, uint32_t *seq)
+{
+    irqflags_t f = spin_lock_irq(&frames_lock);
+    if (!streaming || !ready_seq || ready_seq == *seq) {
+        spin_unlock_irq(&frames_lock, f);
+        return (const uint8_t *)0;
+    }
+    uint8_t *t = fb[2];
+    fb[2] = fb[1];
+    fb[1] = t;
+    fb_len[2] = fb_len[1];
+    *seq = ready_seq;
+    spin_unlock_irq(&frames_lock, f);
+    *len = fb_len[2];
+    return fb[2];
+}
+
+void uvc_counts(uint32_t *frames, uint32_t *dropped, uint32_t *lost)
+{
+    *frames = n_frames;
+    *dropped = n_dropped;
+    *lost = n_lost;
+}
+
+void uvc_grab(int mode, int n)
+{
+    int r = uvc_start(mode);
+    if (r < 0) {
+        static const char *const why[] = {
+            "", "no such mode, or no camera", "no room on the USB bus",
+            "the camera said no", "no memory for the frames",
+            "a bulk camera: it streams in a later stage", "already busy" };
+        printk("camera: cannot start mode %d - %s\n", mode,
+               why[-r < 7 ? -r : 1]);
+        return;
+    }
+    uint32_t seq = 0;
+    int got = 0;
+    uint32_t until = pit_ticks() + 300 + (uint32_t)n * 100;
+    while (got < n && pit_ticks() < until) {
+        uint32_t len;
+        const uint8_t *f = uvc_frame(&len, &seq);
+        if (!f) {
+            task_sleep(1);
+            continue;
+        }
+        const struct uvc_mode *m = &cam.modes[mode];
+        char cc[5];
+        for (int i = 0; i < 4; i++)
+            cc[i] = (char)(m->fourcc >> (8 * i));
+        cc[4] = 0;
+        printk("frame %d: %ux%u %s, %u bytes, crc32 %x\n", got,
+               (uint32_t)m->w, (uint32_t)m->h, cc, len, crc32(f, len));
+        got++;
+    }
+    uint32_t fr, dr, lo;
+    uvc_counts(&fr, &dr, &lo);
+    uvc_stop();
+    printk("camera: %d of %d frames, %u dropped, %u lost\n", got, n, dr, lo);
 }

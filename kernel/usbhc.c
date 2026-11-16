@@ -1037,6 +1037,28 @@ int usbhc_bulk_endpoint(int dev, int in_ep, int out_ep, int maxpacket)
     return 0;
 }
 
+int usbhc_iso_open(int dev, int ep, int raw_mps, int binterval)
+{
+    return controller == XHCI && dev >= 1 ?
+           xhci_iso_open(dev, ep, raw_mps, binterval) : -1;
+}
+
+int usbhc_iso_start(int dev)
+{
+    return controller == XHCI && dev >= 1 ? xhci_iso_start(dev) : -1;
+}
+
+int usbhc_iso_poll(int dev, void (*fn)(void *arg, const uint8_t *data,
+                                       int len, int lost), void *arg)
+{
+    return controller == XHCI && dev >= 1 ? xhci_iso_poll(dev, fn, arg) : -1;
+}
+
+int usbhc_iso_close(int dev)
+{
+    return controller == XHCI && dev >= 1 ? xhci_iso_close(dev) : -1;
+}
+
 int usbhc_bulk_out(int dev, int ep, const void *data, int len)
 {
     if (dev < 1)

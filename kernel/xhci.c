@@ -113,6 +113,8 @@
 #define TRB_ADDRESS_DEV 11
 #define TRB_CONFIG_EP   12
 #define TRB_EVAL_CTX    13
+#define TRB_ISOCH       5           /* one TD of an isochronous endpoint */
+#define TRB_STOP_EP     15
 #define TRB_EV_TRANSFER 32         /* event: a transfer is finished */
 #define TRB_EV_COMMAND 33         /* event: a command has been executed */
 
@@ -124,6 +126,8 @@
 #define CODE_OK      1
 #define CODE_NO_SLOTS   9           /* every device slot is taken */
 #define CODE_SHORT      13          /* less arrived than we asked for - that is not an error */
+#define CODE_BANDWIDTH  8           /* no room on the bus for that endpoint */
+#define TRB_SIA         (1u << 31)  /* isochronous: as soon as possible */
 
 /* Devices at once. Four was enough for a keyboard and a stick in QEMU;
    a laptop has a webcam, a card reader, a fingerprint reader and the
@@ -144,6 +148,7 @@ struct ring {
     struct trb *trb;
     uint32_t index;
     uint32_t cycle;
+    uint32_t size;          /* TRBs, the jump back included */
 };
 
 static uintptr_t base;              /* the capability part */
@@ -160,7 +165,12 @@ static int ctx_size = 32;        /* 32 or 64 B per context - HCCPARAMS1 says whi
    gets a page; two 2048-byte device contexts share one. */
 static uint64_t dcbaa[SLOTS + 1] __attribute__((aligned(256)));
 static struct trb cmd_trb[TRB_CHAIN] __attribute__((aligned(256)));
-static struct trb evt_trb[TRB_CHAIN] __attribute__((aligned(256)));
+/* The event ring is longer than the others: a camera's endpoint
+   finishes up to eight TDs a millisecond, and the controller is read
+   every ten. A full event ring is where a controller starts missing
+   service. Aligned to its size, it cannot cross 64 KiB. */
+#define EVT_TRBS       1024
+static struct trb evt_trb[EVT_TRBS] __attribute__((aligned(16384)));
 static uint32_t erst[4] __attribute__((aligned(64)));
 static uint8_t dev_ctx[SLOTS][DEV_CTX_BYTES] __attribute__((aligned(4096)));
 static uint8_t in_ctx[SLOTS][4096] __attribute__((aligned(4096)));
@@ -284,21 +294,27 @@ static uint32_t portsc_safe(uint32_t v)
 
 /* --- rings ------------------------------------------------------------ */
 
-static void ring_setup(struct ring *p, struct trb *trb)
+static void ring_setup_n(struct ring *p, struct trb *trb, uint32_t n)
 {
-    memset(trb, 0, sizeof(struct trb) * TRB_CHAIN);
+    memset(trb, 0, sizeof(struct trb) * n);
     p->trb = trb;
     p->index = 0;
     p->cycle = 1;
+    p->size = n;
 
     /* The last TRB is a jump back to the start. The "toggle cycle" bit
        makes the meaning of the cycle bit flip on every turn - and that
        is why a ring never has to be cleared. */
-    struct trb *jump = &trb[TRB_CHAIN - 1];
+    struct trb *jump = &trb[n - 1];
     jump->p0 = (uint32_t)fiz(trb);
     jump->p1 = (uint32_t)(fiz(trb) >> 32);
     jump->status = 0;
     jump->control = ((uint32_t)TRB_LINK << 10) | TRB_TC;
+}
+
+static void ring_setup(struct ring *p, struct trb *trb)
+{
+    ring_setup_n(p, trb, TRB_CHAIN);
 }
 
 /* One lock for the rings, and one turn for a whole command.
@@ -336,8 +352,8 @@ static uint64_t insert(struct ring *p, uint64_t param, uint32_t status,
     t->control = control | p->cycle;
 
     p->index++;
-    if (p->index == TRB_CHAIN - 1) {
-        struct trb *jump = &p->trb[TRB_CHAIN - 1];
+    if (p->index == p->size - 1) {
+        struct trb *jump = &p->trb[p->size - 1];
         jump->control = (jump->control & ~1u) | p->cycle;
         p->index = 0;
         p->cycle ^= 1;
@@ -359,7 +375,7 @@ static int event(struct trb *result)
     result->control = t->control;
 
     evt_index++;
-    if (evt_index == TRB_CHAIN) {
+    if (evt_index == EVT_TRBS) {
         evt_index = 0;
         evt_cycle ^= 1;
     }
@@ -377,6 +393,8 @@ static int event(struct trb *result)
    it. A transfer goes under its slot, which is the top byte of the
    control word - and that byte is the only reason two devices can
    share one ring at all. */
+static int iso_event(int slot, int dci, const struct trb *t);
+
 static void sort_events(void)
 {
     struct trb t;
@@ -400,6 +418,11 @@ static void sort_events(void)
             continue;
         int s = (int)((t.control >> 24) & 0xFF);
         if (s < 1 || s > SLOTS)
+            continue;
+        /* A camera's TDs are not anybody's answer: filed with the rest,
+           one would be taken for the reply to a control transfer on
+           the same device */
+        if (iso_event(s, (int)((t.control >> 16) & 0x1F), &t))
             continue;
         int next = (done[s - 1].head + 1) % COMPS;
         if (next == done[s - 1].tail)
@@ -794,7 +817,7 @@ int xhci_init(void)
     evt_cycle = 1;
     erst[0] = (uint32_t)fiz(evt_trb);
     erst[1] = (uint32_t)(fiz(evt_trb) >> 32);
-    erst[2] = TRB_CHAIN;
+    erst[2] = EVT_TRBS;
     erst[3] = 0;
     wr(rt + RT_ERSTSZ, 1);
     wr64(rt + RT_ERDP, fiz(evt_trb) | 0x8);
@@ -1329,6 +1352,266 @@ int xhci_port_connected(int port)
     return (rd(port_reg(port)) & PORT_CCS) ? 1 : 0;
 }
 
+/* --- isochronous IN ------------------------------------------------------
+ *
+ * A camera sends a picture as a steady stream: a packet (or up to three
+ * at high speed) every service interval, whether anybody is reading or
+ * not. The endpoint is isochronous - no retries, no handshakes - and
+ * the way to keep up is to keep the controller supplied with TDs, one
+ * per interval, well ahead of time.
+ *
+ * So the ring is filled once with a TD for every interval of about the
+ * next thirty milliseconds, each with its own buffer, and each TD that
+ * comes back is handed out and put straight back where it was: TD i is
+ * always ring entry i and buffer i, and since the ring is refilled in
+ * the order it is used, the cycle bits alone say whose an entry is.
+ * Every TD asks for an event, and the events of this endpoint are
+ * sorted here instead of into the device's queue.
+ *
+ * One stream at a time: one camera. Starting as soon as possible
+ * (SIA) rather than at a frame number keeps this away from the
+ * controller's frame counter.
+ */
+#define ISO_TD_MAX 255          /* + the jump back: a page of TRBs */
+
+static struct {
+    int running;
+    int slot, dci, esit, mps, tds;
+    struct ring ring;
+    struct trb *trbs;
+    uint32_t pages[ISO_TD_MAX];  /* the buffers, a page holding one or more */
+    uint32_t slot_bytes;         /* one TD's buffer: a power of two */
+    uint32_t next;               /* the oldest TD not yet handed out */
+    volatile uint8_t done[ISO_TD_MAX];
+    uint8_t code[ISO_TD_MAX];
+    uint32_t left[ISO_TD_MAX];
+    volatile uint32_t overruns;
+} iso;
+
+static uint8_t *iso_buf(uint32_t i)
+{
+    uint32_t per = 4096 / iso.slot_bytes;
+    return (uint8_t *)(uintptr_t)iso.pages[i / per] + (i % per) * iso.slot_bytes;
+}
+
+/* Called with the ring lock held, from sort_events: 1 = it was ours */
+static int iso_event(int slot, int dci, const struct trb *t)
+{
+    if (!iso.running || slot != iso.slot || dci != iso.dci)
+        return 0;
+    uint64_t at = (uint64_t)t->p0 | ((uint64_t)t->p1 << 32);
+    uint64_t first = fiz(iso.trbs);
+    if (at >= first && at < first + (uint64_t)iso.tds * sizeof(struct trb)) {
+        uint32_t i = (uint32_t)((at - first) / sizeof(struct trb));
+        iso.code[i] = (uint8_t)(t->status >> 24);
+        iso.left[i] = t->status & 0xFFFFFF;
+        iso.done[i] = 1;
+    } else {
+        /* No TD: the ring ran dry (overrun, underrun) or a service
+           interval was missed - the controller has stopped looking at
+           this endpoint until it is rung again */
+        iso.overruns++;
+    }
+    return 1;
+}
+
+static void iso_queue(uint32_t i)
+{
+    uint32_t packets = (uint32_t)((iso.esit + iso.mps - 1) / iso.mps);
+    insert(&iso.ring, fiz(iso_buf(i)), (uint32_t)iso.esit,
+           ((uint32_t)TRB_ISOCH << 10) | TRB_IOC | TRB_ISP |
+           ((packets - 1) << 16) | TRB_SIA);
+}
+
+static void iso_free(void)
+{
+    uint32_t per = iso.slot_bytes ? 4096 / iso.slot_bytes : 1;
+    for (int i = 0; i < iso.tds; i += (int)per)
+        if (iso.pages[i / per])
+            pmm_free_frame(iso.pages[i / per]);
+    if (iso.trbs)
+        pmm_free_frame((uint32_t)(uintptr_t)iso.trbs);
+    memset(&iso, 0, sizeof(iso));
+}
+
+int xhci_iso_open(int slot, int ep, int raw_mps, int binterval)
+{
+    if (!base || slot < 1 || slot > SLOTS || ep < 1 || iso.running ||
+        iso.trbs)
+        return -1;
+    int speed = slot_speed[slot - 1];
+    int mps = raw_mps & 0x7FF;
+    int mult = speed == 3 ? 1 + ((raw_mps >> 11) & 3) : 1;
+    if (mps < 1 || mult > 3)
+        return -1;
+    int esit = mps * mult;
+    int b = binterval < 1 ? 1 : binterval > 16 ? 16 : binterval;
+    /* The interval field counts 2^n microframes. High speed already
+       writes it that way (2^(bInterval-1) microframes); full speed
+       writes 2^(bInterval-1) frames, three doublings more. */
+    int period = b - 1 + (speed >= 3 ? 0 : 3);
+    if (period > 15)
+        period = 15;
+
+    /* About thirty milliseconds of TDs: the driver is read every ten */
+    int us = 125 << period;
+    int tds = 30000 / us;
+    if (tds < 16)
+        tds = 16;
+    if (tds > ISO_TD_MAX)
+        tds = ISO_TD_MAX;
+
+    iso.slot_bytes = 1024;
+    while ((int)iso.slot_bytes < esit)
+        iso.slot_bytes <<= 1;
+    if (iso.slot_bytes > 4096)
+        return -1;
+    iso.slot = slot;
+    iso.esit = esit;
+    iso.mps = mps;
+    iso.tds = tds;
+    iso.dci = dci_dir(ep, 1);
+    uint32_t per = 4096 / iso.slot_bytes;
+    for (int i = 0; i < tds; i += (int)per) {
+        uint32_t page = pmm_alloc_frame();
+        if (!page) {
+            iso_free();
+            return -1;
+        }
+        iso.pages[i / per] = page;
+    }
+    uint32_t ring_page = pmm_alloc_frame();
+    if (!ring_page) {
+        iso_free();
+        return -1;
+    }
+    iso.trbs = (struct trb *)(uintptr_t)ring_page;
+    ring_setup_n(&iso.ring, iso.trbs, (uint32_t)tds + 1);
+
+    uint8_t *we = in_ctx[slot - 1];
+    memset(we, 0, CTX_BYTES);
+    uint32_t *control = info(we, 0);
+    control[1] = 0x1u | (1u << iso.dci);
+    uint32_t *src = info(dev_ctx[slot - 1], 0);
+    uint32_t last = src[0] >> 27;
+    if ((uint32_t)iso.dci > last)
+        last = (uint32_t)iso.dci;
+    uint32_t *device = info(we, 1);
+    device[0] = (src[0] & 0x07FFFFFFu) | (last << 27);
+    device[1] = src[1];
+
+    /* Isochronous IN (type 5): no retries (CErr 0); below SuperSpeed
+       the extra transactions go in Max Burst and Mult stays 0; the
+       payload of a service interval in Max ESIT Payload, and as the
+       average TRB length */
+    uint32_t *punkt = info(we, iso.dci + 1);
+    punkt[0] = ((uint32_t)period << 16) | (((uint32_t)esit >> 16) << 24);
+    punkt[1] = (5u << 3) | ((uint32_t)(mult - 1) << 8) |
+               ((uint32_t)mps << 16);
+    uint64_t p = fiz(iso.trbs) | 1;
+    punkt[2] = (uint32_t)p;
+    punkt[3] = (uint32_t)(p >> 32);
+    punkt[4] = (uint32_t)esit | (((uint32_t)esit & 0xFFFF) << 16);
+
+    int code = command(fiz(we), ((uint32_t)TRB_CONFIG_EP << 10) |
+                                ((uint32_t)slot << 24), (struct trb *)0);
+    if (code != CODE_OK) {
+        iso_free();
+        return code == CODE_BANDWIDTH ? -2 : -1;
+    }
+    return 0;
+}
+
+int xhci_iso_start(int slot)
+{
+    if (!iso.trbs || slot != iso.slot || iso.running)
+        return -1;
+    for (int i = 0; i < iso.tds; i++)
+        iso.done[i] = 0;
+    iso.next = 0;
+    iso.overruns = 0;
+    iso.running = 1;
+    for (int i = 0; i < iso.tds; i++)
+        iso_queue((uint32_t)i);
+    doorbells[slot] = (uint32_t)iso.dci;
+    return 0;
+}
+
+/* Hands out every TD that has come back, oldest first, and puts each
+   back on the ring. A TD skipped by the controller (a missed service
+   interval leaves no event of its own) is handed out as lost, once a
+   later one is known to be done. The number handed out, or -1. */
+int xhci_iso_poll(int slot, void (*fn)(void *arg, const uint8_t *data,
+                                        int len, int lost), void *arg)
+{
+    if (!iso.running || slot != iso.slot)
+        return -1;
+    sort_events();
+    int handed = 0;
+    for (int n = 0; n < iso.tds; n++) {
+        uint32_t i = iso.next;
+        int skipped = 0;
+        if (!iso.done[i]) {
+            int later = 0;
+            for (int k = 1; k < iso.tds && !later; k++)
+                later = iso.done[(i + (uint32_t)k) % (uint32_t)iso.tds];
+            if (!later)
+                break;
+            /* (another thread may have sorted its event in meanwhile:
+               then it was late, not lost) */
+            skipped = !iso.done[i];
+        }
+        if (skipped) {
+            fn(arg, (const uint8_t *)0, 0, 1);
+        } else if (iso.code[i] == CODE_OK || iso.code[i] == CODE_SHORT) {
+            int len = iso.esit - (int)iso.left[i];
+            fn(arg, iso_buf(i), len < 0 ? 0 : len, 0);
+        } else {
+            fn(arg, (const uint8_t *)0, 0, 1);
+        }
+        iso.done[i] = 0;
+        iso_queue(i);
+        iso.next = (i + 1) % (uint32_t)iso.tds;
+        handed++;
+    }
+    /* Rung every time: harmless while it runs, and what starts it
+       again after the ring ran dry */
+    doorbells[slot] = (uint32_t)iso.dci;
+    return handed;
+}
+
+int xhci_iso_lost(void)
+{
+    return (int)iso.overruns;
+}
+
+int xhci_iso_close(int slot)
+{
+    if (!iso.trbs || slot != iso.slot)
+        return -1;
+    if (iso.running) {
+        command(0, ((uint32_t)TRB_STOP_EP << 10) | ((uint32_t)iso.dci << 16) |
+                   ((uint32_t)slot << 24), (struct trb *)0);
+        /* ... and dropped, so its share of the bus is given back */
+        uint8_t *we = in_ctx[slot - 1];
+        memset(we, 0, CTX_BYTES);
+        uint32_t *control = info(we, 0);
+        control[0] = 1u << iso.dci;
+        control[1] = 0x1u;
+        uint32_t *src = info(dev_ctx[slot - 1], 0);
+        uint32_t *device = info(we, 1);
+        device[0] = src[0];
+        device[1] = src[1];
+        command(fiz(we), ((uint32_t)TRB_CONFIG_EP << 10) |
+                         ((uint32_t)slot << 24), (struct trb *)0);
+    }
+    irqflags_t flags = spin_lock_irq(&ring_lock);
+    iso.running = 0;
+    spin_unlock_irq(&ring_lock, flags);
+    iso_free();
+    return 0;
+}
+
 /* Gives a slot back to the controller. Without this a machine that
    somebody plugs a stick into four times has no slots left - and the
    fifth one is simply not seen, which looks like a broken socket. */
@@ -1336,6 +1619,13 @@ int xhci_release(int slot)
 {
     if (!base || slot < 1 || slot > SLOTS)
         return -1;
+    if (iso.trbs && iso.slot == slot) {
+        /* the camera went: nothing to stop, its memory to give back */
+        irqflags_t flags = spin_lock_irq(&ring_lock);
+        iso.running = 0;
+        spin_unlock_irq(&ring_lock, flags);
+        iso_free();
+    }
 
     command(0, ((uint32_t)TRB_DISABLE_SLOT << 10) | ((uint32_t)slot << 24),
             (struct trb *)0);
