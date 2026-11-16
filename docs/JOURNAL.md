@@ -8073,3 +8073,30 @@ works and is checked by `make test`.
       past, because the step was inside a macro that skipped its
       argument when full - a long error from the card would have hung
       whoever asked for it.
+
+- [x] **The Gallery**
+      (user64/ggallery.c, user/upng.h, user/gimg.c, kernel/desktop.c,
+      Makefile, tests/fuzz/harness.c, scripts/fuzz_parsers.py,
+      scripts/tests/t_gallery.py)
+      A person's pictures in one place, as pictures: the Gallery shows
+      what is in the Gallery folder of the home - made the first time
+      it opens - as squares, each picture shrunk into its own by
+      averaging every pixel under a pixel of the square, the name
+      under it. A click opens one over the window; the arrow keys or a
+      click at either side go to the one before or after, Back or
+      Backspace to all of them. The folder is looked at every two
+      seconds, so a picture saved there - by the Camera, to come -
+      appears by itself. It decodes with the system's own PNG, JPEG,
+      GIF, WebP and SVG readers, one picture a pass so the window is
+      there at once, and is built against musl, because a folder of
+      pictures needs memory given back. PNG moved out of the viewer
+      into upng.h for it, and now reads every depth a PNG comes in -
+      1, 2 and 4 bits a pixel for palettes and grey, and 16 - where the
+      viewer read only 8; `make fuzz` puts it through damaged files and
+      holds its pixels against Pillow's for every kind, and against
+      the top bytes of a 16-bit picture made by hand. t_gallery fetches
+      a PNG, a JPEG, a GIF, a broken PNG and a text file into the
+      folder and checks the squares' colours against Pillow, the names
+      in order, the broken one saying so, the opened picture at its
+      own size, the arrow and Backspace, and a picture arriving while
+      it is open.

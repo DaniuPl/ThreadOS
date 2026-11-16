@@ -444,7 +444,8 @@ def seeds(workdir):
 
     j = lambda n: os.path.join(workdir, n)
     out = {"x509": [], "ecdsa": [], "html": [], "http": [],
-           "inflate": [], "jpeg": [], "cookie": [], "gif": [], "svg": [], "webp": [],
+           "inflate": [], "jpeg": [], "cookie": [], "gif": [], "png": [],
+           "svg": [], "webp": [],
            "brotli": [], "woff": []}
 
     for tag, keyargs in [("rsa", ["-newkey", "rsa:2048"]),
@@ -489,6 +490,7 @@ def seeds(workdir):
     out["inflate"].append(raw.compress(body) + raw.flush())
 
     out["gif"] += [g for g, _ in gif_samples()]
+    out["png"] += [p for p, _ in png_samples()]
 
     # The pictures the SVG test draws: every part of SVG it knows
     sys.path.insert(0, os.path.join(ROOT, "scripts", "tests"))
@@ -591,6 +593,95 @@ def gif_pixels(binary):
     return wrong
 
 
+def png_samples():
+    """PNGs written by Pillow, with what Pillow reads back from each: all
+    five colour kinds - grey, grey with alpha, RGB, RGBA, a palette with
+    a transparent entry - in pictures whose rows need every filter, as
+    (file, (w, h, rgba bytes))"""
+    from PIL import Image
+    import io
+    out = []
+    w, h = 37, 23
+    base = Image.new("RGBA", (w, h))
+    base.putdata([((x * 7) & 255, (y * 11) & 255, (x * y) & 255,
+                   (x * 13 + y * 5) & 255) for y in range(h) for x in range(w)])
+    pics = []
+    for mode in ("L", "LA", "RGB", "RGBA"):
+        pics.append((base.convert(mode), {}))
+    # palettes of 2, 4, 16 and 256 colours: Pillow writes them at 1, 2,
+    # 4 and 8 bits a pixel; and grey at one bit
+    for colours in (2, 4, 16, 256):
+        pal = base.convert("RGB").quantize(colors=colours)
+        pal.info["transparency"] = 1
+        pics.append((pal, {"bits": max(1, (colours - 1).bit_length())}))
+    pics.append((base.convert("1"), {}))
+    for pic, extra in pics:
+        b = io.BytesIO()
+        pic.save(b, "PNG", optimize=False, **extra)
+        data = b.getvalue()
+        back = Image.open(io.BytesIO(data)).convert("RGBA")
+        out.append((data, (w, h, back.tobytes())))
+    # Sixteen bits a channel, RGBA, made here: Pillow reads such files
+    # by clipping rather than scaling, so what is wanted is known from
+    # the making instead - the top byte of every channel - and every
+    # row has another of the five filters
+    import struct
+    import zlib as z
+
+    def chunk(kind, body):
+        return (struct.pack(">I", len(body)) + kind + body +
+                struct.pack(">I", z.crc32(kind + body) & 0xFFFFFFFF))
+    rows, want = b"", bytearray()
+    prev = bytes(w * 8)
+    for y in range(h):
+        raw = bytearray()
+        for x in range(w):
+            for c in range(4):
+                v = ((x * 1031 + y * 517 + c * 9973) * 2654435761) & 0xFFFF
+                raw += struct.pack(">H", v)
+                want.append(v >> 8)
+        f = y % 5
+        line = bytearray(raw)
+        for i in range(len(raw)):
+            a = raw[i - 8] if i >= 8 else 0
+            b, c = prev[i], (prev[i - 8] if i >= 8 else 0)
+            if f == 1:
+                line[i] = (raw[i] - a) & 255
+            elif f == 2:
+                line[i] = (raw[i] - b) & 255
+            elif f == 3:
+                line[i] = (raw[i] - ((a + b) >> 1)) & 255
+            elif f == 4:
+                p_ = a + b - c
+                pa, pb, pc = abs(p_ - a), abs(p_ - b), abs(p_ - c)
+                pred = a if pa <= pb and pa <= pc else b if pb <= pc else c
+                line[i] = (raw[i] - pred) & 255
+        rows += bytes([f]) + bytes(line)
+        prev = bytes(raw)
+    data = (b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 16, 6, 0, 0, 0)) +
+            chunk(b"IDAT", z.compress(rows, 9)) + chunk(b"IEND", b""))
+    out.append((data, (w, h, bytes(want))))
+    return out
+
+
+def png_pixels(binary):
+    """Every PNG of png_samples() through the decoder: the pixels that
+    came out different from Pillow's"""
+    wrong = []
+    for data, (w, h, rgba) in png_samples():
+        path = os.path.join(os.path.dirname(binary), "sample.png")
+        with open(path, "wb") as f:
+            f.write(data)
+        run = subprocess.run([binary, "pngpixels", path], capture_output=True,
+                             text=True, timeout=30)
+        lines = run.stdout.split()
+        if len(lines) < 3 or lines[:2] != [str(w), str(h)] or \
+                bytes.fromhex(lines[2]) != rgba:
+            wrong.append("%dx%d: %s" % (w, h, " ".join(lines[:2])))
+    return wrong
+
+
 def cookie_dates(binary, rng):
     """The cookie date reader against Python's calendar: dates as servers
     write them - RFC 1123, the old RFC 850 with two-digit years, and C's
@@ -684,6 +775,10 @@ def main():
         print("  GIFs against Pillow's reading of them: %d wrong" % len(bad))
         for b in bad:
             failures.append(("gifpixels", b, "the pixels differ"))
+        bad = png_pixels(binary)
+        print("  PNGs against Pillow's reading of them: %d wrong" % len(bad))
+        for b in bad:
+            failures.append(("pngpixels", b, "the pixels differ"))
         wrong = fdt_layouts(fbinary, workdir)
         print("  device trees against what they were made with: %d wrong"
               % len(wrong))

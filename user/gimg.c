@@ -25,7 +25,7 @@
 
 #include "udraw.h"
 #include "ulocale.h"
-#include "uinflate.h"
+#include "upng.h"
 #include "ujpeg.h"
 
 #define W0 420
@@ -248,17 +248,6 @@ static void clear(int winid)
  */
 #define PNG_MAX_PIXELS (1024 * 1024)
 
-static int paeth(int a, int b, int c)
-{
-    int p = a + b - c;
-    int pa = p > a ? p - a : a - p;
-    int pb = p > b ? p - b : b - p;
-    int pc = p > c ? p - c : c - p;
-    if (pa <= pb && pa <= pc)
-        return a;
-    return pb <= pc ? b : c;
-}
-
 static int show_png(int fd, const uint8_t *head, int got)
 {
     if (!need_colour())
@@ -266,7 +255,8 @@ static int show_png(int fd, const uint8_t *head, int got)
     /* The whole file first: the deflate stream is spread across as
        many IDAT chunks as the writer felt like, and they have to be
        fed to the decoder as one. There is no call that says how long a
-       file is, so we take a ceiling and read until it ends. */
+       file is, so we take a ceiling and read until it ends. The
+       decoding is upng.h's, which the Gallery uses too. */
 #define PNG_MAX_FILE (2 * 1024 * 1024)
     uint8_t *file = malloc(PNG_MAX_FILE);
     if (!file) {
@@ -283,82 +273,24 @@ static int show_png(int fd, const uint8_t *head, int got)
             break;
         have += n;
     }
-    int size = have;
 
-    int w = 0, h = 0, depth = 0, colour = 0, interlace = 0;
-    uint8_t plte[256 * 3];
-    int plte_n = 0;
-    uint8_t *idat = malloc((uint32_t)size);   /* never larger than the file */
-    if (!idat) {
-        ecopy(note, "no memory for the picture", sizeof(note));
-        return -1;
-    }
-    int idat_n = 0;
-
-    int pos = 8;                              /* past the signature */
-    while (pos + 8 <= have) {
-        uint32_t len = ((uint32_t)file[pos] << 24) |
-                       ((uint32_t)file[pos + 1] << 16) |
-                       ((uint32_t)file[pos + 2] << 8) | file[pos + 3];
-        const uint8_t *name = file + pos + 4;
-        const uint8_t *body = file + pos + 8;
-        if (pos + 8 + (int)len + 4 > have)
-            break;
-
-        if (name[0] == 'I' && name[1] == 'H' && name[2] == 'D' &&
-            name[3] == 'R' && len >= 13) {
-            w = (int)(((uint32_t)body[0] << 24) | ((uint32_t)body[1] << 16) |
-                      ((uint32_t)body[2] << 8) | body[3]);
-            h = (int)(((uint32_t)body[4] << 24) | ((uint32_t)body[5] << 16) |
-                      ((uint32_t)body[6] << 8) | body[7]);
-            depth = body[8];
-            colour = body[9];
-            interlace = body[12];
-        } else if (name[0] == 'P' && name[1] == 'L' && name[2] == 'T' &&
-                   name[3] == 'E') {
-            plte_n = (int)(len / 3);
-            if (plte_n > 256)
-                plte_n = 256;
-            for (int i = 0; i < plte_n * 3; i++)
-                plte[i] = body[i];
-        } else if (name[0] == 'I' && name[1] == 'D' && name[2] == 'A' &&
-                   name[3] == 'T') {
-            for (uint32_t i = 0; i < len; i++)
-                idat[idat_n++] = body[i];
-        } else if (name[0] == 'I' && name[1] == 'E' && name[2] == 'N' &&
-                   name[3] == 'D') {
-            break;
-        }
-        pos += 8 + (int)len + 4;
-    }
-
-    if (w <= 0 || h <= 0 || w > ROW_MAX || (long)w * h > PNG_MAX_PIXELS) {
+    int w = 0, h = 0;
+    if (png_size(file, (unsigned)have, &w, &h) < 0 || w <= 0 || h <= 0 ||
+        w > ROW_MAX || (long)w * h > PNG_MAX_PIXELS) {
         ecopy(note, "odd dimensions", sizeof(note));
         return -1;
     }
-    if (depth != 8) {
-        ecopy(note, "I read PNG with 8 bits per channel", sizeof(note));
-        return -1;
-    }
-    if (interlace) {
-        ecopy(note, "I cannot read an interlaced PNG", sizeof(note));
-        return -1;
-    }
-    int chan = colour == 2 ? 3 : colour == 6 ? 4 : colour == 4 ? 2 :
-               colour == 0 ? 1 : colour == 3 ? 1 : 0;
-    if (!chan || (colour == 3 && !plte_n)) {
-        ecopy(note, "an unknown kind of PNG", sizeof(note));
-        return -1;
-    }
-
-    uint32_t raw_len = (uint32_t)h * (uint32_t)(1 + w * chan);
-    uint8_t *raw = malloc(raw_len);
-    if (!raw) {
+    uint32_t out_max = (uint32_t)w * (uint32_t)h * 4;
+    uint32_t work_max = (uint32_t)png_work_size(w, h, (unsigned)have);
+    uint8_t *px = malloc(out_max), *work = malloc(work_max);
+    if (!px || !work) {
         ecopy(note, "no memory for the picture", sizeof(note));
         return -1;
     }
-    if (inflate_zlib(idat, (unsigned)idat_n, raw, raw_len) < 0) {
-        ecopy(note, "the PNG stream does not add up", sizeof(note));
+    const char *why = "it did not work";
+    if (png_decode(file, (unsigned)have, px, out_max, work, work_max, &w, &h,
+                   &why) < 0) {
+        ecopy(note, why, sizeof(note));
         return -1;
     }
 
@@ -369,47 +301,14 @@ static int show_png(int fd, const uint8_t *head, int got)
     while ((img_w / step > room_w || img_h / step > room_h) && step < 16)
         step++;
     clear(winid);
-
-    /* Undoing the filters needs the row above, so the rows are walked
-       in order and the previous one kept. */
-    int stride = w * chan;
-    for (int y = 0; y < h; y++) {
-        uint8_t *cur = raw + (uint32_t)y * (uint32_t)(1 + stride);
-        int filter = cur[0];
-        uint8_t *line = cur + 1;
-        uint8_t *prev = y ? raw + (uint32_t)(y - 1) * (uint32_t)(1 + stride)
-                            + 1 : (uint8_t *)0;
-        for (int i = 0; i < stride; i++) {
-            int a = i >= chan ? line[i - chan] : 0;
-            int b = prev ? prev[i] : 0;
-            int c = (prev && i >= chan) ? prev[i - chan] : 0;
-            switch (filter) {
-            case 1: line[i] = (uint8_t)(line[i] + a); break;
-            case 2: line[i] = (uint8_t)(line[i] + b); break;
-            case 3: line[i] = (uint8_t)(line[i] + ((a + b) >> 1)); break;
-            case 4: line[i] = (uint8_t)(line[i] + paeth(a, b, c)); break;
-            default: break;                       /* 0: as it stands */
-            }
-        }
-
-        if (y % step)
-            continue;
+    for (int y = 0; y < h; y += step) {
         int dest = y / step;
         if (dest >= room_h)
             break;
         int n = 0;
         for (int x = 0; x < w && n < ROW_MAX; x += step) {
-            int r, g, b;
-            const uint8_t *px = line + (long)x * chan;
-            if (colour == 2 || colour == 6) {
-                r = px[0]; g = px[1]; b = px[2];
-            } else if (colour == 3) {
-                const uint8_t *c = plte + (px[0] % (plte_n ? plte_n : 1)) * 3;
-                r = c[0]; g = c[1]; b = c[2];
-            } else {
-                r = g = b = px[0];                /* grey, with or without alpha */
-            }
-            out32[n++] = rgb(r, g, b);
+            const uint8_t *p = px + ((long)y * w + x) * 4;
+            out32[n++] = rgb(p[0], p[1], p[2]);
         }
         win_blit32(winid, 0, dest, n, 1, out32);
     }

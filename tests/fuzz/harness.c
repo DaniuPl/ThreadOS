@@ -7,7 +7,8 @@
  * scripts/fuzz_parsers.py feeds it thousands of cases made by damaging
  * data that was correct.
  *
- * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie|gif|svg|webp|brotli|woff> <file>
+ * Usage: harness <x509|html|http|ecdsa|inflate|jpeg|cookie|gif|png|svg|webp|
+ *                 brotli|woff> <file>
  */
 
 #include <stdio.h>
@@ -21,6 +22,7 @@
 #include "ujpeg.h"
 #include "ucookie.h"
 #include "ugif.h"
+#include "upng.h"
 #include "usvg.h"
 #include "uwebp.h"
 #include "uwoff2.h"
@@ -288,6 +290,58 @@ static void run_gifpixels(const unsigned char *data, size_t len)
     free(out);
 }
 
+/* A PNG into a buffer as large as its header asks, within reason */
+static int png_run(const unsigned char *data, size_t len, unsigned char **px,
+                   int *w, int *h, const char **why)
+{
+    int pw = 0, ph = 0;
+    *px = 0;
+    *why = "not a PNG";
+    if (png_size(data, (unsigned)len, &pw, &ph) < 0 || pw <= 0 || ph <= 0 ||
+        (long)pw * ph > (1 << 20))
+        return -1;
+    unsigned out_max = (unsigned)pw * (unsigned)ph * 4;
+    unsigned work_max = (unsigned)png_work_size(pw, ph, (unsigned)len);
+    unsigned char *out = malloc(out_max), *work = malloc(work_max);
+    int r = -1;
+    if (out && work)
+        r = png_decode(data, (unsigned)len, out, out_max, work, work_max, w, h,
+                       why);
+    free(work);
+    if (r < 0) {
+        free(out);
+        return -1;
+    }
+    *px = out;
+    return 0;
+}
+
+static void run_png(const unsigned char *data, size_t len)
+{
+    unsigned char *px;
+    int w, h;
+    const char *why;
+    if (png_run(data, len, &px, &w, &h, &why) == 0)
+        free(px);
+}
+
+/* Not a fuzz target: as gifpixels, for PNGs */
+static void run_pngpixels(const unsigned char *data, size_t len)
+{
+    unsigned char *px;
+    int w = 0, h = 0;
+    const char *why = "";
+    if (png_run(data, len, &px, &w, &h, &why) == 0) {
+        printf("%d %d\n", w, h);
+        for (long i = 0; i < (long)w * h * 4; i++)
+            printf("%02x", px[i]);
+        printf("\n");
+        free(px);
+    } else {
+        printf("error %s\n", why);
+    }
+}
+
 /* Not a fuzz target: a date a line in, the seconds since 1970 the
    cookie rules make of it out - for scripts/fuzz_parsers.py to hold
    against Python's own calendar */
@@ -347,6 +401,10 @@ int main(int argc, char **argv)
         run_gif(input, len);
     else if (!strcmp(argv[1], "gifpixels"))
         run_gifpixels(input, len);
+    else if (!strcmp(argv[1], "png"))
+        run_png(input, len);
+    else if (!strcmp(argv[1], "pngpixels"))
+        run_pngpixels(input, len);
     else if (!strcmp(argv[1], "svg"))
         run_svg(input, len);
     else if (!strcmp(argv[1], "webp"))

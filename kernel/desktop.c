@@ -105,7 +105,7 @@ struct icon {
 /* The browser is the litehtml one (apps/browser), in the initrd as
    "web"; gweb, the older one in C, is still there to be run by name */
 #define WEB_APP "web"
-#define ART_N      19
+#define ART_N      20
 #define ART_LETTER 14
 #define ART_TRASH  15
 /* Pictures drawn later than the letter and the waste bin come after
@@ -114,6 +114,7 @@ struct icon {
 #define ART_CODE   16
 #define ART_USERS  17
 #define ART_IMAGE  18
+#define ART_GALLERY 19
 /* The time is on the bar, so the clock is not in the dock; it and the
    demonstration program stay in the menu, with everything else */
 static struct icon icons[ICON_MAX] = {
@@ -261,6 +262,7 @@ static const struct { const char *app, *label; int art; } known_apps[] = {
     { "gappear", "Appearance", 10 }, { "gcalc", "Calculator", 11 },
     { "gcal", "Calendar", 12 }, { "gpaint", "Paint", 13 },
     { "gcode", "Code", ART_CODE }, { "gusers", "Accounts", ART_USERS },
+    { "ggallery", "Gallery", ART_GALLERY },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -715,7 +717,8 @@ static const char *const context_items[] = {
    somebody's other windows. */
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_APP,
                                   "gedit", "gtasks", "gmikser", "gappear",
-                                  "gcalc", "gcal", "gpaint", "gcode"};
+                                  "gcalc", "gcal", "gpaint", "ggallery",
+                                  "gcode"};
 
 /* Under a line at the bottom of the same menu: not programs but what is
    done to the session and to the machine. The three that end something
@@ -1627,6 +1630,7 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0x3A3A52, 0x16162A },   /* Code */
         { 0x8FA3C8, 0x4E6290 },   /* Accounts */
         { 0x7FD3FF, 0x2D8CEB },   /* Picture */
+        { 0xFFC46B, 0xFF7A45 },   /* Gallery */
     };
     if (art < 0 || art >= ART_N)
         art = ART_LETTER;
@@ -1766,6 +1770,14 @@ static void draw_art(int art, int x, int y, int s, char letter)
         gfx_disc16(PX(205), PY(125), D(20), 0xFFCC00, 255);
         art_hill(x, y, s, 132, 138, 62, 234, 0x34C759);
         art_hill(x, y, s, 204, 170, 50, 234, 0x2A9D4A);
+        break;
+    case ART_GALLERY:                             /* prints in a pile */
+        /* the one behind, tipped: a thick line is a turned rectangle */
+        gfx_line16(PX(92), PY(118), PX(236), PY(86), D(128), 0xFFFFFF, 140);
+        gfx_rrect16(PX(56), PY(92), D(196), D(160), D(18), 0xFFFFFF, 255);
+        gfx_rrect16(PX(70), PY(106), D(168), D(132), D(10), 0xFFE2B8, 255);
+        gfx_disc16(PX(196), PY(140), D(18), 0xFF5E3A, 255);
+        art_hill(x, y, s, 122, 168, 56, 238, 0xFF9F0A);
         break;
     default: {                                    /* the first letter */
         char t[2] = { letter, 0 };
