@@ -7868,3 +7868,46 @@ works and is checked by `make test`.
       in range. t_bt finds both by name with both kinds of adapter, and
       checks the mask, the access code and the scan type the adapter
       was sent. On the old driver it finds nothing.
+
+- [x] **Desktop shortcuts: a missing folder made again, no disk said**
+      (kernel/desktop.c, kernel/user.c, scripts/tests/t_desktop1.py)
+      On the laptop, started from the stick, Home opened Files on an
+      empty root and Desktop and Trash opened nothing: the stick holds
+      only the EFI partition, and with no disk of ThreadOS's there is no
+      home to open. A double click on one of the three now says so in
+      the island ("Nowhere to keep files - No disk with ThreadOS on
+      it") instead of failing silently. With a disk, a home, Desktop or
+      Trash that has gone missing - deleted from a shell, or an account
+      older than the folders - is made again before Files is opened on
+      it (user_current_home). t_desktop1 double-clicks the Trash on a
+      machine with no disk and reads the island, and deletes the Trash
+      folder before opening it from the desktop.
+
+- [x] **The lock: a PIN, a swipe, and a while before it comes**
+      (kernel/user.c, kernel/desktop.c, user/gsettings.c, kernel/config.c,
+      scripts/tests/t_unlock.py, scripts/tests/t_screenoff.py)
+      Settings' Screen Lock page now chooses, for the signed-in account,
+      what opens its lock: the password, a PIN of 4 to 8 digits, or a
+      swipe up with nothing to type - changed only with the account's
+      password, in the same page. The PIN is kept in the account file,
+      hashed like the password with a salt of its own (the file is
+      version 3; version 2 files are read and written back). The
+      password still opens a lock that asks for a PIN, and five wrong
+      PINs leave only the password until it has been given. The lock
+      follows a swipe up the screen; a fifth of it opens, less springs
+      back; Enter does the same from the keyboard. 'lockafter' says how
+      long after the screen goes dark the lock comes (never, at once, 1,
+      5 or 15 minutes), so a glance back within it needs nothing; a
+      machine with only the older 'lockoff' reads as never or at once.
+      Two faults found on the way: the way to unlock was taken in
+      desktop_lock(), which Ctrl+Alt+L calls from the keyboard's
+      interrupt - on behalf of whatever task was running, so of a random
+      account - and is taken in the desktop's thread now; and what was
+      typed while a try was being checked was wiped by the check's
+      clean-up, so Enter now hands the text over and empties the field.
+      t_unlock does it all through Settings and the lock screen, and
+      rewrites the account file on the image as version 2 to sign in
+      from it. t_screenoff, from the desktop-main branch, clicked the
+      Files tile where it stands on an 800x600 screen on a 640x480 one,
+      typed the sudo password unasked and woke a dark screen with the
+      first letter of a command; it passes now.

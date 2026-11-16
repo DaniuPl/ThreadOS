@@ -70,6 +70,9 @@ static struct setting settings[] = {
                             "dark: 0 no, 1 yes",                    0, { 0 } },
     { "lockoff", "0",       "ask for the password when the screen comes\n"
                             "back from dark: 0 no, 1 yes",          0, { 0 } },
+    { "lockafter", "",      "lock the screen this many seconds after it\n"
+                            "goes dark, or 'never' (empty: as lockoff)",
+                                                                    0, { 0 } },
     { "pointer", "100",     "pointer speed, per cent of the hand's\n"
                             "movement: 25-400",                     0, { 0 } },
     { "natural", "0",       "scrolling: 0 the wheel moves the view,\n"

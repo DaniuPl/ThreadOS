@@ -2378,6 +2378,13 @@ static int last_title_win = -1;
 /* The search and the notifications (below): what the input asks of them */
 static volatile int search_open;
 static volatile int locked;            /* the lock screen (below) is up */
+static int lock_out;                   /* it was a log out, not a lock */
+/* How this lock opens (USER_UNLOCK_*), taken from the account when it
+   comes; a swipe in progress - how far up, from where - and a key that
+   asked for the same */
+static int lock_mode;
+static int swipe_from = -1, swipe_dy;
+static volatile int swipe_go;
 /* The question before logging out, restarting or shutting down: which
    of session_items[] is being asked about, or -1. The answer is acted
    on by the desktop's own thread (ask_go) - a key arrives in an
@@ -2480,6 +2487,15 @@ static int desktop_spawn_app(const char *command)
 static void desktop_open_icon(int index)
 {
     char home[64], path[80], command[128];
+    /* A machine started from the stick with no disk of ThreadOS's has
+       no home, no Desktop and no Trash: say so, rather than open Files
+       on an empty root or open nothing at all */
+    if (!fs_ready()) {
+        desktop_notify(locale_text("Nowhere to keep files"),
+                       locale_text("No disk with ThreadOS on it"));
+        return;
+    }
+    user_current_home();
     if (!desktop_home_path(home, sizeof(home)))
         return;
     if (index == 0) {
@@ -2615,6 +2631,20 @@ static void handle_input(int mx, int my, int buttons)
             } else if (in_rect(mx, my, x + 340, y + 386, 120, 34)) {
                 setup_focus = 5;
                 setup_try = 1;
+            }
+        }
+        /* A swipe up opens a lock that asks for nothing: a fifth of the
+           screen is a decision, less springs back */
+        if (!setup_mode && !lock_out && lock_mode == USER_UNLOCK_SWIPE) {
+            if (pressed && !prev_pressed)
+                swipe_from = my;
+            if (pressed && swipe_from >= 0)
+                swipe_dy = swipe_from - my > 0 ? swipe_from - my : 0;
+            if (!pressed && swipe_from >= 0) {
+                if (swipe_dy >= video_h() / 5)
+                    swipe_go = 1;
+                swipe_from = -1;
+                swipe_dy = 0;
             }
         }
         prev_pressed = pressed;
@@ -5172,10 +5202,16 @@ static char lock_display[USER_DISPLAY_NAME_MAX + 1];
 static volatile int lock_user_len = 5;
 static volatile int lock_field = 1;    /* username = 0, password = 1 */
 static volatile int lock_try;          /* Enter: the thread checks */
+/* What Enter handed over for checking. The field is empty again at
+   once: a check takes the thread a while (a few thousand rounds of a
+   hash), and what is typed meanwhile is the next try, not something
+   for the check's clean-up to wipe. */
+static char lock_given[USER_PASSWORD_MAX + 1];
+static volatile int lock_given_len;
 static uint32_t lock_wrong_at;         /* when a wrong one was given */
 static int lock_wrong;
 static int lock_no_home;                /* ...and it was the home, not it */
-static int lock_out;                   /* it was a log out, not a lock */
+
 static char setup_login[USER_NAME_MAX + 1];
 static char setup_display[USER_DISPLAY_NAME_MAX + 1];
 static char setup_password[USER_PASSWORD_MAX + 1];
@@ -5228,6 +5264,13 @@ int desktop_lock(void)
     lock_wrong = 0;
     lock_out = 0;
     lock_field = 1;
+    /* -1: the desktop's thread asks the account (draw_lock). Not here:
+       Ctrl+Alt+L calls this from the keyboard's interrupt, on top of
+       whatever task was running, and whose account that is is luck. */
+    lock_mode = -1;
+    swipe_from = -1;
+    swipe_dy = 0;
+    swipe_go = 0;
     ask = -1;
     tmenu = -1;
     search_close();
@@ -5973,11 +6016,23 @@ static void lock_key(char c)
         setup_key(c);
         return;
     }
+    if (lock_mode == USER_UNLOCK_SWIPE && !lock_out) {
+        if (c == '\n' || c == '\r' || c == ' ')
+            swipe_go = 1;              /* the keyboard's swipe */
+        return;
+    }
     if (c == '\n' || c == '\r') {
-        if (lock_out && lock_field == 0)
+        if (lock_out && lock_field == 0) {
             lock_field = 1;
-        else
+        } else {
+            for (int i = 0; i <= lock_len; i++)
+                lock_given[i] = lock_pass[i];
+            lock_given_len = lock_len;
+            for (int i = 0; i < lock_len; i++)
+                lock_pass[i] = 0;
+            lock_len = 0;
             lock_try = 1;
+        }
     } else if (c == '\t') {
         if (lock_out)
             lock_field = !lock_field;
@@ -6014,23 +6069,48 @@ static void draw_lock(void)
         draw_setup();
         return;
     }
+    if (lock_mode < 0)
+        lock_mode = user_unlock_mode();
+    if (swipe_go) {
+        swipe_go = 0;
+        if (lock_mode == USER_UNLOCK_SWIPE && !lock_out) {
+            locked = 0;
+            return;
+        }
+    }
     if (lock_try) {
         lock_try = 0;
-        lock_pass[lock_len] = 0;
-        lock_pass[lock_len] = 0;
-        int rc = !lock_len ? USER_LOGIN_DENIED
-                 : lock_out ? user_login(lock_user, lock_pass)
-                 : user_password_current_ok(lock_pass) ? 0 : USER_LOGIN_DENIED;
+        static char given[USER_PASSWORD_MAX + 1];
+        int n = lock_given_len;
+        for (int i = 0; i < n; i++)
+            given[i] = lock_given[i];
+        given[n] = 0;
+        for (int i = 0; i < n; i++)
+            lock_given[i] = 0;
+        /* A PIN is digits; what is not is the password, and is not
+           counted against the PIN. A right password also opens a lock
+           that asks for a PIN - and gives the PIN back its tries. */
+        int digits = n >= USER_PIN_MIN && n <= USER_PIN_MAX;
+        for (int i = 0; i < n; i++)
+            digits &= given[i] >= '0' && given[i] <= '9';
+        int rc = !n ? USER_LOGIN_DENIED
+                 : lock_out ? user_login(lock_user, given)
+                 : lock_mode == USER_UNLOCK_PIN && digits &&
+                         user_pin_ok(given) ? 0
+                 : user_password_current_ok(given) ? 0 : USER_LOGIN_DENIED;
+        for (int i = 0; i < n; i++)
+            given[i] = 0;
+        if (lock_mode == USER_UNLOCK_PIN && user_pin_blocked())
+            lock_mode = USER_UNLOCK_PASSWORD;
         int ok = rc == 0;
         /* A right password for an account whose home is gone is not a
            wrong password, and saying so would only make the person
            retype it */
         lock_no_home = rc == USER_LOGIN_NO_HOME;
-        for (int i = 0; i < (int)sizeof(lock_pass); i++)
-            lock_pass[i] = 0;
-        lock_len = 0;
-        lock_pass[0] = 0;
         if (ok) {
+            for (int i = 0; i < (int)sizeof(lock_pass); i++)
+                lock_pass[i] = 0;
+            lock_len = 0;
             locked = 0;
             lock_wrong = 0;
             lock_out = 0;
@@ -6039,6 +6119,11 @@ static void draw_lock(void)
         }
         lock_wrong = 1;
         lock_wrong_at = frames;
+        /* (for a test to count the tries by, and for a person reading
+           the log of a machine somebody has been guessing at) */
+        printk("[desktop] the lock stays shut: a wrong %s\n",
+               lock_out ? "sign-in" : digits && lock_mode != USER_UNLOCK_PASSWORD
+                                          ? "PIN" : "password");
     }
     int w = video_w(), h = video_h();
     gfx_fill(0, 0, w, h, 0x000000, theme_dark ? 90 : 50);
@@ -6064,7 +6149,10 @@ static void draw_lock(void)
         hm[hn++] = 'M';
     }
     hm[hn] = 0;
-    int ty = h / 3;
+    /* A lock opened by a swipe follows the pointer up while it is held */
+    int swipe = !lock_out && lock_mode == USER_UNLOCK_SWIPE;
+    int lift = swipe ? swipe_dy : 0;
+    int ty = h / 3 - lift;
     int tw = ui_font_width(UI_BOLD, LOCK_TIME_PX, hm);
     ui_font_text(UI_BOLD, LOCK_TIME_PX, (w - tw) / 2, ty, hm, 0xFFFFFF);
     clock_refresh();
@@ -6078,11 +6166,14 @@ static void draw_lock(void)
         name = "ThreadOS";
     int nw = ui_font_width(UI_BOLD, 15, name);
     int fy = h * 2 / 3 - LOCK_FIELD_H;
-    ui_font_text(UI_BOLD, 15, (w - nw) / 2, fy - (lock_out ? 70 : 14),
-                 name, 0xFFFFFF);
+    ui_font_text(UI_BOLD, 15, (w - nw) / 2,
+                 fy - (lock_out ? 70 : 14) - lift, name, 0xFFFFFF);
     int fx = (w - LOCK_FIELD_W) / 2;
     int user_y = fy - LOCK_FIELD_H - 12;
-    int fields = lock_out ? 2 : 1;
+    int fields = swipe ? 0 : lock_out ? 2 : 1;
+    if (swipe)                         /* a handle to take hold of */
+        gfx_rrect16((w / 2 - 36) * 16, (fy + LOCK_FIELD_H / 2 - 3 - lift) * 16,
+                    72 * 16, 6 * 16, 3 * 16, 0xFFFFFF, 200);
     for (int i = 0; i < fields; i++) {
         int y = lock_out && i == 0 ? user_y : fy;
         int focus = lock_out ? lock_field == i : 1;
@@ -6104,7 +6195,8 @@ static void draw_lock(void)
                            (y + LOCK_FIELD_H / 2) * 16, dot * 8,
                            0xFFFFFF, 255);
         } else {
-            const char *p = locale_text("Password");
+            const char *p = locale_text(lock_mode == USER_UNLOCK_PIN && !lock_out
+                                            ? "PIN" : "Password");
             int pw = ui_font_width(UI_SANS, MENU_PX, p);
             ui_font_text(UI_SANS, MENU_PX, (w - pw) / 2,
                          ui_font_baseline_in(MENU_PX, y, LOCK_FIELD_H), p,
@@ -6118,6 +6210,11 @@ static void draw_lock(void)
                                              : "Wrong password - try again")
                                       : lock_out
                                             ? "Tab selects a field; Enter signs in"
+                                      : swipe ? "Swipe up to unlock"
+                                      : lock_mode == USER_UNLOCK_PIN
+                                            ? "Enter your PIN to unlock"
+                                      : user_pin_blocked()
+                                            ? "Too many wrong PINs - enter your password"
                                             : "Enter your password to unlock");
     int sw = ui_font_width(UI_SANS, UI_PX, say);
     ui_font_text(UI_SANS, UI_PX, (w - sw) / 2, fy + LOCK_FIELD_H + 22, say,
@@ -6996,6 +7093,8 @@ static int dark_shown;                 /* the black frame has gone out */
 static int wake_hold;                  /* a click that woke it, until let go */
 static uint32_t off_s = 600;           /* the settings, read once a second */
 static int dim_on = 1, lock_on_dark;
+static uint32_t lock_delay;            /* seconds of dark before the lock */
+static uint32_t dark_since;            /* pit_ticks() when it went dark */
 
 #define DIM_ALPHA 140                  /* a little more than half as bright */
 
@@ -7005,7 +7104,19 @@ static void idle_settings(void)
     if (off_s > 86400)
         off_s = 86400;
     dim_on = config_get_num("screendim", 1) != 0;
-    lock_on_dark = config_get_num("lockoff", 0) != 0;
+    /* 'lockafter': "never", or how long after the screen goes dark the
+       lock comes - a glance back within it needs no password. Without
+       it, the older 'lockoff' switch: at once, or never. */
+    const char *after = config_get("lockafter");
+    if (after && after[0]) {
+        lock_on_dark = strcmp(after, "never") != 0;
+        lock_delay = (uint32_t)config_get_num("lockafter", 0);
+        if (lock_delay > 86400)
+            lock_delay = 86400;
+    } else {
+        lock_on_dark = config_get_num("lockoff", 0) != 0;
+        lock_delay = 0;
+    }
     /* The pointer's two settings live here too: the desktop reads the
        settings once a second anyway, and the mouse driver should not
        be parsing text in an interrupt */
@@ -7052,9 +7163,11 @@ static int idle_frame(int buttons)
     dark = now_dark;
     if (dark == 2 && was != 2) {
         dark_shown = 0;
-        if (lock_on_dark && !locked && !setup_mode)
-            desktop_lock();
+        dark_since = now;
     }
+    if (dark == 2 && lock_on_dark && !locked && !setup_mode &&
+        now - dark_since >= lock_delay * 100)
+        desktop_lock();
     return buttons;
 }
 

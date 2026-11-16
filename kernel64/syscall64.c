@@ -1347,6 +1347,18 @@ static void handle(struct regs *r)
                 memset(ctl.admin_password, 0, sizeof(ctl.admin_password));
                 *(struct user_ctl *)(uintptr_t)a1 = ctl;
             }
+        } else if (ctl.op == USER_CTL_UNLOCK_INFO) {
+            int mode, pin;
+            rc = user_unlock_info(&mode, &pin);
+            if (rc == 0 && !paging64_user_writable(a1, sizeof(ctl)))
+                rc = -1;
+            if (rc == 0) {
+                memset(&ctl, 0, sizeof(ctl));
+                ctl.op = USER_CTL_UNLOCK_INFO;
+                ctl.level = mode;
+                ctl.index = pin;
+                *(struct user_ctl *)(uintptr_t)a1 = ctl;
+            }
         } else {
             char name[16] = { 0 };
             char password[USER_PASSWORD_MAX + 1] = { 0 };
@@ -1360,7 +1372,8 @@ static void handle(struct regs *r)
                 r->rax = (uint64_t)-1;
                 return;
             }
-            if ((ctl.op == USER_CTL_ADD || ctl.op == USER_CTL_PASSWORD) &&
+            if ((ctl.op == USER_CTL_ADD || ctl.op == USER_CTL_PASSWORD ||
+                 ctl.op == USER_CTL_UNLOCK) &&
                 text_from_ring3(a1 + offsetof(struct user_ctl, password),
                                 password, sizeof(password)) < 0) {
                 memset(name, 0, sizeof(name));
@@ -1371,7 +1384,8 @@ static void handle(struct regs *r)
                 return;
             }
             if ((ctl.op == USER_CTL_ADD || ctl.op == USER_CTL_DELETE ||
-                 ctl.op == USER_CTL_PASSWORD || ctl.op == USER_CTL_ROLE) &&
+                 ctl.op == USER_CTL_PASSWORD || ctl.op == USER_CTL_ROLE ||
+                 ctl.op == USER_CTL_UNLOCK) &&
                 text_from_ring3(a1 + offsetof(struct user_ctl, admin_password),
                                 admin_password, sizeof(admin_password)) < 0) {
                 memset(name, 0, sizeof(name));
@@ -1388,6 +1402,8 @@ static void handle(struct regs *r)
                 rc = user_account_delete(name, admin_password);
             else if (ctl.op == USER_CTL_ROLE)
                 rc = user_account_set_level(name, ctl.level, admin_password);
+            else if (ctl.op == USER_CTL_UNLOCK)
+                rc = user_set_unlock(ctl.level, password, admin_password);
             else if (ctl.op == USER_CTL_PASSWORD) {
                 if (!strcmp(name, user_current_name()))
                     rc = user_password_current_ok(admin_password)

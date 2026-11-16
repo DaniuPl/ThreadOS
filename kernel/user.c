@@ -8,6 +8,7 @@
 #include "include/pit.h"
 #include "include/printk.h"
 #include "include/task.h"
+#include "include/random.h"
 #define THREADOS_UAPI_H
 #include "../user/usha1.h"
 #undef THREADOS_UAPI_H
@@ -23,7 +24,8 @@
 #define kill_uid task64_kill_uid
 
 #define USER_DB_FILE ".users"
-#define USER_DB_MAGIC "THRUSR2"
+#define USER_DB_MAGIC "THRUSR3"
+#define USER_DB_MAGIC_V2 "THRUSR2"
 #define USER_DB_MAGIC_V1 "THRUSR1"
 #define USER_PASSWORD_MIN 6
 #define USER_HASH_LEGACY 1
@@ -39,6 +41,12 @@ struct account {
     uint8_t used;
     uint8_t salt[16];
     uint8_t hash[20];
+    /* How this account's locked screen opens (USER_UNLOCK_*), and its
+       PIN, hashed like the password but with a salt of its own */
+    uint8_t unlock;
+    uint8_t has_pin;
+    uint8_t pin_salt[16];
+    uint8_t pin_hash[20];
 } __attribute__((packed));
 
 struct user_db {
@@ -46,6 +54,25 @@ struct user_db {
     uint8_t next_uid;
     uint8_t reserved[3];
     struct account account[USER_ACCOUNT_MAX];
+} __attribute__((packed));
+
+/* Version 2: the same, before the lock had a PIN */
+struct account_v2 {
+    char name[USER_NAME_MAX + 1];
+    char display_name[USER_DISPLAY_NAME_MAX + 1];
+    uint8_t uid;
+    uint8_t level;
+    uint8_t hash_kind;
+    uint8_t used;
+    uint8_t salt[16];
+    uint8_t hash[20];
+} __attribute__((packed));
+
+struct user_db_v2 {
+    char magic[8];
+    uint8_t next_uid;
+    uint8_t reserved[3];
+    struct account_v2 account[USER_ACCOUNT_MAX];
 } __attribute__((packed));
 
 struct account_v1 {
@@ -73,6 +100,11 @@ static int shell_level = USER_PLAIN;
 static int shell_uid = 127;       /* no account owns this login-screen identity */
 static int wrong;
 static uint32_t locked_until;
+/* Wrong PINs since the last right one. After PIN_TRIES the PIN stops
+   being taken until the password has been given: four digits are
+   guessed in an afternoon, a password is not. */
+#define PIN_TRIES 5
+static int pin_wrong;
 static char current_name[USER_NAME_MAX + 1] = "guest";
 static char current_display_name[USER_DISPLAY_NAME_MAX + 1] = "Guest";
 
@@ -168,7 +200,8 @@ static int db_valid(const struct user_db *saved)
             a->uid >= saved->next_uid ||
             (a->level != USER_ADMIN && a->level != USER_PLAIN) ||
             (a->hash_kind != USER_HASH_LEGACY &&
-             a->hash_kind != USER_HASH_PBKDF2))
+             a->hash_kind != USER_HASH_PBKDF2) ||
+            a->unlock > USER_UNLOCK_SWIPE || a->has_pin > 1)
             return 0;
         admins += a->level == USER_ADMIN;
         if (a->uid == 0 && a->level == USER_ADMIN)
@@ -224,6 +257,22 @@ static int db_migrate_v1(const struct user_db_v1 *old, struct user_db *fresh)
                 return 0;
     }
     return admins > 0 && root_admin;
+}
+
+/* Version 2 to 3: every account opens its lock with its password, as
+   it did, and has no PIN */
+static int db_migrate_v2(const struct user_db_v2 *old, struct user_db *fresh)
+{
+    if (memcmp(old->magic, USER_DB_MAGIC_V2, sizeof(USER_DB_MAGIC_V2)))
+        return 0;
+    memset(fresh, 0, sizeof(*fresh));
+    memcpy(fresh->magic, USER_DB_MAGIC, sizeof(USER_DB_MAGIC));
+    fresh->next_uid = old->next_uid;
+    memcpy(fresh->reserved, old->reserved, sizeof(fresh->reserved));
+    for (int i = 0; i < USER_ACCOUNT_MAX; i++)
+        memcpy(&fresh->account[i], &old->account[i],
+               sizeof(old->account[i]));
+    return db_valid(fresh);
 }
 
 static void salt_for(struct account *a)
@@ -408,6 +457,18 @@ void user_accounts_load(void)
         int n = fs_read_at(slot, 0, &saved, sizeof(saved));
         if (n == (int)sizeof(saved) && db_valid(&saved)) {
             db = saved;
+            for (int i = 0; i < USER_ACCOUNT_MAX; i++)
+                if (db.account[i].used)
+                    ensure_home(&db.account[i]);
+            forget_legacy_password();
+            return;
+        }
+        static struct user_db_v2 v2;
+        if (n == (int)sizeof(v2) &&
+            fs_read_at(slot, 0, &v2, sizeof(v2)) == (int)sizeof(v2) &&
+            db_migrate_v2(&v2, &saved)) {
+            db = saved;
+            db_save();
             for (int i = 0; i < USER_ACCOUNT_MAX; i++)
                 if (db.account[i].used)
                     ensure_home(&db.account[i]);
@@ -612,6 +673,7 @@ int user_password_current_ok(const char *password)
         return user_password_ok(password);
     if (i >= 0 && hash_matches(&db.account[i], password)) {
         wrong = 0;
+        pin_wrong = 0;
         if (db.account[i].hash_kind == USER_HASH_LEGACY)
             upgrade_legacy_hash(&db.account[i], password);
         return 1;
@@ -889,4 +951,113 @@ void user_shell_set(int level)
 int user_shell_uid(void)         { return shell_uid; }
 void user_shell_set_uid(int uid) { if (uid >= 0) shell_uid = uid; }
 const char *user_current_name(void) { return current_name; }
+
+/* --- how the lock opens ------------------------------------------- */
+
+static int pin_ok_text(const char *pin)
+{
+    int n = 0;
+    for (; pin[n]; n++)
+        if (pin[n] < '0' || pin[n] > '9' || n >= USER_PIN_MAX)
+            return 0;
+    return n >= USER_PIN_MIN;
+}
+
+static void pin_hash(const struct account *a, const char *pin, uint8_t *out)
+{
+    pbkdf2_sha1((const uint8_t *)pin, (uint32_t)password_length(pin),
+                a->pin_salt, sizeof(a->pin_salt), USER_HASH_ROUNDS, out, 20);
+}
+
+static int current_account(void)
+{
+    user_accounts_load();
+    return account_uid(current_uid());
+}
+
+int user_unlock_mode(void)
+{
+    int i = current_account();
+    if (i < 0)
+        return USER_UNLOCK_PASSWORD;
+    const struct account *a = &db.account[i];
+    if (a->unlock == USER_UNLOCK_PIN &&
+        (!a->has_pin || pin_wrong >= PIN_TRIES))
+        return USER_UNLOCK_PASSWORD;
+    return a->unlock;
+}
+
+int user_unlock_info(int *mode, int *has_pin)
+{
+    int i = current_account();
+    if (i < 0)
+        return -1;
+    *mode = db.account[i].unlock;
+    *has_pin = db.account[i].has_pin;
+    return 0;
+}
+
+int user_set_unlock(int mode, const char *pin, const char *password)
+{
+    int i = current_account();
+    if (i < 0 || mode < USER_UNLOCK_PASSWORD || mode > USER_UNLOCK_SWIPE)
+        return -1;
+    if (!password || !user_password_current_ok(password))
+        return -2;
+    if (pin && pin[0] && !pin_ok_text(pin))
+        return -3;
+    struct account *a = &db.account[i];
+    struct account old = *a;
+    if (pin && pin[0]) {
+        if (random_ready())
+            random_bytes(a->pin_salt, sizeof(a->pin_salt));
+        else
+            for (int k = 0; k < (int)sizeof(a->pin_salt); k++)
+                a->pin_salt[k] = (uint8_t)(a->salt[k] ^ (pit_ticks() >> k));
+        pin_hash(a, pin, a->pin_hash);
+        a->has_pin = 1;
+    }
+    if (mode == USER_UNLOCK_PIN && !a->has_pin) {
+        *a = old;
+        return -3;
+    }
+    a->unlock = (uint8_t)mode;
+    if (db_save() < 0) {
+        *a = old;
+        return -1;
+    }
+    pin_wrong = 0;
+    return 0;
+}
+
+int user_pin_ok(const char *pin)
+{
+    int i = current_account();
+    if (i < 0 || !pin || !db.account[i].has_pin || pin_wrong >= PIN_TRIES)
+        return 0;
+    uint8_t got[20];
+    pin_hash(&db.account[i], pin, got);
+    uint8_t diff = 0;
+    for (int k = 0; k < 20; k++)
+        diff |= got[k] ^ db.account[i].pin_hash[k];
+    if (!diff) {
+        pin_wrong = 0;
+        return 1;
+    }
+    pin_wrong++;
+    return 0;
+}
+
+int user_pin_blocked(void)
+{
+    return pin_wrong >= PIN_TRIES;
+}
+
+int user_current_home(void)
+{
+    if (!fs_ready())
+        return -1;
+    int i = account_index(current_name);
+    return i < 0 ? -1 : ensure_home(&db.account[i]);
+}
 const char *user_current_display_name(void) { return current_display_name; }

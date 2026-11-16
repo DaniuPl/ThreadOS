@@ -56,6 +56,9 @@
 #define INFO_H 24             /* a line of figures: a name and a value */
 #define INFO_X 120            /* the value, right of the name */
 #define NOTE_DY 14            /* the last line's baseline, from the bottom */
+#define LOCK_WAY_W 84         /* Screen Lock: a way to unlock, as a chip */
+#define LOCK_PIN_W 92         /* ...the PIN field */
+#define LOCK_PW_W 140         /* ...and the password beside it */
 #define PASS_W 300            /* the password panel */
 #define PASS_H 96
 
@@ -439,9 +442,11 @@ static void try_password(void)
 #define F_RES  1
 #define F_DNS  2
 #define F_WALL 3
-#define F_N    4
+#define F_PIN  4                  /* the lock's: a new PIN */
+#define F_LOCKPW 5                /* ...and one's own password, to change it */
+#define F_N    6
 static const char *const field_setting[F_N] = {
-    "name", "resolution", "dns", "wallpaper"
+    "name", "resolution", "dns", "wallpaper", (const char *)0, (const char *)0
 };
 static char fields[F_N][CFG_VAL_MAX];
 static int focus = -1;            /* the field that has the keys */
@@ -450,7 +455,7 @@ static int focus = -1;            /* the field that has the keys */
 static void fields_from_settings(void)
 {
     for (int i = 0; i < F_N; i++)
-        if (i != focus)
+        if (i != focus && field_setting[i])
             copy(fields[i], setting(field_setting[i]), CFG_VAL_MAX);
 }
 
@@ -465,6 +470,8 @@ static void fields_from_settings(void)
 #define A_BEEP    7
 #define A_TOGGLE  8               /* name flips between 0 and 1 */
 #define A_BT_SEARCH 12
+#define A_UNLOCK_PICK 13          /* the way the lock opens, chosen */
+#define A_UNLOCK_SAVE 14          /* ...and saved, with the password */
 #define A_UPDATE_CHECK   9
 #define A_UPDATE_INSTALL 10
 #define A_UPDATE_ROLLBACK 11
@@ -950,6 +957,60 @@ static void draw_bluetooth(void)
     }
 }
 
+/* How the lock opens is the account's own, kept with its password in
+   the account file: read from the kernel, changed only with the
+   password (USER_CTL_UNLOCK). What is picked waits for Save. */
+static int unlock_mode, unlock_has_pin, unlock_pick = -1;
+static int unlock_said;            /* 1 saved, -2 wrong password, -3 no PIN */
+
+static void unlock_load(void)
+{
+    struct user_ctl c = { 0 };
+    c.op = USER_CTL_UNLOCK_INFO;
+    if (sys_user(&c) == 0) {
+        unlock_mode = c.level;
+        unlock_has_pin = c.index;
+    }
+    if (unlock_pick < 0)
+        unlock_pick = unlock_mode;
+}
+
+static void unlock_save(void)
+{
+    struct user_ctl c = { 0 };
+    c.op = USER_CTL_UNLOCK;
+    c.level = unlock_pick;
+    copy(c.password, fields[F_PIN], sizeof(c.password));
+    copy(c.admin_password, fields[F_LOCKPW], sizeof(c.admin_password));
+    int32_t rc = sys_user(&c);
+    unlock_said = rc == 0 ? 1 : rc == -2 ? -2 : rc == -3 ? -3 : -1;
+    for (int i = 0; i < (int)sizeof(c.password); i++)
+        c.password[i] = c.admin_password[i] = 0;
+    for (int i = 0; i < CFG_VAL_MAX; i++)
+        fields[F_PIN][i] = fields[F_LOCKPW][i] = 0;
+    focus = -1;
+    unlock_load();
+    if (rc == 0)
+        unlock_pick = unlock_mode;
+}
+
+/* A field whose letters are not shown: a dot for each, or what it is
+   for, dimmed, while it is empty */
+static void secret_field(int x, int y, int w, int f, const char *empty)
+{
+    ud_round(win, x, y, w, CHIP_H, 6, l.field);
+    ud_ring(win, x, y, w, CHIP_H, 6, focus == f ? l.accent : l.line);
+    int n = len(fields[f]), cx = x + 10;
+    if (!n && focus != f)
+        ud_text_l(win, x + 8, ud_baseline(y, CHIP_H, UD_PX), empty, l.dim,
+                  UD_SANS, UD_PX);
+    for (int i = 0; i < n && cx < x + w - 10; i++, cx += 9)
+        ud_disc(win, cx, y + CHIP_H / 2, 3, l.text);
+    if (focus == f)
+        ud_fill(win, cx - 2, y + 5, 1, CHIP_H - 10, l.text);
+    hot(x, y, w, CHIP_H, A_FOCUS, f, (const char *)0, (const char *)0);
+}
+
 static void draw_lockscreen(void)
 {
     static const char *const offs[5] = { "Never", "1 min", "5 min", "10 min",
@@ -960,18 +1021,63 @@ static void draw_lockscreen(void)
     row_name(y, "Turn the screen off when inactive for");
     chips(y + CTRL_DY, 5, offs, off_values, "screenoff");
 
-    y += ROW_H;
+    y += ROW_H - 2;
     check_box(y, "Dim the screen before it turns off",
               same(setting("screendim"), "1"), "screendim");
-    y += CHIP_H + 8;
-    check_box(y, "Ask for the password when it comes back",
-              same(setting("lockoff"), "1"), "lockoff");
 
-    y += CHIP_H + 16;
-    note(y, "Any key or movement brings the screen back, and goes");
-    note(y + 14, "no further: a click there opens nothing.");
-    note(y + 34, "Ctrl+Alt+L locks the screen at once.");
-    note(y + 48, "The panel's light stays on - there is no driver for it yet.");
+    /* When the lock comes: never, as the screen goes dark, or a while
+       after. 'lockafter' says it; a machine that only ever had the
+       older 'lockoff' switch reads as "never" or "at once". */
+    static const char *const after[5] = { "Never", "At once", "1 min",
+                                          "5 min", "15 min" };
+    static const char *const after_values[5] = { "never", "0", "60", "300",
+                                                 "900" };
+    const char *now = setting("lockafter");
+    if (!now[0])
+        now = same(setting("lockoff"), "1") ? "0" : "never";
+    y += CHIP_H + 10;
+    row_name(y, "Lock the screen after it turns off");
+    for (int i = 0; i < 5; i++)
+        chip(PANE_X + i * (CHIP_W + CHIP_GAP), y + CTRL_DY, after[i],
+             same(now, after_values[i]), "lockafter", after_values[i]);
+
+    unlock_load();
+    static const char *const ways[3] = { "Password", "PIN", "Swipe" };
+    y += ROW_H - 2;
+    row_name(y, "Unlock with");
+    for (int i = 0; i < 3; i++) {
+        int x = PANE_X + i * (LOCK_WAY_W + CHIP_GAP), cy = y + CTRL_DY;
+        ud_round(win, x, cy, LOCK_WAY_W, CHIP_H, 8,
+                 unlock_pick == i ? l.accent : l.row);
+        ud_text_mid_l(win, x, cy, LOCK_WAY_W, CHIP_H, ways[i],
+                      unlock_pick == i ? l.on_accent : l.text, UD_SANS, UD_PX);
+        hot(x, cy, LOCK_WAY_W, CHIP_H, A_UNLOCK_PICK, i, (const char *)0,
+            (const char *)0);
+    }
+
+    y += ROW_H - 2;
+    secret_field(PANE_X, y, LOCK_PIN_W, F_PIN,
+                 unlock_has_pin ? "New PIN" : "PIN");
+    secret_field(PANE_X + LOCK_PIN_W + 8, y, LOCK_PW_W, F_LOCKPW,
+                 "Your password");
+    button(PANE_X + LOCK_PIN_W + LOCK_PW_W + 16, y, SAVE_W, "Save",
+           A_UNLOCK_SAVE, 0);
+
+    y += CHIP_H + 6;
+    if (unlock_said == 1)
+        note(y, "Saved - the lock opens the new way");
+    else if (unlock_said == -2)
+        note(y, "NOT changed (wrong password)");
+    else if (unlock_said == -3)
+        note(y, "NOT changed: a PIN is 4 to 8 digits");
+    else if (unlock_said == -1)
+        note(y, "NOT changed");
+    else if (unlock_pick == 2)
+        note(y, "Swipe: anyone at the machine can open it");
+    else
+        note(y, unlock_has_pin ? "The PIN or the password opens the lock"
+                               : "A PIN is 4 to 8 digits; the password still works");
+    note(y + 14, "Ctrl+Alt+L locks the screen at once.");
 }
 
 static void draw_mouse(void)
@@ -1163,6 +1269,13 @@ static void click(int x, int y)
         case A_BT_SEARCH:
             sys_bt(BT_SEARCH, (struct bt_info *)0);
             break;
+        case A_UNLOCK_PICK:
+            unlock_pick = t->arg;
+            unlock_said = 0;
+            break;
+        case A_UNLOCK_SAVE:
+            unlock_save();
+            break;
         case A_UPDATE_CHECK:
             update_start(UPDATE_CHECK);
             break;
@@ -1220,9 +1333,12 @@ static void key(char c)
         if (c == '\n' || c == '\r') {
             int was = focus;
             focus = -1;
-            apply(field_setting[was], fields[was]);
+            if (!field_setting[was])
+                unlock_save();         /* the lock's two: Enter is Save */
+            else
+                apply(field_setting[was], fields[was]);
         } else if (c == KEY_COPY) {
-            if (n)
+            if (n && field_setting[focus])   /* never a secret */
                 sys_clip_set(f, (uint32_t)n);
         } else if (c == KEY_PASTE) {
             char got[CLIP_MAX + 1];

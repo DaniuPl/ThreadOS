@@ -62,10 +62,17 @@ def wait_shade(q, want, timeout):
 
 
 def as_admin(q, line):
+    """A setting the administrator's: the password typed only when the
+    shell asks for it (q.sudo) - typed unasked, it was a command of its
+    own, and the wait for "saved" ran out its thirty seconds while the
+    screen went dark under the test. And on a lit screen: on a dark
+    one the first key only wakes it, and "sudo" arrives as "udo"."""
+    q.mouse_move(2, 0)
+    q.mx += 2
+    wait_shade(q, "aurora", 6)
     q.click_desktop()
-    q.type_line("sudo " + line)
-    time.sleep(1)
-    q.command("thread", "saved", timeout=30)
+    said = q.sudo(line, "saved")
+    check("'%s' is saved" % line, "saved" in said)
 
 
 def lock_says(q):
@@ -125,7 +132,10 @@ def main():
 
             # A click on a dark screen wakes it and opens nothing - the
             # pointer on the Files tile, where a click would open Files
-            tx, ty = dock_tile(dock_index("gfiles"), n_w=0)
+            # (on the screen this machine has - the disc's GRUB gives
+            # the desktop 640x480, not the 800x600 of a test's own disc)
+            sw, sh = q.size()
+            tx, ty = dock_tile(dock_index("gfiles"), n_w=0, w=sw, h=sh)
             q.mouse_goto(tx, ty)
             got = wait_shade(q, "black", 16)
             check("dark again with the pointer on a tile (%s)" % got,
@@ -139,7 +149,9 @@ def main():
                   % q.dock_windows(), got == "aurora" and q.dock_windows() == 0)
             # The same click on a lit screen does open it
             q.mouse_click()
-            time.sleep(3)
+            end = time.time() + 15
+            while time.time() < end and q.dock_windows() != 1:
+                time.sleep(0.5)
             check("the same click on a lit screen opens Files (%d windows)"
                   % q.dock_windows(), q.dock_windows() == 1)
 

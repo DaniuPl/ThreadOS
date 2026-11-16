@@ -17,6 +17,12 @@
 #define USER_CTL_DELETE 2
 #define USER_CTL_PASSWORD 3
 #define USER_CTL_ROLE 4
+/* How one's own locked screen opens. INFO: level = the way
+   (0 password, 1 PIN, 2 swipe), index = 1 when a PIN is set. SET:
+   level = the way, password = a new PIN or "", admin_password = one's
+   own password. -> 0, -2 wrong password, -3 not a PIN. */
+#define USER_CTL_UNLOCK_INFO 5
+#define USER_CTL_UNLOCK 6
 
 struct user_ctl {
     int32_t op, index, uid, level;

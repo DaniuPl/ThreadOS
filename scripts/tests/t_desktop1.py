@@ -121,6 +121,23 @@ def main():
                           px=BAR_PX, face="bold", under=on_bar)
         check("the bar says the system's name in bold TrueType ('%s')" % name,
               name == "ThreadOS")
+
+        # No disk: no home, no Desktop, no Trash - as on a laptop started
+        # from the stick with no disk of ThreadOS's. A double click on
+        # the Trash says so in the island instead of opening nothing.
+        q4.mouse_goto(224, BAR_H + 42)
+        time.sleep(0.4)
+        q4.double_click()
+        q4.mouse_goto(600, 400)
+        note = ("", "")
+        deadline = time.time() + 10
+        while time.time() < deadline and not note[0]:
+            note = island_note(q4)
+            time.sleep(0.3)
+        check("with no disk the Trash says why it does not open (%s)"
+              % (note,), note == ("Nowhere to keep files",
+                                  "No disk with ThreadOS on it"))
+        check("and no window opens for nothing", q4.dock_windows() == 0)
     finally:
         q4.close()
 
@@ -130,7 +147,9 @@ def main():
     q5_disk = tempfile.mktemp(suffix=".img")
     with open(q5_disk, "wb") as f:
         f.truncate(16 * 1024 * 1024)
-    q5 = Qemu(KERNEL, INITRD, q5_disk)
+    # (a serial port, for the shell the Trash is deleted with)
+    q5_log = tempfile.mktemp(suffix=".log")
+    q5 = Qemu(KERNEL, INITRD, q5_disk, serial=q5_log)
     try:
         q5.wait_desktop()
         time.sleep(1.0)
@@ -170,7 +189,25 @@ def main():
         # stands from y=156 to 224 now: its middle is where it is clicked
         open_desktop_icon(338, 190, "Files: /home/")
         open_desktop_icon(136, icon_y, "/Desktop")
+        # The Trash deleted from the shell: the shortcut makes it again
+        # rather than lead nowhere
+        q5.click_desktop()
+        who = q5.command("whoami", "(", timeout=20)
+        m = re.search(r"(\S+) \((?:admin|user)\)", who)
+        gone = q5.command("rm /home/%s/.Trash" % (m.group(1) if m else "?"),
+                          "rm:", timeout=20)
+        check("the Trash folder is deleted (%s)" % gone.strip()[-40:],
+              "removed" in gone)
         open_desktop_icon(224, icon_y, "/.Trash")
+        # (Files' title names the folder it was asked for even when it
+        # cannot open it: the shell says whether it is there)
+        q5.click_desktop()
+        q5.command("cd /home/%s/.Trash" % (m.group(1) if m else "?"),
+                   "thread64", timeout=20)
+        here = q5.command("pwd", "thread64", timeout=20)
+        check("and the shortcut made it again (%s)" % here.split()[1:2],
+              "/home/%s/.Trash" % (m.group(1) if m else "?") in here)
+        q5.command("cd /", "thread64", timeout=20)
         check("closing each desktop shortcut returns to the bare desktop",
               q5.dock_windows() == 0)
 
@@ -216,8 +253,9 @@ def main():
               "Files: /home/" in title)
     finally:
         q5r.close()
-        if os.path.exists(q5_disk):
-            os.unlink(q5_disk)
+        for f in (q5_disk, q5_log):
+            if os.path.exists(f):
+                os.unlink(f)
 
     # --- The desktop: closing an application window -------------------
     print("--- the desktop: closing an application ---")

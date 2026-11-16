@@ -48,6 +48,28 @@ int user_reauth(const char *password);
 int user_password_current_ok(const char *password);
 const char *user_current_name(void);
 const char *user_current_display_name(void);
+/* The signed-in account's home with its Desktop and Trash, made again
+   if they are missing - a shortcut on the desktop must not lead to a
+   folder somebody deleted. 0 = they are there; -1 = no disk, or no
+   account signed in. */
+int user_current_home(void);
+
+/* How the signed-in account's locked screen opens: its password, its
+   PIN (4 to 8 digits; after five wrong ones only the password, until
+   it has been given), or a swipe up with nothing to type. */
+#define USER_UNLOCK_PASSWORD 0
+#define USER_UNLOCK_PIN      1
+#define USER_UNLOCK_SWIPE    2
+#define USER_PIN_MIN 4
+#define USER_PIN_MAX 8
+int user_unlock_mode(void);
+int user_unlock_info(int *mode, int *has_pin);
+/* Changes it, with the account's password. 'pin' is a new PIN, or ""
+   to keep the one there is. 0 done, -2 wrong password, -3 not a PIN
+   (or the PIN way with no PIN), -1 anything else. */
+int user_set_unlock(int mode, const char *pin, const char *password);
+int user_pin_ok(const char *pin);
+int user_pin_blocked(void);
 
 /* The files the system itself reads. A plain user may look into them;
    writing to them or deleting them is changing the system. */
