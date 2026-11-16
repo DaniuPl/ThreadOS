@@ -61,6 +61,18 @@ def wait_for(fn, want, timeout=10):
     return got
 
 
+def fill_near(q, px):
+    """The slider's filled length, polled until it is px (to a pixel):
+    the frame the number was read from may still have the slider on its
+    way to its new length - the last length seen"""
+    deadline = time.time() + 10
+    fill = island_slider(q)
+    while abs(fill - px) > 1 and time.time() < deadline:
+        time.sleep(0.3)
+        fill = island_slider(q)
+    return fill
+
+
 def island_shown(q, screen=None):
     """Whether the island's black is at the top centre"""
     _, _, at = screen or q.screen_raw()
@@ -79,7 +91,7 @@ def loudness_part(q):
     q.mouse_goto(400, 300)
     q.sendkey("volumeup")
     got = wait_for(said, "85%")
-    fill = island_slider(q)
+    fill = fill_near(q, 85 * ISL_BAR_W // 100)
     check(f"Volume Up: the island says 85% ('{got}'), its slider filled "
           f"{fill} of {ISL_BAR_W} px", got == "85%" and
           abs(fill - 85 * ISL_BAR_W // 100) <= 1)
@@ -88,13 +100,13 @@ def loudness_part(q):
     for _ in range(3):
         q.sendkey("volumedown")
     got = wait_for(said, "70%")
-    fill = island_slider(q)
+    fill = fill_near(q, 70 * ISL_BAR_W // 100)
     check(f"Volume Down three times: 70% ('{got}'), filled {fill} px",
           got == "70%" and abs(fill - 70 * ISL_BAR_W // 100) <= 1)
 
     q.sendkey("audiomute")
     got = wait_for(said, "Off")
-    fill = island_slider(q)
+    fill = fill_near(q, 0)
     check(f"Mute: the island says Off ('{got}') and its slider is empty "
           f"({fill} px)", got == "Off" and fill == 0)
     check("and the driver is muted", kernel_volume(q) == (70, True))
@@ -123,7 +135,7 @@ def loudness_part(q):
     # A click along the slider, and a drag
     q.click(bx + ISL_BAR_W // 4, cy)
     got = wait_for(said, "25%")
-    fill = island_slider(q)
+    fill = fill_near(q, 25 * ISL_BAR_W // 100)
     check(f"a click a quarter of the way along the slider: 25% ('{got}', "
           f"filled {fill} px)", got == "25%" and
           abs(fill - 25 * ISL_BAR_W // 100) <= 1)
