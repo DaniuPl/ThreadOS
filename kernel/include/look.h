@@ -30,8 +30,7 @@
 #define BAR_H        24      /* its height */
 #define BAR_LOGO_X   10      /* the mark at its left end */
 #define BAR_LOGO_D   12      /* ... and how large it is */
-#define BAR_NAME_X   30      /* "ThreadOS", in bold */
-#define BAR_APP_GAP  16      /* from that to the focused window's name */
+#define BAR_NAME_X   30      /* the program in front, in bold */
 #define BAR_RIGHT    10      /* air at the right-hand end */
 #define BAR_ITEM_GAP 14      /* between the things on the right */
 #define BAR_BLUR     8       /* how far the glass smears what is under it */

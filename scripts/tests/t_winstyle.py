@@ -46,9 +46,10 @@ SEC_DESK = GSET_SECTIONS.index("Desktop & Dock")
 
 
 def bar_name(q):
+    """The bar's bold name: with no window in front, "Desktop" """
     return q.find_ui(BAR_NAME_X, BAR_NAME_X + 100,
                      ui_font_baseline_in(BAR_PX, 0, BAR_H),
-                     charset="ThreadOS", px=BAR_PX, face="bold")
+                     px=BAR_PX, face="bold")
 
 
 def slot_x(W, n, k):
@@ -83,7 +84,7 @@ def main():
             W, H = q.size()
             q.mouse_home()
             check("the Mac style first: the bar at the top ('%s')"
-                  % bar_name(q), bar_name(q) == "ThreadOS")
+                  % bar_name(q), bar_name(q) == "Desktop")
             q.click_desktop()
             check("'layout windows'",
                   "saved" in q.sudo("set layout windows", "saved"))
@@ -220,9 +221,9 @@ def main():
             q.click_desktop()
             q.sudo("set layout mac", "saved")
             end = time.time() + 10
-            while time.time() < end and bar_name(q) != "ThreadOS":
+            while time.time() < end and bar_name(q) != "Desktop":
                 time.sleep(0.5)
-            check("'layout mac': the bar is back", bar_name(q) == "ThreadOS")
+            check("'layout mac': the bar is back", bar_name(q) == "Desktop")
         finally:
             q.close()
     finally:

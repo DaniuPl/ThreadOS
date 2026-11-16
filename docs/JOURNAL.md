@@ -8100,3 +8100,16 @@ works and is checked by `make test`.
       in order, the broken one saying so, the opened picture at its
       own size, the arrow and Backspace, and a picture arriving while
       it is open.
+
+- [x] **The menu bar names the program in front**
+      (kernel/desktop.c, kernel/locale.c, scripts/tests/t_bar.py,
+      t_desktop1.py, t_fullscreen.py, t_winstyle.py)
+      A Mac's menu bar has the mark at its left and, in bold, the name
+      of the program in front - not the system's own name, which ours
+      had in bold all day with the window's title after it. Now the
+      mark opens the menu, and next to it in bold is the program in
+      front - its window's title up to the colon, as every program
+      here titles its window ("Terminal: /home/admin") - or "Desktop"
+      when no window is. t_bar reads Settings there with Settings in
+      front; the others read the program or the desktop where they
+      read the system's name.

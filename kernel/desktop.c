@@ -795,10 +795,10 @@ static volatile int bt_searching;
 static int stat_scan_x, stat_scan_y;   /* the Search button, as drawn */
 static int status_card_click(int mx, int my);
 static int cat(char *d, int at, const char *s);
-/* The mark and the name at the left end: what opens the menu */
+/* The mark at the left end: what opens the menu */
 static int logo_w(void)
 {
-    return BAR_NAME_X + ui_font_width(UI_BOLD, BAR_PX, "ThreadOS") + 6;
+    return BAR_NAME_X - 4;
 }
 
 /* --- the dock -------------------------------------------------------------
@@ -4353,6 +4353,32 @@ static int status_card_click(int mx, int my)
     return 1;
 }
 
+/* The name of a window's program, as the bar shows it: its title up
+   to the colon - every program here titles its window "Terminal:
+   /home/admin", "Web: the page" - or all of it; a window with no
+   title yet goes by its program's label */
+static void app_name_of(int i, char *out, int cap)
+{
+    const char *t = wins[i].title;
+    int n = 0;
+    while (t[n] && t[n] != ':' && n < cap - 1) {
+        out[n] = t[n];
+        n++;
+    }
+    out[n] = '\0';
+    if (n)
+        return;
+    char prog[24];
+    if (task_name_of(wins[i].owner, prog, sizeof(prog))) {
+        const char *l = label_of_app(prog);
+        while (l[n] && n < cap - 1) {
+            out[n] = l[n];
+            n++;
+        }
+        out[n] = '\0';
+    }
+}
+
 static void draw_bar(void)
 {
     int w = video_w();
@@ -4364,23 +4390,24 @@ static void draw_bar(void)
 
     int base = ui_font_baseline_in(BAR_PX, 0, BAR_H);
 
-    /* The left end: the mark and the name, which open the menu - lit
-       while it is open, like a button held down */
+    /* The left end: the mark, which opens the menu - lit while it is
+       open, like a button held down */
     if (menu_on_bar())
         gfx_rrect(4, 3, logo_w() - 4, BAR_H - 6, 6, L.bar_text, 40);
     draw_logo(BAR_LOGO_X, (BAR_H - BAR_LOGO_D) / 2, L.bar_text);
-    int x = ui_font_text(UI_BOLD, BAR_PX, BAR_NAME_X, base, "ThreadOS",
-                         L.bar_text);
-    /* ... and after them the name of the window that is listening:
-       what the keyboard will reach */
-    if (focus_idx >= 0 && wins[focus_idx].used && here(focus_idx)) {
-        char cut[sizeof(wins[0].title) + 4];
-        int room = bt_x() - BAR_ITEM_GAP - (x + BAR_APP_GAP);
-        ui_font_text(UI_SANS, BAR_PX, x + BAR_APP_GAP, base,
-                     fit_text(wins[focus_idx].title, UI_SANS, BAR_PX,
-                              room > 0 ? room : 0, cut, sizeof(cut)),
-                     L.bar_text);
-    }
+    /* ... and after it, in bold, the name of the program in front -
+       what the keyboard will reach - as a Mac's menu bar names it, and
+       not the system's own name, which nobody needs read to them all
+       day. With no window in front it is the desktop. */
+    char name[sizeof(wins[0].title)], cut[sizeof(wins[0].title) + 4];
+    if (focus_idx >= 0 && wins[focus_idx].used && here(focus_idx))
+        app_name_of(focus_idx, name, sizeof(name));
+    else
+        cat(name, 0, locale_text("Desktop"));
+    int room = bt_x() - BAR_ITEM_GAP - BAR_NAME_X;
+    ui_font_text(UI_BOLD, BAR_PX, BAR_NAME_X, base,
+                 fit_text(name, UI_BOLD, BAR_PX, room > 0 ? room : 0, cut,
+                          sizeof(cut)), L.bar_text);
 
     draw_status_icons();
 

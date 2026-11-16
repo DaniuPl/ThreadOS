@@ -58,12 +58,12 @@ def dot_at(at, g, k):
     return at(tx + g["tile"] // 2, ty + g["tile"] + 1 + DOCK_DOT // 2)
 
 def bar_name(q):
-    """The system's name at the left end of the bar - in bold, the way
-    draw_bar() writes it; "" while the bar is hidden"""
+    """The name at the left end of the bar, in bold, the way draw_bar()
+    writes it: the program in front, or "Desktop" with none; "" while
+    the bar is hidden"""
     return q.find_ui(BAR_NAME_X, BAR_NAME_X + 100,
                      ui_font_baseline_in(BAR_PX, 0, BAR_H),
-                     charset="ThreadOS", px=BAR_PX, face="bold",
-                     under=on_bar)
+                     px=BAR_PX, face="bold", under=on_bar)
 
 
 def open_two(q, want=None):
@@ -95,13 +95,13 @@ def main():
             q.mouse_goto(300, BAR_MID)
             time.sleep(0.4)
             check("the top bar is visible while the pointer uses it",
-                  bar_name(q) == "ThreadOS")
+                  bar_name(q) == "Desktop")
             q.mouse_goto(600, 300)
             # By default it stays, as a Mac's menu bar does: still there
             # well after the three seconds it used to be given
             time.sleep(6)
             check("left alone, the bar stays (barhide is off by default)",
-                  bar_name(q) == "ThreadOS")
+                  bar_name(q) == "Desktop")
             q.click_desktop()
             check("'barhide 1' asks it to hide when not used",
                   "saved" in q.sudo("set barhide 1", "saved"))
@@ -109,20 +109,24 @@ def main():
             # Three seconds of the desktop's frames, which a loaded host
             # draws more slowly than fifty a second: waited for, not timed
             deadline = time.time() + 20
-            while time.time() < deadline and bar_name(q) == "ThreadOS":
+            while time.time() < deadline and bar_name(q) == "Desktop":
                 time.sleep(0.2)
             check("the idle top bar hides",
-                  bar_name(q) != "ThreadOS")
+                  bar_name(q) != "Desktop")
             q.mouse_goto(LOGO_XY[0], 1)
             time.sleep(0.4)
             q.mouse_goto(300, BAR_MID)
             time.sleep(0.4)
             check("moving to the top edge reveals the bar",
-                  bar_name(q) == "ThreadOS")
+                  bar_name(q) == "Desktop")
             q.click_desktop()
             q.sudo("set barhide 0", "saved")
 
             open_two(q)
+            # As a Mac's menu bar: the program in front by name, in bold,
+            # and not the system's name
+            check("with Settings in front the bar names it ('%s')"
+                  % bar_name(q), bar_name(q) == "Settings")
 
             g = dock_geom(n_w=2)
             w, h, at = q.screen_raw()

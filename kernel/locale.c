@@ -103,6 +103,7 @@ static const struct translation translations[] = {
     { "Desktop & Dock", "Biurko i Dock" },
     { "Interface style", "Styl interfejsu" },
     { "Devices", "Urządzenia" },
+    { "Desktop", "Biurko" },
     { "Device", "Urządzenie" },
     { "Need attention", "Wymaga uwagi" },
     { "Maker:model", "Producent:model" },

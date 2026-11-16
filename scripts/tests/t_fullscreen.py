@@ -39,9 +39,10 @@ def block(at, x, y, n):
 
 
 def bar_name(q):
+    """The bar's bold name: the program in front"""
     return q.find_ui(BAR_NAME_X, BAR_NAME_X + 100,
                      ui_font_baseline_in(BAR_PX, 0, BAR_H),
-                     charset="ThreadOS", px=BAR_PX, face="bold")
+                     px=BAR_PX, face="bold")
 
 
 def main():
@@ -89,7 +90,7 @@ def main():
               % title_at, "Terminal" in title_at)
         check("and the dock stays, the Files tile where it was",
               block(at, gx, gy, n) == files_pic and
-              bar_name(q) == "ThreadOS")
+              bar_name(q) == "Terminal")
         q.click(*light_xy(0, BAR_H, 2))
         q.mouse_goto(W // 2, H // 2)
         time.sleep(2)
@@ -136,7 +137,7 @@ def main():
         strip = q.window_title(0, BAR_H, W)
         check("the pointer at the top brings the bar out ('%s'), the "
               "window's title bar slid out under it ('%s')" % (name, strip),
-              name == "ThreadOS" and "Terminal" in strip)
+              name == "Terminal" and "Terminal" in strip)
 
         q.click(*light_xy(0, BAR_H, 2))
         q.mouse_goto(W // 2, H // 2)
@@ -150,7 +151,7 @@ def main():
         time.sleep(1)
         _, _, at = q.screen_raw()
         check("and the dock is there again", block(at, gx, gy, n) ==
-              files_pic and bar_name(q) == "ThreadOS")
+              files_pic and bar_name(q) == "Terminal")
 
         # The dock hidden until the pointer comes
         q.click_desktop()

@@ -119,8 +119,8 @@ def main():
         name = q4.find_ui(BAR_NAME_X, BAR_NAME_X + 100,
                           ui_font_baseline_in(BAR_PX, 0, BAR_H),
                           px=BAR_PX, face="bold", under=on_bar)
-        check("the bar says the system's name in bold TrueType ('%s')" % name,
-              name == "ThreadOS")
+        check("the bar names what is in front - with no window, the "
+              "desktop - in bold TrueType ('%s')" % name, name == "Desktop")
 
         # No disk: no home, no Desktop, no Trash - as on a laptop started
         # from the stick with no disk of ThreadOS's. A double click on
