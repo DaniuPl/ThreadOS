@@ -13,6 +13,11 @@ dock - the ground above the letter - is the letter's colour. Code's
 tile in the dock, the picture viewer's window tile and the Accounts and
 Code entries of the menu must not be that grey ground.
 
+Settings marks its sections the same way, with a square each down its
+left side, and those were letters too - W, B, N, S, ... They are
+pictures now: none of the thirteen squares reads as its old letter, in
+the bold lettering the letters were drawn in, and no two are alike.
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -22,7 +27,11 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, no64
+from ptest import check, summary, no64, _kernel_define
+
+_GS = "user/gsettings.c"
+ICON = _kernel_define(_GS, "ICON")
+OLD_LETTERS = "WBNSGADLMFRiU"
 
 
 def far(a, b):
@@ -106,6 +115,46 @@ def main():
             got = at(MENU_X0 + 10 + MENU_ICON // 2, iy + 2)
             check("the menu's %s wears a picture (%s against %s)"
                   % (app, got, letter), far(got, letter) > 30)
+        q.mouse_goto(w - 40, h // 2)
+        q.sendkey("esc")
+        time.sleep(0.5)
+
+        # Settings' sections
+        q.launch_dock("gsettings", n_w=1)    # (the viewer is open)
+        at_win = None
+        end = time.time() + 15
+        while time.time() < end and at_win is None:
+            for slot in range(8):
+                x, y = cascade(slot, GSET_W + 2, GSET_H + TITLE_H + 2,
+                               w=w, h=h)
+                if q.window_title(x, y, GSET_W + 2) == "Settings":
+                    at_win = (x + 1, y + CONTENT_DY)
+                    break
+            time.sleep(0.3)
+        check("Settings opens", at_win is not None)
+        if at_win:
+            cx, cy = at_win
+            q.mouse_goto(w - 20, h // 2)
+            time.sleep(1)
+            shot = q.screen_raw()
+            _, _, at = shot
+            read, pics = [], []
+            for i, old in enumerate(OLD_LETTERS):
+                iy = cy + GSET_SIDE_Y0 + i * GSET_SIDE_H + \
+                    (GSET_SIDE_H - ICON) // 2
+                read.append(q.find_ui(cx + 12, cx + 12 + ICON,
+                                      ui_font_baseline_in(11, iy, ICON),
+                                      charset=OLD_LETTERS, px=11,
+                                      face="bold", fg=(255, 255, 255),
+                                      screen=shot))
+                pics.append(tuple(at(cx + 12 + a, iy + b)
+                                  for b in range(2, ICON - 2)
+                                  for a in range(2, ICON - 2)))
+            letters = [r for r, old in zip(read, OLD_LETTERS) if r == old]
+            check("no section's square is its old letter (%s read)"
+                  % (letters,), not letters)
+            check("and the thirteen pictures are all different",
+                  len(set(pics)) == len(pics))
     finally:
         q.close()
     return summary()

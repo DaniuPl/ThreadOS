@@ -7953,3 +7953,15 @@ works and is checked by `make test`.
       on the page that the list is that. t_wifiui reads the list off
       the screen: the order, the names, the protection, the bars, and
       nothing of the broken frame.
+
+- [x] **Pictures for Settings' sections**
+      (user/gsettings.c, scripts/tests/t_appicons.py)
+      The squares down the left of Settings were letters - W, B, N, S
+      and so on. Each section has a picture now, drawn with the
+      window's own shapes in white on its square: Wi-Fi's arcs, the
+      Bluetooth rune, three joined machines, a loudspeaker, a cogwheel,
+      half a disc, a screen on its foot, a padlock, a mouse, a folder,
+      a globe, an i in a ring and an arrow into a tray. t_appicons reads
+      every square in the bold lettering the letters had: none reads as
+      its old letter (the old build reads W, A and L), and no two are
+      alike.

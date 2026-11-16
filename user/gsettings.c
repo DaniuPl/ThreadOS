@@ -100,17 +100,112 @@ static int group_ends(int i)
     return i == SEC_NET || i == SEC_SOUND || i == SEC_LOCK ||
            i == SEC_REGION;
 }
-/* Each section's square and the letter on it */
+/* Each section's square, under the picture of it */
 static const uint32_t section_colour[] = {
     0x0A84FF, 0x0A84FF, 0x0A84FF, 0xFF375F, 0x8E8E93, 0x3A3A3C,
     0x0A84FF, 0x3A3A3C, 0x8E8E93, 0x1E8CF0, 0x34A853, 0x8E8E93, 0xFF9500
 };
-static const char *const section_letter[] = {
-    "W", "B", "N", "S", "G", "A", "D", "L", "M", "F", "R", "i", "U"
-};
 
 static int win = -1;
 static int cw = W0, ch = H0;
+
+/* A section's picture, white on its ICON-sized square at x, y - drawn
+   with the window's own shapes, as the desktop draws the programs'.
+   'bg' is the square's colour, for the holes. */
+static void section_icon(int i, int x, int y, uint32_t bg)
+{
+    const uint32_t w = 0xFFFFFF;
+    switch (i) {
+    case SEC_WIFI:                      /* two arcs over a dot */
+        ud_disc(win, x + 6, y + 10, 4, w);
+        ud_clip(win, x + 1, y + 1, 14, 9);
+        ud_ring(win, x + 4, y + 7, 8, 8, 4, w);
+        ud_ring(win, x + 1, y + 4, 14, 14, 7, w);
+        ud_ring(win, x + 2, y + 5, 12, 12, 6, w);
+        ud_unclip(win);
+        break;
+    case SEC_BT:                        /* the rune */
+        ud_line(win, x + 5, y + 5, x + 11, y + 10, 24, w);
+        ud_line(win, x + 11, y + 10, x + 8, y + 13, 24, w);
+        ud_line(win, x + 8, y + 13, x + 8, y + 2, 24, w);
+        ud_line(win, x + 8, y + 2, x + 11, y + 5, 24, w);
+        ud_line(win, x + 11, y + 5, x + 5, y + 10, 24, w);
+        break;
+    case SEC_NET:                       /* three machines, joined */
+        ud_line(win, x + 8, y + 4, x + 4, y + 12, 20, w);
+        ud_line(win, x + 8, y + 4, x + 12, y + 12, 20, w);
+        ud_line(win, x + 4, y + 12, x + 12, y + 12, 20, w);
+        ud_disc(win, x + 6, y + 2, 5, w);
+        ud_disc(win, x + 2, y + 10, 5, w);
+        ud_disc(win, x + 10, y + 10, 5, w);
+        break;
+    case SEC_SOUND:                     /* a loudspeaker, and its sound */
+        ud_fill(win, x + 2, y + 6, 3, 4, w);
+        for (int k = 0; k < 4; k++)
+            ud_line(win, x + 5 + k, y + 6 - k, x + 5 + k, y + 9 + k, 16, w);
+        ud_clip(win, x + 10, y + 1, 6, 14);
+        ud_ring(win, x + 6, y + 5, 6, 6, 3, w);
+        ud_ring(win, x + 4, y + 3, 10, 10, 5, w);
+        ud_unclip(win);
+        break;
+    case SEC_GENERAL:                   /* a cogwheel */
+        ud_line(win, x + 8, y + 2, x + 8, y + 14, 40, w);
+        ud_line(win, x + 2, y + 8, x + 14, y + 8, 40, w);
+        ud_line(win, x + 4, y + 4, x + 12, y + 12, 40, w);
+        ud_line(win, x + 12, y + 4, x + 4, y + 12, 40, w);
+        ud_disc(win, x + 3, y + 3, 11, w);
+        ud_disc(win, x + 6, y + 6, 5, bg);
+        break;
+    case SEC_LOOK:                      /* light and dark, half and half */
+        ud_ring(win, x + 2, y + 2, 12, 12, 6, w);
+        ud_clip(win, x + 2, y + 2, 6, 12);
+        ud_disc(win, x + 2, y + 2, 12, w);
+        ud_unclip(win);
+        break;
+    case SEC_DISPLAY:                   /* a screen on its foot */
+        ud_round(win, x + 1, y + 3, 14, 9, 2, w);
+        ud_round(win, x + 2, y + 4, 12, 7, 1, bg);
+        ud_fill(win, x + 7, y + 12, 2, 2, w);
+        ud_fill(win, x + 4, y + 13, 8, 1, w);
+        break;
+    case SEC_LOCK:                      /* a padlock */
+        ud_clip(win, x, y, 16, 8);
+        ud_ring(win, x + 4, y + 2, 8, 12, 4, w);
+        ud_ring(win, x + 5, y + 3, 6, 10, 3, w);
+        ud_unclip(win);
+        ud_round(win, x + 3, y + 7, 10, 7, 2, w);
+        ud_disc(win, x + 7, y + 9, 2, bg);
+        break;
+    case SEC_MOUSE:                     /* a mouse, its button split */
+        ud_ring(win, x + 4, y + 1, 8, 14, 4, w);
+        ud_ring(win, x + 5, y + 2, 6, 12, 3, w);
+        ud_line(win, x + 8, y + 2, x + 8, y + 6, 16, w);
+        break;
+    case SEC_FILES:                     /* a folder */
+        ud_round(win, x + 2, y + 3, 6, 3, 1, w);
+        ud_round(win, x + 2, y + 5, 12, 8, 1, w);
+        break;
+    case SEC_REGION:                    /* a globe */
+        ud_ring(win, x + 2, y + 2, 12, 12, 6, w);
+        ud_ring(win, x + 5, y + 2, 6, 12, 3, w);
+        ud_line(win, x + 2, y + 8, x + 14, y + 8, 16, w);
+        ud_line(win, x + 4, y + 5, x + 12, y + 5, 12, w);
+        ud_line(win, x + 4, y + 11, x + 12, y + 11, 12, w);
+        break;
+    case SEC_ABOUT:                     /* information, in a ring */
+        ud_ring(win, x + 1, y + 1, 14, 14, 7, w);
+        ud_ring(win, x + 2, y + 2, 12, 12, 6, w);
+        ud_disc(win, x + 7, y + 4, 2, w);
+        ud_fill(win, x + 7, y + 7, 2, 5, w);
+        break;
+    default:                            /* Updates: down, into the tray */
+        ud_line(win, x + 8, y + 2, x + 8, y + 10, 24, w);
+        ud_line(win, x + 4, y + 7, x + 8, y + 11, 24, w);
+        ud_line(win, x + 12, y + 7, x + 8, y + 11, 24, w);
+        ud_line(win, x + 3, y + 13, x + 13, y + 13, 24, w);
+        break;
+    }
+}
 static int section = SEC_GENERAL;       /* where it opens */
 static struct ud_look l;
 
@@ -1226,11 +1321,10 @@ static void draw(void)
         int y = SIDE_Y0 + i * SIDE_H;
         if (i == section)
             ud_round(win, 6, y + 1, SIDE_W - 12, SIDE_H - 2, 6, l.accent);
-        /* The square with its letter, the way a Mac marks each one */
+        /* The square with its picture, the way a Mac marks each one */
         int iy = y + (SIDE_H - ICON) / 2;
         ud_round(win, 12, iy, ICON, ICON, 4, section_colour[i]);
-        ud_text_mid_l(win, 12, iy, ICON, ICON, section_letter[i], 0xFFFFFF,
-                      UD_BOLD, 11);
+        section_icon(i, 12, iy, section_colour[i]);
         ud_text_l(win, SIDE_TEXT_X, ud_baseline(y, SIDE_H, UD_PX),
                   sections[i], i == section ? l.on_accent : l.text, UD_SANS,
                   UD_PX);
