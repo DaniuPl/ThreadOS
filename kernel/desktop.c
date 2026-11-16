@@ -658,6 +658,17 @@ static volatile int menu_go = -1;
 /* The loudness keys: what was pressed, for the desktop's thread -
    writing the setting is not an interrupt's work - and until when the
    island says how loud it is now */
+/* Bumped by whatever changes what the screen shows from outside the
+   desktop's own loop - a program's window, a notification, a key - so
+   that a frame with nothing new in it need not be drawn (see the main
+   loop). From system calls on any core and from the keyboard's
+   interrupt, hence atomic. */
+static volatile uint32_t scene_seq;
+static void scene_changed(void)
+{
+    __atomic_add_fetch(&scene_seq, 1, __ATOMIC_RELAXED);
+}
+
 static volatile int vol_steps;      /* up minus down, since the last frame */
 static volatile int vol_mutes;      /* Mute presses, since the last frame */
 static uint32_t vol_until;
@@ -4293,6 +4304,7 @@ static void copy_cut(char *d, const char *s, int cap)
 
 void desktop_notify(const char *title, const char *body)
 {
+    scene_changed();
     irqflags_t fl = spin_lock_irq(&note_lock);
     if (note_n < NOTE_SHOWN)
         note_n++;
@@ -4933,6 +4945,7 @@ static void focus_next(void)
    is told and given time to end; a kernel window simply goes. */
 static void close_window(int i)
 {
+    scene_changed();
     struct window *w = &wins[i];
     if (!w->used)
         return;
@@ -5147,6 +5160,7 @@ static void setup_submit(void)
 
 int desktop_lock(void)
 {
+    scene_changed();
     if (!compositor_running || kiosk)
         return -1;
     if (user_current_passwordless())
@@ -6041,6 +6055,7 @@ static int idle_key(void);
 
 static void desktop_on_key(char c)
 {
+    scene_changed();
     if (idle_key())
         return;                         /* it only woke the screen */
     if (locked) {                       /* the keys are the field's alone */
@@ -6148,6 +6163,7 @@ static void desktop_on_key(char c)
 
 int desktop_win_create(int owner, int cw, int ch, const char *title)
 {
+    scene_changed();
     if (cw <= 0 || ch <= 0 || cw > video_w() || ch > video_h())
         return -1;
     for (int i = 0; i < MAX_WIN; i++) {
@@ -6211,6 +6227,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
  * dock shows over its tile, so one call fixes both at once. */
 int desktop_win_title(int winid, int owner, const char *title)
 {
+    scene_changed();
     if (winid < 0 || winid >= MAX_WIN || !title)
         return -1;
     struct window *w = &wins[winid];
@@ -6236,6 +6253,7 @@ int desktop_win_title(int winid, int owner, const char *title)
  * window taken away. */
 int desktop_win_keep(int winid, int owner)
 {
+    scene_changed();
     if (winid < 0 || winid >= MAX_WIN)
         return -1;
     struct window *w = &wins[winid];
@@ -6261,6 +6279,7 @@ static struct window *app_window(int winid, int owner)
 int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
                      uint8_t color)
 {
+    scene_changed();
     struct window *win = app_window(winid, owner);
     if (!win)
         return -1;
@@ -6285,6 +6304,7 @@ int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
  * framebuffer at all, not the case to design for. */
 int desktop_win_truecolour(int winid, int owner)
 {
+    scene_changed();
     struct window *win = app_window(winid, owner);
     if (!win)
         return -1;
@@ -6318,6 +6338,7 @@ int desktop_win_truecolour(int winid, int owner)
 int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
                      const uint8_t *pixels)
 {
+    scene_changed();
     struct window *win = app_window(winid, owner);
     if (!win || !pixels || w <= 0 || h <= 0)
         return -1;
@@ -6340,6 +6361,7 @@ int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
 int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
                        const uint32_t *pixels)
 {
+    scene_changed();
     struct window *win = app_window(winid, owner);
     if (!win || !pixels || w <= 0 || h <= 0)
         return -1;
@@ -6391,6 +6413,7 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
 int desktop_win_draw(int winid, int owner, const struct win_draw *d,
                      const char *s)
 {
+    scene_changed();
     int px = d->px > 0 && d->px <= 64 ? d->px : UI_PX;
     int font = d->font == UI_BOLD || d->font == UI_MONO ? d->font : UI_SANS;
     if (d->op == WD_MEASURE || d->op == WD_LMEASURE)
@@ -6520,6 +6543,7 @@ void desktop_ui_look(int which, uint32_t *out)
 int desktop_win_text(int winid, int owner, int x, int y, const char *s,
                      uint8_t color)
 {
+    scene_changed();
     struct window *win = app_window(winid, owner);
     if (!win)
         return -1;
@@ -6644,8 +6668,11 @@ static void kiosk_frame(int mx, int my)
 #define FRAME_TICKS (100 / FRAME_HZ)   /* 20 ms at 100 ticks a second */
 
 static uint32_t frame_due;
-static uint32_t stat_from, stat_frames, stat_busy;
-static int fps_last = -1, busy_last;
+static uint32_t stat_from, stat_frames, stat_busy, stat_drawn;
+static int fps_last = -1, busy_last, drawn_last;
+/* What the last frame actually drawn was drawn from */
+static uint32_t seq_drawn, frame_drawn;
+static int mx_drawn = -1, my_drawn, buttons_drawn;
 
 static void frame_done(uint32_t began)
 {
@@ -6655,9 +6682,11 @@ static void frame_done(uint32_t began)
     if (now - stat_from >= 100) {
         fps_last = (int)(stat_frames * 100 / (now - stat_from));
         busy_last = (int)(stat_busy * 100 / (now - stat_from));
+        drawn_last = (int)(stat_drawn * 100 / (now - stat_from));
         stat_from = now;
         stat_frames = 0;
         stat_busy = 0;
+        stat_drawn = 0;
     }
     frame_due += FRAME_TICKS;
     if ((int32_t)(frame_due - now) <= 0)
@@ -6665,12 +6694,13 @@ static void frame_done(uint32_t began)
     task_sleep((frame_due - now) * 10);
 }
 
-int desktop_frame_stats(int *fps, int *busy)
+int desktop_frame_stats(int *fps, int *busy, int *drawn)
 {
     if (fps_last < 0)
         return 0;
     *fps = fps_last;
     *busy = busy_last;
+    *drawn = drawn_last;
     return 1;
 }
 
@@ -6979,6 +7009,30 @@ static void desktop_thread(void *arg)
             frame_done(began);
             continue;
         }
+
+        /* A frame that would be the last one again is not drawn. The
+           last one sent the card nothing, and since then no input has
+           come and no program has changed a window: drawing it would
+           cost most of the machine's time to show the same picture.
+           Anything that moves - a window opening, the island growing -
+           changes the screen every frame and so is drawn every frame;
+           what changes with time alone - the clock, the bar hiding, a
+           notification's end - is caught by the frame drawn anyway five
+           times a second. */
+        uint32_t seq = scene_seq;
+        if (video_present_rows() == 0 && seq == seq_drawn &&
+            mx == mx_drawn && my == my_drawn && buttons == buttons_drawn &&
+            frames - frame_drawn < FRAME_HZ / 5) {
+            frames++;
+            frame_done(began);
+            continue;
+        }
+        seq_drawn = seq;
+        mx_drawn = mx;
+        my_drawn = my;
+        buttons_drawn = buttons;
+        frame_drawn = frames;
+        stat_drawn++;
 
         draw_background();
 

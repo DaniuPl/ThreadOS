@@ -1310,10 +1310,10 @@ static void execute(const char *line)
                video_scale(), video_pw(), video_ph());
         printk("last frame:      %u rows to the card (of %d)\n",
                video_present_rows(), video_ph());
-        int fps, busy;
-        if (desktop_frame_stats(&fps, &busy))
-            printk("frames:          %d a second, %d%% of it drawing\n",
-                   fps, busy);
+        int fps, busy, drawn;
+        if (desktop_frame_stats(&fps, &busy, &drawn))
+            printk("frames:          %d a second, %d%% of it drawing, "
+                   "%d of them drawn\n", fps, busy, drawn);
     } else if (!strcmp(line, "reboot")) {
         printk("Restarting...\n");
         /* When the ACPI tables have no reset register, there is a way

@@ -20,7 +20,8 @@ What is asserted:
 
   the compositor says what its frames cost ('screen'), and an idle
   desktop gets more of them than the old sleep ever allowed, spending
-  a small share of the second drawing them
+  a small share of the second drawing them - most idle frames, with
+  nothing new in them, are not drawn at all
 
   an idle frame still sends nothing to the card - the kept dock is the
   same picture, to the pixel
@@ -54,12 +55,13 @@ def stats(q):
     q.type_line("screen")
     time.sleep(1.5)
     said = q.serial()[seen:]
-    m = re.search(r"frames:\s+(\d+) a second, (\d+)% of it drawing", said)
+    m = re.search(r"frames:\s+(\d+) a second, (\d+)% of it drawing, "
+                  r"(\d+) of them drawn", said)
     rows = re.search(r"last frame:\s+(\d+) rows", said)
     if not m:
-        return None, None, None
+        return None, None, None, None
     return (int(m.group(1)), int(m.group(2)),
-            int(rows.group(1)) if rows else None)
+            int(rows.group(1)) if rows else None, int(m.group(3)))
 
 
 def set_motion(q, n):
@@ -89,12 +91,12 @@ def main():
             # --- the beat ------------------------------------------------
             # The best of three seconds: the machine running the tests
             # may be busy with other machines at any one of them
-            best = (0, 100, None)
+            best = (0, 100, None, None)
             for _ in range(3):
-                fps, busy, rows = stats(q)
+                fps, busy, rows, drawn = stats(q)
                 if fps is not None and fps > best[0]:
-                    best = (fps, busy, rows)
-            fps, busy, rows = best
+                    best = (fps, busy, rows, drawn)
+            fps, busy, rows, drawn = best
             check("the compositor says what its frames cost (%s a second, "
                   "%s%% drawing)" % (fps, busy), fps > 0)
             check("an idle desktop gets more frames than a fixed sleep after "
@@ -103,6 +105,11 @@ def main():
                   % busy, busy < 50)
             check("an idle frame sends nothing to the card - the kept dock "
                   "is the very same picture (%s rows)" % rows, rows == 0)
+            # Most idle frames are not drawn at all - five a second still
+            # are, for what changes with time alone
+            check("and most idle frames are not even drawn (%s of %s)"
+                  % (drawn, fps), drawn is not None and fps and
+                  drawn <= fps // 2)
 
             # --- opening, slowed down ------------------------------------
             set_motion(q, 10)

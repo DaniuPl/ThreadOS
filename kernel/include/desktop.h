@@ -104,11 +104,12 @@ void desktop_ui_look(int which, uint32_t *out);
 #define BG_PREVIEW_MAX (200 * 150)
 int desktop_bg_preview(int bg, int dark, int w, int h, uint32_t *out);
 
-/* The compositor's last second: frames drawn, and the share of the
-   second spent drawing them (percent). 0 while it is not running. */
-int desktop_frame_stats(int *fps, int *busy);
+/* The compositor's last second: its frames, the share of the second
+   spent drawing them (percent), and how many of them were drawn - a
+   frame with nothing new in it is not. 0 while it is not running. */
+int desktop_frame_stats(int *fps, int *busy, int *drawn);
 
-/* A card at the top right of the screen for a few seconds: something
+/* A notification in the island at the top of the screen: something
    worth a glance that nobody asked for. Callable from anywhere. */
 void desktop_notify(const char *title, const char *body);
 
