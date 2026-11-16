@@ -170,6 +170,11 @@
    MIC_READ (a2 = buffer, a3 = frames: 16-bit stereo, 48 kHz),
    MIC_CLOSE */
 #define SYS64_MIC 103
+/* Pages given back: (address, length) - they read as zeros afterwards.
+   What madvise(MADV_DONTNEED) and munmap do on Linux. The answer is the
+   count of pages it could not drop (shared with another space), which
+   the program has to clear itself; -1 for a range not its own. */
+#define SYS64_DISCARD 104
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

@@ -324,6 +324,56 @@ uint64_t paging64_unmap(uint64_t virt)
     return phys;
 }
 
+/* Pages of the current space given back - madvise(MADV_DONTNEED) and
+   munmap, from libc/overlay. One that is there goes back to the pool,
+   one on the swap disk gives up its slot, and either way the next touch
+   brings a page of zeros: what a program on Linux is promised, and what
+   WebKit counts on when it decommits memory and later uses it again
+   expecting it clean. A page shared with another space (shm, a forked
+   copy not yet written to, a mapped file) stays as it is: it is not
+   this space's alone to drop: the count of those is what comes back,
+   and the caller clears them some other way. */
+int paging64_discard(uint64_t virt, uint64_t len)
+{
+    int kept = 0;
+    uint64_t end = virt + len;
+    if (end < virt)
+        return 0;
+    for (uint64_t va = virt & ~0xFFFULL; va < end; va += 4096) {
+        uint32_t frame = 0;
+        int slot = -1;
+        tables_lock();
+        uint64_t *pte = page_entry(va);
+        if (pte) {
+            uint64_t e = *pte;
+            if ((e & PTE_PRESENT) && (e & PG_USER) &&
+                !(e & (PG_COW | PG_FILE))) {
+                uint32_t f = (uint32_t)(e & ADDR_MASK);
+                if (!shm_is_shared(f) && pmm_frame_refs(f) == 1) {
+                    *pte = 0;
+                    frame = f;
+                } else {
+                    kept++;
+                }
+            } else if (e & PTE_PRESENT) {
+                kept++;
+            } else if (!(e & PTE_PRESENT) && (e & PG_SWAPPED)) {
+                slot = (int)((e & ADDR_MASK) >> 12);
+                *pte = 0;
+            }
+        }
+        tables_unlock();
+        if (frame) {
+            /* every core forgets it before the frame goes to anyone */
+            invalidate(va);
+            pmm_free_frame(frame);
+        } else if (slot >= 0) {
+            swap_free_slot(slot);
+        }
+    }
+    return kept;
+}
+
 /* The entry that gives ring 3 this page, or 0 when ring 3 cannot reach
    it. Access rights are the intersection over all four levels, so the
    USER bit has to be on each of them - exactly as the processor checks

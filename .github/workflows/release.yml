@@ -37,7 +37,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-            clang lld python3 openssl xz-utils
+            clang lld python3 openssl xz-utils cmake ninja-build ruby
 
       - name: Build 0.1.0-alpha.${{ github.run_number }}
         run: |

@@ -217,6 +217,31 @@ def main():
                   "ELF64 from the initrd:" in out)
         finally:
             q.close()
+
+        # --- An initrd larger than the memory there is: the loader
+        # says so, rather than that it found no initrd - the file is
+        # right there, and a person looking for it would look in vain.
+        # (A file of holes: nothing is written, and the firmware reads
+        # it only once it has the room, which it never gets.)
+        with open(os.path.join(esp, "initrd64.img"), "wb") as fh:
+            fh.truncate(384 * 1024 * 1024)
+        shutil.copy(OVMF_VARS, nvram)
+        q = Qemu(KERNEL, INITRD, esp=esp, serial=slog,
+                 qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+        try:
+            seen = len(q.serial())
+            try:
+                q.wait_serial("threadboot: There is", timeout=90)
+            except RuntimeError:
+                pass
+            time.sleep(1)
+            out = q.serial()[seen:]
+            check("an initrd bigger than the memory: the loader says there "
+                  "is not enough memory for it, not that there is none",
+                  "There is not enough memory for initrd64.img" in out and
+                  "I found no initrd64.img" not in out)
+        finally:
+            q.close()
     finally:
         shutil.rmtree(esp, ignore_errors=True)
         for f in (slog, nvram):

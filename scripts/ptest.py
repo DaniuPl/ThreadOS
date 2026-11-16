@@ -2081,6 +2081,12 @@ class Qemu:
                # the driver, not the network code.
                *(["-device", nic + ",netdev=n0"] if nic else []),
                "-qmp", f"unix:{self.qmp_path},server,nowait"]
+        # Under UEFI the firmware takes a good part of QEMU's 128 MiB, and
+        # the loader needs the kernel and the initrd in one piece each
+        # (boot/efi/efiboot.c): with WebKit's engine in it the initrd no
+        # longer found the room. A machine to boot UEFI is bigger.
+        if not ram_mib and (uefi or esp):
+            ram_mib = 256
         if ram_mib:
             cmd += ["-m", str(ram_mib)]
         if cpu_model:

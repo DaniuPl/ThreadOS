@@ -107,6 +107,7 @@ long __tos_open_virtual(const char *path);
 #define T_FTRUNCATE 88
 #define T_FDINODE   89
 #define T_GETRANDOM 98
+#define T_DISCARD  104
 
 #define T_FUTEX_WAIT    0
 #define T_FUTEX_WAKE    1
@@ -720,6 +721,21 @@ static long do_brk(unsigned long want)
 static struct { unsigned long at, len; } holes[HOLES];
 static int nholes;
 
+/* Pages given back to the system, reading as zeros from now on - as
+   Linux promises after madvise(MADV_DONTNEED), and WebKit relies on
+   when it decommits memory and later takes it again. The kernel drops
+   what is this program's alone; what it shares (a page still shared
+   with a forked parent, say) is cleared here instead. Clearing it all
+   here would bring back every page of a big reservation never
+   touched. (munmap keeps to filing the range and clearing it when it
+   is used again: given back at once, it set off a race in programs
+   with threads that has not been found yet.) */
+static void scrub(unsigned long at, unsigned long len)
+{
+	if (tos(T_DISCARD, at, len, 0, 0) != 0)
+		memset((void *)at, 0, len);
+}
+
 static void hole_add(unsigned long at, unsigned long len)
 {
 	for (int i = 0; i < nholes; i++) {
@@ -1234,9 +1250,25 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_brk:        return do_brk(a);
 	case SYS_mmap:       return do_mmap(a, b, c, d, e, f);
 	case SYS_munmap:     return do_munmap(a, b);
-	case SYS_mremap:     return -ENOMEM;     /* realloc copies instead */
-	case SYS_mprotect:
+	case SYS_mremap:
+		/* With MREMAP_MAYMOVE it is musl's realloc, told to copy
+		   instead. Without, it is musl's pthread_getattr_np feeling
+		   for the bottom of the main thread's stack a page at a time
+		   (WebKit asks where its stack ends): "in use" (ENOMEM)
+		   while the page is inside the room the stack may grow into
+		   (USER64_STACK_TOP and _MAX, kernel64/elf64.h), "nothing
+		   there" (EFAULT) below it */
+		if (d & 1)
+			return -ENOMEM;
+		return a >= 0x60000000UL - 4 * 1024 * 1024 && a < 0x60000000UL
+		       ? -ENOMEM : -EFAULT;
 	case SYS_madvise:
+		/* MADV_DONTNEED and MADV_FREE: the pages may go, and read as
+		   zeros afterwards; the rest are hints */
+		if ((c == 4 || c == 8) && b && !(a & 4095))
+			scrub(a, (b + 4095) & ~4095UL);
+		return 0;
+	case SYS_mprotect:
 	case SYS_membarrier: return 0;
 
 	case SYS_clock_gettime: return do_clock_gettime(a, (struct timespec *)b);

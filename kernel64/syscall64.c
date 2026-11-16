@@ -1050,6 +1050,15 @@ static void handle(struct regs *r)
     case SYS64_MMAP:
         r->rax = proc64_mmap(a1);
         return;
+    case SYS64_DISCARD:
+        /* Only the program's own memory: a range that leaves it is
+           refused rather than cut. (Not paging64_user_range: that
+           brings every page of the range in first.) */
+        r->rax = a1 >= USER64_BASE && a1 + a2 >= a1 &&
+                 a1 + a2 <= USER64_STACK_TOP
+                     ? (uint64_t)(int64_t)paging64_discard(a1, a2)
+                     : (uint64_t)(int64_t)-1;
+        return;
     case SYS64_THREAD:
         /* A thread starts in ring 3, so its entry point has to be the
            program's own code - and the program is the only one that

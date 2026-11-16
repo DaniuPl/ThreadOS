@@ -177,6 +177,9 @@ static void open_volume(EFI_HANDLE image)
 /* The size is asked for by going to the end and asking where that is -
    which avoids EFI_FILE_INFO and the GUID and the buffer that goes
    with it, for an answer that is one number. */
+/* 1 = read; 0 = there is no such file; -1 = there is, but no memory
+   for it below LOW_LIMIT - which is a different thing to tell the
+   person at the screen */
 static int read_file(const CHAR16 *name, struct blob *out)
 {
     EFI_FILE_PROTOCOL *f;
@@ -199,7 +202,7 @@ static int read_file(const CHAR16 *name, struct blob *out)
     UINTN pages = (UINTN)((size + 4095) / 4096);
     if (alloc_low(EfiLoaderData_Type, pages, &where) != EFI_SUCCESS) {
         f->Close(f);
-        return 0;
+        return -1;
     }
 
     UINTN left = (UINTN)size;
@@ -212,6 +215,22 @@ static int read_file(const CHAR16 *name, struct blob *out)
     out->data = (void *)(UINTN)where;
     out->size = left;
     return 1;
+}
+
+/* The first of the places a file may be: 1 found and read, otherwise
+   the loader stops, saying which of the two things went wrong */
+static void read_one(const CHAR16 *const *names, int n, struct blob *out,
+                     const CHAR16 *missing, const CHAR16 *no_room)
+{
+    int room = 1;
+    for (int i = 0; i < n; i++) {
+        int r = read_file(names[i], out);
+        if (r > 0)
+            return;
+        if (r < 0)
+            room = 0;
+    }
+    fail(room ? missing : no_room, 0);
 }
 
 /* --- what the screen is ---------------------------------------------- */
@@ -915,14 +934,18 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
      * one would serve a case nobody has - generality nobody asked for
      * is how a loader becomes hard to trust. */
     struct blob kernel, initrd;
-    if (!read_file(L"\\threados64.bin", &kernel) &&
-        !read_file(L"\\EFI\\BOOT\\threados64.bin", &kernel) &&
-        !read_file(L"\\EFI\\ThreadOS\\threados64.bin", &kernel))
-        fail(L"I found no threados64.bin", 0);
-    if (!read_file(L"\\initrd64.img", &initrd) &&
-        !read_file(L"\\EFI\\BOOT\\initrd64.img", &initrd) &&
-        !read_file(L"\\EFI\\ThreadOS\\initrd64.img", &initrd))
-        fail(L"I found no initrd64.img", 0);
+    static const CHAR16 *const kernels[] = {
+        L"\\threados64.bin", L"\\EFI\\BOOT\\threados64.bin",
+        L"\\EFI\\ThreadOS\\threados64.bin"
+    };
+    static const CHAR16 *const initrds[] = {
+        L"\\initrd64.img", L"\\EFI\\BOOT\\initrd64.img",
+        L"\\EFI\\ThreadOS\\initrd64.img"
+    };
+    read_one(kernels, 3, &kernel, L"I found no threados64.bin",
+             L"There is not enough memory for threados64.bin");
+    read_one(initrds, 3, &initrd, L"I found no initrd64.img",
+             L"There is not enough memory for initrd64.img");
 
     /* And the loader itself, as a file.
      *

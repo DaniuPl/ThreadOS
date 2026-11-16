@@ -24,7 +24,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-            clang lld python3
+            clang lld python3 cmake ninja-build ruby
+          # (cmake, ninja and ruby build WebKit's JavaScriptCore)
 
       - name: The kernel and its initrd
         run: make -j$(nproc)
@@ -57,7 +58,7 @@ jobs:
             build-essential \
             qemu-system-x86 qemu-system-arm grub-pc-bin grub-efi-amd64-bin \
             xorriso mtools ovmf clang lld python3 openssl libssl-dev \
-            acpica-tools qemu-system-gui
+            acpica-tools qemu-system-gui cmake ninja-build ruby
           # (iasl, from acpica-tools, compiles the batteries t_power
           # gives the machine; qemu-system-gui has QEMU's SDL sound,
           # whose disk driver is t_mic's microphone)

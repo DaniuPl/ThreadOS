@@ -8279,3 +8279,60 @@ works and is checked by `make test`.
       welcome; then makes a C++ project and checks C++, Rust and Java
       colouring. The Camera's build rule moved below zlib's, where
       $(ZLIB_A) has a value, so a fresh build directory links it.
+
+- [x] **WebKit, first stage: JavaScriptCore runs on ThreadOS**
+      (third_party/webkit/, third_party/icu/, apps/webkit/, Makefile,
+      kernel64/paging64.c, kernel64/syscall64.c,
+      libc/overlay/src/threados/syscall.c, libc/cxx/compat.h,
+      libc/cxx/cxxrt.cpp, scripts/tests/t_jsc.py, scripts/tests/js/)
+      The browser is to become WebKit; its engine comes first. WebKitGTK
+      2.54.2's release archive is built by WebKit's own CMake through a
+      toolchain file of ours (apps/webkit/threados.cmake): the host's
+      compilers against musl, everything static, musl's start files
+      around the objects - the JSCOnly port, with the C loop interpreter
+      (no JIT, so no executable memory) and the system's malloc. Not one
+      of WebKit's files needed changing. Under it is ICU 78.3, compiled
+      from its sources (apps/webkit/icu.mk) with its data cut from 32 MB
+      to 4 (apps/webkit/icu-data.py: the Unicode tables, normalization,
+      collation and the formats of the root locale, English and
+      Polish). The engine's shell runs as 'jsc'.
+      What it took underneath. WebKit gives memory back with
+      madvise(MADV_DONTNEED) and counts on it reading as zeros when it
+      takes it again; here madvise did nothing and munmap only filed the
+      range for reuse, clearing it then - a clearing that would have
+      brought back every page of a 128 MB reservation never touched. So
+      the kernel gives pages back now (SYS64_DISCARD: a page of the
+      program's own goes back to the pool, one on the swap disk gives up
+      its slot, a shared one is reported and cleared by the caller), and
+      musl's madvise uses it. munmap keeps to what it did - files the
+      range and clears it when it is used again: giving its pages back
+      at once made SQLite's sorter threads and pthreadtest fail now and
+      then on four cores under load, which points at memory a thread
+      still uses being unmapped, a race the old munmap hid; it is not
+      found yet. musl's pthread_getattr_np feels
+      for the bottom of the main thread's stack with mremap, which
+      answered "in use" everywhere: it would never have finished; now
+      the answer follows the stack's room. libstdc++ asked a weak
+      reference to pthread_cancel whether threads were in use, and a weak
+      reference never pulls a definition out of a static libc: so
+      std::call_once failed and std::mutex locked nothing - in every C++
+      program here. compat.h now says what glibc 2.34's headers say
+      (threads are always there), cxxrt.cpp answers the glibc names
+      libstdc++'s locale and stream code asks for, and
+      __libc_single_threaded is 0, so libstdc++'s reference counts stay
+      atomic between threads.
+      t_jsc runs 'jsc' on ThreadOS and holds what it prints to what
+      Node.js prints for the same files: core.js (the language, through
+      promises and timers in their order) and intl.js (ICU: Unicode
+      properties, normalization, Polish collation, numbers, plurals,
+      dates in time zones, segmentation, display names, and the
+      collector after 60,000 objects) - compared only with a Node.js on
+      the same ICU, since the formats are ICU's data - and an uncaught
+      exception ends it with an error code.
+      The initrd grew from 19 MB to 35: t_swap64's machine has 64 MiB
+      now (at 32 GRUB could not load it), and a machine that boots UEFI
+      in the tests has 256 MiB (ptest.py), since OVMF takes a good part
+      of 128 and the loader needs the initrd in one piece. The loader
+      said "I found no initrd64.img" when it was there but did not fit;
+      it says "There is not enough memory for initrd64.img" now, which
+      t_threadboot checks with an initrd bigger than the machine.

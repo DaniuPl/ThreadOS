@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <new>
 #include <string>
 #include <unistd.h>
@@ -98,17 +99,27 @@ template class __cxx11::basic_string<char>;
 
 extern "C" {
 
-// glibc 2.32's "is this process single-threaded" - which every ThreadOS
-// program built against musl is (libc/overlay/src/thread/x86_64/clone.s)
-char __libc_single_threaded = 1;
+// glibc 2.32's "is this process single-threaded", which libstdc++ reads
+// to decide whether its reference counts need atomic instructions. musl
+// has no such flag, and programs on it do start threads (pthreads,
+// libc/overlay/src/thread/x86_64/clone.s), so the answer is always no:
+// counts shared between threads must not be torn
+char __libc_single_threaded = 0;
 
 void *__dso_handle = &__dso_handle;
 
 [[noreturn]] void __cxa_pure_virtual() { die("pure virtual function called", 0); }
 [[noreturn]] void __cxa_deleted_virtual() { die("deleted virtual function called", 0); }
 
-// Never reached: nothing throws (see above)
+// Never reached: nothing throws (see above). The library's exception
+// code names the rest of the unwinder too.
 [[noreturn]] void _Unwind_Resume(void *) { die("unwinding", 0); }
+[[noreturn]] int _Unwind_RaiseException(void *) { die("unwinding", 0); }
+[[noreturn]] int _Unwind_Resume_or_Rethrow(void *) { die("unwinding", 0); }
+void _Unwind_DeleteException(void *) {}
+unsigned long _Unwind_GetRegionStart(void *) { return 0; }
+unsigned long _Unwind_GetTextRelBase(void *) { return 0; }
+unsigned long _Unwind_GetDataRelBase(void *) { return 0; }
 int __gxx_personality_v0(int, int, unsigned long, void *, void *)
 {
     die("unwinding", 0);
@@ -128,6 +139,35 @@ ssize_t __read_chk(int fd, void *buf, size_t n, size_t)
 {
     return read(fd, buf, n);
 }
+int __fprintf_chk(FILE *f, int, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = std::vfprintf(f, fmt, ap);
+    va_end(ap);
+    return n;
+}
+void *__memcpy_chk(void *d, const void *s, size_t n, size_t)
+{
+    return std::memcpy(d, s, n);
+}
+wchar_t *__wmemset_chk(wchar_t *d, wchar_t c, size_t n, size_t)
+{
+    return std::wmemset(d, c, n);
+}
+size_t __mbsrtowcs_chk(wchar_t *d, const char **s, size_t n, mbstate_t *ps,
+                       size_t)
+{
+    return std::mbsrtowcs(d, s, n, ps);
+}
+size_t __mbsnrtowcs_chk(wchar_t *d, const char **s, size_t nms, size_t n,
+                        mbstate_t *ps, size_t)
+{
+    return mbsnrtowcs(d, s, nms, n, ps);
+}
+// The large-file names: off_t is 64 bits here already
+off_t ftello64(FILE *f) { return ftello(f); }
+int fseeko64(FILE *f, off_t off, int whence) { return fseeko(f, off, whence); }
 unsigned long __isoc23_strtoul(const char *s, char **end, int base)
 {
     return std::strtoul(s, end, base);

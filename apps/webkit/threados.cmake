@@ -1,0 +1,73 @@
+# CMake toolchain for WebKit on ThreadOS (apps/webkit/threados.cmake)
+#
+# ThreadOS programs are built by the host's compilers against musl
+# (libc/): musl's headers and the host libstdc++'s in front of the
+# host's own, everything static, and musl's start files around the
+# objects. WebKit's build is CMake's, so this says the same to it. The
+# Makefile passes the paths:
+#
+#   THREADOS_MUSL   the musl install (include/, lib/)
+#   THREADOS_REPO   the repository (libc/cxx/compat.h, libc/libc64.ld)
+#   THREADOS_CXXRT  the C++ runtime's last pieces (libc/cxx/cxxrt.cpp)
+#
+# The system is Linux as far as WebKit is concerned: musl answers the
+# Linux system calls (libc/overlay/), so WebKit's Linux code paths are
+# the right ones; what differs is in apps/webkit/patches/.
+
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_C_COMPILER gcc)
+set(CMAKE_CXX_COMPILER g++)
+
+# The variables reach try_compile() projects too
+set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
+    THREADOS_MUSL THREADOS_REPO THREADOS_CXXRT)
+
+execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=include
+                OUTPUT_VARIABLE _gcc_include OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND ${CMAKE_C_COMPILER} -print-libgcc-file-name
+                OUTPUT_VARIABLE _libgcc OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libstdc++.a
+                OUTPUT_VARIABLE _libstdcxx OUTPUT_STRIP_TRAILING_WHITESPACE)
+# libstdc++'s header directories, in the order the compiler searches them
+execute_process(COMMAND sh -c "echo | ${CMAKE_CXX_COMPILER} -xc++ -E -v - 2>&1 | sed -n 's/^ \\(.*c++.*\\)$/-isystem \\1/p' | tr '\\n' ' '"
+                OUTPUT_VARIABLE _cxx_includes OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+set(_common "-m64 -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
+-fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections \
+-DTHREADOS_LIBC")
+set(CMAKE_C_FLAGS_INIT "${_common} -nostdinc -isystem ${THREADOS_MUSL}/include \
+-isystem ${_gcc_include}")
+set(CMAKE_CXX_FLAGS_INIT "${_common} -fno-exceptions -nostdinc -nostdinc++ \
+${_cxx_includes} -isystem ${THREADOS_MUSL}/include -isystem ${_gcc_include} \
+-include ${THREADOS_REPO}/libc/cxx/compat.h")
+
+set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
+set(BUILD_SHARED_LIBS OFF)
+
+# Programs: static, at the address libc64.ld gives them, between musl's
+# start files; the C++ runtime, libstdc++ and the C library after them.
+# The libraries as one group: static ones are searched in order, and
+# CMake lists ICU's data before the code that refers to it
+# --allow-multiple-definition: WTF's file system code reaches for
+# std::filesystem, which pulls libstdc++'s exception and locale objects
+# in, and they bring definitions of their own of what cxxrt.o already
+# defines (std::__throw_system_error, the personality routine) - the
+# first, cxxrt.o's, is the one wanted.
+set(_start "-static -no-pie -nostdlib -Wl,--build-id=none \
+-Wl,-z,max-page-size=0x1000 -Wl,--gc-sections \
+-Wl,--allow-multiple-definition \
+-T ${THREADOS_REPO}/libc/libc64.ld \
+${THREADOS_MUSL}/lib/crt1.o ${THREADOS_MUSL}/lib/crti.o")
+set(_end "${THREADOS_CXXRT} ${_libstdcxx} ${THREADOS_MUSL}/lib/libc.a \
+${_libgcc} ${THREADOS_MUSL}/lib/crtn.o")
+set(CMAKE_C_LINK_EXECUTABLE
+    "<CMAKE_C_COMPILER> <FLAGS> <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${_start} <OBJECTS> -o <TARGET> <LINK_LIBRARIES> ${THREADOS_MUSL}/lib/libc.a ${_libgcc} ${THREADOS_MUSL}/lib/crtn.o")
+set(CMAKE_CXX_LINK_EXECUTABLE
+    "<CMAKE_CXX_COMPILER> <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> ${_start} <OBJECTS> -o <TARGET> -Wl,--start-group <LINK_LIBRARIES> -Wl,--end-group ${_end}")
+
+set(CMAKE_FIND_ROOT_PATH ${THREADOS_MUSL})
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)
+set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)

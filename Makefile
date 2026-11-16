@@ -751,6 +751,98 @@ $(BUILD)/litehtml/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c $(LIBC64) \
 CXX64_LINK = $(call LIBC64_LINK,$(1) $(BUILD)/libc64/cxxrt.o \
                                 $(LIBSTDCXX)) -Wl,--gc-sections
 
+# --- ICU, for WebKit ------------------------------------------------
+# ICU 78.3 as unicode.org releases it (third_party/README.md). Its
+# tools are built for this machine first - icupkg trims the data,
+# genccode makes an object of it - then its libraries for ThreadOS by
+# apps/webkit/icu.mk, from the sources straight, and the data cut down
+# to what apps/webkit/icu-data.py keeps (32 MB to 4).
+ICU_TGZ    := third_party/icu/icu4c-78.3-sources.tgz
+ICU_DIR    := $(BUILD)/icu
+ICU_SRC    := $(ICU_DIR)/icu/source
+ICU_HOST   := $(ICU_DIR)/host
+ICU_ROOT   := $(ICU_DIR)/root
+ICU_DAT    := $(ICU_DIR)/data/icudt78l.dat
+ICU_STAMP  := $(ICU_ROOT)/built
+ICU_HOSTRUN = env LD_LIBRARY_PATH=$(abspath $(ICU_HOST))/lib
+
+$(ICU_SRC)/runConfigureICU: $(ICU_TGZ)
+	rm -rf $(ICU_DIR)/icu && mkdir -p $(ICU_DIR)
+	tar -xzf $< -C $(ICU_DIR)
+	touch $@
+
+$(ICU_HOST)/bin/genccode: $(ICU_SRC)/runConfigureICU
+	rm -rf $(ICU_HOST) && mkdir -p $(ICU_HOST)
+	cd $(ICU_HOST) && $(abspath $(ICU_SRC))/runConfigureICU Linux \
+	    --disable-tests --disable-samples --disable-extras \
+	    --disable-icuio --disable-layoutex > configure.log
+	$(MAKE) -C $(ICU_HOST) > $(ICU_HOST)/make.log
+	touch $@
+
+$(ICU_DAT): $(ICU_HOST)/bin/genccode apps/webkit/icu-data.py
+	rm -rf $(dir $@) && mkdir -p $(dir $@)
+	cp $(ICU_SRC)/data/in/icudt78l.dat $@
+	$(ICU_HOSTRUN) $(ICU_HOST)/bin/icupkg -l $@ | \
+	    python3 apps/webkit/icu-data.py > $(dir $@)remove.txt
+	$(ICU_HOSTRUN) $(ICU_HOST)/bin/icupkg --ignore-deps \
+	    -r $(dir $@)remove.txt $@ 2> /dev/null
+
+# Thread-safe statics: ICU runs on JavaScriptCore's threads too
+$(ICU_STAMP): $(ICU_DAT) apps/webkit/icu.mk $(LIBC64) libc/cxx/compat.h
+	$(MAKE) -f apps/webkit/icu.mk SRC=$(ICU_SRC) OUT=$(ICU_DIR)/obj \
+	    DAT=$(ICU_DAT) CXX="$(CXX)" CC="$(CC)" AR="$(AR)" \
+	    GENCCODE="$(ICU_HOSTRUN) $(abspath $(ICU_HOST))/bin/genccode" \
+	    CXXFLAGS="$(filter-out -fno-threadsafe-statics,$(CXX64_FLAGS)) -w"
+	rm -rf $(ICU_ROOT) && mkdir -p $(ICU_ROOT)/include/unicode $(ICU_ROOT)/lib
+	cp $(ICU_SRC)/common/unicode/*.h $(ICU_SRC)/i18n/unicode/*.h \
+	    $(ICU_ROOT)/include/unicode/
+	cp $(ICU_DIR)/obj/*.a $(ICU_ROOT)/lib/
+	touch $@
+
+# --- WebKit: JavaScriptCore -------------------------------------------
+# WebKitGTK's release (third_party/README.md), built by its own CMake
+# through apps/webkit/threados.cmake: the JSCOnly port, the C loop
+# interpreter (no JIT: no executable memory to hand out), the system's
+# malloc, everything static. -Os because the initrd is memory. The
+# shell, jsc, runs scripts; the browser engine is the next stage.
+WEBKIT_TAR := third_party/webkit/webkitgtk-2.54.2.tar.xz
+WEBKIT_DIR := $(BUILD)/webkit
+WEBKIT_SRC := $(WEBKIT_DIR)/webkitgtk-2.54.2
+JSC_DIR    := $(WEBKIT_DIR)/jsc
+
+$(WEBKIT_SRC)/CMakeLists.txt: $(WEBKIT_TAR)
+	rm -rf $(WEBKIT_SRC) && mkdir -p $(WEBKIT_DIR)
+	tar -xf $< -C $(WEBKIT_DIR)
+	touch $@
+
+$(JSC_DIR)/build.ninja: $(WEBKIT_SRC)/CMakeLists.txt apps/webkit/threados.cmake \
+                        $(ICU_STAMP)
+	rm -rf $(JSC_DIR) && mkdir -p $(JSC_DIR)
+	cd $(JSC_DIR) && cmake -G Ninja $(abspath $(WEBKIT_SRC)) \
+	    -DCMAKE_TOOLCHAIN_FILE=$(abspath apps/webkit/threados.cmake) \
+	    -DTHREADOS_MUSL=$(abspath $(MUSL_ROOT)) -DTHREADOS_REPO=$(CURDIR) \
+	    -DTHREADOS_CXXRT=$(abspath $(BUILD)/libc64/cxxrt.o) \
+	    -DICU_ROOT=$(abspath $(ICU_ROOT)) -DPORT=JSCOnly \
+	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-Os -DNDEBUG" \
+	    -DCMAKE_CXX_FLAGS_RELEASE="-Os -DNDEBUG" \
+	    -DENABLE_STATIC_JSC=ON -DENABLE_JIT=OFF -DENABLE_C_LOOP=ON \
+	    -DENABLE_DFG_JIT=OFF -DENABLE_FTL_JIT=OFF -DENABLE_WEBASSEMBLY=OFF \
+	    -DENABLE_SAMPLING_PROFILER=OFF -DUSE_SYSTEM_MALLOC=ON \
+	    -DENABLE_API_TESTS=OFF -DDEVELOPER_MODE=OFF > cmake.log
+
+# ninja knows which of WebKit's files changed; the C library and the
+# C++ runtime it cannot see, so the program is linked again every time
+# this runs
+$(BUILD)/user64/jsc.elf: $(JSC_DIR)/build.ninja $(LIBC64) \
+                         $(BUILD)/libc64/cxxrt.o libc/cxx/compat.h \
+                         | $(BUILD)/user64
+	rm -f $(JSC_DIR)/bin/jsc
+	ninja -C $(JSC_DIR) jsc > $(JSC_DIR)/ninja.log || \
+	    { tail -40 $(JSC_DIR)/ninja.log; exit 1; }
+	strip -o $@ $(JSC_DIR)/bin/jsc
+
+USER64_ELFS += $(BUILD)/user64/jsc.elf
+
 # layouttest lays pages out with a font of known sizes and prints every
 # box; scripts/tests/t_browser.py holds what it prints on ThreadOS
 # against the same program built for this machine. It is not in the
@@ -905,6 +997,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    fonttest=$(BUILD)/user64/fonttest.elf \
 	    mbedtest=$(BUILD)/user64/mbedtest.elf \
 	    js=$(BUILD)/user64/js.elf \
+	    jsc=$(BUILD)/user64/jsc.elf \
 	    update=$(BUILD)/user64/update.elf \
 	    iwl3160.ucode=third_party/iwlwifi/iwlwifi-3160-17.ucode \
 	    cacert.pem=third_party/cacert/cacert.pem \

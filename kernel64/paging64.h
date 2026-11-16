@@ -59,6 +59,7 @@ int paging64_entry_empty(uint64_t virt);
 
 /* Removes a page's mapping; returns the frame that lay under it */
 uint64_t paging64_unmap(uint64_t virt);
+int paging64_discard(uint64_t virt, uint64_t len);
 
 /* The physical address behind a virtual one (0 = not mapped) */
 uint64_t paging64_lookup(uint64_t virt);
