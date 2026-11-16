@@ -802,11 +802,20 @@ static int logo_w(void)
  * Everything that draws the dock or looks for a tile under the pointer
  * asks dock_geom(), so a tile is clickable exactly where it is drawn.
  */
+#define DOCK_SLOTS (ICON_MAX + MAX_WIN)
+#define DOCK_SIDE_BOTTOM 0
+#define DOCK_SIDE_LEFT   1
+#define DOCK_SIDE_RIGHT  2
+
 struct dock {
     int x, y, w, h;       /* the glass */
-    int tile;             /* the side of one tile */
-    int ty;               /* where the tiles' top edge is */
+    int tile;             /* the side of one tile, before magnification */
+    int ty;               /* a bottom dock's tiles' top edge, before it */
     int n_l, n_w;         /* programs, windows */
+    int side;             /* DOCK_SIDE_* */
+    /* Each tile as it is drawn and clicked: its top left and its side.
+       Magnified tiles are larger, and push the others along. */
+    int kx[DOCK_SLOTS], ky[DOCK_SLOTS], ks[DOCK_SLOTS];
 };
 
 static int win_count(void);
@@ -818,57 +827,140 @@ static int dock_want(void)
     return s == 0 ? DOCK_TILE_S : s == 2 ? DOCK_TILE_L : DOCK_TILE_M;
 }
 
+/* Where the dock stands and whether it magnifies - read with the other
+   settings once a second (idle_settings), not on every geometry */
+static int dock_side = DOCK_SIDE_BOTTOM;
+static int dock_magnify;
+static int bar_autohide;
+/* How far magnification has come in, 0..256: it grows when the pointer
+   reaches the dock and shrinks when it leaves, over a few frames */
+static int dock_mag_level;
+static int dock_moved;                 /* the side changed: relayout */
+
+#define DOCK_MAG_REACH 3      /* tiles either side of the pointer that grow */
+
 static void dock_geom(struct dock *d)
 {
     int want = dock_want();
     d->n_l = icon_n;
     d->n_w = win_count();
+    d->side = dock_side;
+    int vert = d->side != DOCK_SIDE_BOTTOM;
     int n = d->n_l + d->n_w;
+    if (n > DOCK_SLOTS)
+        n = DOCK_SLOTS;
     int fixed = 2 * DOCK_PAD + (n > 0 ? (n - 1) * DOCK_GAP : 0) +
                 (d->n_l && d->n_w ? DOCK_SEP - DOCK_GAP : 0);
-    int room = video_w() - 2 * DOCK_MARGIN;
+    int room = (vert ? video_h() - BAR_H : video_w()) - 2 * DOCK_MARGIN;
     int t = want;
     if (n && fixed + n * t > room)
         t = (room - fixed) / n;
     if (t < DOCK_TILE_MIN)
         t = DOCK_TILE_MIN;
     d->tile = t;
-    d->w = fixed + n * t;
-    d->h = want + 2 * DOCK_PAD;
-    d->x = (video_w() - d->w) / 2;
-    d->y = video_h() - DOCK_BOTTOM - d->h;
-    d->ty = d->y + DOCK_PAD + (want - t) / 2;
-}
 
-/* The left edge of the k-th tile, counting the programs first */
-static int dock_tile_x(const struct dock *d, int k)
-{
-    int x = d->x + DOCK_PAD + k * (d->tile + DOCK_GAP);
-    if (d->n_l && k >= d->n_l)
-        x += DOCK_SEP - DOCK_GAP;
-    return x;
+    /* Along the dock: each tile's place before magnification, then its
+       size with it - largest under the pointer, falling off over
+       DOCK_MAG_REACH tiles either side - and the places again with the
+       sizes the tiles now have */
+    int at[DOCK_SLOTS];
+    int pos = DOCK_PAD;
+    for (int k = 0; k < n; k++) {
+        if (d->n_l && k == d->n_l)
+            pos += DOCK_SEP - DOCK_GAP;
+        at[k] = pos;
+        pos += t + DOCK_GAP;
+    }
+    int base = fixed + n * t;
+    int start = vert ? BAR_H + (video_h() - BAR_H - base) / 2
+                     : (video_w() - base) / 2;
+    int p = vert ? mouse_y : mouse_x;
+    int big = t * 7 / 4;
+    for (int k = 0; k < n; k++) {
+        int s = t;
+        if (dock_mag_level) {
+            int dist = p - (start + at[k] + t / 2);
+            if (dist < 0)
+                dist = -dist;
+            int reach = DOCK_MAG_REACH * (t + DOCK_GAP);
+            if (dist < reach) {
+                int f = 256 - (dist * dist * 256) / (reach * reach);
+                s = t + (big - t) * f / 256 * dock_mag_level / 256;
+            }
+        }
+        d->ks[k] = s;
+    }
+    /* The glass: as long as its tiles, its thickness the setting's */
+    int length = fixed;
+    for (int k = 0; k < n; k++)
+        length += d->ks[k];
+    int thick = want + 2 * DOCK_PAD;
+    int lo = vert ? BAR_H + (video_h() - BAR_H - length) / 2
+                  : (video_w() - length) / 2;
+    if (!vert) {
+        d->w = length;
+        d->h = thick;
+        d->x = lo;
+        d->y = video_h() - DOCK_BOTTOM - d->h;
+    } else {
+        d->w = thick;
+        d->h = length;
+        d->x = d->side == DOCK_SIDE_LEFT ? DOCK_BOTTOM
+                                         : video_w() - DOCK_BOTTOM - thick;
+        d->y = lo;
+    }
+    d->ty = d->y + DOCK_PAD + (want - t) / 2;
+    /* The tiles: one after another along the glass, standing on the
+       edge nearest the screen's - a magnified tile grows away from it */
+    int along = lo + DOCK_PAD;
+    int edge = DOCK_PAD + (want - t) / 2 + t;  /* the far side, unmagnified */
+    for (int k = 0; k < n; k++) {
+        if (d->n_l && k == d->n_l)
+            along += DOCK_SEP - DOCK_GAP;
+        int s = d->ks[k];
+        if (!vert) {
+            d->kx[k] = along;
+            d->ky[k] = d->y + edge - s;
+        } else if (d->side == DOCK_SIDE_LEFT) {
+            d->kx[k] = d->x + DOCK_PAD + (want - t) / 2;
+            d->ky[k] = along;
+        } else {
+            d->kx[k] = d->x + edge - s;
+            d->ky[k] = along;
+        }
+        along += s + DOCK_GAP;
+    }
 }
 
 /* Which tile is under the point: 0.. for the programs, 100.. for the
    windows (counted among those on this desktop), -1 for none. A tile
-   takes clicks over the dock's whole height and half the gap on either
-   side - a tile that has to be hit to the pixel is a tile that gets
-   missed. */
+   takes clicks over the dock's whole thickness - and over a magnified
+   tile's whole size - and half the gap on either side: a tile that has
+   to be hit to the pixel is a tile that gets missed. */
 static int dock_hit(int mx, int my)
 {
     struct dock d;
     dock_geom(&d);
-    if (my < d.y || my >= d.y + d.h)
-        return -1;
-    for (int k = 0; k < d.n_l + d.n_w; k++) {
-        int tx = dock_tile_x(&d, k);
-        if (mx >= tx - DOCK_GAP / 2 && mx < tx + d.tile + DOCK_GAP / 2)
+    int n = d.n_l + d.n_w;
+    for (int k = 0; k < n && k < DOCK_SLOTS; k++) {
+        int x0 = d.kx[k], y0 = d.ky[k], s = d.ks[k];
+        int in;
+        if (d.side == DOCK_SIDE_BOTTOM)
+            in = mx >= x0 - DOCK_GAP / 2 && mx < x0 + s + DOCK_GAP / 2 &&
+                 my >= (y0 < d.y ? y0 : d.y) && my < d.y + d.h;
+        else if (d.side == DOCK_SIDE_LEFT)
+            in = my >= y0 - DOCK_GAP / 2 && my < y0 + s + DOCK_GAP / 2 &&
+                 mx >= d.x && mx < (x0 + s > d.x + d.w ? x0 + s : d.x + d.w);
+        else
+            in = my >= y0 - DOCK_GAP / 2 && my < y0 + s + DOCK_GAP / 2 &&
+                 mx >= (x0 < d.x ? x0 : d.x) && mx < d.x + d.w;
+        if (in)
             return k < d.n_l ? k : 100 + (k - d.n_l);
     }
     return -1;
 }
 
-/* Where windows may be put: under the bar, above the dock. A
+/* Where windows may be put: under the bar, clear of the dock. A
    maximised window fills exactly this, and so do the halves a window
    snaps to - the bar and the dock are how a person reaches everything
    else, so a window that covered them would be one there was no way
@@ -876,9 +968,27 @@ static int dock_hit(int mx, int my)
 static int work_top(void) { return BAR_H; }
 static int work_bottom(void)
 {
+    if (dock_side != DOCK_SIDE_BOTTOM)
+        return video_h();
     struct dock d;
     dock_geom(&d);
     return d.y - DOCK_BOTTOM;
+}
+static int work_left(void)
+{
+    if (dock_side != DOCK_SIDE_LEFT)
+        return 0;
+    struct dock d;
+    dock_geom(&d);
+    return d.x + d.w + DOCK_BOTTOM;
+}
+static int work_right(void)
+{
+    if (dock_side != DOCK_SIDE_RIGHT)
+        return video_w();
+    struct dock d;
+    dock_geom(&d);
+    return d.x - DOCK_BOTTOM;
 }
 
 static int menu_h(void)
@@ -967,9 +1077,12 @@ static void context_at(int x, int y)
     menu_sel = -1;
 }
 
+/* The bar stays, as a Mac's menu bar does, unless 'barhide' asks it to
+   go after three seconds nobody uses it */
 static int bar_visible(void)
 {
-    return frames <= bar_until || mouse_y < 3 || menu_on_bar();
+    return !bar_autohide || frames <= bar_until || mouse_y < 3 ||
+           menu_on_bar();
 }
 
 /* How much of the machine is in use.
@@ -2092,9 +2205,10 @@ static int win_tile(const struct window *win, int *x, int *y, int *t)
         if (!here(i))
             continue;
         if (&wins[i] == win) {
-            *x = dock_tile_x(&d, d.n_l + j);
-            *y = d.ty;
-            *t = d.tile;
+            int k = d.n_l + j < DOCK_SLOTS ? d.n_l + j : DOCK_SLOTS - 1;
+            *x = d.kx[k];
+            *y = d.ky[k];
+            *t = d.ks[k];
             return 1;
         }
         j++;
@@ -2324,15 +2438,16 @@ static int snap_hint;             /* where the dragged window would land */
    bar and the dock, as a maximised window does. */
 static void snap_geom(int where, int *x, int *y, int *w, int *h)
 {
-    *x = 0;
+    int l = work_left(), r = work_right();
+    *x = l;
     *y = work_top();
-    *w = video_w();
+    *w = r - l;
     *h = work_bottom() - work_top();
     if (where == SNAP_LEFT)
-        *w = video_w() / 2;
+        *w = (r - l) / 2;
     else if (where == SNAP_RIGHT) {
-        *x = video_w() / 2;
-        *w = video_w() - *x;
+        *x = l + (r - l) / 2;
+        *w = r - *x;
     }
 }
 
@@ -3203,9 +3318,9 @@ static void toggle_max(int i)
 
     if (!w->maxed) {
         int ox = w->x, oy = w->y, ow = w->w, oh = w->h;
-        w->x = 0;
+        w->x = work_left();
         w->y = work_top();
-        w->w = video_w();
+        w->w = work_right() - work_left();
         w->h = work_bottom() - work_top();
         if (resize_content(w) < 0) {   /* no memory for that buffer */
             w->x = ox;
@@ -4136,6 +4251,25 @@ static uint32_t dock_under_fp(int x, int y, int w, int h)
     return f;
 }
 
+/* The dot that says a program runs: under its tile on a bottom dock,
+   beside it - towards the screen's edge - on a side one */
+static void dock_dot(const struct dock *d, int k, uint32_t c)
+{
+    int x = d->kx[k], y = d->ky[k], s = d->ks[k];
+    int cx, cy;
+    if (d->side == DOCK_SIDE_BOTTOM) {
+        cx = x * 16 + s * 8;
+        cy = (y + s + 1) * 16 + DOCK_DOT * 8;
+    } else if (d->side == DOCK_SIDE_LEFT) {
+        cx = (x - 1) * 16 - DOCK_DOT * 8;
+        cy = y * 16 + s * 8;
+    } else {
+        cx = (x + s + 1) * 16 + DOCK_DOT * 8;
+        cy = y * 16 + s * 8;
+    }
+    gfx_disc16(cx, cy, DOCK_DOT * 8, c, 230);
+}
+
 static void draw_dock_glass(const struct dock *d)
 {
     gfx_shadow(d->x, d->y, d->w, d->h, DOCK_R, 12, theme_dark ? 120 : 70, 3);
@@ -4143,28 +4277,36 @@ static void draw_dock_glass(const struct dock *d)
     gfx_rring16(d->x * 16, d->y * 16, d->w * 16, d->h * 16, DOCK_R * 16, 16,
                 L.dock_line, L.dock_line_a);
 
-    int t = d->tile;
     /* the programs */
-    for (int k = 0; k < d->n_l; k++) {
-        int tx = dock_tile_x(d, k), ty = d->ty;
+    for (int k = 0; k < d->n_l && k < DOCK_SLOTS; k++) {
+        int tx = d->kx[k], ty = d->ky[k];
         if (hop_set[k]) {
             uint32_t age = frames - hop_at[k];
             if (age < HOP_FRAMES) {
+                /* away from the screen's edge the dock stands on */
                 int up = (int)(age < HOP_FRAMES / 2 ? age : HOP_FRAMES - age);
-                ty -= up;
+                if (d->side == DOCK_SIDE_BOTTOM)
+                    ty -= up;
+                else if (d->side == DOCK_SIDE_LEFT)
+                    tx += up;
+                else
+                    tx -= up;
             } else {
                 hop_set[k] = 0;
             }
         }
-        draw_tile(icons[k].art, tx, ty, t, icons[k].label[0], 255);
+        draw_tile(icons[k].art, tx, ty, d->ks[k], icons[k].label[0], 255);
         if (launcher_running(k))
-            gfx_disc16(tx * 16 + t * 8, (d->ty + t + 1) * 16 + DOCK_DOT * 8,
-                       DOCK_DOT * 8, L.dot, 230);
+            dock_dot(d, k, L.dot);
     }
     /* the line between the programs and the windows */
-    if (d->n_l && d->n_w) {
-        int lx = dock_tile_x(d, d->n_l) - (DOCK_SEP + 1) / 2;
-        gfx_fill(lx, d->y + 8, 1, d->h - 16, L.bar_text, 70);
+    if (d->n_l && d->n_w && d->n_l < DOCK_SLOTS) {
+        if (d->side == DOCK_SIDE_BOTTOM)
+            gfx_fill(d->kx[d->n_l] - (DOCK_SEP + 1) / 2, d->y + 8, 1,
+                     d->h - 16, L.bar_text, 70);
+        else
+            gfx_fill(d->x + 8, d->ky[d->n_l] - (DOCK_SEP + 1) / 2,
+                     d->w - 16, 1, L.bar_text, 70);
     }
     /* the windows: their program's picture; a minimised one faded, the
        one that is listening with its dot in the accent colour */
@@ -4172,13 +4314,14 @@ static void draw_dock_glass(const struct dock *d)
     for (int i = 0; i < MAX_WIN; i++) {
         if (!here(i))
             continue;
-        int tx = dock_tile_x(d, d->n_l + j);
+        int k = d->n_l + j;
+        if (k >= DOCK_SLOTS)
+            break;
         int from = launch_icon_of(&wins[i]);
-        draw_tile(launch_art_of(&wins[i]), tx, d->ty, t,
+        draw_tile(launch_art_of(&wins[i]), d->kx[k], d->ky[k], d->ks[k],
                   from >= 0 ? icons[from].label[0] : wins[i].title[0],
                   wins[i].minimized ? 110 : 255);
-        gfx_disc16(tx * 16 + t * 8, (d->ty + t + 1) * 16 + DOCK_DOT * 8,
-                   DOCK_DOT * 8, i == focus_idx ? L.accent : L.dot, 230);
+        dock_dot(d, k, i == focus_idx ? L.accent : L.dot);
         j++;
     }
 }
@@ -4202,7 +4345,15 @@ static int tmenu_x(int t)
     struct dock d;
     dock_geom(&d);
     int k = t >= 100 ? d.n_l + t - 100 : t;
-    int x = dock_tile_x(&d, k) + d.tile / 2 - TMENU_W / 2;
+    if (k >= DOCK_SLOTS)
+        k = DOCK_SLOTS - 1;
+    int x;
+    if (d.side == DOCK_SIDE_LEFT)
+        x = d.x + d.w + TMENU_GAP;
+    else if (d.side == DOCK_SIDE_RIGHT)
+        x = d.x - TMENU_GAP - TMENU_W;
+    else
+        x = d.kx[k] + d.ks[k] / 2 - TMENU_W / 2;
     if (x + TMENU_W > video_w())
         x = video_w() - TMENU_W;
     return x < 0 ? 0 : x;
@@ -4212,7 +4363,15 @@ static int tmenu_y(int t)
 {
     struct dock d;
     dock_geom(&d);
-    return d.y - TMENU_GAP - tmenu_h(t);
+    if (d.side == DOCK_SIDE_BOTTOM)
+        return d.y - TMENU_GAP - tmenu_h(t);
+    int k = t >= 100 ? d.n_l + t - 100 : t;
+    if (k >= DOCK_SLOTS)
+        k = DOCK_SLOTS - 1;
+    int y = d.ky[k] + d.ks[k] / 2 - tmenu_h(t) / 2;
+    if (y + tmenu_h(t) > video_h())
+        y = video_h() - tmenu_h(t);
+    return y < BAR_H ? BAR_H : y;
 }
 
 static void tile_action(int t, int i)
@@ -4297,7 +4456,8 @@ static void draw_dock(void)
     h = P(ly + h) - y;
     uint32_t room = (uint32_t)video_pw() * (uint32_t)P(DOCK_TILE_L +
                                     2 * DOCK_PAD + 2 * DOCK_KEEP_M);
-    int keep = !hopping && video_prow32(0) && w > 0 && h > 0;
+    int keep = !hopping && !dock_mag_level && video_prow32(0) && w > 0 &&
+               h > 0;
     if (keep && !dock_keep && !dock_keep_tried) {
         dock_keep_tried = 1;
         dock_keep = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
@@ -4332,25 +4492,31 @@ static void draw_dock(void)
         }
     }
 
-    /* The name of the tile under the pointer, over it */
-    int t = d.tile;
-    for (int k = 0; k < d.n_l + d.n_w; k++) {
-        int tx = dock_tile_x(&d, k);
-        if (!in_rect(mouse_x, mouse_y, tx - DOCK_GAP / 2, d.y,
-                     t + DOCK_GAP, d.h))
-            continue;
-        if (k < d.n_l) {
-            hint_above(tx + t / 2, d.y - 6, icons[k].label);
-        } else {
-            int j = 0;
-            for (int i = 0; i < MAX_WIN; i++) {
-                if (!here(i))
-                    continue;
-                if (j++ == k - d.n_l)
-                    hint_above(tx + t / 2, d.y - 6, wins[i].title);
-            }
-        }
+    /* The name of the tile under the pointer: over it on a bottom dock,
+       beside it on a side one */
+    int hit = dock_hit(mouse_x, mouse_y);
+    if (hit < 0)
+        return;
+    int k = hit < 100 ? hit : d.n_l + hit - 100;
+    if (k >= DOCK_SLOTS)
+        return;
+    const char *name = (const char *)0;
+    if (hit < 100) {
+        name = icons[hit].label;
+    } else {
+        int wi = win_of_tile(hit);
+        if (wi >= 0)
+            name = wins[wi].title;
     }
+    if (!name)
+        return;
+    int tx = d.kx[k], ty = d.ky[k], ts = d.ks[k];
+    if (d.side == DOCK_SIDE_BOTTOM)
+        hint_above(tx + ts / 2, (ty < d.y ? ty : d.y) - 6, name);
+    else if (d.side == DOCK_SIDE_LEFT)
+        hint_at(d.x + d.w + 8, ty + ts / 2 - HINT_H / 2, name);
+    else
+        hint_at(d.x - 8 - hint_w(name), ty + ts / 2 - HINT_H / 2, name);
 }
 
 /* --- Notifications ----------------------------------------------------------
@@ -7000,10 +7166,11 @@ static void rebuffer(struct window *w)
 static void fit_rect(int *x, int *y, int *w, int *h)
 {
     int room_h = work_bottom() - work_top();
-    if (*w > video_w()) *w = video_w();
+    int l = work_left(), r = work_right();
+    if (*w > r - l) *w = r - l;
     if (*h > room_h) *h = room_h;
-    if (*x + *w > video_w()) *x = video_w() - *w;
-    if (*x < 0) *x = 0;
+    if (*x + *w > r) *x = r - *w;
+    if (*x < l) *x = l;
     if (*y + *h > work_bottom()) *y = work_bottom() - *h;
     if (*y < work_top()) *y = work_top();
 }
@@ -7029,9 +7196,9 @@ static void relayout(void)
             continue;
         w->anim = 0;
         if (w->maxed) {
-            w->x = 0;
+            w->x = work_left();
             w->y = work_top();
-            w->w = video_w();
+            w->w = work_right() - work_left();
             w->h = work_bottom() - work_top();
             fit_rect(&w->rx, &w->ry, &w->rw, &w->rh);
         } else {
@@ -7122,6 +7289,47 @@ static void idle_settings(void)
        be parsing text in an interrupt */
     mouse_set_speed((int)config_get_num("pointer", 100));
     mouse_set_natural(config_get_num("natural", 0) != 0);
+
+    /* The dock's side and its magnifying, and the bar's hiding. A dock
+       that moves takes the room of the windows that fill it along. */
+    const char *pos = config_get("dockpos");
+    int side = pos && !strcmp(pos, "left") ? DOCK_SIDE_LEFT
+               : pos && !strcmp(pos, "right") ? DOCK_SIDE_RIGHT
+                                              : DOCK_SIDE_BOTTOM;
+    dock_magnify = config_get_num("dockmag", 0) != 0;
+    bar_autohide = config_get_num("barhide", 0) != 0;
+    if (side != dock_side) {
+        dock_side = side;
+        dock_moved = 1;
+        printk("[desktop] the dock moves to the %s\n",
+               side == DOCK_SIDE_LEFT ? "left" : side == DOCK_SIDE_RIGHT
+                                                     ? "right" : "bottom");
+    }
+}
+
+/* Once a frame: magnification comes in while the pointer is over the
+   dock and goes when it leaves - a quarter of the way a frame */
+static void dock_magnify_step(void)
+{
+    int target = 0;
+    if (dock_magnify && !locked && dark != 2) {
+        int keep = dock_mag_level;
+        dock_mag_level = 0;
+        struct dock d;
+        dock_geom(&d);
+        dock_mag_level = keep;
+        int reach = d.tile;
+        target = in_rect(mouse_x, mouse_y, d.x - reach, d.y - reach,
+                         d.w + 2 * reach, d.h + 2 * reach) ? 256 : 0;
+    }
+    if (dock_mag_level != target) {
+        dock_mag_level += target > dock_mag_level ? 64 : -64;
+        if (dock_mag_level < 0)
+            dock_mag_level = 0;
+        if (dock_mag_level > 256)
+            dock_mag_level = 256;
+        scene_changed();
+    }
 }
 
 /* A key. 1 = it was there only to wake the screen. */
@@ -7231,7 +7439,12 @@ static void desktop_thread(void *arg)
         int mx, my, buttons;
         mouse_get(&mx, &my, &buttons);
         buttons = idle_frame(buttons);
+        if (dock_moved) {               /* Settings moved the dock */
+            dock_moved = 0;
+            relayout();
+        }
         handle_input(mx, my, buttons);
+        dock_magnify_step();
 
         if (dark == 2) {
             if (!dark_shown) {

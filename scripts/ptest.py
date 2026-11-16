@@ -825,8 +825,8 @@ GSET_SIDE_TEXT_X = _kernel_define(_GS, "SIDE_TEXT_X")
 # In the order down the left; Updates is last, being the 64-bit
 # system's alone, so that the rest stand in the same place in both
 GSET_SECTIONS = ["Wi-Fi", "Bluetooth", "Network", "Sound", "General",
-                 "Appearance", "Display", "Screen Lock", "Mouse", "Files",
-                 "Region", "About"]
+                 "Appearance", "Desktop & Dock", "Display", "Screen Lock",
+                 "Mouse", "Files", "Region", "About"]
 GSET_SECTIONS64 = GSET_SECTIONS + ["Updates"]
 GSET_OPENS_ON = "General"
 

@@ -7965,3 +7965,26 @@ works and is checked by `make test`.
       every square in the bold lettering the letters had: none reads as
       its old letter (the old build reads W, A and L), and no two are
       alike.
+
+- [x] **The dock on either side, magnified; the menu bar stays**
+      (kernel/desktop.c, kernel/config.c, user/gsettings.c,
+      scripts/tests/t_dock.py, t_bar.py, t_notify.py, scripts/ptest.py)
+      Settings has a "Desktop & Dock" section now, as a Mac has. The
+      dock stands at the bottom, or down the left or right side
+      ('dockpos'): its geometry is one list of tiles, each with its own
+      place and size, which the drawing, the clicking, the tile menus,
+      the names and the running dots all take from, so a tile is
+      clickable exactly where it is drawn. A window that fills the
+      screen, or snaps to a half, stops where a side dock begins and
+      then reaches the screen's bottom. With 'dockmag' the tiles grow
+      under the pointer - largest under it, less over the three either
+      side, the others pushed along - coming in and going over four
+      frames. The menu bar stays at the top unless 'barhide' asks it to
+      hide when unused; that was the default, and a bar that kept going
+      away was what a person missed. t_dock moves the dock with the
+      Settings chip and the shell, finds the Files tile's very picture
+      on each side, starts a program from the side dock, fills the
+      screen beside it, and sees the tile under the pointer reach past
+      the others only with magnification on. t_bar checks the new
+      default and the setting; t_notify reads the wallpaper under the
+      bar, which is now there.

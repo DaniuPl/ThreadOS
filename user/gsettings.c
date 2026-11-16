@@ -31,11 +31,11 @@
 /* Small enough to open in the cascade's third place on a 640x480
    screen, between the bar and the dock */
 #define W0 500
-#define H0 340
+#define H0 362
 
 #define SIDE_W 150            /* the sections, down the left */
 #define SIDE_Y0 44            /* the first section's top */
-#define SIDE_H 22             /* thirteen of them have to fit in 340 */
+#define SIDE_H 22             /* fourteen of them have to fit in 362 */
 #define ICON 16               /* a section's coloured square */
 #define SIDE_TEXT_X 36        /* a section's name, right of its square */
 #define PANE_X 170            /* the open section, right of them */
@@ -81,18 +81,20 @@
 #define SEC_SOUND   3
 #define SEC_GENERAL 4
 #define SEC_LOOK    5
-#define SEC_DISPLAY 6
-#define SEC_LOCK    7
-#define SEC_MOUSE   8
-#define SEC_FILES   9
-#define SEC_REGION  10
-#define SEC_ABOUT   11
-#define SEC_UPDATES 12
-#define SEC_N       13
+#define SEC_DESK    6
+#define SEC_DISPLAY 7
+#define SEC_LOCK    8
+#define SEC_MOUSE   9
+#define SEC_FILES   10
+#define SEC_REGION  11
+#define SEC_ABOUT   12
+#define SEC_UPDATES 13
+#define SEC_N       14
 
 static const char *const sections[] = {
     "Wi-Fi", "Bluetooth", "Network", "Sound", "General", "Appearance",
-    "Display", "Screen Lock", "Mouse", "Files", "Region", "About", "Updates"
+    "Desktop & Dock", "Display", "Screen Lock", "Mouse", "Files", "Region",
+    "About", "Updates"
 };
 /* A line under the last of each group */
 static int group_ends(int i)
@@ -102,7 +104,7 @@ static int group_ends(int i)
 }
 /* Each section's square, under the picture of it */
 static const uint32_t section_colour[] = {
-    0x0A84FF, 0x0A84FF, 0x0A84FF, 0xFF375F, 0x8E8E93, 0x3A3A3C,
+    0x0A84FF, 0x0A84FF, 0x0A84FF, 0xFF375F, 0x8E8E93, 0x3A3A3C, 0x5E5CE6,
     0x0A84FF, 0x3A3A3C, 0x8E8E93, 0x1E8CF0, 0x34A853, 0x8E8E93, 0xFF9500
 };
 
@@ -161,6 +163,11 @@ static void section_icon(int i, int x, int y, uint32_t bg)
         ud_clip(win, x + 2, y + 2, 6, 12);
         ud_disc(win, x + 2, y + 2, 12, w);
         ud_unclip(win);
+        break;
+    case SEC_DESK:                      /* a screen with its dock */
+        ud_round(win, x + 1, y + 2, 14, 12, 2, w);
+        ud_round(win, x + 2, y + 3, 12, 10, 1, bg);
+        ud_round(win, x + 4, y + 10, 8, 2, 1, w);
         break;
     case SEC_DISPLAY:                   /* a screen on its foot */
         ud_round(win, x + 1, y + 3, 14, 9, 2, w);
@@ -779,6 +786,31 @@ static void draw_look(void)
     note(y + ROW_H + 14, "Wallpaper files are read from the system root.");
 }
 
+/* Where the dock stands, whether it magnifies, whether the bar stays -
+   the way a Mac's "Desktop & Dock" has them */
+static void draw_desk(void)
+{
+    static const char *const sides[3] = { "Left", "Bottom", "Right" };
+    static const char *const side_values[3] = { "left", "bottom", "right" };
+    int y = PANE_Y0;
+    row_name(y, "Position on screen");
+    const char *now = setting("dockpos");
+    if (!now[0])
+        now = "bottom";
+    for (int i = 0; i < 3; i++)
+        chip(PANE_X + i * (CHIP_W + CHIP_GAP), y + CTRL_DY, sides[i],
+             same(now, side_values[i]), "dockpos", side_values[i]);
+    y += ROW_H;
+    check_box(y, "Magnify the icons under the pointer",
+              same(setting("dockmag"), "1"), "dockmag");
+    y += CHIP_H + 8;
+    check_box(y, "Hide the menu bar when it is not used",
+              same(setting("barhide"), "1"), "barhide");
+    y += CHIP_H + 16;
+    note(y, "The size of the dock is in Appearance.");
+    note(y + 14, "With the bar hidden, the pointer at the top brings it.");
+}
+
 static void draw_display(void)
 {
     static const char *const scales[5] = { "Auto", "100%", "125%", "150%",
@@ -1342,6 +1374,7 @@ static void draw(void)
     case SEC_SOUND:   draw_sound(); break;
     case SEC_GENERAL: draw_general(); break;
     case SEC_LOOK:    draw_look(); break;
+    case SEC_DESK:    draw_desk(); break;
     case SEC_DISPLAY: draw_display(); break;
     case SEC_LOCK:    draw_lockscreen(); break;
     case SEC_MOUSE:   draw_mouse(); break;

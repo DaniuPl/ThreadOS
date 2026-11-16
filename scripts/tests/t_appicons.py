@@ -15,7 +15,7 @@ Code entries of the menu must not be that grey ground.
 
 Settings marks its sections the same way, with a square each down its
 left side, and those were letters too - W, B, N, S, ... They are
-pictures now: none of the thirteen squares reads as its old letter, in
+pictures now: none of the squares reads as its old letter, in
 the bold lettering the letters were drawn in, and no two are alike.
 
 Run on its own or through scripts/run_tests.py.
@@ -31,7 +31,7 @@ from ptest import check, summary, no64, _kernel_define
 
 _GS = "user/gsettings.c"
 ICON = _kernel_define(_GS, "ICON")
-OLD_LETTERS = "WBNSGADLMFRiU"
+OLD_LETTERS = "WBNSGA?DLMFRiU"    # (Desktop & Dock never had a letter)
 
 
 def far(a, b):
@@ -150,10 +150,11 @@ def main():
                 pics.append(tuple(at(cx + 12 + a, iy + b)
                                   for b in range(2, ICON - 2)
                                   for a in range(2, ICON - 2)))
-            letters = [r for r, old in zip(read, OLD_LETTERS) if r == old]
+            letters = [r for r, old in zip(read, OLD_LETTERS)
+                       if old != "?" and r == old]
             check("no section's square is its old letter (%s read)"
                   % (letters,), not letters)
-            check("and the thirteen pictures are all different",
+            check("and the %d pictures are all different" % len(pics),
                   len(set(pics)) == len(pics))
     finally:
         q.close()

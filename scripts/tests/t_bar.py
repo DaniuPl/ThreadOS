@@ -97,6 +97,15 @@ def main():
             check("the top bar is visible while the pointer uses it",
                   bar_name(q) == "ThreadOS")
             q.mouse_goto(600, 300)
+            # By default it stays, as a Mac's menu bar does: still there
+            # well after the three seconds it used to be given
+            time.sleep(6)
+            check("left alone, the bar stays (barhide is off by default)",
+                  bar_name(q) == "ThreadOS")
+            q.click_desktop()
+            check("'barhide 1' asks it to hide when not used",
+                  "saved" in q.sudo("set barhide 1", "saved"))
+            q.mouse_goto(600, 300)
             # Three seconds of the desktop's frames, which a loaded host
             # draws more slowly than fifty a second: waited for, not timed
             deadline = time.time() + 20
@@ -110,6 +119,8 @@ def main():
             time.sleep(0.4)
             check("moving to the top edge reveals the bar",
                   bar_name(q) == "ThreadOS")
+            q.click_desktop()
+            q.sudo("set barhide 0", "saved")
 
             open_two(q)
 

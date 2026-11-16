@@ -160,9 +160,10 @@ def main():
             # longer, so it is watched until it goes rather than looked
             # for once. Where the island was, the wallpaper comes back
             # (from its middle rightwards: udtest's window and the
-            # screen's icons reach its left end)
+            # screen's icons reach its left end) - under the bar, which
+            # now stays at the top
             x0, x1 = SCREEN_W // 2 - 60, SCREEN_W // 2 + 160
-            y0, y1 = ISL_TOP, ISL_TOP + ISL_NOTE_H
+            y0, y1 = BAR_H, ISL_TOP + ISL_NOTE_H
             points = ((x1 - x0) // 4) * ((y1 - y0) // 4)
             bare = 0
             t0 = time.time()
