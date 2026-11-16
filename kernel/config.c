@@ -46,6 +46,8 @@ static struct setting settings[] = {
     { "wallpaper", "",         "the wallpaper file (empty = the background);\n"
                             "the 'mkwall' program makes one", 0, { 0 } },
     { "theme",  "dark",     "the desktop's colours: dark or light", 0, { 0 } },
+    { "layout", "mac",      "the desktop's style: mac (a bar and a dock)\n"
+                            "or windows (a taskbar with Start)",    0, { 0 } },
     { "dockpos", "bottom",  "where the dock stands: bottom, left or right",
                                                                     0, { 0 } },
     { "dockmag", "0",       "the dock's tiles grow under the pointer:\n"

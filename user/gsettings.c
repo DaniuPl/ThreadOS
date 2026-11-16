@@ -792,7 +792,26 @@ static void draw_desk(void)
 {
     static const char *const sides[3] = { "Left", "Bottom", "Right" };
     static const char *const side_values[3] = { "left", "bottom", "right" };
+    static const char *const styles[2] = { "macOS", "Windows" };
+    static const char *const style_values[2] = { "mac", "windows" };
     int y = PANE_Y0;
+    /* The whole desktop's way: a bar at the top and a dock, or a
+       taskbar along the bottom with Start */
+    row_name(y, "Interface style");
+    const char *style = setting("layout");
+    if (!style[0])
+        style = "mac";
+    for (int i = 0; i < 2; i++) {
+        int x = PANE_X + i * (LOCK_WAY_W + CHIP_GAP);
+        int on = same(style, style_values[i]);
+        ud_round(win, x, y + CTRL_DY, LOCK_WAY_W, CHIP_H, 8,
+                 on ? l.accent : l.row);
+        ud_text_mid_l(win, x, y + CTRL_DY, LOCK_WAY_W, CHIP_H, styles[i],
+                      on ? l.on_accent : l.text, UD_SANS, UD_PX);
+        hot(x, y + CTRL_DY, LOCK_WAY_W, CHIP_H, A_SET, 0, "layout",
+            style_values[i]);
+    }
+    y += ROW_H;
     row_name(y, "Position on screen");
     const char *now = setting("dockpos");
     if (!now[0])
@@ -810,7 +829,10 @@ static void draw_desk(void)
     check_box(y, "Hide the menu bar when it is not used",
               same(setting("barhide"), "1"), "barhide");
     y += CHIP_H + 16;
-    note(y, "The size of the dock is in Appearance.");
+    if (same(style, "windows"))
+        note(y, "In the Windows style the taskbar stands at the bottom.");
+    else
+        note(y, "The size of the dock is in Appearance.");
     note(y + 14, "With the bar hidden, the pointer at the top brings it.");
 }
 

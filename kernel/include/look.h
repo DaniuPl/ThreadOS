@@ -64,6 +64,18 @@
 #define SHADOW_S     14      /* how far the shadow reaches */
 #define SHADOW_DY    4       /* ... and how far it falls below */
 
+/* The Windows style ('layout windows'): no bar at the top, a taskbar
+   along the bottom - Start, the programs and the windows in the middle
+   (as Windows 11 has them), the tray and the clock at the right - and
+   a window's buttons at the right end of its title bar */
+#define TB_H         40      /* the taskbar's height */
+#define TB_SLOT      40      /* one button on it: Start, a program, a window */
+#define TB_ICON      24      /* the picture in it */
+#define TB_SHOW_W    6       /* "show the desktop", the sliver at the right */
+#define TB_CLOCK_W   76      /* the time over the date */
+#define TB_TRAY_W    28      /* one icon in the tray */
+#define WB_W         34      /* minimise, maximise, close: one button */
+
 /* the three lights: the same in both themes, because they are signals */
 #define LIGHT_CLOSE  0xFF5F57
 #define LIGHT_MIN    0xFEBC2E

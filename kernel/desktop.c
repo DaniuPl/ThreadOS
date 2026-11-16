@@ -128,6 +128,8 @@ static struct icon icons[ICON_MAX] = {
 };
 static int icon_n = 8;         /* how many of them there are */
 
+static int work_top(void);
+
 struct desktop_item {
     char name[32];
     uint32_t size;
@@ -235,7 +237,7 @@ static int desktop_read_items(void)
             cols = 6;
         int icon_index = desktop_item_n + 2;
         item->x = 10 + (icon_index % cols) * 88;
-        item->y = BAR_H + 8 + (icon_index / cols) * 72;
+        item->y = work_top() + 8 + (icon_index / cols) * 72;
         for (int old = 0; old < previous_n; old++) {
             if (!strcmp(item->name, previous[old].name)) {
                 item->x = previous[old].x;
@@ -809,6 +811,8 @@ static int logo_w(void)
  * asks dock_geom(), so a tile is clickable exactly where it is drawn.
  */
 #define DOCK_SLOTS (ICON_MAX + MAX_WIN)
+#define TB_START   200             /* dock_hit: the taskbar's Start button */
+static int taskbar_tray_click(int mx, int my);
 #define DOCK_SIDE_BOTTOM 0
 #define DOCK_SIDE_LEFT   1
 #define DOCK_SIDE_RIGHT  2
@@ -836,6 +840,10 @@ static int dock_want(void)
 /* Where the dock stands and whether it magnifies - read with the other
    settings once a second (idle_settings), not on every geometry */
 static int dock_side = DOCK_SIDE_BOTTOM;
+/* The Windows style ('layout windows'): the dock is a taskbar along the
+   bottom, there is no bar at the top, and a window's buttons are at the
+   right end of its title bar. 0 = the Mac style everything was. */
+static int ui_win;
 static int dock_magnify;
 static int dock_autohide;      /* out of the way until the pointer comes */
 static int bar_autohide;
@@ -849,11 +857,41 @@ static int bar_peek, dock_peek;
 
 #define DOCK_MAG_REACH 3      /* tiles either side of the pointer that grow */
 
+/* The taskbar: one strip along the bottom, its buttons in the middle -
+   Start first, then the programs, then the windows - each TB_SLOT wide
+   with its picture in the middle of it */
+static int tb_start_x;
+
+static void taskbar_geom(struct dock *d)
+{
+    int n = d->n_l + d->n_w;
+    if (n > DOCK_SLOTS)
+        n = DOCK_SLOTS;
+    d->side = DOCK_SIDE_BOTTOM;
+    d->x = 0;
+    d->w = video_w();
+    d->h = TB_H;
+    d->y = video_h() - TB_H;
+    d->tile = TB_ICON;
+    d->ty = d->y + (TB_H - TB_ICON) / 2;
+    int x0 = (video_w() - (n + 1) * TB_SLOT) / 2;
+    tb_start_x = x0;
+    for (int k = 0; k < n; k++) {
+        d->kx[k] = x0 + (k + 1) * TB_SLOT + (TB_SLOT - TB_ICON) / 2;
+        d->ky[k] = d->ty;
+        d->ks[k] = TB_ICON;
+    }
+}
+
 static void dock_geom(struct dock *d)
 {
     int want = dock_want();
     d->n_l = icon_n;
     d->n_w = win_count();
+    if (ui_win) {
+        taskbar_geom(d);
+        return;
+    }
     d->side = dock_side;
     int vert = d->side != DOCK_SIDE_BOTTOM;
     int n = d->n_l + d->n_w;
@@ -956,6 +994,16 @@ static int dock_hit(int mx, int my)
     struct dock d;
     dock_geom(&d);
     int n = d.n_l + d.n_w;
+    if (ui_win) {                  /* a whole slot takes the click */
+        if (my < d.y || my >= d.y + d.h || mx < tb_start_x)
+            return -1;
+        int k = (mx - tb_start_x) / TB_SLOT - 1;
+        if (k == -1)
+            return TB_START;
+        if (k < 0 || k >= n || k >= DOCK_SLOTS)
+            return -1;
+        return k < d.n_l ? k : 100 + (k - d.n_l);
+    }
     for (int k = 0; k < n && k < DOCK_SLOTS; k++) {
         int x0 = d.kx[k], y0 = d.ky[k], s = d.ks[k];
         int in;
@@ -979,9 +1027,11 @@ static int dock_hit(int mx, int my)
    snaps to - the bar and the dock are how a person reaches everything
    else, so a window that covered them would be one there was no way
    out of. */
-static int work_top(void) { return BAR_H; }
+static int work_top(void) { return ui_win ? 0 : BAR_H; }
 static int work_bottom(void)
 {
+    if (ui_win)
+        return dock_autohide ? video_h() : video_h() - TB_H;
     if (dock_side != DOCK_SIDE_BOTTOM || dock_autohide)
         return video_h();
     struct dock d;
@@ -990,7 +1040,7 @@ static int work_bottom(void)
 }
 static int work_left(void)
 {
-    if (dock_side != DOCK_SIDE_LEFT || dock_autohide)
+    if (ui_win || dock_side != DOCK_SIDE_LEFT || dock_autohide)
         return 0;
     struct dock d;
     dock_geom(&d);
@@ -998,7 +1048,7 @@ static int work_left(void)
 }
 static int work_right(void)
 {
-    if (dock_side != DOCK_SIDE_RIGHT || dock_autohide)
+    if (ui_win || dock_side != DOCK_SIDE_RIGHT || dock_autohide)
         return video_w();
     struct dock d;
     dock_geom(&d);
@@ -1055,18 +1105,22 @@ static void menu_at(int x, int y, int from_bar)
         x = 0;
     if (y + hgt > work_bottom())
         y = work_bottom() - hgt;
-    if (y < BAR_H)
-        y = BAR_H;
+    if (y < work_top())
+        y = work_top();
     menu_px = x;
     menu_py = y;
     menu_bar = from_bar;
     menu_open = 1;
 }
 
-/* The menu hung from the mark on the bar */
+/* The menu hung from the mark on the bar - or, in the Windows style,
+   standing on the taskbar over its Start button */
 static void menu_from_bar(void)
 {
-    menu_at(6, MENU_Y, 1);
+    if (ui_win)
+        menu_at(tb_start_x, video_h() - TB_H - 8 - menu_h(), 1);
+    else
+        menu_at(6, MENU_Y, 1);
 }
 
 static int menu_on_bar(void)
@@ -1083,8 +1137,8 @@ static void context_at(int x, int y)
         x = 0;
     if (y + hgt > work_bottom())
         y = work_bottom() - hgt;
-    if (y < BAR_H)
-        y = BAR_H;
+    if (y < work_top())
+        y = work_top();
     context_px = x;
     context_py = y;
     context_open = 1;
@@ -1109,6 +1163,8 @@ static int full_win(void)
    and then only the pointer at the top brings it */
 static int bar_visible(void)
 {
+    if (ui_win)
+        return 0;                  /* the taskbar is the bar */
     if (full_win() >= 0)
         return mouse_y < 3 || bar_peek || menu_on_bar();
     return !bar_autohide || frames <= bar_until || mouse_y < 3 ||
@@ -1264,18 +1320,27 @@ static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
 
 /* The three lights on the left of the title bar: close, minimise,
    zoom - in that order, as everywhere they are lights. k = 0, 1, 2. */
+/* In the Windows style the three are buttons at the right end of the
+   title bar: close the last, zoom left of it, minimise left of that */
 static int light_x(const struct window *w, int k)
 {
+    if (ui_win)
+        return w->x + w->w - WB_W * (k == 0 ? 1 : k == 2 ? 2 : 3);
     return w->x + LIGHT_X + k * LIGHT_STEP;
 }
 static int light_y(const struct window *w)
 {
+    if (ui_win)
+        return w->y;
     return w->y + (TITLE_H - LIGHT_D) / 2 + 1;
 }
 /* Is the point on light k? The square around it is a little larger
-   than the light: eleven pixels is a small thing to aim at. */
+   than the light: eleven pixels is a small thing to aim at. A Windows
+   button is the whole height of the bar. */
 static int on_light(const struct window *w, int k, int x, int y)
 {
+    if (ui_win)
+        return in_rect(x, y, light_x(w, k), w->y, WB_W, TITLE_H);
     int pad = (LIGHT_HIT - LIGHT_D) / 2;
     return in_rect(x, y, light_x(w, k) - pad, light_y(w) - pad,
                    LIGHT_HIT, LIGHT_HIT);
@@ -1831,7 +1896,7 @@ static void desktop_icon_default_rect(int index, int *x, int *y)
     if (cols > 6)
         cols = 6;
     *x = 10 + (index % cols) * 88;
-    *y = BAR_H + 8 + (index / cols) * 72;
+    *y = work_top() + 8 + (index / cols) * 72;
 }
 
 static int desktop_icon_rect(int index, int *x, int *y)
@@ -2029,8 +2094,48 @@ static void draw_desktop_icons(void)
    gfx_round_save) */
 static uint32_t corner_keep[4 * WIN_R * WIN_R];
 
+/* The Windows style's three: a line, a square (two, overlapping, while
+   the window is maximised) and a cross; the one under the pointer lit,
+   the cross on red */
+static void draw_win_buttons(const struct window *win, int focused)
+{
+    uint32_t ink = focused ? L.title_text : L.title_dim;
+    int y = win->y;
+    for (int k = 0; k < 3; k++) {
+        int x = light_x(win, k);
+        int over = in_rect(mouse_x, mouse_y, x, y, WB_W, TITLE_H);
+        if (over)
+            gfx_fill(x, y, WB_W, TITLE_H, k == 0 ? 0xE81123 : L.title_text,
+                     k == 0 ? 255 : 40);
+        uint32_t c = over && k == 0 ? 0xFFFFFF : ink;
+        int cx = x + WB_W / 2, cy = y + TITLE_H / 2;
+        if (k == 0) {
+            gfx_line16((cx - 4) * 16, (cy - 4) * 16, (cx + 4) * 16,
+                       (cy + 4) * 16, 18, c, 255);
+            gfx_line16((cx - 4) * 16, (cy + 4) * 16, (cx + 4) * 16,
+                       (cy - 4) * 16, 18, c, 255);
+        } else if (k == 1) {
+            gfx_fill(cx - 5, cy, 10, 1, c, 255);
+        } else if (win->maxed) {
+            gfx_rring16((cx - 3) * 16, (cy - 5) * 16, 8 * 16, 8 * 16, 16, 16,
+                        c, 255);
+            gfx_fill(cx - 5, cy - 3, 8, 8, focused ? L.title_bg : L.title_off,
+                     255);
+            gfx_rring16((cx - 5) * 16, (cy - 3) * 16, 8 * 16, 8 * 16, 16, 16,
+                        c, 255);
+        } else {
+            gfx_rring16((cx - 5) * 16, (cy - 5) * 16, 10 * 16, 10 * 16, 16,
+                        16, c, 255);
+        }
+    }
+}
+
 static void draw_lights(const struct window *win, int focused)
 {
+    if (ui_win) {
+        draw_win_buttons(win, focused);
+        return;
+    }
     static const uint32_t on[3] = { LIGHT_CLOSE, LIGHT_MIN, LIGHT_ZOOM };
     int ly = light_y(win);
     /* The signs on them only while the pointer is over them: three
@@ -2076,13 +2181,15 @@ static void draw_body(const struct window *win, int focused, int off)
     /* The title in the middle of the bar, in bold - and kept clear of
        the lights, so a long one is cut short rather than run under
        them */
-    int left = kiosk ? x + 8 : light_x(win, 2) + LIGHT_D + 8;
-    int room = x + w - 8 - left;
+    int left = kiosk || ui_win ? x + 10 : light_x(win, 2) + LIGHT_D + 8;
+    int right = ui_win && !kiosk ? light_x(win, 1) - 8 : x + w - 8;
+    int room = right - left;
     char cut[sizeof(win->title) + 4];
     const char *t = fit_text(win->title, UI_BOLD, TITLE_PX,
                              room > 0 ? room : 0, cut, sizeof(cut));
     int tw = ui_font_width(UI_BOLD, TITLE_PX, t);
-    int tx = x + (w - tw) / 2;
+    /* centred on a Mac, from the left on Windows */
+    int tx = ui_win && !kiosk ? left : x + (w - tw) / 2;
     if (tx < left)
         tx = left;
     ui_font_text(UI_BOLD, TITLE_PX, tx,
@@ -2512,7 +2619,7 @@ static int snap_where(int i, int mx, int my)
     /* The top comes last, so that a corner gives a half - two windows
        side by side is what somebody dragging into a corner wants, and
        the whole screen is one button away anyway. */
-    if (my < sh / 4 && win->y <= BAR_H + SNAP_EDGE)
+    if (my < sh / 4 && win->y <= work_top() + SNAP_EDGE)
         return SNAP_FULL;
     return SNAP_NONE;
 }
@@ -2901,13 +3008,15 @@ static void handle_input(int mx, int my, int buttons)
     prev_alt = alt;
     if (right && !prev_right) {
         tmenu = -1;
-        if (window_at(mx, my) < 0 && my >= BAR_H && my < work_bottom() &&
+        if (window_at(mx, my) < 0 && my >= work_top() && my < work_bottom() &&
             dock_hit(mx, my) < 0) {
             context_at(mx, my);
         } else {
             menu_open = 0;
             context_open = 0;
             tmenu = dock_hit(mx, my);
+            if (tmenu == TB_START)
+                tmenu = -1;
         }
     }
     prev_right = right;
@@ -3021,6 +3130,18 @@ static void handle_input(int mx, int my, int buttons)
            if it was - and gives it the keyboard. The same function the
            drawing asks, so a tile is clickable exactly where it is. */
         int tile = dock_hit(mx, my);
+        if (tile == TB_START) {          /* Start: the menu, or away with it */
+            if (menu_on_bar())
+                menu_open = 0;
+            else
+                menu_from_bar();
+            prev_pressed = pressed;
+            return;
+        }
+        if (ui_win && taskbar_tray_click(mx, my)) {
+            prev_pressed = pressed;
+            return;
+        }
         if (tile >= 0 && tile < 100) {
             remember_launch(desktop_spawn_app(icons[tile].app), tile,
                             icons[tile].art);
@@ -3036,6 +3157,14 @@ static void handle_input(int mx, int my, int buttons)
                     continue;
                 if (j++ != tile - 100)
                     continue;
+                /* On a taskbar the button of the window that already
+                   has the keyboard puts it away, as Windows does */
+                if (ui_win && focus_idx == i && !wins[i].minimized) {
+                    wins[i].minimized = 1;
+                    anim_start(i, ANIM_MIN);
+                    focus_idx = -1;
+                    break;
+                }
                 if (wins[i].minimized)   /* restore it if minimised */
                     anim_start(i, ANIM_RESTORE);
                 wins[i].minimized = 0;
@@ -3304,8 +3433,8 @@ static void handle_input(int mx, int my, int buttons)
                 w->x = 0;
             if (w->x + w->w > video_w())
                 w->x = video_w() - w->w;
-            if (w->y < BAR_H)
-                w->y = BAR_H;
+            if (w->y < work_top())
+                w->y = work_top();
             drag_dx = mx - w->x;
             drag_dy = my - w->y;
         }
@@ -4037,34 +4166,38 @@ static void bt_search_thread(void *arg)
     bt_searching = 0;
 }
 
+static int tb_clock_x(void) { return video_w() - TB_SHOW_W - 6 - TB_CLOCK_W; }
+static int tb_net_x(void)   { return tb_clock_x() - TB_TRAY_W; }
+static int tb_bt_x(void)    { return tb_net_x() - TB_TRAY_W; }
+
 static int stat_card_x(void)
 {
-    int icon = stat_open == STAT_NET ? net_x() : bt_x();
+    int icon = ui_win ? (stat_open == STAT_NET ? tb_net_x() : tb_bt_x()) +
+                            (TB_TRAY_W - STAT_W) / 2
+                      : stat_open == STAT_NET ? net_x() : bt_x();
     int x = icon + STAT_W / 2 - STAT_CARD_W / 2;
     if (x + STAT_CARD_W > video_w() - 6)
         x = video_w() - 6 - STAT_CARD_W;
     return x < 6 ? 6 : x;
 }
 
-static void draw_status_icons(void)
+/* The network's picture, 16 pixels square at nx, y: three boxes
+   joined, lit with an address */
+static void draw_net_glyph(int nx, int y)
 {
-    int y = (BAR_H - 16) / 2;
-    /* Wired: three boxes joined, lit with an address */
-    int nx = net_x(), up = netdev_present() && net_ip() != 0;
+    int up = netdev_present() && net_ip() != 0;
     int a = up ? 255 : 90;
     gfx_rrect(nx + 5, y + 1, 6, 5, 1, L.bar_text, a);
     gfx_fill(nx + 7, y + 6, 2, 3, L.bar_text, a);
     gfx_fill(nx + 2, y + 8, 12, 2, L.bar_text, a);
     gfx_rrect(nx, y + 10, 6, 5, 1, L.bar_text, a);
     gfx_rrect(nx + 10, y + 10, 6, 5, 1, L.bar_text, a);
-    /* (no hint while a card hangs there: it would cover the card) */
-    if (stat_open == STAT_NONE &&
-        in_rect(mouse_x, mouse_y, nx, 0, STAT_W, BAR_H))
-        hint_at(nx - hint_w(locale_text("Network")) / 2 + STAT_W / 2,
-                BAR_H + 4, locale_text("Network"));
+}
 
-    /* Bluetooth's rune, lit with an adapter */
-    int bx = bt_x() + STAT_W / 2, ba = bt_present() ? 255 : 90;
+/* Bluetooth's rune, 16 high, its stem at bx; lit with an adapter */
+static void draw_bt_glyph(int bx, int y)
+{
+    int ba = bt_present() ? 255 : 90;
     int t = y, b = y + 15;
     gfx_line16(bx * 16, t * 16, bx * 16, b * 16, 24, L.bar_text, ba);
     gfx_line16(bx * 16, t * 16, (bx + 4) * 16, (t + 4) * 16, 24, L.bar_text,
@@ -4075,6 +4208,20 @@ static void draw_status_icons(void)
                ba);
     gfx_line16((bx + 4) * 16, (b - 4) * 16, (bx - 4) * 16, (t + 4) * 16, 24,
                L.bar_text, ba);
+}
+
+static void draw_status_icons(void)
+{
+    int y = (BAR_H - 16) / 2;
+    int nx = net_x();
+    draw_net_glyph(nx, y);
+    /* (no hint while a card hangs there: it would cover the card) */
+    if (stat_open == STAT_NONE &&
+        in_rect(mouse_x, mouse_y, nx, 0, STAT_W, BAR_H))
+        hint_at(nx - hint_w(locale_text("Network")) / 2 + STAT_W / 2,
+                BAR_H + 4, locale_text("Network"));
+
+    draw_bt_glyph(bt_x() + STAT_W / 2, y);
     if (stat_open == STAT_NONE &&
         in_rect(mouse_x, mouse_y, bt_x(), 0, STAT_W, BAR_H))
         hint_at(bt_x() - hint_w("Bluetooth") / 2 + STAT_W / 2, BAR_H + 4,
@@ -4144,6 +4291,8 @@ static void draw_status_card(void)
     int x = stat_card_x(), y = BAR_H + 6;
     int with_button = stat_open == STAT_BT && bt_present();
     int h = STAT_PAD * 2 + STAT_ROW * (n + 1) + (with_button ? STAT_ROW + 6 : 0);
+    if (ui_win)                         /* over the taskbar's tray */
+        y = video_h() - TB_H - 6 - h;
     gfx_shadow(x, y, STAT_CARD_W, h, VOL_R, 14, theme_dark ? 150 : 90, 4);
     gfx_frost(x, y, STAT_CARD_W, h, VOL_R, 10, L.menu_bg, L.menu_a);
     gfx_rring16(x * 16, y * 16, STAT_CARD_W * 16, h * 16, VOL_R * 16, 16,
@@ -4556,8 +4705,154 @@ static void draw_tmenu(void)
     }
 }
 
+/* The taskbar's clock: the time over the date, as Windows has it,
+   in the order the 'datefmt' setting asks for */
+static void tb_clock_text(char *tm, char *dt)
+{
+    struct rtc_time r;
+    rtc_read(&r);
+    int n = 0, hour = r.hour;
+    if (clock_is_12h()) {
+        hour %= 12;
+        n += put_num(tm, hour ? hour : 12);
+    } else {
+        tm[n++] = (char)('0' + hour / 10);
+        tm[n++] = (char)('0' + hour % 10);
+    }
+    tm[n++] = ':';
+    n = clock_put_two(tm, n, r.min);
+    if (clock_is_12h()) {
+        tm[n++] = ' ';
+        tm[n++] = r.hour < 12 ? 'A' : 'P';
+        tm[n++] = 'M';
+    }
+    tm[n] = 0;
+    const char *f = config_get("datefmt");
+    n = 0;
+    if (f && !strcmp(f, "iso")) {
+        n += put_num(dt + n, r.year);
+        dt[n++] = '-';
+        n = clock_put_two(dt, n, r.month);
+        dt[n++] = '-';
+        n = clock_put_two(dt, n, r.day);
+    } else if (f && !strcmp(f, "mdy")) {
+        n += put_num(dt + n, r.month);
+        dt[n++] = '/';
+        n += put_num(dt + n, r.day);
+        dt[n++] = '/';
+        n += put_num(dt + n, r.year);
+    } else {
+        n = clock_put_two(dt, n, r.day);
+        dt[n++] = '.';
+        n = clock_put_two(dt, n, r.month);
+        dt[n++] = '.';
+        n += put_num(dt + n, r.year);
+    }
+    dt[n] = 0;
+}
+
+/* The tray's clicks: the network's and Bluetooth's cards, and the
+   sliver at the right end that shows the desktop. 1 = it was the
+   tray's (the clock takes its click and does nothing yet). */
+static int taskbar_tray_click(int mx, int my)
+{
+    int y = video_h() - TB_H;
+    if (my < y)
+        return 0;
+    if (mx >= video_w() - TB_SHOW_W) {
+        toggle_show_desktop();
+        return 1;
+    }
+    if (in_rect(mx, my, tb_net_x(), y, TB_TRAY_W, TB_H)) {
+        stat_open = stat_open == STAT_NET ? STAT_NONE : STAT_NET;
+        return 1;
+    }
+    if (in_rect(mx, my, tb_bt_x(), y, TB_TRAY_W, TB_H)) {
+        stat_open = stat_open == STAT_BT ? STAT_NONE : STAT_BT;
+        return 1;
+    }
+    return mx >= tb_clock_x();
+}
+
+/* The Windows style's taskbar, in place of the dock */
+static void draw_taskbar(void)
+{
+    struct dock d;
+    dock_geom(&d);
+    int y = d.y, w = video_w();
+    gfx_frost(0, y, w, TB_H, 0, 8, L.dock_tint, L.dock_a);
+    gfx_fill(0, y, w, 1, L.dock_line, L.dock_line_a);
+    int hover = dock_hit(mouse_x, mouse_y);
+
+    /* Start: the system's mark, on a lit square while it is pointed at
+       or its menu is open */
+    if (hover == TB_START || menu_on_bar())
+        gfx_rrect(tb_start_x + 3, y + 3, TB_SLOT - 6, TB_H - 6, 6,
+                  L.bar_text, 36);
+    draw_logo(tb_start_x + (TB_SLOT - BAR_LOGO_D) / 2,
+              y + (TB_H - BAR_LOGO_D) / 2, L.accent);
+    if (hover == TB_START && !menu_open)
+        hint_above(tb_start_x + TB_SLOT / 2, y - 6, "Start");
+
+    /* The programs, then the windows; under a running one a short line,
+       under the one with the keyboard a longer one in the accent */
+    int n = d.n_l + d.n_w;
+    for (int k = 0; k < n && k < DOCK_SLOTS; k++) {
+        int sx = d.kx[k] - (TB_SLOT - TB_ICON) / 2;
+        int is_hover = k < d.n_l ? hover == k : hover == 100 + k - d.n_l;
+        if (is_hover)
+            gfx_rrect(sx + 3, y + 3, TB_SLOT - 6, TB_H - 6, 6, L.bar_text, 36);
+        int art, alpha = 255, line = 0;
+        char letter;
+        const char *name;
+        uint32_t lc = L.dot;
+        if (k < d.n_l) {
+            art = icons[k].art;
+            letter = icons[k].label[0];
+            name = icons[k].label;
+            line = launcher_running(k) ? 6 : 0;
+        } else {
+            int wi = win_of_tile(100 + k - d.n_l);
+            if (wi < 0)
+                continue;
+            int from = launch_icon_of(&wins[wi]);
+            art = launch_art_of(&wins[wi]);
+            letter = from >= 0 ? icons[from].label[0] : wins[wi].title[0];
+            name = wins[wi].title;
+            alpha = wins[wi].minimized ? 110 : 255;
+            line = wi == focus_idx ? 14 : 6;
+            if (wi == focus_idx)
+                lc = L.accent;
+        }
+        draw_tile(art, d.kx[k], d.ky[k], TB_ICON, letter, alpha);
+        if (line)
+            gfx_rrect(d.kx[k] + TB_ICON / 2 - line / 2, y + TB_H - 5, line, 3,
+                      1, lc, 230);
+        if (is_hover && tmenu < 0)
+            hint_above(sx + TB_SLOT / 2, y - 6, name);
+    }
+
+    /* The tray: Bluetooth and the network, then the clock */
+    int gy = y + (TB_H - 16) / 2;
+    draw_bt_glyph(tb_bt_x() + TB_TRAY_W / 2, gy);
+    draw_net_glyph(tb_net_x() + (TB_TRAY_W - 16) / 2, gy);
+    char tm[16], dt[16];
+    tb_clock_text(tm, dt);
+    int cx = tb_clock_x();
+    int tw = ui_font_width(UI_SANS, UI_PX, tm);
+    int dw = ui_font_width(UI_SANS, UI_PX, dt);
+    ui_font_text(UI_SANS, UI_PX, cx + TB_CLOCK_W - tw, y + 17, tm, L.bar_text);
+    ui_font_text(UI_SANS, UI_PX, cx + TB_CLOCK_W - dw, y + 33, dt, L.bar_text);
+    /* "Show the desktop": the sliver at the very end */
+    gfx_fill(w - TB_SHOW_W, y + 8, 1, TB_H - 16, L.bar_text, 80);
+}
+
 static void draw_dock(void)
 {
+    if (ui_win) {
+        draw_taskbar();
+        return;
+    }
     struct dock d;
     dock_geom(&d);
 
@@ -7434,6 +7729,13 @@ static void idle_settings(void)
                                               : DOCK_SIDE_BOTTOM;
     dock_magnify = config_get_num("dockmag", 0) != 0;
     bar_autohide = config_get_num("barhide", 0) != 0;
+    const char *lay = config_get("layout");
+    int win_style = lay && !strcmp(lay, "windows");
+    if (win_style != ui_win) {
+        ui_win = win_style;
+        dock_moved = 1;
+        printk("[desktop] the %s style\n", ui_win ? "Windows" : "Mac");
+    }
     int hide = config_get_num("dockhide", 0) != 0;
     if (hide != dock_autohide) {
         dock_autohide = hide;
@@ -7489,7 +7791,7 @@ static void peek_step(void)
 static void dock_magnify_step(void)
 {
     int target = 0;
-    if (dock_magnify && !locked && dark != 2) {
+    if (dock_magnify && !ui_win && !locked && dark != 2) {
         int keep = dock_mag_level;
         dock_mag_level = 0;
         struct dock d;

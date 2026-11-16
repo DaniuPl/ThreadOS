@@ -8006,3 +8006,30 @@ works and is checked by `make test`.
       maximised or minimised (it never was cleared). t_fullscreen fills
       a terminal and reads the dock under it, goes Full Screen and back
       through the slid-out title bar, and hides the dock.
+
+- [x] **The Windows style**
+      (kernel/desktop.c, kernel/include/look.h, kernel/config.c,
+      kernel/locale.c, user/gsettings.c, scripts/tests/t_winstyle.py,
+      t_dock.py)
+      Settings' Desktop & Dock page starts with "Interface style":
+      macOS, as it was, or Windows ('layout windows'), for a person who
+      comes from a PC. The same desktop, turned round: no bar at the
+      top, so windows reach the screen's top edge; a taskbar along the
+      bottom with Start, the pinned programs and the open windows
+      centred on it, a line under a running program and a longer one
+      under the focused window, the network and Bluetooth in the tray
+      at its right, a clock of the time over the date (in the order
+      'datefmt' gives), and the sliver at the very end that shows the
+      desktop. Start opens the same menu the ThreadOS mark opens, only
+      standing on the taskbar; a window's button minimises it when it
+      is already in front. A window's title is at the left of its bar
+      and its minimise, maximise and close buttons at the right, the
+      close one red under the pointer; maximise fills everything but
+      the taskbar. It is one geometry with the dock's - the taskbar is
+      a dock laid out differently - so clicking, the tile menus and
+      the window list work on it unchanged. t_winstyle reads the bar
+      gone and the date on the taskbar's clock, starts Files from its
+      button, maximises it from the very top down to the taskbar and
+      closes it with the buttons at the right, opens Start and reads
+      Shut Down at the end of its menu, and goes back to the Mac
+      style. t_dock clicks the Position chips a row lower.

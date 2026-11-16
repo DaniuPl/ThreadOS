@@ -99,8 +99,10 @@ def main():
             head = q.gset_heading(cx, cy)
             check("its Desktop & Dock page ('%s')" % head,
                   head == "Desktop & Dock")
+            # (Position is the page's second row, under Interface style)
             q.click(cx + GSET_PANE_X + GSET_CHIP_W // 2,
-                    cy + GSET_PANE_Y0 + GSET_CTRL_DY + GSET_CHIP_H // 2)
+                    cy + GSET_PANE_Y0 + GSET_ROW_H + GSET_CTRL_DY +
+                    GSET_CHIP_H // 2)
             time.sleep(1)
             if q.gset_asks(cx, cy):          # a setting is the admin's
                 for ch in "thread\n":
