@@ -48,6 +48,14 @@ int hda_stream_write(const int16_t *samples, uint32_t frames);
 int hda_stream_end(void);
 void hda_stream_abort(int task_id);
 
+#define HDA_LEVELS 4
+/* Who is playing (a task id, -1 = nobody), and how loud what they
+   last handed over is: the peak of each quarter of the block, 0..255.
+   For the desktop, which shows it; the samples, not the volume
+   setting, so a quiet passage looks quiet at any loudness. */
+int hda_stream_who(void);
+void hda_stream_levels(uint8_t out[HDA_LEVELS]);
+
 /* A tone of the given frequency and length. The oldest thing a
    computer does with a speaker, and the shortest way to hear whether
    any of the above is true. 0 = played. */

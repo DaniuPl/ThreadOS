@@ -93,15 +93,28 @@
 #define TMENU_W      132     /* the right button's menu on a dock tile */
 #define TMENU_GAP    8       /* between it and the dock */
 
-/* --- how loud: the card the loudness keys bring up ------------------- */
-#define VOL_W        240
-#define VOL_H        52
-#define VOL_R        14
-#define VOL_DY       24      /* above the dock */
-#define VOL_BAR_X    52      /* the bar, from the card's left edge */
-#define VOL_BAR_W    128
-#define VOL_BAR_H    6
+#define VOL_R        14      /* the corners of the status card */
 #define SESS_ROW     22      /* an entry below it, a little lower */
+
+/* --- the island: a capsule at the top centre for what is going on ----- */
+#define ISL_TOP      8       /* from the top edge of the screen */
+#define ISL_VOL_W    300     /* how loud: the wide capsule */
+#define ISL_VOL_H    44
+#define ISL_ICON_X   26      /* the speaker's middle, from the left end */
+#define ISL_BAR_X    52      /* the slider, from the left end */
+#define ISL_BAR_W    176
+#define ISL_BAR_H    6
+#define ISL_GRAB     10      /* how far above and below the slider grabs */
+#define ISL_TEXT_X   244     /* the number, from the left end */
+#define ISL_PX       14
+#define ISL_PLAY_W   260     /* something is playing: the small capsule */
+#define ISL_PLAY_H   32
+#define ISL_NAME_X   16      /* its program's name, from the left end */
+#define ISL_LEV_W    4       /* a level bar, and the gap after it */
+#define ISL_LEV_GAP  3
+#define ISL_LEV_RIGHT 16     /* the last bar's right edge, from the right end */
+#define ISL_LEV_MIN  3       /* a bar for silence */
+#define ISL_LEV_MAX  18      /* and for a full-scale sample */
 
 /* --- the question before logging out, restarting, shutting down ------- */
 #define ASK_W        320

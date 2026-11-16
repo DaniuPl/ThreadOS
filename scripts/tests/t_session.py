@@ -188,28 +188,24 @@ def session(slog, disk):
         q.sendkey("alt-f4")
         time.sleep(2)
 
-        # The loudness keys a laptop has on Fn: a card above the dock
-        # says how loud it is now, and the setting keeps it
+        # The loudness keys a laptop has on Fn: the island at the top
+        # says how loud it is now (t_island has the rest of it), and
+        # the setting keeps it
         def loudness():
-            g = dock_geom(w=W, h=H)
-            x = (W - VOL_W) // 2
-            y = g["y"] - VOL_DY - VOL_H
-            return q.read_ui(x + VOL_BAR_X + VOL_BAR_W + 12,
-                             ui_font_baseline_in(MENU_PX, y, VOL_H), 60,
-                             px=MENU_PX, fg=DARK["menu_text"])
+            return island_volume(q, w=W)
         q.mouse_goto(400, 300)
         q.sendkey("volumeup")
         q.sendkey("volumeup")
         time.sleep(0.8)
         said = loudness()
-        check("Volume Up twice: the card says 90%% ('%s')" % said,
+        check("Volume Up twice: the island says 90%% ('%s')" % said,
               said == "90%")
         check("and the setting keeps it",
               "volume = 90" in q.command("set", "slower", timeout=10))
         q.sendkey("audiomute")
         time.sleep(0.8)
         said = loudness()
-        check("Mute: the card says Off ('%s')" % said, said == "Off")
+        check("Mute: the island says Off ('%s')" % said, said == "Off")
         q.sendkey("volumedown")
         time.sleep(0.8)
         said = loudness()
@@ -221,7 +217,7 @@ def session(slog, disk):
         deadline = time.time() + 10
         while loudness() != "" and time.time() < deadline:
             time.sleep(0.5)
-        check("the card goes after a moment", loudness() == "")
+        check("the island goes after a moment", loudness() == "")
 
         # About: what the machine is, said on a card - against what the
         # test knows it started (one processor, the screen GRUB set, the

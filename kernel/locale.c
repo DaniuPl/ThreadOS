@@ -323,6 +323,7 @@ static const struct translation translations[] = {
     { "Volume", "Głośność" },
     { "Mute", "Wycisz" },
     { "Off", "Wył." },
+    { "Playing", "Odtwarzanie" },
     { "Wired: ", "Przewodowa: " },
     { "Address: ", "Adres: " },
     { "No address yet (DHCP)", "Jeszcze bez adresu (DHCP)" },

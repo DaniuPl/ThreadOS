@@ -1145,6 +1145,60 @@ def dock_index(app):
     return DOCK_APPS.index("gweb" if app == "web" else app)
 
 
+# --- the island (kernel/desktop.c): black, lettered in white -----------
+
+ISL_BG, ISL_FG = (0, 0, 0), (255, 255, 255)
+HDA_LEVELS = _kernel_define("kernel/include/hda.h", "HDA_LEVELS")
+
+
+def island_volume(q, w=SCREEN_W, screen=None):
+    """What the island says about loudness - '85%', 'Off' - or '' while
+    it is not saying it"""
+    x = (w - ISL_VOL_W) // 2 + ISL_TEXT_X
+    return q.read_ui(x, ui_font_baseline_in(ISL_PX, ISL_TOP, ISL_VOL_H),
+                     ISL_VOL_W - ISL_TEXT_X - 8, px=ISL_PX, face="bold",
+                     fg=ISL_FG, screen=screen)
+
+
+def island_slider(q, w=SCREEN_W, screen=None):
+    """How much of the island's slider is filled, in pixels: the white
+    along its middle row (the rest of the track is grey)"""
+    _, _, at = screen or q.screen_raw()
+    x0 = (w - ISL_VOL_W) // 2 + ISL_BAR_X
+    y = ISL_TOP + ISL_VOL_H // 2
+    return sum(1 for x in range(x0, x0 + ISL_BAR_W) if min(at(x, y)) >= 200)
+
+
+def island_name(q, w=SCREEN_W, screen=None):
+    """The name the island shows while something plays, or ''"""
+    x = (w - ISL_PLAY_W) // 2 + ISL_NAME_X
+    return q.read_ui(x, ui_font_baseline_in(ISL_PX, ISL_TOP, ISL_PLAY_H),
+                     ISL_PLAY_W - ISL_NAME_X - 60, px=ISL_PX, fg=ISL_FG,
+                     screen=screen)
+
+
+def island_level_x(i, w=SCREEN_W):
+    lev_w = HDA_LEVELS * ISL_LEV_W + (HDA_LEVELS - 1) * ISL_LEV_GAP
+    return ((w - ISL_PLAY_W) // 2 + ISL_PLAY_W - ISL_LEV_RIGHT - lev_w +
+            i * (ISL_LEV_W + ISL_LEV_GAP))
+
+
+def island_levels(q, w=SCREEN_W, screen=None):
+    """The heights of the island's level bars, in pixels: down the
+    middle of each, what is not the island's black"""
+    _, _, at = screen or q.screen_raw()
+    return [sum(1 for y in range(ISL_TOP, ISL_TOP + ISL_PLAY_H)
+                if max(at(island_level_x(i, w) + ISL_LEV_W // 2, y)) > 80)
+            for i in range(HDA_LEVELS)]
+
+
+def island_level_px(peak):
+    """The bar the desktop draws for a block whose loudest sample is
+    'peak' (of 32767) - kernel/hda.c's scaling, then desktop.c's"""
+    level = min(255, peak * 255 // 32767)
+    return ISL_LEV_MIN + (ISL_LEV_MAX - ISL_LEV_MIN) * level // 255
+
+
 def dock_geom(n_l=DOCK_N, n_w=0, want=None, w=SCREEN_W, h=SCREEN_H):
     """The dock as dock_geom() lays it out: its glass, its tile size and
     where every tile is - programs first, then the windows on this

@@ -2272,6 +2272,9 @@ static void search_click(int mx, int my);
 static void search_close(void);
 static int search_key(char c);
 static int note_at(int x, int y);
+static int island_press(int mx, int my);
+static int island_wheel(int mx, int my, int notches);
+static void island_pointer(int mx, int my, int pressed);
 static void note_drop(int i);
 static int desktop_spawn_app(const char *command);
 static int setup_mode;
@@ -2552,7 +2555,7 @@ static void handle_input(int mx, int my, int buttons)
        pointing at it, without first making it the window that hears
        the keyboard. */
     int notches = mouse_take_scroll();
-    if (notches) {
+    if (notches && !island_wheel(mx, my, notches)) {
         int wi = window_at(mx, my);
         if (wi >= 0 && wins[wi].content) {
             struct window *w = &wins[wi];
@@ -2591,8 +2594,14 @@ static void handle_input(int mx, int my, int buttons)
     }
     prev_right = right;
 
-    /* The search and the notifications are above everything else, and
-       take a click before anything under them can */
+    /* The search, the island and the notifications are above
+       everything else, and take a click before anything under them
+       can */
+    island_pointer(mx, my, pressed);
+    if (pressed && !prev_pressed && island_press(mx, my)) {
+        prev_pressed = pressed;
+        return;
+    }
     if (pressed && !prev_pressed && search_open) {
         search_click(mx, my);
         prev_pressed = pressed;
@@ -5177,60 +5186,293 @@ static void session_do(int what)
     }
 }
 
-/* --- How loud: a card above the dock for a moment -------------------- */
-
-static int cat(char *d, int at, const char *s);
+/* --- The island: what is going on, at the top of the screen ---------------
+ *
+ * A black capsule at the top centre that grows into whatever needs a
+ * moment of attention and shrinks away after: how loud, whenever the
+ * loudness changes - the keys, the wheel over it, Settings, the
+ * shell's 'volume' - and what is playing, while a program streams
+ * sound. Passing things get one place instead of a card each in a
+ * corner of their own. It is black in both themes: it belongs to the
+ * edge of the screen, not to the windows.
+ *
+ * Its size follows the target like a spring, a little past it and
+ * back, so a change of what it shows reads as one thing growing, not
+ * one card swapped for another; the contents come in once the size has
+ * nearly arrived. With motion turned off it is simply the new size.
+ */
 static int cat_num(char *d, int at, uint32_t v);
 
-static void draw_volume(void)
-{
-    if ((int32_t)(vol_until - frames) <= 0)
-        return;
-    struct dock d;
-    dock_geom(&d);
-    int x = (video_w() - VOL_W) / 2, y = d.y - VOL_DY - VOL_H;
-    gfx_shadow(x, y, VOL_W, VOL_H, VOL_R, 14, theme_dark ? 150 : 90, 4);
-    gfx_frost(x, y, VOL_W, VOL_H, VOL_R, 10, L.menu_bg, L.menu_a);
-    gfx_rring16(x * 16, y * 16, VOL_W * 16, VOL_H * 16, VOL_R * 16, 16,
-                L.win_line, 200);
+#define ISL_BG    0x000000
+#define ISL_FG    0xFFFFFF
+#define ISL_SHOW  (3 * FRAME_HZ / 2)    /* how long a change of loudness stays */
 
-    /* A speaker - a box and a cone - and as many waves as it is loud */
-    int muted = hda_muted(), v = hda_volume();
-    int cx = x + 26, cy = y + VOL_H / 2;
-    gfx_rrect(cx - 10, cy - 4, 6, 8, 1, L.menu_text, 255);
+enum { ISL_NONE, ISL_PLAYING, ISL_VOLUME };
+
+static int isl_w16, isl_h16;            /* the size now, sixteenths */
+static int isl_vw16, isl_vh16;          /* and how fast it changes */
+static int isl_kind;                    /* what it shows (kept while it goes) */
+static int isl_alpha;                   /* 0 = not there at all */
+static int isl_drag;                    /* the slider held by the pointer */
+static int isl_seen_vol = -1, isl_seen_mute;
+static uint8_t isl_lev[HDA_LEVELS];
+static uint32_t isl_ticks;              /* the timer when it last moved */
+
+static void speaker(int cx, int cy, int muted, int v, uint32_t c)
+{
+    gfx_rrect(cx - 10, cy - 4, 6, 8, 1, c, 255);
     gfx_line16((cx - 4) * 16, (cy - 4) * 16, (cx + 2) * 16, (cy - 9) * 16, 24,
-               L.menu_text, 255);
+               c, 255);
     gfx_line16((cx - 4) * 16, (cy + 4) * 16, (cx + 2) * 16, (cy + 9) * 16, 24,
-               L.menu_text, 255);
+               c, 255);
     gfx_line16((cx + 2) * 16, (cy - 9) * 16, (cx + 2) * 16, (cy + 9) * 16, 24,
-               L.menu_text, 255);
+               c, 255);
     if (muted) {
         gfx_line16((cx + 6) * 16, (cy - 4) * 16, (cx + 13) * 16, (cy + 4) * 16,
-                   24, L.menu_text, 255);
+                   24, c, 255);
         gfx_line16((cx + 6) * 16, (cy + 4) * 16, (cx + 13) * 16, (cy - 4) * 16,
-                   24, L.menu_text, 255);
+                   24, c, 255);
     } else {
         for (int k = 0; k < 3 && v > k * 34; k++)
-            arc16((cx + 2) * 16, cy * 16, (6 + 4 * k) * 16, 2, 10, 22,
-                  L.menu_text);
+            arc16((cx + 2) * 16, cy * 16, (6 + 4 * k) * 16, 2, 10, 22, c);
+    }
+}
+
+/* What it should be showing, and at what size */
+static int island_want(int *w, int *h)
+{
+    if ((int32_t)(vol_until - frames) > 0 || isl_drag) {
+        *w = ISL_VOL_W;
+        *h = ISL_VOL_H;
+        return ISL_VOLUME;
+    }
+    if (hda_stream_who() >= 0) {
+        *w = ISL_PLAY_W;
+        *h = ISL_PLAY_H;
+        return ISL_PLAYING;
+    }
+    *w = *h = ISL_PLAY_H;               /* shrinking to a dot, and gone */
+    return ISL_NONE;
+}
+
+static void island_rect(int *x, int *y, int *w, int *h)
+{
+    *w = (isl_w16 + 8) / 16;
+    *h = (isl_h16 + 8) / 16;
+    *x = (video_w() - *w) / 2;
+    *y = ISL_TOP;
+}
+
+static int island_hit(int mx, int my)
+{
+    int x, y, w, h;
+    if (isl_alpha < 128)
+        return 0;
+    island_rect(&x, &y, &w, &h);
+    return in_rect(mx, my, x, y, w, h);
+}
+
+static void spring(int *pos, int *vel, int target)
+{
+    /* A little under critical damping: it overshoots by a few per cent
+       and settles in about a third of a second at 50 frames */
+    *vel = *vel * 184 / 256 + (target - *pos) * 56 / 256;
+    *pos += *vel;
+    int d = target - *pos;
+    if (d > -8 && d < 8 && *vel > -8 && *vel < 8) {
+        *pos = target;
+        *vel = 0;
+    }
+}
+
+/* Once a frame, before it is drawn */
+static void island_step(void)
+{
+    /* Whoever changed the loudness - a key, Settings, the shell - the
+       island says so */
+    int v = hda_volume(), m = hda_muted();
+    if (isl_seen_vol >= 0 && (v != isl_seen_vol || m != isl_seen_mute))
+        vol_until = frames + ISL_SHOW;
+    isl_seen_vol = v;
+    isl_seen_mute = m;
+
+    int tw, th, kind = island_want(&tw, &th);
+    if (kind != ISL_NONE)
+        isl_kind = kind;
+    uint32_t motion = config_get_num("motion", 1);
+
+    /* The motion is in time, not in frames: a desktop that misses
+       frames while a program loads catches up with several steps,
+       rather than growing the island in slow motion */
+    uint32_t now_ticks = pit_ticks();
+    int steps = (int)(now_ticks - isl_ticks) * FRAME_HZ / 100;
+    isl_ticks = now_ticks;
+    steps = steps < 1 ? 1 : steps > 25 ? 25 : steps;
+
+    if (isl_alpha == 0 && kind != ISL_NONE) {
+        /* Out of nothing: from a dot of its small height */
+        isl_w16 = isl_h16 = ISL_PLAY_H * 16;
+        isl_vw16 = isl_vh16 = 0;
+        steps = 1;
+    }
+    if (!motion) {
+        isl_w16 = tw * 16;
+        isl_h16 = th * 16;
+        isl_alpha = kind != ISL_NONE ? 255 : 0;
+    } else {
+        for (int k = 0; k < steps; k++) {
+            spring(&isl_w16, &isl_vw16, tw * 16);
+            spring(&isl_h16, &isl_vh16, th * 16);
+            if (kind != ISL_NONE)
+                isl_alpha = isl_alpha + 64 > 255 ? 255 : isl_alpha + 64;
+            else if (isl_w16 <= (ISL_PLAY_H + 8) * 16)
+                isl_alpha = isl_alpha - 40 < 0 ? 0 : isl_alpha - 40;
+        }
     }
 
-    int bx = x + VOL_BAR_X, by = cy - VOL_BAR_H / 2;
-    gfx_rrect(bx, by, VOL_BAR_W, VOL_BAR_H, VOL_BAR_H / 2, L.menu_text, 60);
-    int fill = muted ? 0 : v * VOL_BAR_W / 100;
-    if (fill > 0)
-        gfx_rrect(bx, by, fill, VOL_BAR_H, VOL_BAR_H / 2, L.accent, 255);
-    char t[8];
-    int n = 0;
-    if (muted) {
-        n = cat(t, 0, locale_text("Off"));
-    } else {
-        n = cat_num(t, 0, (uint32_t)v);
-        n = cat(t, n, "%");
+    /* The level bars jump up at once and fall back slowly - a meter */
+    uint8_t now[HDA_LEVELS];
+    hda_stream_levels(now);
+    for (int q = 0; q < HDA_LEVELS; q++) {
+        int fall = 24 * steps;
+        isl_lev[q] = now[q] >= isl_lev[q] ? now[q]
+                   : isl_lev[q] > fall ? (uint8_t)(isl_lev[q] - fall) : now[q];
     }
-    (void)n;
-    ui_font_text(UI_SANS, MENU_PX, bx + VOL_BAR_W + 12,
-                 ui_font_baseline_in(MENU_PX, y, VOL_H), t, L.menu_text);
+}
+
+/* The name of what is playing: its window's title, else its program's */
+static void playing_name(char *out, int cap)
+{
+    int who = hda_stream_who();
+    out[0] = 0;
+    for (int i = 0; i < MAX_WIN; i++)
+        if (wins[i].used && wins[i].owner == who && wins[i].title[0]) {
+            copy_cut(out, wins[i].title, cap);
+            return;
+        }
+    if (who < 0 || task_name_of(who, out, cap) < 0)
+        copy_cut(out, locale_text("Playing"), cap);
+}
+
+static void draw_island(void)
+{
+    island_step();
+    if (isl_alpha == 0)
+        return;
+    int x, y, w, h;
+    island_rect(&x, &y, &w, &h);
+    int a = isl_alpha;
+    gfx_shadow(x, y, w, h, h / 2, 12, (theme_dark ? 160 : 100) * a / 255, 3);
+    gfx_rrect(x, y, w, h, h / 2, ISL_BG, a);
+
+    /* The contents only once the size has (nearly) come: a slider
+       squeezed into a growing capsule would be drawn over its ends */
+    int tw, th;
+    island_want(&tw, &th);
+    int dw = w - (isl_kind == ISL_VOLUME ? ISL_VOL_W : ISL_PLAY_W);
+    int dh = h - (isl_kind == ISL_VOLUME ? ISL_VOL_H : ISL_PLAY_H);
+    if (dw < -2 || dw > 6 || dh < -2 || dh > 3 || a < 255)
+        return;
+    x = (video_w() - (isl_kind == ISL_VOLUME ? ISL_VOL_W : ISL_PLAY_W)) / 2;
+
+    if (isl_kind == ISL_VOLUME) {
+        int muted = hda_muted(), v = hda_volume();
+        int cy = y + h / 2;
+        speaker(x + ISL_ICON_X, cy, muted, v, ISL_FG);
+        int bx = x + ISL_BAR_X, by = cy - ISL_BAR_H / 2;
+        gfx_rrect(bx, by, ISL_BAR_W, ISL_BAR_H, ISL_BAR_H / 2, ISL_FG, 70);
+        int fill = muted ? 0 : v * ISL_BAR_W / 100;
+        if (fill > 0)
+            gfx_rrect(bx, by, fill, ISL_BAR_H, ISL_BAR_H / 2, ISL_FG, 255);
+        char t[16];
+        if (muted)
+            copy_cut(t, locale_text("Off"), sizeof(t));
+        else
+            cat(t, cat_num(t, 0, (uint32_t)v), "%");
+        ui_font_text(UI_BOLD, ISL_PX, x + ISL_TEXT_X,
+                     ui_font_baseline_in(ISL_PX, y, ISL_VOL_H), t, ISL_FG);
+        return;
+    }
+
+    /* Playing: its name, and how loud what it plays is - in the
+       accent, a quarter of the latest block a bar */
+    int lev_w = HDA_LEVELS * ISL_LEV_W + (HDA_LEVELS - 1) * ISL_LEV_GAP;
+    int lx = x + ISL_PLAY_W - ISL_LEV_RIGHT - lev_w;
+    for (int q = 0; q < HDA_LEVELS; q++) {
+        int bh = ISL_LEV_MIN + (ISL_LEV_MAX - ISL_LEV_MIN) * isl_lev[q] / 255;
+        gfx_rrect(lx + q * (ISL_LEV_W + ISL_LEV_GAP), y + (h - bh) / 2,
+                  ISL_LEV_W, bh, ISL_LEV_W / 2, L.accent, 255);
+    }
+    char name[64], cut[72];
+    playing_name(name, sizeof(name));
+    int room = lx - 12 - (x + ISL_NAME_X);
+    ui_font_text(UI_SANS, ISL_PX, x + ISL_NAME_X,
+                 ui_font_baseline_in(ISL_PX, y, ISL_PLAY_H),
+                 fit_text(name, UI_SANS, ISL_PX, room, cut, sizeof(cut)),
+                 ISL_FG);
+}
+
+/* The slider: the loudness where the pointer is along it */
+static void island_set_from(int mx)
+{
+    int x = (video_w() - ISL_VOL_W) / 2 + ISL_BAR_X;
+    int v = (mx - x) * 100 / ISL_BAR_W;
+    v = v < 0 ? 0 : v > 100 ? 100 : v;
+    if (v != hda_volume() || hda_muted()) {
+        hda_set_volume(v);
+        hda_set_mute(0);
+    }
+    vol_until = frames + ISL_SHOW;
+}
+
+/* The pointer and the island: the wheel over it, a press on the
+   speaker or the slider. 1 = it took the input. */
+static int island_wheel(int mx, int my, int notches)
+{
+    if (!island_hit(mx, my))
+        return 0;
+    hda_set_volume(hda_volume() + 5 * notches);
+    hda_set_mute(0);
+    hda_remember();
+    vol_until = frames + ISL_SHOW;
+    return 1;
+}
+
+static int island_press(int mx, int my)
+{
+    if (!island_hit(mx, my))
+        return 0;
+    if (isl_kind != ISL_VOLUME) {        /* what is playing -> how loud */
+        vol_until = frames + ISL_SHOW;
+        return 1;
+    }
+    int x = (video_w() - ISL_VOL_W) / 2, cy = ISL_TOP + ISL_VOL_H / 2;
+    if (mx < x + ISL_BAR_X - ISL_GRAB / 2) {
+        hda_set_mute(!hda_muted());
+        hda_remember();
+        vol_until = frames + ISL_SHOW;
+    } else if (my >= cy - ISL_GRAB && my <= cy + ISL_GRAB) {
+        isl_drag = 1;
+        island_set_from(mx);
+    }
+    return 1;
+}
+
+/* Every frame: a held slider follows the pointer, and a pointer
+   resting on the island keeps it open */
+static void island_pointer(int mx, int my, int pressed)
+{
+    if (isl_drag) {
+        if (pressed) {
+            island_set_from(mx);
+        } else {
+            isl_drag = 0;
+            hda_remember();
+        }
+    } else if (isl_kind == ISL_VOLUME && island_hit(mx, my) &&
+               (int32_t)(vol_until - frames) > 0) {
+        vol_until = frames + ISL_SHOW;
+    }
 }
 
 /* --- About ThreadOS: what this machine is, on a card ------------------- */
@@ -6581,7 +6823,7 @@ static void desktop_thread(void *arg)
         draw_context_menu();
         draw_notes();
         draw_search();
-        draw_volume();
+        draw_island();
         draw_status_card();
         draw_ask();
         /* What was just saved stays on the screen for a moment - the

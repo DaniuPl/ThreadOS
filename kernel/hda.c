@@ -117,6 +117,7 @@ static int ready;
 static int stream_active;
 static int stream_owner = -1;
 static uint32_t stream_fill;
+static volatile uint8_t stream_peaks[HDA_LEVELS];
 static char name[48];
 
 /* Where it stopped, when it stopped. A driver for a device that is
@@ -629,12 +630,35 @@ int hda_stream_write(const int16_t *samples, uint32_t frames)
         return -1;
     }
     uint32_t at = stream_fill * half;
+    int peak[HDA_LEVELS] = { 0 };
     for (uint32_t i = 0; i < half; i++) {
-        buf[(at + i) * 2] = i < frames ? samples[i * 2] : 0;
-        buf[(at + i) * 2 + 1] = i < frames ? samples[i * 2 + 1] : 0;
+        int l = i < frames ? samples[i * 2] : 0;
+        int r = i < frames ? samples[i * 2 + 1] : 0;
+        buf[(at + i) * 2] = (int16_t)l;
+        buf[(at + i) * 2 + 1] = (int16_t)r;
+        int q = (int)(i * HDA_LEVELS / half);
+        l = l < 0 ? -l : l;
+        r = r < 0 ? -r : r;
+        if (l > peak[q])
+            peak[q] = l;
+        if (r > peak[q])
+            peak[q] = r;
     }
+    for (int q = 0; q < HDA_LEVELS; q++)
+        stream_peaks[q] = (uint8_t)(peak[q] > 32767 ? 255 : peak[q] * 255 / 32767);
     stream_fill ^= 1;
     return 0;
+}
+
+int hda_stream_who(void)
+{
+    return stream_active ? stream_owner : -1;
+}
+
+void hda_stream_levels(uint8_t out[HDA_LEVELS])
+{
+    for (int q = 0; q < HDA_LEVELS; q++)
+        out[q] = stream_active ? stream_peaks[q] : 0;
 }
 
 int hda_stream_end(void)

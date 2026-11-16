@@ -7197,3 +7197,36 @@ works and is checked by `make test`.
       `make fuzz` builds Mbed TLS's own certificate and key fuzz
       programs under ASan and UBSan and feeds them corrupted
       certificates and keys.
+
+- [x] **The island** (kernel/desktop.c, kernel/hda.c, kernel/include/look.h,
+      scripts/tests/t_island.py, scripts/ptest.py)
+      Passing things had a card each in a corner of their own: the
+      loudness above the dock, notifications at the top right. The
+      loudness, and now what is playing, have one place instead: a
+      black capsule at the top centre - black in both themes, part of
+      the screen's edge rather than a window - that grows into what is
+      going on and shrinks away after. Its size follows a spring, a
+      little past the target and back, in timer ticks rather than
+      frames, so a desktop that misses frames while a program loads
+      does not grow it in slow motion; with motion turned off it just
+      is the new size.
+
+      Loudness: any change shows it - the keys, Settings, the shell's
+      'volume' - because the desktop watches the driver rather than the
+      keys. The wheel over the island changes it, a click or drag along
+      the slider sets it, a click on the speaker mutes. Playing: while
+      a program streams sound the island names it (its window's title)
+      and shows four level bars, the peaks of the quarters of the block
+      the program last handed the driver (hda_stream_levels()) - the
+      samples, not the loudness setting, so a quiet passage looks quiet.
+      A click on it opens the loudness.
+
+      t_island reads the island's number and measures its slider off
+      the screen after keys, the wheel, a click, a drag, the speaker and
+      the shell's command, and asks the driver each time whether the
+      loudness really is what the island says. It plays a WAV it made -
+      four seconds of a sine at 24000 of 32767, three of silence -
+      through gmedia: the island names the window, every bar stands
+      13 px while the tone plays (the height the test works out from
+      the WAV's peak) and 3 px in the silence, and goes when the stream
+      ends. t_session reads the loudness off the island now.
