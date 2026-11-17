@@ -8624,3 +8624,20 @@ works and is checked by `make test`.
       none: a client that has sent a request and reads the input as a
       server's frames, then a server reading it as a client's, from
       frames built here with RFC 7541's HPACK examples in them.
+
+- [x] **JavaScriptCore from WPE WebKit's release** (Makefile,
+      third_party/webkit/, third_party/README.md)
+      The engine's next stage is WebCore and WebKit2 through the WPE
+      port, whose platform layer (WPEPlatform) is what a ThreadOS window
+      will be drawn through; WebKitGTK's release does not carry it. The
+      archive is now wpewebkit-2.54.2 (the same WebKit version, SHA-256
+      as wpewebkit.org's .sums lists it), and JavaScriptCore is built
+      from it as before - the JSCOnly port is in it too. t_jsc passes on
+      the new build unchanged. What the WPE port needs that the tree
+      does not have yet: HarfBuzz as a library with its ICU part,
+      libepoxy, libgcrypt and libgpg-error, libtasn1, libxkbcommon and
+      libwebp; the rest (GStreamer, Wayland, DRM, ATK, WebGL) can be
+      switched off. It draws without a GPU: NonCompositedFrameRenderer
+      paints with Skia on the processor into a shared-memory swap chain,
+      and the UI process receives WPEBufferSHM buffers - which a
+      ThreadOS platform only has to copy into a window.

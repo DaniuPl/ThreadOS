@@ -1190,14 +1190,14 @@ $(BUILD)/user64/souptest.elf: libc/tests/souptest.c $(LIBSOUP_A) $(GIONET_A) \
 	       pkg-config --cflags --static --libs libsoup-3.0 gioopenssl openssl)
 
 # --- WebKit: JavaScriptCore -------------------------------------------
-# WebKitGTK's release (third_party/README.md), built by its own CMake
+# WPE WebKit's release (third_party/README.md), built by its own CMake
 # through apps/webkit/threados.cmake: the JSCOnly port, the C loop
 # interpreter (no JIT: no executable memory to hand out), the system's
 # malloc, everything static. -Os because the initrd is memory. The
 # shell, jsc, runs scripts; the browser engine is the next stage.
-WEBKIT_TAR := third_party/webkit/webkitgtk-2.54.2.tar.xz
+WEBKIT_TAR := third_party/webkit/wpewebkit-2.54.2.tar.xz
 WEBKIT_DIR := $(BUILD)/webkit
-WEBKIT_SRC := $(WEBKIT_DIR)/webkitgtk-2.54.2
+WEBKIT_SRC := $(WEBKIT_DIR)/wpewebkit-2.54.2
 JSC_DIR    := $(WEBKIT_DIR)/jsc
 
 $(WEBKIT_SRC)/CMakeLists.txt: $(WEBKIT_TAR)
