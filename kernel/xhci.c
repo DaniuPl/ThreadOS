@@ -471,11 +471,17 @@ static int take_comp(int slot, int dci, struct comp *out)
     return got;
 }
 
+/* How long a transfer is waited for with the core offered to others
+   but not slept on: longer than a disk takes to answer, shorter than
+   anybody would notice a core kept busy */
+#define YIELD_TICKS 3
+
 /* Waits for one of this slot's transfers, filing everybody else's on
    the way rather than dropping them. */
 static int wait_slot(int slot, struct comp *out, uint32_t ms)
 {
-    uint32_t az = pit_ticks() + (ms + 9) / 10 + 1;
+    uint32_t start = pit_ticks();
+    uint32_t az = start + (ms + 9) / 10 + 1;
     int spins = 0;
 
     while (pit_ticks() < az) {
@@ -483,15 +489,22 @@ static int wait_slot(int slot, struct comp *out, uint32_t ms)
         if (take_comp(slot, 0, out))
             return 1;
         /* The first few hundred turns are a busy wait, because most
-           answers come back in microseconds and going to sleep would
-           cost more than the wait itself. After that the machine is
-           let go: a driver that spins for five seconds waiting for a
-           disk - or for a packet that may never come - is a driver
-           that stops the machine while it waits. */
-        if (++spins > 200 && task_scheduler_ready())
-            task_sleep(1);
-        else
+           answers come back in microseconds and giving the core away
+           would cost more than the wait itself. After that the core is
+           offered to anybody who wants it - and taken straight back
+           when nobody does, rather than slept on until the next tick.
+           A disk answers in a millisecond or two, and sleeping until
+           the next tick for every such answer is up to ten
+           milliseconds a command: that was nearly all of the time it
+           took to install the system onto a stick. Only an answer later than a few ticks - a
+           network card with nothing to say for five seconds - is
+           waited for asleep, so that it keeps no core busy. */
+        if (++spins <= 200 || !task_scheduler_ready())
             io_wait();
+        else if (pit_ticks() - start < YIELD_TICKS)
+            task_sleep(0);
+        else
+            task_sleep(1);
     }
     return 0;
 }
@@ -1280,9 +1293,11 @@ int xhci_bulk_endpoint(int slot, int in_ep, int out_ep, int maxpacket)
  *
  * A single TRB may not describe a buffer that crosses a 64 KiB
  * boundary - not because of the bus but because of how the controller
- * counts. Nothing here asks for more than four kilobytes at a time,
- * but "nothing here does" is exactly the kind of assumption that
- * breaks a year later, so the split is done properly.
+ * counts. Each piece is a transfer of its own, so a piece that is not
+ * a whole number of packets ends with a short one, and a device takes
+ * that as the end of the data. Buffers that move a lot at once are
+ * therefore aligned so that they never split (the FAT writer's run of
+ * sectors, kernel/fat.c); the split stays, for the buffers that are not.
  */
 static int bulk_transfer(int slot, int ep, void *data, int len, int in)
 {

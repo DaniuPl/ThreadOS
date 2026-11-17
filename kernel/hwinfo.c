@@ -164,6 +164,10 @@ void hwinfo_disks(void)
                (uint32_t)(i + 1), blk_name_of(i), blk_sectors_of(i),
                blk_sectors_of(i) / 2048,
                i == blk_current() ? "  <- in use" : "");
+        uint32_t written, writes;
+        blk_write_stats(i, &written, &writes);
+        printk("         written since start: %u sectors in %u writes\n",
+               written, writes);
         /* What is on it. Reading another disk's table means pointing
            the machine at it, so it is pointed back straight after -
            looking must not move what the filesystem is reading. */

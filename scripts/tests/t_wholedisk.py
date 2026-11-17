@@ -26,9 +26,13 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
+from ptest import _kernel_define
 from ptest import (check, summary, no64, make_gpt_disk, mtools_ok, fat_format,
                    fat_mkdirs, fat_put, fat_get, fat_dir, fat_kind, gpt_read,
                    GUID_ESP4, GUID_TFS4, TfsImage)
+
+# The EFI partition the installer makes (kernel/install.c)
+ESP_MIB = _kernel_define("kernel/install.c", "ESP_MIB")
 
 ESP_START = 2048
 ESP_SECTORS = 204800
@@ -119,7 +123,7 @@ def main():
                   and "It will lose EVERYTHING" in out)
             check("and it lists what it will do",
                   "a GPT" in out
-                  and "an EFI partition of 128 MiB (FAT32)" in out
+                  and "an EFI partition of %d MiB (FAT32)" % ESP_MIB in out
                   and "partition (TFS)" in out)
             check("the word is different from the one for installing beside",
                   "Type ERASE" in out and "Type YES" not in out)
@@ -163,10 +167,10 @@ def main():
                   parts[1][0] == GUID_TFS4)
             check("the partition names: '%s' and '%s'" % (parts[0][3], parts[1][3]),
                   parts[0][3] == "EFI" and parts[1][3] == "ThreadOS")
-            check("the EFI partition starts at 2048 and is 128 MiB (%d "
-                  "sectors)" % (parts[0][2] - parts[0][1] + 1),
+            check("the EFI partition starts at 2048 and is %d MiB (%d "
+                  "sectors)" % (ESP_MIB, parts[0][2] - parts[0][1] + 1),
                   parts[0][1] == 2048
-                  and parts[0][2] - parts[0][1] + 1 == 128 * 2048)
+                  and parts[0][2] - parts[0][1] + 1 == ESP_MIB * 2048)
             check("our partition starts where that one ends",
                   parts[1][1] == parts[0][2] + 1)
             size = os.path.getsize(target) // 512

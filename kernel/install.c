@@ -69,12 +69,14 @@ int install_update_allowed(void)
     return update_allowed;
 }
 
-/* The EFI partition we make when the disk becomes ours. A hundred and
-   twenty-eight megabytes is far more than three files need and is the
-   smallest size at which FAT32 is comfortably FAT32 - the format is
-   decided by having more than 65524 clusters, and a smaller partition
-   has to use clusters so small that the table itself gets silly. */
-#define ESP_MIB 128
+/* The EFI partition we make when the disk becomes ours. It holds the
+   system - the loader, the kernel, the initrd - and, while an update is
+   written, the previous one beside it for a rollback (user/update.c):
+   twice the system, which with the web engine's libraries is past 60 MB
+   and growing. At 128 MiB the next update could not keep its copy and
+   refused; 256 has room for both and for the system to grow, and is
+   still FAT32 comfortably (more than 65524 clusters). */
+#define ESP_MIB 256
 
 static struct {
     int ready;

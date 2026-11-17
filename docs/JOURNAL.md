@@ -9020,3 +9020,77 @@ works and is checked by `make test`.
       beside it white - and Clear; Clock to the second. arm64boot, core
       and threads boot as they did. The README's pictures add the
       phone's five screens.
+- [x] **Writing a large file to a USB stick: from 525 s to a second**
+      (kernel/fat.c, xhci.c, blk.c, include/blk.h, hwinfo.c,
+      scripts/tests/t_usbdisk.py, t_update.py)
+      Installing onto a stick (t_usbdisk, 'install text whole N' and
+      ERASE) writes about 59 MB, 54 of them the initrd. It took 1137 s
+      in a full test run and 525 s with the group running alone, on four
+      cores under TCG. Counted with pit_ticks, the block layer was
+      handed 118 000 writes of one sector each - fat_write_file wrote a
+      file a sector per call, and fat_mkfs zeroed the tables the same
+      way - and of the 48 646 ticks the initrd took, 48 527 were the
+      xHCI driver asleep. wait_slot polled 200 times and then slept a
+      tick at a time. QEMU's stick answers a write in well under a
+      millisecond but seldom within 200 polls, so a command cost up to a
+      tick, and more often the busier the host: that is the difference
+      between the two times. Three changes, the first two measured
+      alone:
+      - fat.c gathers a file's sectors in a 64 KiB buffer for as long
+        as its clusters follow one another on the disk, and writes each
+        run with one command: in fat_write_file, in fat_copy_file
+        (which also reads a source cluster with one command) and in
+        fat_mkfs's zeroing. The buffer is aligned to 64 KiB, because
+        xHCI splits a transfer at every 64 KiB line, and a split that is
+        not a whole number of packets ends the data early for the
+        device. Alone: 36 to 50 s - 3 300 commands, each still a tick
+        asleep.
+      - xhci.c's wait_slot, after its 200 polls, yields the core
+        (task_sleep(0)) for up to three ticks before it sleeps a tick at
+        a time: a thread that wants the core gets it, and when none does
+        the answer is taken as soon as it is there. The USB network
+        card's receiving thread, which waits up to five seconds for a
+        packet, still sleeps after 30 ms. Alone: 10.5 s, 118 000
+        commands at about 90 us each.
+      - The allocation table is held four sectors at a time, the one
+        used longest ago let go, instead of one. Copying a file walks
+        the source's chain in one place of the table and allocates in
+        another; with one sector held, every cluster copied wrote the
+        destination's table sector back to both copies of the table.
+        An update's backup of the installed system (fat_copy_file) was
+        still 115 000 one-sector writes after the first change. Writing
+        a file now also writes each table sector once as it crosses
+        into the next, not three times.
+      Together: about a second, 49 to 65 MB/s. The stick takes the
+      118 000 sectors in 1 939 writes, and the usbdisk group runs in
+      135 s instead of over twenty minutes.
+      The block layer counts the sectors written to each disk and the
+      writes they took, and 'disks' prints them under each disk
+      ("written since start: N sectors in M writes").
+      t_usbdisk times the install and wants at least 6 MB/s: without
+      the wait change it ran at 2.4 MB/s and failed. It reads the
+      stick's counters from 'disks' before and after, and wants at
+      least 16 sectors a write: 61 now, 1.0 without the run buffer,
+      which failed. t_update reads them around an update: 51 sectors a
+      write now, 2.9 before the table held more than one sector, which
+      failed. The ERASE timeout is 120 s instead of 1200. Not changed:
+      fat_read still reads a sector per command, and the GPT goes out a
+      sector at a time (67 writes).
+
+- [x] **Room on the EFI partition for an update's rollback** (kernel/install.c,
+      scripts/tests/t_update.py, t_wholedisk.py)
+      With the web engine's libraries the initrd is 62.5 MB, and t_update
+      found the next update refused on a whole-disk install: "the
+      previous system could not be backed up; nothing was updated".
+      The update keeps the running system beside the new one for a
+      rollback - twice the system - and the 128 MiB EFI partition the
+      installer made had room for 118 MB of that, not 135. Refused
+      safely, nothing broken, but every installed system would have
+      stopped taking updates. The installer now makes 256 MiB (room for
+      both, and for the system to grow, FAT32 still), t_wholedisk reads
+      the size from install.c instead of knowing 128, and t_update's
+      machines have 512 MiB: an update holds the new initrd in memory
+      while the loader holds the running one. Not changed: a system
+      installed beside another on a smaller EFI partition still needs
+      twice the system free there; a smaller initrd - compressed, or
+      without the test programs - is what lifts that.

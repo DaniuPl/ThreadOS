@@ -61,19 +61,17 @@ static struct {
     char label[12];
 } v;
 
-/* Four buffers that must not be one buffer. The allocation table, a
+/* Buffers that must not be one buffer. The allocation table, a
    directory sector and a sector of file data are in use at the same
    moment: a file being written walks the table while its directory
-   entry is half-built. Each of the first three is a cache of one
-   sector, and each remembers which one - that is what keeps walking a
-   directory from re-reading the same sector for every entry in it. */
-static uint8_t fatbuf[SECTOR] __attribute__((aligned(16)));
+   entry is half-built. The table's sectors (below) and the directory
+   sector are caches, and each remembers which sector it holds - that
+   is what keeps walking a directory from re-reading the same sector
+   for every entry in it. */
 static uint8_t dirbuf[SECTOR] __attribute__((aligned(16)));
 static uint8_t datbuf[SECTOR] __attribute__((aligned(16)));
 static uint8_t bsbuf[SECTOR] __attribute__((aligned(16)));
-static uint32_t fat_rel = 0xFFFFFFFFu;   /* which sector of the table is held */
 static uint32_t dirbuf_lba;              /* 0 = nothing valid in dirbuf */
-static int fat_dirty;
 
 /* Which disk this filesystem lies on.
  *
@@ -113,6 +111,52 @@ static int fat_bwrite(uint32_t lba, uint32_t n, const void *buf)
     if (fat_disk >= 0 && fat_disk != was)
         blk_use(was);
     return r;
+}
+
+/* --- A file's sectors, gathered into runs ----------------------------
+ *
+ * A file used to go to the disk one sector per command. On a SATA disk
+ * that is merely wasteful; on a USB stick every command is three
+ * transfers - the wrapper, the data, the verdict - each waited for in
+ * turn, whatever the size, and installing the system onto a stick
+ * wrote its sixty megabytes as 118 000 commands.
+ *
+ * The clusters a new file is given mostly follow one another on the
+ * disk - the free ones are handed out in order - so their sectors are
+ * gathered here for as long as they do and go out as one command. The
+ * largest cluster a mount accepts (128 sectors) fits whole.
+ *
+ * Aligned to its own size because an xHCI controller may not have one
+ * TRB cross a 64 KiB line, and the driver splits a transfer there: a
+ * split inside this buffer would not fall on a whole packet of a
+ * SuperSpeed stick, and a short packet in the middle of the data ends
+ * the data for the device.
+ */
+#define RUN_SECTORS 128
+static uint8_t runbuf[RUN_SECTORS * SECTOR] __attribute__((aligned(65536)));
+static uint32_t run_lba, run_n;
+
+static int run_flush(void)
+{
+    uint32_t n = run_n;
+
+    run_n = 0;
+    return n ? fat_bwrite(run_lba, n, runbuf) : 0;
+}
+
+/* Room for 'n' sectors (at most a cluster) bound for lba onwards, at
+   the end of the run - which is written out first when they would not
+   continue it, or would not fit. */
+static uint8_t *run_room(uint32_t lba, uint32_t n)
+{
+    if (run_n && (run_lba + run_n != lba || run_n + n > RUN_SECTORS) &&
+        run_flush() < 0)
+        return 0;
+    if (!run_n)
+        run_lba = lba;
+    uint8_t *p = runbuf + run_n * SECTOR;
+    run_n += n;
+    return p;
 }
 
 static uint16_t le16(const uint8_t *p)
@@ -162,52 +206,109 @@ static void copy_name(char *dst, const char *src, int max)
 
 /* --- The allocation table ------------------------------------------
  *
- * One sector of it is held at a time. Everything else - walking a
+ * A few sectors of it are held at a time. Everything else - walking a
  * chain, allocating, freeing - goes through single bytes, and that is
  * deliberate: on FAT12 an entry is twelve bits, and the entry that
  * straddles a sector boundary is exactly where a driver written for
  * whole entries breaks. Bytes straddle nothing.
+ *
+ * A few rather than one, because two places in the table are in use
+ * at once more often than not. Copying a file walks the source's
+ * chain in one place while it gives the copy clusters in another, and
+ * a file growing past the end of a table sector links its last
+ * cluster in one sector and its next in the following. With a single
+ * sector held, every step from one place to the other wrote the one
+ * left behind back to the disk, to both copies of the table: copying
+ * the 54 MB initrd aside before an update was 115 000 writes of one
+ * sector each. The sector used longest ago is the one let go.
  */
 
-static int fat_flush(void)
+#define FAT_HELD 4
+#define FAT_NONE 0xFFFFFFFFu
+static struct {
+    uint32_t rel;                /* which sector of the table, or FAT_NONE */
+    uint64_t used;               /* when it was last touched; 0 = empty */
+    int dirty;
+    uint8_t buf[SECTOR];
+} held[FAT_HELD];
+/* Counts every touch, and 0 means "empty": 32 bits would come back to
+   0 after a few thousand free-space counts of a large volume, and a
+   sector still dirty would then look free */
+static uint64_t held_clock;
+
+static void fat_drop(void)
 {
-    if (!fat_dirty || fat_rel == 0xFFFFFFFFu)
-        return 0;
-    for (uint32_t i = 0; i < v.nfats; i++)
-        if (fat_bwrite(v.fat_start + i * v.fat_sectors + fat_rel, 1, fatbuf) < 0)
+    for (int i = 0; i < FAT_HELD; i++) {
+        held[i].rel = FAT_NONE;
+        held[i].used = 0;
+        held[i].dirty = 0;
+    }
+}
+
+/* Every copy of the table gets it, because the system that boots this
+   machine tomorrow may read either one */
+static int write_back(int i)
+{
+    for (uint32_t k = 0; k < v.nfats; k++)
+        if (fat_bwrite(v.fat_start + k * v.fat_sectors + held[i].rel, 1,
+                       held[i].buf) < 0)
             return -1;
-    fat_dirty = 0;
+    held[i].dirty = 0;
     return 0;
 }
 
+static int fat_flush(void)
+{
+    for (int i = 0; i < FAT_HELD; i++)
+        if (held[i].dirty && held[i].rel != FAT_NONE && write_back(i) < 0)
+            return -1;
+    return 0;
+}
+
+/* Which of the held sectors is table sector 'rel', read in first if
+   none is - in place of the one used longest ago. -1 = it cannot be. */
 static int fat_load(uint32_t rel)
 {
-    if (rel == fat_rel)
-        return 0;
-    if (fat_flush() < 0)
-        return -1;
+    int old = 0;
+
+    for (int i = 0; i < FAT_HELD; i++) {
+        if (held[i].used && held[i].rel == rel) {
+            held[i].used = ++held_clock;
+            return i;
+        }
+        if (held[i].used < held[old].used)
+            old = i;
+    }
     if (rel >= v.fat_sectors)
         return -1;
-    if (fat_bread(v.fat_start + rel, 1, fatbuf) < 0)
+    if (held[old].dirty && write_back(old) < 0)
         return -1;
-    fat_rel = rel;
-    return 0;
+    if (fat_bread(v.fat_start + rel, 1, held[old].buf) < 0) {
+        held[old].rel = FAT_NONE;
+        held[old].used = 0;
+        return -1;
+    }
+    held[old].rel = rel;
+    held[old].used = ++held_clock;
+    return old;
 }
 
 static int tab_get(uint32_t off, uint8_t *out)
 {
-    if (fat_load(off / SECTOR) < 0)
+    int i = fat_load(off / SECTOR);
+    if (i < 0)
         return -1;
-    *out = fatbuf[off % SECTOR];
+    *out = held[i].buf[off % SECTOR];
     return 0;
 }
 
 static int tab_set(uint32_t off, uint8_t val)
 {
-    if (fat_load(off / SECTOR) < 0)
+    int i = fat_load(off / SECTOR);
+    if (i < 0)
         return -1;
-    fatbuf[off % SECTOR] = val;
-    fat_dirty = 1;
+    held[i].buf[off % SECTOR] = val;
+    held[i].dirty = 1;
     return 0;
 }
 
@@ -770,9 +871,8 @@ void fat_forget(int disk)
 {
     if (!v.type || (fat_disk >= 0 && fat_disk != disk))
         return;
-    fat_dirty = 0;
+    fat_drop();
     memset(&v, 0, sizeof(v));
-    fat_rel = 0xFFFFFFFFu;
     dirbuf_lba = 0;
     fat_disk = -1;
 }
@@ -782,9 +882,8 @@ void fat_umount(void)
     fat_flush();
     fat_disk = -1;
     memset(&v, 0, sizeof(v));
-    fat_rel = 0xFFFFFFFFu;
+    fat_drop();
     dirbuf_lba = 0;
-    fat_dirty = 0;
 }
 
 int fat_mount_on(int disk, uint32_t lba)
@@ -1227,6 +1326,7 @@ int fat_write_file(const char *path, const void *data, uint32_t len)
        says "these clusters" before the clusters hold anything is a
        file that reads as rubbish if the power goes out in between. */
     uint32_t first = 0, prev = 0, done = 0;
+    run_n = 0;
     while (done < len) {
         uint32_t c = alloc_cluster();
         if (!c)
@@ -1235,19 +1335,21 @@ int fat_write_file(const char *path, const void *data, uint32_t len)
             return -1;
         if (!first)
             first = c;
-        for (uint32_t s = 0; s < v.sec_per_clus && done < len; s++) {
-            uint32_t take = len - done;
-            if (take > SECTOR)
-                take = SECTOR;
-            memset(datbuf, 0, SECTOR);
-            memcpy(datbuf, src + done, take);
-            if (fat_bwrite(clus_lba(c) + s, 1, datbuf) < 0)
-                return -1;
-            done += take;
-        }
+        /* The cluster's sectors that hold data; the last one's tail is
+           zeros rather than whatever the buffer held before */
+        uint32_t take = len - done;
+        if (take > v.sec_per_clus * SECTOR)
+            take = v.sec_per_clus * SECTOR;
+        uint32_t n = (take + SECTOR - 1) / SECTOR;
+        uint8_t *p = run_room(clus_lba(c), n);
+        if (!p)
+            return -1;
+        memcpy(p, src + done, take);
+        memset(p + take, 0, n * SECTOR - take);
+        done += take;
         prev = c;
     }
-    if (fat_flush() < 0)
+    if (run_flush() < 0 || fat_flush() < 0)
         return -1;
 
     if (existed) {
@@ -1291,6 +1393,7 @@ int fat_copy_file(const char *source, const char *target)
     uint32_t first = 0, prev = 0;
     uint32_t source_clus = src.clus;
     uint32_t remaining = src.size;
+    run_n = 0;
     while (remaining) {
         if (source_clus < 2 || source_clus >= v.clusters + 2 ||
             is_eoc(source_clus))
@@ -1307,22 +1410,23 @@ int fat_copy_file(const char *source, const char *target)
             first = fresh;
         prev = fresh;
 
-        for (uint32_t s = 0; s < v.sec_per_clus && remaining; s++) {
-            uint32_t take = remaining > SECTOR ? SECTOR : remaining;
-            if (fat_bread(clus_lba(source_clus) + s, 1, datbuf) < 0)
-                goto failed;
-            if (take < SECTOR)
-                memset(datbuf + take, 0, SECTOR - take);
-            if (fat_bwrite(clus_lba(fresh) + s, 1, datbuf) < 0)
-                goto failed;
-            remaining -= take;
-        }
+        /* The source cluster is read with one command straight into
+           its place in the run, and goes out with its neighbours */
+        uint32_t take = remaining;
+        if (take > v.sec_per_clus * SECTOR)
+            take = v.sec_per_clus * SECTOR;
+        uint32_t n = (take + SECTOR - 1) / SECTOR;
+        uint8_t *p = run_room(clus_lba(fresh), n);
+        if (!p || fat_bread(clus_lba(source_clus), n, p) < 0)
+            goto failed;
+        memset(p + take, 0, n * SECTOR - take);
+        remaining -= take;
 
         if (remaining)
             source_clus = chain_next(source_clus);
     }
 
-    if (fat_flush() < 0)
+    if (run_flush() < 0 || fat_flush() < 0)
         goto failed;
     if (existed) {
         if (touch_entry(at_lba, at_off, first, src.size) < 0)
@@ -1336,6 +1440,7 @@ int fat_copy_file(const char *source, const char *target)
     return 0;
 
 failed:
+    run_n = 0;                   /* what was gathered belongs to nobody now */
     if (first)
         free_chain(first);
     fat_flush();
@@ -1500,10 +1605,15 @@ int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
     /* The tables, zeroed, then their first three entries: the media
        byte, the end-of-chain mark, and the root directory's single
        cluster. */
-    memset(datbuf, 0, SECTOR);
-    for (uint32_t i = 0; i < nfats * fatsz; i++)
-        if (fat_bwrite(fat_lba + i, 1, datbuf) < 0)
+    memset(runbuf, 0, sizeof(runbuf));
+    for (uint32_t i = 0; i < nfats * fatsz; i += RUN_SECTORS) {
+        uint32_t n = nfats * fatsz - i;
+        if (n > RUN_SECTORS)
+            n = RUN_SECTORS;
+        if (fat_bwrite(fat_lba + i, n, runbuf) < 0)
             return -1;
+    }
+    memset(datbuf, 0, SECTOR);
     put32(datbuf, 0x0FFFFFF8u);
     put32(datbuf + 4, 0x0FFFFFFFu);
     put32(datbuf + 8, 0x0FFFFFFFu);        /* cluster two: the root, and done */
@@ -1514,10 +1624,8 @@ int fat_mkfs(uint32_t lba, uint32_t sectors, const char *label)
     /* And the root directory itself, empty. A directory that has never
        been written is a directory full of whatever was on the disk
        before, and the first entry of that is read as a file. */
-    memset(datbuf, 0, SECTOR);
-    for (uint32_t i = 0; i < spc; i++)
-        if (fat_bwrite(data_lba + i, 1, datbuf) < 0)
-            return -1;
+    if (fat_bwrite(data_lba, spc, runbuf) < 0)
+        return -1;
 
     return 0;
 }

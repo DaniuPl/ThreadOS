@@ -116,9 +116,16 @@ def serve(prefix, manifest, kernel, initrd, loader):
     SERVED[prefix + "BOOTX64.EFI"] = loader
 
 
+# An update holds the new initrd in memory while the loader holds the
+# running one: with the web engine's libraries both are over 60 MB, past
+# what 256 MiB leaves once the firmware has its share
+RAM_MIB = 512
+
+
 def boot_disk(disk, nvram, serial):
     return Qemu(KERNEL, INITRD, disk=disk, sata=True, serial=serial,
-                qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+                qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram),
+                ram_mib=RAM_MIB)
 
 
 def make_live_iso(work, kernel, initrd):
@@ -158,6 +165,28 @@ def signed_in(q):
     out = q.command("logout", "ordinary user again", timeout=20)
     check("and the shell behind it drops to an ordinary user",
           "ordinary user again" in out)
+
+
+def disk_writes(q):
+    """What the system says it has written to its disks since it
+    started, from its own disk list: (sectors, writes), all disks
+    together - or None."""
+    seen = len(q.serial())
+    q.type_line("disks")
+    out = ""
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        out = q.serial()[seen:]
+        # the whole list: a disk's line, and the prompt back after it
+        if re.search(r"written since start: [^\n]*\n[\s\S]*thread64[>#]",
+                     out):
+            break
+        time.sleep(0.3)
+    found = re.findall(r"written since start: (\d+) sectors in (\d+) writes",
+                       out)
+    if not found:
+        return None
+    return (sum(int(s) for s, _ in found), sum(int(w) for _, w in found))
 
 
 def run(q, line, end="[update] done", timeout=240, password=False):
@@ -222,7 +251,8 @@ def main():
         shutil.copy(OVMF_VARS, nvram)
         q = Qemu(KERNEL, INITRD, esp=stick, disk=disk, sata=True,
                  serial=os.path.join(work, "s1.log"),
-                 qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+                 qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram),
+                 ram_mib=RAM_MIB)
         try:
             q.wait_serial("The 64-bit system is ready", timeout=120)
             # threadboot starts the Live desktop; the stick's blank disk
@@ -282,6 +312,7 @@ def main():
             check("without sudo the system is not replaced",
                   "only an admin may replace the system" in out)
 
+            before = disk_writes(q)
             out = run(q, "sudo run update " + base + "rel/",
                       end="[update] done, exit code", password=True)
             check("with sudo: downloaded, every hash checked, written",
@@ -289,6 +320,21 @@ def main():
                   out.count("[update] written:") == 3 and
                   "updated to release sequence 7" in out and
                   "[update] done, exit code 0" in out)
+            # The installed files are copied aside first (the previous
+            # system, for a rollback) and then written over: each of
+            # them twice. Both go to the disk a run of clusters per
+            # write, about 50 sectors a write - the copy used to take a
+            # write per sector, and then one per cluster for the
+            # allocation table it walked in two places at once.
+            done = disk_writes(q)
+            sectors = done[0] - before[0] if before and done else 0
+            writes = done[1] - before[1] if before and done else 0
+            files = len(kernel) + len(initrd7) + len(loader)
+            check("the previous system kept and the new one written in "
+                  "runs, not a sector a write: %d sectors in %d writes "
+                  "(%.1f a write, at least 16)"
+                  % (sectors, writes, sectors / max(writes, 1)),
+                  sectors * 512 >= 2 * files and sectors >= 16 * writes > 0)
         finally:
             q.close()
 
@@ -303,7 +349,7 @@ def main():
         live_iso = make_live_iso(work, KERNEL64, initrd0)
         q = Qemu(KERNEL, INITRD, cdrom=live_iso, disk=disk, sata=True,
                  serial=os.path.join(work, "live.log"),
-                 qemu="qemu-system-x86_64")
+                 qemu="qemu-system-x86_64", ram_mib=RAM_MIB)
         try:
             q.wait_serial("thread64>", timeout=60)
             q.wait_serial("[net] DHCP", timeout=60)
