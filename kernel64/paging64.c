@@ -380,7 +380,10 @@ int paging64_discard(uint64_t virt, uint64_t len)
                 } else {
                     kept++;
                 }
-            } else if (e & PTE_PRESENT) {
+            } else if ((e & PTE_PRESENT) && !(e & PG_FILE)) {
+                /* (a page of shared memory or of a file keeps its
+                   contents: dropping a mapping of it is not clearing
+                   it, on Linux either) */
                 kept++;
             } else if (!(e & PTE_PRESENT) && (e & PG_SWAPPED)) {
                 slot = (int)((e & ADDR_MASK) >> 12);

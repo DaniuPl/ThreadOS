@@ -101,6 +101,7 @@
 #define SYS64_CAMERA 102
 #define SYS64_MIC 103
 #define SYS64_DISCARD 104
+#define SYS64_IPC 105
 #define SYS64_SYSINFO    38
 #define SYS64_GETPID     39
 #define SYS64_MMAP_FILE  40

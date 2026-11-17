@@ -67,6 +67,10 @@ long __tos_net(long n, long a, long b, long c, long d, long e, long f);
 __attribute__((__visibility__("hidden")))
 long __tos_open_virtual(const char *path);
 
+/* src/threados/unix.c: Unix socket pairs, which are kernel descriptors */
+__attribute__((__visibility__("hidden")))
+long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
+
 
 /* --- The ThreadOS side (kernel64/syscall64.h) --------------------- */
 
@@ -108,6 +112,12 @@ long __tos_open_virtual(const char *path);
 #define T_FDINODE   89
 #define T_GETRANDOM 98
 #define T_DISCARD  104
+#define T_IPC      105
+
+/* SYS64_IPC's operations (kernel64/ipc64.h) used here */
+#define IPC_MEMFD 6
+#define IPC_MAP   7
+#define IPC_UNMAP 8
 
 #define T_FUTEX_WAIT    0
 #define T_FUTEX_WAKE    1
@@ -120,8 +130,10 @@ long __tos_open_virtual(const char *path);
 #define K_FILE   1
 #define K_PIPE_R 2
 #define K_PIPE_W 3
+#define K_USOCK  4                   /* an end of a socket pair (unix.c) */
+#define K_MEMFD  5                   /* shared memory, memfd_create */
 
-#define T_FDS    32                  /* FD_MAX in kernel64/task64.c */
+#define T_FDS    256                 /* FD_MAX in kernel64/task64.c */
 #define T_HZ     100                 /* the timer, kernel64/kmain64.c */
 #define T_CHUNK  4096                /* the most one read or write moves */
 #define AT_EMPTY  0x1000             /* AT_EMPTY_PATH, a GNU name */
@@ -224,6 +236,19 @@ static void set_flags(int fd, int flags)
 	}
 }
 
+/* (for unix.c, whose sockets are kernel descriptors with flags here) */
+__attribute__((__visibility__("hidden")))
+int __tos_fd_flags(int fd)
+{
+	return flags_of(fd);
+}
+
+__attribute__((__visibility__("hidden")))
+void __tos_fd_set_flags(int fd, int flags)
+{
+	set_flags(fd, flags);
+}
+
 static size_t slen(const char *s)
 {
 	size_t n = 0;
@@ -312,6 +337,8 @@ static long do_read(int fd, void *buf, size_t n)
 	int k = kind_of(fd);
 	if (k == K_NONE || k == K_PIPE_W)
 		return -EBADF;
+	if (k == K_USOCK)
+		return __tos_unix(SYS_read, fd, (long)buf, n, 0, 0, 0);
 	if (n > T_CHUNK)
 		n = T_CHUNK;
 	long r = tos(T_READ, fd, (long)buf, n, 0);
@@ -327,6 +354,8 @@ static long do_write(int fd, const void *buf, size_t n)
 	int k = kind_of(fd);
 	if (k == K_PIPE_R || (k == K_NONE && fd != 1))
 		return -EBADF;
+	if (k == K_USOCK)
+		return __tos_unix(SYS_write, fd, (long)buf, n, 0, 0, 0);
 	touch(buf, n);
 	size_t done = 0;
 	while (done < n) {
@@ -349,6 +378,8 @@ static long do_write(int fd, const void *buf, size_t n)
 
 static long do_readv(int fd, const struct iovec *iov, int cnt)
 {
+	if (kind_of(fd) == K_USOCK)
+		return __tos_unix(SYS_readv, fd, (long)iov, cnt, 0, 0, 0);
 	long total = 0;
 	for (int i = 0; i < cnt; i++) {
 		if (!iov[i].iov_len)
@@ -365,6 +396,8 @@ static long do_readv(int fd, const struct iovec *iov, int cnt)
 
 static long do_writev(int fd, const struct iovec *iov, int cnt)
 {
+	if (kind_of(fd) == K_USOCK)
+		return __tos_unix(SYS_writev, fd, (long)iov, cnt, 0, 0, 0);
 	long total = 0;
 	for (int i = 0; i < cnt; i++) {
 		if (!iov[i].iov_len)
@@ -510,6 +543,11 @@ static long do_fstat(int fd, struct kstat *st)
 	case K_PIPE_W:
 		fill_stat(st, S_IFIFO | 0600, 0, 10 + fd);
 		return 0;
+	case K_MEMFD:
+		fill_stat(st, S_IFREG | 0600, fi.size, 4000 + fd);
+		return 0;
+	case K_USOCK:
+		return __tos_unix(SYS_fstat, fd, (long)st, 0, 0, 0, 0);
 	}
 	if (fd <= 2 && (fd == 0 ? is_console_in(0) : is_console_out(fd))) {
 		fill_stat(st, S_IFCHR | 0620, 0, 1 + fd);
@@ -550,7 +588,7 @@ static long do_lseek(int fd, long off, int whence)
 	struct fdinfo fi;
 	if (fd < 0 || fd >= T_FDS || fdinfo(fd, &fi) < 0)
 		return -EBADF;
-	if (fi.kind != K_FILE)
+	if (fi.kind != K_FILE && fi.kind != K_MEMFD)
 		return fi.kind == K_NONE && fd > 2 ? -EBADF : -ESPIPE;
 	long at;
 	switch (whence) {
@@ -641,6 +679,8 @@ static long do_ioctl(int fd, unsigned long req, void *arg)
 	int tty = fd == 0 ? is_console_in(0) : is_console_out(fd);
 	if (fd < 0 || fd >= T_FDS)
 		return -EBADF;
+	if (!tty && kind_of(fd) == K_USOCK)
+		return __tos_unix(SYS_ioctl, fd, req, (long)arg, 0, 0, 0);
 	if (!tty)
 		return -ENOTTY;
 	if (req == TIOCGWINSZ) {
@@ -820,21 +860,103 @@ static long do_mmap_locked(unsigned long len)
 	return at <= 0 ? -ENOMEM : at;
 }
 
+/* The memfds mapped MAP_SHARED: their pages are the memfd's, and
+   munmap has to give them back to it (IPC_UNMAP) - filing the range
+   for reuse, as for anonymous memory, would hand the next mmap pages
+   another process still draws on. Copied by fork with the rest of
+   memory, as the mappings are. */
+#define SHARED 256
+static struct { unsigned long at, len; } shared[SHARED];
+static int nshared;
+
+static long map_memfd(int fd, unsigned long len, int flags, long off)
+{
+	if (off < 0 || (off & 4095))
+		return -EINVAL;
+	if ((flags & 3) == MAP_PRIVATE) {
+		/* a copy of what is there now, the program's own from here on */
+		lock();
+		long at = do_mmap_locked(len);
+		unlock();
+		if (at < 0)
+			return at;
+		long was = do_lseek(fd, 0, SEEK_CUR);
+		do_lseek(fd, off, SEEK_SET);
+		for (unsigned long done = 0; done < len; ) {
+			long r = tos(T_READ, fd, at + done, len - done > T_CHUNK
+			             ? T_CHUNK : len - done, 0);
+			if (r <= 0)
+				break;               /* past its end: zeros */
+			done += r;
+		}
+		do_lseek(fd, was, SEEK_SET);
+		return at;
+	}
+	long at = tos(T_IPC, IPC_MAP, fd, off, len);
+	if (at < 0)
+		return at == -EINVAL ? -ENXIO : -ENOMEM;   /* past its end */
+	lock();
+	if (nshared == SHARED) {
+		unlock();
+		tos(T_IPC, IPC_UNMAP, at, len, 0);
+		return -ENOMEM;
+	}
+	shared[nshared].at = at;
+	shared[nshared].len = len;
+	nshared++;
+	unlock();
+	return at;
+}
+
 static long do_mmap(unsigned long addr, unsigned long len, int prot,
                     int flags, int fd, long off)
 {
-	(void)addr; (void)prot; (void)off; (void)fd;
+	(void)addr; (void)prot;
 	if (!len)
 		return -EINVAL;
-	if (!(flags & MAP_ANONYMOUS))
-		return -ENODEV;
 	if (flags & MAP_FIXED)
 		return -ENOMEM;
 	len = (len + 4095) & ~4095UL;
+	if (!(flags & MAP_ANONYMOUS))
+		return kind_of(fd) == K_MEMFD ? map_memfd(fd, len, flags, off)
+		                               : -ENODEV;
 	lock();
 	long r = do_mmap_locked(len);
 	unlock();
 	return r;
+}
+
+/* What of [at, end) is memfd pages goes back to the memfds. Called
+   with the lock held; IPC_UNMAP never waits. */
+static void unmap_shared(unsigned long at, unsigned long end)
+{
+	for (int i = 0; i < nshared; ) {
+		unsigned long s = shared[i].at, e = s + shared[i].len;
+		unsigned long lo = at > s ? at : s, hi = end < e ? end : e;
+		if (lo >= hi) {
+			i++;
+			continue;
+		}
+		tos(T_IPC, IPC_UNMAP, lo, hi - lo, 0);
+		if (lo == s && hi == e) {
+			shared[i] = shared[--nshared];
+			continue;            /* look at what moved here */
+		}
+		if (lo == s) {
+			shared[i].at = hi;
+			shared[i].len = e - hi;
+		} else {
+			shared[i].len = lo - s;
+			if (hi < e && nshared < SHARED) {
+				shared[nshared].at = hi;
+				shared[nshared].len = e - hi;
+				nshared++;
+			}
+			/* (with no room the tail is forgotten: munmap then only
+			   files it, and its pages stay until the program ends) */
+		}
+		i++;
+	}
 }
 
 static long do_munmap(unsigned long addr, unsigned long len)
@@ -844,6 +966,8 @@ static long do_munmap(unsigned long addr, unsigned long len)
 	len = (len + 4095) & ~4095UL;
 	if (len) {
 		lock();
+		if (nshared)
+			unmap_shared(addr, addr + len);
 		hole_add(addr, len);
 		unlock();
 	}
@@ -1215,15 +1339,31 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		set_flags(fds[1], O_WRONLY);
 		return 0;
 	}
+	case SYS_memfd_create: {
+		/* MFD_CLOEXEC and MFD_ALLOW_SEALING: nothing to do (no seals
+		   are ever added, so allowing them changes nothing) */
+		if (b & ~3L)
+			return -EINVAL;
+		long fd = tos(T_IPC, IPC_MEMFD, 0, 0, 0);
+		if (fd < 0)
+			return fd == -ENOMEM ? -ENFILE : fd;
+		set_flags(fd, O_RDWR);
+		return fd;
+	}
 	case SYS_fsync:
 	case SYS_fdatasync:
 	case SYS_sync:       return 0;
 	case SYS_ftruncate: {
 		struct fdinfo fi;
-		if (a < 0 || a >= T_FDS || fdinfo(a, &fi) < 0 || fi.kind != K_FILE)
+		if (a < 0 || a >= T_FDS || fdinfo(a, &fi) < 0 ||
+		    (fi.kind != K_FILE && fi.kind != K_MEMFD))
 			return -EBADF;
 		if (b < 0)
 			return -EINVAL;
+		if (fi.kind == K_MEMFD) {
+			long r = tos(T_FTRUNCATE, a, b, 0, 0);
+			return r < 0 ? (r == -ENOMEM ? -ENOMEM : -EINVAL) : 0;
+		}
 		if (b > 0xFFFFFFFFL)
 			return -EFBIG;
 		long r = tos(T_FTRUNCATE, a, b, 0, 0);

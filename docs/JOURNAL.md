@@ -8358,3 +8358,43 @@ works and is checked by `make test`.
       a frame before the other cores have forgotten it - a race to look
       at - and the kernel manages at most 512 MiB of RAM, the next
       thing WebKit will want.)
+
+- [x] **Processes talking: Unix socket pairs, descriptors sent over
+      them, memfds** (kernel64/ipc64.c, kernel64/ipc64.h,
+      kernel64/task64.c, kernel64/syscall64.c,
+      libc/overlay/src/threados/unix.c, socket.c, syscall.c,
+      libc/tests/ipctest.c, scripts/tests/t_ipc.py)
+      The second thing WebKit needs of the kernel. Its page engine runs
+      in processes of its own - one for the window, one per page, one
+      for the network - and they talk over Unix socket pairs, sending
+      shared memory and other sockets' ends with the bytes. ThreadOS had
+      pipes, which carry bytes one way and nap 10 ms when empty, and
+      descriptors that never left the process that opened them.
+      SYS64_IPC makes pairs of connected ends (SOCK_STREAM or
+      SOCK_SEQPACKET) whose messages carry copies of descriptors; each
+      copy holds what it stands for, so a pipe or a memfd stays alive on
+      its way even when the sender closes its own number at once. A
+      memfd is a list of frames, not one block (megabytes in one piece
+      are what a machine that has run a while lacks); mapping one puts
+      its frames into the mapping area as pages fork shares rather than
+      copies. Waiting is sleeping: a reader with nothing to read, a
+      writer facing a full queue and a poll with nothing ready sleep on
+      the ends until a change there wakes them. The table of
+      descriptors has 256 places now, not 32, and socket.c's made-up
+      ones start at 512.
+      In musl (libc/overlay) socketpair, sendmsg and recvmsg with
+      SCM_RIGHTS, MSG_PEEK, MSG_DONTWAIT, MSG_WAITALL, MSG_TRUNC and
+      MSG_CTRUNC, shutdown, FIONREAD, SO_TYPE, poll and select,
+      memfd_create, ftruncate, read, write and lseek on a memfd, and
+      mmap of one shared or private, with munmap giving its pages back,
+      behave as on Linux.
+      ipctest goes through all of it - a child is sent a pipe's end, a
+      memfd and another socket's end made after the fork, answers
+      through each, and sends a megabyte in pieces of every size - and
+      t_ipc builds it a second time against glibc, runs it on Linux,
+      and holds what ThreadOS prints to that line for line, on one core
+      and on four. It also wants a message there and back between two
+      processes in under 2 ms - it takes 80 us on one core and 60 on
+      four, where a 10 ms nap per side would have made it 20 ms - and
+      the machine's memory back once it is over, which it is to the
+      kilobyte.

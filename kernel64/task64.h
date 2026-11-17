@@ -205,10 +205,29 @@ void task64_set_mmap_next(uint64_t adr);
 #define FDK_FILE    1
 #define FDK_POTOK_R 2
 #define FDK_POTOK_W 3
+#define FDK_USOCK   4                /* an end of a Unix socket pair (ipc64.c) */
+#define FDK_MEMFD   5                /* shared memory with a descriptor (ipc64.c) */
+
+/* What a descriptor number stands for. Public because a descriptor can
+   travel: ipc64.c carries copies of these from one process to another */
+struct fd_entry {
+    int kind;
+    int slot;                    /* a TFS inode, a pipe, a socket end, a memfd */
+    uint32_t pos;                /* where this particular reader stands */
+};
+
+/* For ipc64.c: a copy of descriptor 'fd' with its own hold on what it
+   stands for (0, or -1 for no such descriptor); a copy put into the
+   current table, the hold going with it (the number, or -1 when the
+   table is full - the hold is then let go); a copy's hold let go */
+int task64_fd_copy(int fd, struct fd_entry *out);
+int task64_fd_install(const struct fd_entry *e);
+void task64_fd_drop(struct fd_entry *e);
 
 int task64_fd_open(int slot);        /* returns a descriptor number or -1 */
 int task64_slot_open(int slot);      /* is the inode open anywhere */
 int task64_fd_pipe(int idx, int reader_task);
+int task64_fd_new(int kind, int slot);   /* the first free number, or -1 */
 int task64_fd_kind(int fd);
 int task64_fd_dup2(int old, int fresh_one);
 void task64_fd_close_all(void);

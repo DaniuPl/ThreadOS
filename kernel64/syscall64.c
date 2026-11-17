@@ -53,6 +53,7 @@
 #include "../kernel/include/devices.h"
 #include "../kernel/include/uvc.h"
 #include "../kernel/include/cam_info.h"
+#include "ipc64.h"
 #include "../kernel/include/mic_info.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/random.h"
@@ -382,6 +383,19 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)(int64_t)n;
             return;
         }
+        if (kind == FDK_USOCK) {
+            long n = usock64_write(task64_fd_slot((int)a1), buf, (uint32_t)a3);
+            r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
+            return;
+        }
+        if (kind == FDK_MEMFD) {
+            long n = memfd64_rw(task64_fd_slot((int)a1), task64_fd_pos((int)a1),
+                                (void *)buf, (uint32_t)a3, 1);
+            if (n > 0)
+                task64_fd_advance((int)a1, (uint32_t)n);
+            r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
+            return;
+        }
         if (kind != FDK_FILE) {
             r->rax = (uint64_t)-1;   /* write into the read end */
             return;
@@ -470,6 +484,20 @@ static void handle(struct regs *r)
             int n = pipe64_read(task64_fd_slot((int)a1),
                                 (char *)(uintptr_t)a2, (uint32_t)a3);
             r->rax = (uint64_t)(int64_t)n;
+            return;
+        }
+        if (kind == FDK_USOCK) {
+            long n = usock64_read(task64_fd_slot((int)a1),
+                                  (void *)(uintptr_t)a2, (uint32_t)a3);
+            r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
+            return;
+        }
+        if (kind == FDK_MEMFD) {
+            long n = memfd64_rw(task64_fd_slot((int)a1), task64_fd_pos((int)a1),
+                                (void *)(uintptr_t)a2, (uint32_t)a3, 0);
+            if (n > 0)
+                task64_fd_advance((int)a1, (uint32_t)n);
+            r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
             return;
         }
         if (kind != FDK_FILE) {
@@ -934,6 +962,11 @@ static void handle(struct regs *r)
                                          ? task64_fd_slot((int)a1) : -1);
         return;
     case SYS64_FTRUNCATE: {
+        if (task64_fd_kind((int)a1) == FDK_MEMFD) {
+            r->rax = (uint64_t)(int64_t)memfd64_resize(
+                task64_fd_slot((int)a1), a2);
+            return;
+        }
         int slot = task64_fd_kind((int)a1) == FDK_FILE
                        ? task64_fd_slot((int)a1) : -1;
         if (slot < 0 || a2 > 0xFFFFFFFFULL)
@@ -1049,6 +1082,9 @@ static void handle(struct regs *r)
         return;
     case SYS64_MMAP:
         r->rax = proc64_mmap(a1);
+        return;
+    case SYS64_IPC:
+        r->rax = (uint64_t)ipc64_call(a1, a2, a3, a4);
         return;
     case SYS64_DISCARD:
         /* Only the program's own memory: a range that leaves it is
@@ -1451,6 +1487,14 @@ static void handle(struct regs *r)
             int sz = fs_size(task64_fd_slot((int)a1));
             info.size = sz > 0 ? (uint32_t)sz : 0;
             info.pos = task64_fd_pos((int)a1);
+        } else if (info.kind == FDK_MEMFD) {
+            info.size = (uint32_t)memfd64_size(task64_fd_slot((int)a1));
+            info.pos = task64_fd_pos((int)a1);
+        } else if (info.kind == FDK_USOCK) {
+            /* for a socket: the bytes waiting, and its type in 'pos' */
+            int type;
+            usock64_info(task64_fd_slot((int)a1), &info.size, &type);
+            info.pos = (uint32_t)type;
         }
         *(__typeof__(info) *)(uintptr_t)a2 = info;
         r->rax = 0;

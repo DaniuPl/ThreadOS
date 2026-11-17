@@ -13,7 +13,8 @@
  * so a signal is seen between them. poll() and select() look at every
  * descriptor in turn and sleep a tick between rounds: a file or a pipe
  * counts as always ready, a socket as the kernel says (SYS64_TCP_POLL,
- * SYS64_UDP_POLL).
+ * SYS64_UDP_POLL). Unix socket pairs are the kernel's own descriptors
+ * (unix.c); a poll on those alone sleeps until one of them changes.
  *
  * Name lookups are musl's own resolver, which reads /etc/resolv.conf.
  * A ThreadOS disk has none, so when there is no such file a read-only
@@ -71,12 +72,23 @@
 #define P_ACCEPT    0x20
 
 #define T_HZ      100
-#define T_FDS     32                 /* the kernel's descriptors */
+#define T_FDS     256                /* the kernel's descriptors */
 #define CHUNK     1400               /* the most one TCP or UDP call moves */
-#define SOCK_BASE 64
+#define SOCK_BASE 512                /* above them, under FD_SETSIZE */
 #define SOCKS     32
 #define VFILE_BASE (SOCK_BASE + SOCKS)
 #define VFILES    8
+
+/* unix.c */
+NET_HIDDEN int __tos_unix_owns(long fd);
+NET_HIDDEN long __tos_unix_pair(long type, long proto, int *sv);
+NET_HIDDEN long __tos_unix(long n, long fd, long b, long c, long d, long e,
+                           long f);
+NET_HIDDEN short __tos_unix_events(int fd, short want);
+NET_HIDDEN void __tos_unix_wait(const int *fds, int n, long ms);
+NET_HIDDEN int __tos_unix_want(int fd, short events);
+
+#define K_USOCK 4                    /* FDK_USOCK, kernel64/task64.h */
 
 static long tos(long n, long a1, long a2, long a3, long a4)
 {
@@ -699,8 +711,11 @@ static short sock_events(struct sk *s, short want)
 	return got & (want | POLLERR | POLLHUP);
 }
 
-static short fd_events(int fd, short want)
+/* '*pair' says whether it is the end of a socket pair, which poll can
+   sleep on */
+static short fd_events(int fd, short want, int *pair)
 {
+	*pair = 0;
 	if (fd < 0)
 		return 0;
 	struct sk *s = sock_of(fd);
@@ -714,9 +729,36 @@ static short fd_events(int fd, short want)
 	touch(&fi, sizeof(fi));
 	if (tos(T_FDINFO, fd, (long)&fi, 0, 0) < 0 || (fi.kind == 0 && fd > 2))
 		return POLLNVAL;
+	if (fi.kind == K_USOCK) {
+		*pair = 1;
+		return __tos_unix_events(fd, want);
+	}
 	/* a file, a pipe, the console: a read or a write would not wait
 	   long, which is as much as the kernel lets anyone tell */
 	return want & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM);
+}
+
+#define PAIRS_MAX 64                 /* WAIT_MAX, kernel64/ipc64.c */
+
+/* Between two looks. When everything watched is the end of a socket
+   pair the kernel wakes us the moment one changes, so we sleep until
+   then or the time is up. Anything else is looked at again after a
+   tick, and the pairs watched in the meantime. */
+static void nap(const int *pairs, int npairs, int others, long ms,
+                unsigned long start)
+{
+	if (!npairs) {
+		tos(T_SLEEP, 10, 0, 0, 0);
+		return;
+	}
+	long left = -1;
+	if (ms >= 0) {
+		long gone = (long)(tos(T_TICKS, 0, 0, 0, 0) - start) * (1000 / T_HZ);
+		left = ms > gone ? ms - gone : 1;
+	}
+	if (others && (left < 0 || left > 10))
+		left = 10;
+	__tos_unix_wait(pairs, npairs, left);
 }
 
 static long do_poll(struct pollfd *fds, unsigned long n, long ms)
@@ -726,17 +768,24 @@ static long do_poll(struct pollfd *fds, unsigned long n, long ms)
 	unsigned long start = tos(T_TICKS, 0, 0, 0, 0);
 	for (;;) {
 		long ready = 0;
+		int pairs[PAIRS_MAX], npairs = 0, others = 0;
 		for (unsigned long i = 0; i < n; i++) {
-			fds[i].revents = fd_events(fds[i].fd, fds[i].events);
+			int pair;
+			fds[i].revents = fd_events(fds[i].fd, fds[i].events, &pair);
 			if (fds[i].revents)
 				ready++;
+			if (pair && npairs < PAIRS_MAX)
+				pairs[npairs++] = __tos_unix_want(fds[i].fd,
+				                                  fds[i].events);
+			else if (fds[i].fd >= 0)
+				others = 1;
 		}
 		if (ready || !ms)
 			return ready;
 		if (ms > 0 &&
 		    (tos(T_TICKS, 0, 0, 0, 0) - start) * (1000 / T_HZ) >= (unsigned long)ms)
 			return 0;
-		tos(T_SLEEP, 10, 0, 0, 0);
+		nap(pairs, npairs, others, ms, start);
 	}
 }
 
@@ -753,6 +802,7 @@ static long do_select(int n, fd_set *r, fd_set *w, fd_set *e, long ms)
 	if (e) { touch(e, sizeof(*e)); memcpy(&ein, e, bytes); }
 	for (;;) {
 		long ready = 0;
+		int pairs[PAIRS_MAX], npairs = 0, others = 0;
 		fd_set ro, wo, eo;
 		FD_ZERO(&ro); FD_ZERO(&wo); FD_ZERO(&eo);
 		for (int fd = 0; fd < n; fd++) {
@@ -760,7 +810,12 @@ static long do_select(int n, fd_set *r, fd_set *w, fd_set *e, long ms)
 			             (FD_ISSET(fd, &win) ? POLLOUT : 0);
 			if (!want && !FD_ISSET(fd, &ein))
 				continue;
-			short got = fd_events(fd, want);
+			int pair;
+			short got = fd_events(fd, want, &pair);
+			if (pair && npairs < PAIRS_MAX)
+				pairs[npairs++] = __tos_unix_want(fd, want);
+			else
+				others = 1;
 			if (got & POLLNVAL)
 				return -EBADF;
 			if ((got & (POLLIN | POLLHUP | POLLERR)) && FD_ISSET(fd, &rin)) {
@@ -780,7 +835,7 @@ static long do_select(int n, fd_set *r, fd_set *w, fd_set *e, long ms)
 			if (e) memcpy(e, &eo, bytes);
 			return ready;
 		}
-		tos(T_SLEEP, 10, 0, 0, 0);
+		nap(pairs, npairs, others, ms, start);
 	}
 }
 
@@ -896,7 +951,9 @@ NET_HIDDEN long __tos_net(long n, long a, long b, long c, long d, long e, long f
 		return sock_new(type == SOCK_STREAM, (b & SOCK_NONBLOCK) != 0);
 	}
 	case SYS_socketpair:
-		return -EAFNOSUPPORT;
+		if (a != AF_UNIX)
+			return a == AF_INET ? -EOPNOTSUPP : -EAFNOSUPPORT;
+		return __tos_unix_pair(b, c, (int *)d);
 	case SYS_poll:
 		return do_poll((struct pollfd *)a, b, c);
 	case SYS_ppoll:
@@ -917,6 +974,8 @@ NET_HIDDEN long __tos_net(long n, long a, long b, long c, long d, long e, long f
 
 	if ((v = vfile_of(a)))
 		return vfile_call(v, n, a, b, c);
+	if (a >= 0 && a < T_FDS && __tos_unix_owns(a))
+		return __tos_unix(n, a, b, c, d, e, f);
 	if (!(s = sock_of(a)))
 		return n == SYS_close || n == SYS_fstat || n == SYS_read ||
 		       n == SYS_write ? -EBADF : -ENOTSOCK;

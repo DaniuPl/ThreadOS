@@ -175,6 +175,8 @@
    count of pages it could not drop (shared with another space), which
    the program has to clear itself; -1 for a range not its own. */
 #define SYS64_DISCARD 104
+/* Unix socket pairs and memfds (kernel64/ipc64.h): (op, a, b, c) */
+#define SYS64_IPC 105
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

@@ -22,6 +22,7 @@
 #include "../kernel/include/fs.h"
 #include "../kernel/include/user.h"
 #include "pipe64.h"
+#include "ipc64.h"
 #include "proc64.h"
 #include "../kernel/include/spinlock.h"
 #include "../kernel/include/smp.h"
@@ -48,18 +49,17 @@
  * errors. The rest are files on disk - each with its own position in
  * the file, because two processes may read the same file at different
  * paces. */
-#define FD_MAX   32
+/* 256: a program in several processes (WebKit's) holds sockets,
+   shared memory and fonts open besides its files, and 32 was a number
+   from when a program opened a file or two */
+#define FD_MAX   256
 #define FD_FIRST 3
 
 /* The kinds live in the header - programs and syscalls know about them
-   too. A free number 0, 1 or 2 means "the default input and output":
-   the keyboard and the console. Only a redirection puts something else
-   there. */
-struct fd_entry {
-    int kind;
-    int slot;                    /* a TFS inode or a pipe number */
-    uint32_t pos;                /* where this particular reader stands */
-};
+   too, and so does struct fd_entry, which ipc64.c carries between
+   processes. A free number 0, 1 or 2 means "the default input and
+   output": the keyboard and the console. Only a redirection puts
+   something else there. */
 
 /* The table lives apart from the task because threads share it: a file
    one thread opens is there for the others, as a C program expects, and
@@ -1709,42 +1709,123 @@ int task64_fd_slot(int fd)
     return current->fds[fd].slot;
 }
 
+/* A file and a memfd have a place where reading goes on */
+static int seekable(int fd)
+{
+    return fd >= 0 && fd < FD_MAX &&
+           (current->fds[fd].kind == FDK_FILE ||
+            current->fds[fd].kind == FDK_MEMFD);
+}
+
 uint32_t task64_fd_pos(int fd)
 {
-    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind != FDK_FILE)
+    if (!seekable(fd))
         return 0;
     return current->fds[fd].pos;
 }
 
 void task64_fd_advance(int fd, uint32_t n)
 {
-    if (fd >= 0 && fd < FD_MAX && current->fds[fd].kind == FDK_FILE)
+    if (seekable(fd))
         current->fds[fd].pos += n;
 }
 
-/* Puts the reading point where the program says. Only a file has one -
-   a pipe or the keyboard has nowhere to go back to. */
+/* Puts the reading point where the program says. Only a file (or a
+   memfd) has one - a pipe or the keyboard has nowhere to go back to. */
 int task64_fd_seek(int fd, uint32_t pos)
 {
-    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind != FDK_FILE)
+    if (!seekable(fd))
         return -1;
     current->fds[fd].pos = pos;
     return 0;
 }
 
-/* Closing a pipe end decreases the owner count - and it is exactly
-   that which lets a reader ever see the end of the data */
+/* One more holder of what an entry stands for - a copy in another
+   number (dup2), another process (fork), or a message (ipc64.c) */
+static void hold(const struct fd_entry *e)
+{
+    if (e->kind == FDK_POTOK_R)
+        pipe64_ref(e->slot, 1);
+    else if (e->kind == FDK_POTOK_W)
+        pipe64_ref(e->slot, 0);
+    else if (e->kind == FDK_USOCK)
+        usock64_ref(e->slot);
+    else if (e->kind == FDK_MEMFD)
+        memfd64_ref(e->slot);
+}
+
+/* And one fewer. Closing a pipe end decreases the owner count - and it
+   is exactly that which lets a reader ever see the end of the data;
+   the same for a socket's peer */
+static void let_go(const struct fd_entry *e)
+{
+    if (e->kind == FDK_POTOK_R)
+        pipe64_unref(e->slot, 1);
+    else if (e->kind == FDK_POTOK_W)
+        pipe64_unref(e->slot, 0);
+    else if (e->kind == FDK_USOCK)
+        usock64_unref(e->slot);
+    else if (e->kind == FDK_MEMFD)
+        memfd64_unref(e->slot);
+    /* an unlinked file goes with the last descriptor on it */
+    else if (e->kind == FDK_FILE)
+        fs_slot_closed(e->slot);
+}
+
 static void release(struct task64 *t, int fd)
 {
-    int kind = t->fds[fd].kind;
-    if (kind == FDK_POTOK_R)
-        pipe64_unref(t->fds[fd].slot, 1);
-    else if (kind == FDK_POTOK_W)
-        pipe64_unref(t->fds[fd].slot, 0);
+    struct fd_entry e = t->fds[fd];
     t->fds[fd].kind = FDK_FREE;
-    /* an unlinked file goes with the last descriptor on it */
-    if (kind == FDK_FILE)
-        fs_slot_closed(t->fds[fd].slot);
+    let_go(&e);
+}
+
+int task64_fd_new(int kind, int slot)
+{
+    irqflags_t flags = irq_save();
+    int fd = -1;
+    for (int i = FD_FIRST; i < FD_MAX; i++) {
+        if (current->fds[i].kind == FDK_FREE) {
+            current->fds[i].kind = kind;
+            current->fds[i].slot = slot;
+            current->fds[i].pos = 0;
+            fd = i;
+            break;
+        }
+    }
+    irq_restore(flags);
+    return fd;
+}
+
+int task64_fd_copy(int fd, struct fd_entry *out)
+{
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_FREE)
+        return -1;
+    irqflags_t flags = irq_save();
+    *out = current->fds[fd];
+    hold(out);
+    irq_restore(flags);
+    return 0;
+}
+
+int task64_fd_install(const struct fd_entry *e)
+{
+    irqflags_t flags = irq_save();
+    int fd = -1;
+    for (int i = FD_FIRST; i < FD_MAX; i++)
+        if (current->fds[i].kind == FDK_FREE) {
+            current->fds[i] = *e;
+            fd = i;
+            break;
+        }
+    irq_restore(flags);
+    if (fd < 0)
+        let_go(e);
+    return fd;
+}
+
+void task64_fd_drop(struct fd_entry *e)
+{
+    let_go(e);
 }
 
 /* Does any descriptor of any task hold this inode open? The filesystem
@@ -1790,10 +1871,7 @@ int task64_fd_dup2(int old, int fresh_one)
     if (current->fds[fresh_one].kind != FDK_FREE)
         release(current, fresh_one);
     current->fds[fresh_one] = current->fds[old];
-    if (current->fds[fresh_one].kind == FDK_POTOK_R)
-        pipe64_ref(current->fds[fresh_one].slot, 1);
-    else if (current->fds[fresh_one].kind == FDK_POTOK_W)
-        pipe64_ref(current->fds[fresh_one].slot, 0);
+    hold(&current->fds[fresh_one]);
     irq_restore(flags);
     return fresh_one;
 }
@@ -1816,10 +1894,7 @@ void task64_inherit_fds(struct task64 *child)
     irqflags_t flags = irq_save();
     for (int i = 0; i < FD_MAX; i++) {
         child->fds[i] = current->fds[i];
-        if (child->fds[i].kind == FDK_POTOK_R)
-            pipe64_ref(child->fds[i].slot, 1);
-        else if (child->fds[i].kind == FDK_POTOK_W)
-            pipe64_ref(child->fds[i].slot, 0);
+        hold(&child->fds[i]);
     }
     irq_restore(flags);
 }
