@@ -1,0 +1,39 @@
+The names of WebKit's processes on ThreadOS
+
+ThreadOS starts a program by a name of at most 15 characters
+(kernel64/proc64.c), and WPENetworkProcess has 17. The two processes
+are programs of ThreadOS's own around WebKit's entry points
+(apps/webkit/wpewebproc.cpp, wpenetproc.cpp, built by
+apps/webkit/programs.cmake), named in lower case as the system's
+programs are. Only the names change; where WebKit looks for them
+(PKGLIBEXECDIR) is as before.
+
+--- a/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
++++ b/Source/WebKit/Shared/glib/ProcessExecutablePathGLib.cpp
+@@ -63,9 +63,14 @@
+     return FileSystem::pathByAppendingComponent(FileSystem::stringFromFileSystemRepresentation(PKGLIBEXECDIR), processName);
+ }
+ 
++// ThreadOS starts a program by a name of at most 15 characters
++// (kernel64/proc64.c), and its own programs are named in lower case;
++// the programs are apps/webkit/wpewebproc.cpp and wpenetproc.cpp.
+ String executablePathOfWebProcess()
+ {
+-#if PLATFORM(WPE)
++#if defined(THREADOS_LIBC)
++    return findWebKitProcess("wpewebproc"_s);
++#elif PLATFORM(WPE)
+     return findWebKitProcess("WPEWebProcess"_s);
+ #else
+     return findWebKitProcess("WebKitWebProcess"_s);
+@@ -74,7 +79,9 @@
+ 
+ String executablePathOfNetworkProcess()
+ {
+-#if PLATFORM(WPE)
++#if defined(THREADOS_LIBC)
++    return findWebKitProcess("wpenetproc"_s);
++#elif PLATFORM(WPE)
+     return findWebKitProcess("WPENetworkProcess"_s);
+ #else
+     return findWebKitProcess("WebKitNetworkProcess"_s);

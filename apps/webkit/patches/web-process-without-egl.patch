@@ -1,0 +1,39 @@
+The web process on a system without EGL (WPE port, ThreadOS)
+
+WebKit's web process makes an EGL display before its first page,
+and ends itself when it cannot: a system without a GPU is expected
+to have Mesa's software EGL. ThreadOS has no EGL library at all, and
+the first EGL call through libepoxy would abort on not finding one.
+WebKit can paint without one - Skia on the processor, into shared
+memory (NonCompositedFrameRenderer, the SharedMemory swap chain) -
+and every path that would want the display asks
+ProcessCapabilities::canUseAcceleratedBuffers() first. So when
+libepoxy finds no EGL (epoxy_has_egl() asks without aborting), the
+web process says buffers cannot be accelerated and makes no display.
+
+--- a/Source/WebKit/WebProcess/glib/WebProcessGLib.cpp
++++ b/Source/WebKit/WebProcess/glib/WebProcessGLib.cpp
+@@ -39,6 +39,7 @@
+ #include <WebCore/ProcessCapabilities.h>
+ #include <WebCore/ScreenProperties.h>
+ #include <WebCore/SystemSoundManager.h>
++#include <epoxy/egl.h>
+ 
+ #if ENABLE(REMOTE_INSPECTOR)
+ #include <JavaScriptCore/RemoteInspector.h>
+@@ -149,6 +150,15 @@
+     if (PlatformDisplay::sharedDisplayIfExists())
+         return;
+ 
++    // A system with no EGL library at all draws pages on the processor:
++    // there is no display to make, and every path that would want one
++    // asks canUseAcceleratedBuffers() first. (epoxy_has_egl() asks
++    // without aborting, as the first EGL call through epoxy would.)
++    if (!epoxy_has_egl()) {
++        ProcessCapabilities::setCanUseAcceleratedBuffers(false);
++        return;
++    }
++
+ #if USE(GBM)
+     if (m_rendererBufferTransportMode.contains(RendererBufferTransportMode::Hardware)) {
+         bool disabled = false;

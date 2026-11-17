@@ -9,6 +9,12 @@
 #   THREADOS_MUSL   the musl install (include/, lib/)
 #   THREADOS_REPO   the repository (libc/cxx/compat.h, libc/libc64.ld)
 #   THREADOS_CXXRT  the C++ runtime's last pieces (libc/cxx/cxxrt.cpp)
+#   THREADOS_LIBS   (WPE only) the libraries built for ThreadOS
+#                   (BUILD/libs64), found through their pkg-config files
+#   THREADOS_LINK   (WPE only) what those libraries need linked after
+#                   them, as `pkg-config --static --libs` says: CMake's
+#                   find modules name a library, not the static ones
+#                   under it
 #
 # The system is Linux as far as WebKit is concerned: musl answers the
 # Linux system calls (libc/overlay/), so WebKit's Linux code paths are
@@ -21,7 +27,7 @@ set(CMAKE_CXX_COMPILER g++)
 
 # The variables reach try_compile() projects too
 set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
-    THREADOS_MUSL THREADOS_REPO THREADOS_CXXRT)
+    THREADOS_MUSL THREADOS_REPO THREADOS_CXXRT THREADOS_LIBS THREADOS_LINK)
 
 execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=include
                 OUTPUT_VARIABLE _gcc_include OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -54,19 +60,28 @@ set(BUILD_SHARED_LIBS OFF)
 # in, and they bring definitions of their own of what cxxrt.o already
 # defines (std::__throw_system_error, the personality routine) - the
 # first, cxxrt.o's, is the one wanted.
+# -L: a library asked for by name (-lm, -ldl, -latomic) is to be found
+# among ThreadOS's - musl's empty ones, libs64's - and never in the
+# host's directories, which -nostdlib leaves searched: the host's libm
+# is glibc's, with ifuncs a ThreadOS program cannot resolve.
+set(_search "-L${THREADOS_MUSL}/lib")
+if (THREADOS_LIBS)
+    set(_search "${_search} -L${THREADOS_LIBS}/lib")
+endif ()
 set(_start "-static -no-pie -nostdlib -Wl,--build-id=none \
 -Wl,-z,max-page-size=0x1000 -Wl,--gc-sections \
--Wl,--allow-multiple-definition \
+-Wl,--allow-multiple-definition ${_search} \
 -T ${THREADOS_REPO}/libc/libc64.ld \
 ${THREADOS_MUSL}/lib/crt1.o ${THREADOS_MUSL}/lib/crti.o")
 set(_end "${THREADOS_CXXRT} ${_libstdcxx} ${THREADOS_MUSL}/lib/libc.a \
 ${_libgcc} ${THREADOS_MUSL}/lib/crtn.o")
+set(_libs "-Wl,--start-group <LINK_LIBRARIES> ${THREADOS_LINK} -Wl,--end-group")
 set(CMAKE_C_LINK_EXECUTABLE
     "<CMAKE_C_COMPILER> <FLAGS> <CMAKE_C_LINK_FLAGS> <LINK_FLAGS> ${_start} <OBJECTS> -o <TARGET> <LINK_LIBRARIES> ${THREADOS_MUSL}/lib/libc.a ${_libgcc} ${THREADOS_MUSL}/lib/crtn.o")
 set(CMAKE_CXX_LINK_EXECUTABLE
-    "<CMAKE_CXX_COMPILER> <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> ${_start} <OBJECTS> -o <TARGET> -Wl,--start-group <LINK_LIBRARIES> -Wl,--end-group ${_end}")
+    "<CMAKE_CXX_COMPILER> <FLAGS> <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> ${_start} <OBJECTS> -o <TARGET> ${_libs} ${_end}")
 
-set(CMAKE_FIND_ROOT_PATH ${THREADOS_MUSL})
+set(CMAKE_FIND_ROOT_PATH ${THREADOS_MUSL} ${THREADOS_LIBS})
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
 set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY BOTH)
 set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE BOTH)

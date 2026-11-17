@@ -341,8 +341,168 @@ static int add_record(char **buf, int *len, int *cap, const char *name,
 	return 0;
 }
 
+/* --- The system's fonts, where Linux programs look for them -----------
+ *
+ * The desktop's three fonts (fonts/, cut out of DejaVu) are in the
+ * initrd. A program that finds its fonts through fontconfig - WebKit's
+ * web process - wants them as files in a directory, and a configuration
+ * that names it: so FONT_DIR lists them, opening one there reads it out
+ * of the initrd, and FONTS_CONF names the directory and says which of
+ * them stands for sans-serif, serif and monospace - and for a family
+ * the system does not have (Helvetica), the sans. The bold face is a
+ * family of its own in its file ("DejaVu Sans Bold ThreadOS"); the
+ * configuration makes it the bold of "DejaVu Sans ThreadOS", so a page
+ * asking for bold gets it and not a face drawn thicker. fontconfig's
+ * own default is a path where the libraries were built, so a program
+ * is pointed here by FONTCONFIG_FILE (apps/webkit/wpewebproc.cpp sets
+ * it).
+ */
+#define FONT_DIR   "/usr/share/fonts/threados"
+#define FONTS_CONF "/etc/fonts/fonts.conf"
+#define FONT_MAX   (4 << 20)
+
+static const char *const font_files[] = { "sans.ttf", "bold.ttf", "mono.ttf" };
+#define FONT_FILES ((int)(sizeof(font_files) / sizeof(font_files[0])))
+
+static const char fonts_conf[] =
+	"<?xml version=\"1.0\"?>\n"
+	"<!DOCTYPE fontconfig SYSTEM \"urn:fontconfig:fonts.dtd\">\n"
+	"<fontconfig>\n"
+	"  <dir>" FONT_DIR "</dir>\n"
+	"  <match target=\"scan\">\n"
+	"    <test name=\"family\"><string>DejaVu Sans Bold ThreadOS</string></test>\n"
+	"    <edit name=\"family\" mode=\"assign\" binding=\"same\">"
+	"<string>DejaVu Sans ThreadOS</string></edit>\n"
+	"  </match>\n"
+	"  <alias><family>sans-serif</family>"
+	"<prefer><family>DejaVu Sans ThreadOS</family></prefer></alias>\n"
+	"  <alias><family>serif</family>"
+	"<prefer><family>DejaVu Sans ThreadOS</family></prefer></alias>\n"
+	"  <alias><family>monospace</family>"
+	"<prefer><family>DejaVu Sans Mono ThreadOS</family></prefer></alias>\n"
+	"  <match target=\"pattern\">\n"
+	"    <edit name=\"family\" mode=\"append_last\">"
+	"<string>DejaVu Sans ThreadOS</string></edit>\n"
+	"  </match>\n"
+	"</fontconfig>\n";
+
+static int is_font_dir(const char *path)
+{
+	return !strcmp(path, FONT_DIR) || !strcmp(path, FONT_DIR "/");
+}
+
+/* Which of the fonts a path names, or -1 */
+static int font_of(const char *path)
+{
+	size_t n = sizeof(FONT_DIR) - 1;
+	if (strncmp(path, FONT_DIR "/", n + 1))
+		return -1;
+	for (int i = 0; i < FONT_FILES; i++)
+		if (!strcmp(path + n + 1, font_files[i]))
+			return i;
+	return -1;
+}
+
+/* A file of the initrd, whole, on the heap; its length, or -ENOENT */
+static long initrd_file(const char *name, char **out)
+{
+	char *buf = malloc(FONT_MAX);
+	if (!buf)
+		return -ENOMEM;
+	touch(buf, FONT_MAX);
+	long n = tos(T_INITRD_READ, (long)name, strlen(name), (long)buf,
+	             FONT_MAX);
+	if (n <= 0) {
+		free(buf);
+		return -ENOENT;
+	}
+	char *fit = realloc(buf, n);
+	*out = fit ? fit : buf;
+	return n;
+}
+
+static long vfile_of_buffer(char *buf, long n)
+{
+	long fd = vfile_new(0);
+	if (fd < 0) {
+		free(buf);
+		return fd;
+	}
+	struct vf *v = &vfiles[fd - VFILE_BASE];
+	v->big = buf;
+	v->len = (int)n;
+	return fd;
+}
+
+static long open_font(int i)
+{
+	char *buf;
+	long n = initrd_file(font_files[i], &buf);
+	return n < 0 ? n : vfile_of_buffer(buf, n);
+}
+
+static long open_fonts_conf(void)
+{
+	char *buf = malloc(sizeof(fonts_conf));
+	if (!buf)
+		return -ENOMEM;
+	memcpy(buf, fonts_conf, sizeof(fonts_conf) - 1);
+	return vfile_of_buffer(buf, sizeof(fonts_conf) - 1);
+}
+
+/* stat() of the fonts, their directory and the configuration */
+NET_HIDDEN long __tos_stat_virtual(const char *path, struct kstat *st)
+{
+	long size;
+	unsigned mode = S_IFREG | 0444;
+	int i = font_of(path);
+	if (is_font_dir(path)) {
+		mode = S_IFDIR | 0555;
+		size = 0;
+	} else if (i >= 0) {
+		char *buf;
+		size = initrd_file(font_files[i], &buf);
+		if (size < 0)
+			return size;
+		free(buf);
+	} else if (!strcmp(path, FONTS_CONF)) {
+		size = sizeof(fonts_conf) - 1;
+	} else {
+		return -ENOENT;
+	}
+	memset(st, 0, sizeof(*st));
+	st->st_mode = mode;
+	st->st_nlink = 1;
+	st->st_ino = 6000 + (i >= 0 ? i : is_font_dir(path) ? 10 : 11);
+	st->st_size = size;
+	st->st_blksize = 4096;
+	st->st_blocks = (size + 511) / 512;
+	return 0;
+}
+
+static long open_font_dir(void)
+{
+	char *buf = NULL;
+	int len = 0, cap = 0;
+	int bad = add_record(&buf, &len, &cap, ".", DT_DIR, 6010) ||
+	          add_record(&buf, &len, &cap, "..", DT_DIR, 2);
+	for (int i = 0; !bad && i < FONT_FILES; i++)
+		bad = add_record(&buf, &len, &cap, font_files[i], DT_REG,
+		                 6000 + i);
+	if (bad) {
+		free(buf);
+		return -ENOMEM;
+	}
+	long fd = vfile_of_buffer(buf, len);
+	if (fd >= 0)
+		vfiles[fd - VFILE_BASE].dir = 1;
+	return fd;
+}
+
 NET_HIDDEN long __tos_open_dir(const char *path)
 {
+	if (is_font_dir(path))
+		return open_font_dir();
 	char here[256];
 	touch(here, sizeof(here));
 	if (tos(T_GETCWD, (long)here, sizeof(here), 0, 0) < 0)
@@ -519,6 +679,10 @@ NET_HIDDEN long __tos_open_virtual(const char *path)
 		return vfile_new(1);
 	if (is_bundle(path))
 		return open_bundle();
+	if (font_of(path) >= 0)
+		return open_font(font_of(path));
+	if (!strcmp(path, FONTS_CONF))
+		return open_fonts_conf();
 	if (strcmp(path, "/etc/resolv.conf"))
 		return -ENOENT;
 	unsigned info[4];

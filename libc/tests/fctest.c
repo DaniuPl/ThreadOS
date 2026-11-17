@@ -17,6 +17,14 @@
  *   FreeType, of each font: its glyph count, units per em, ascender
  *   and descender, and for a Polish sentence the glyphs and their
  *   advances in the font's own units, unscaled and unhinted
+ *
+ * `fctest --system [FILE]` asks the configuration a program gets when
+ * it asks for none (FONTCONFIG_FILE: FILE, or /etc/fonts/fonts.conf) -
+ * on ThreadOS the system's fonts and configuration, which the C
+ * library makes up out of the initrd (libc/overlay/.../socket.c) - for
+ * its fonts and for the families a page names: sans-serif, serif,
+ * monospace, and bold. The test gives the host's fontconfig the same
+ * configuration and the same fonts.
  */
 
 #include <stdio.h>
@@ -149,9 +157,45 @@ static void freetype(FT_Library lib, const char *path)
     FT_Done_Face(face);
 }
 
+static int system_fonts(const char *file)
+{
+    setenv("FONTCONFIG_FILE", file, 1);
+    FcConfig *cfg = FcInitLoadConfigAndFonts();
+    if (!cfg) {
+        printf("the system's configuration could not be read\n");
+        return 1;
+    }
+    FcPattern *all = FcPatternCreate();
+    FcObjectSet *os = FcObjectSetBuild(FC_FILE, FC_FAMILY, FC_STYLE,
+                                       FC_WEIGHT, FC_SLANT, FC_SPACING,
+                                       FC_CHARSET, FC_LANG, (char *)0);
+    FcFontSet *set = FcFontList(cfg, all, os);
+    printf("the system's fonts: %d\n", set ? set->nfont : 0);
+    if (set) {
+        qsort(set->fonts, set->nfont, sizeof(*set->fonts), by_file);
+        for (int i = 0; i < set->nfont; i++)
+            describe(set->fonts[i]);
+        FcFontSetDestroy(set);
+    }
+    /* (a '-' in fontconfig's names starts the size: "sans-serif" would
+       be the family "sans") */
+    match(cfg, "sans\\-serif");
+    match(cfg, "serif");
+    match(cfg, "monospace");
+    match(cfg, "sans\\-serif:bold");
+    match(cfg, "DejaVu Sans ThreadOS:bold");
+    match(cfg, "Helvetica");
+    FcObjectSetDestroy(os);
+    FcPatternDestroy(all);
+    FcConfigDestroy(cfg);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     setvbuf(stdout, NULL, _IOLBF, 0);
+    if (argc > 1 && !strcmp(argv[1], "--system"))
+        return system_fonts(argc > 2 ? argv[2] : "/etc/fonts/fonts.conf");
     const char *dir = argc > 1 ? argv[1] : "fonts";
     FcConfig *cfg = FcConfigCreate();
     if (!FcConfigAppFontAddDir(cfg, (const FcChar8 *)dir)) {

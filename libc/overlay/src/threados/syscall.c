@@ -68,6 +68,8 @@ __attribute__((__visibility__("hidden")))
 long __tos_open_virtual(const char *path);
 __attribute__((__visibility__("hidden")))
 long __tos_open_dir(const char *path);
+__attribute__((__visibility__("hidden")))
+long __tos_stat_virtual(const char *path, struct kstat *st);
 
 /* src/threados/unix.c: Unix socket pairs, which are kernel descriptors */
 __attribute__((__visibility__("hidden")))
@@ -626,7 +628,8 @@ static long do_stat(const char *path, struct kstat *st)
 		st->st_nlink = 2;
 		return 0;
 	}
-	return -ENOENT;
+	/* what the system makes up: its fonts (socket.c) */
+	return __tos_stat_virtual(path, st);
 }
 
 static long do_lseek(int fd, long off, int whence)
