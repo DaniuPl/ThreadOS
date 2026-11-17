@@ -21,6 +21,8 @@
 #include <stdint.h>
 #include "arm64.h"
 
+extern char __kernel_start[];
+
 #define ENTRIES 512
 static uint64_t l1[ENTRIES] __attribute__((aligned(4096)));
 static uint64_t l2_low[ENTRIES] __attribute__((aligned(4096)));
@@ -54,9 +56,16 @@ int mmu_build(uint64_t ram_base, uint64_t ram_size)
         l2_low[i] = i * MIB2 | ATTRIDX(ATTR_DEVICE) | AF | PXN | UXN |
                     DESC_BLOCK;
     l1[0] = (uint64_t)(uintptr_t)l2_low | DESC_TABLE;
+    /* No code runs from RAM but the kernel's own: none at EL0 at all
+       (UXN), and at EL1 none outside the gigabyte the kernel image lies
+       in (PXN) - a buffer there that held bytes from outside is not a
+       place to jump into. Finer than a gigabyte would need tables of
+       2 MiB entries for the kernel's own, which is for later. */
+    uint64_t kernel_gb = (uint64_t)(uintptr_t)__kernel_start / GIB;
     for (uint64_t gb = ram_base / GIB; gb <= (ram_base + ram_size - 1) / GIB;
          gb++)
-        l1[gb] = gb * GIB | ATTRIDX(ATTR_NORMAL) | SH_INNER | AF | DESC_BLOCK;
+        l1[gb] = gb * GIB | ATTRIDX(ATTR_NORMAL) | SH_INNER | AF | UXN |
+                 (gb == kernel_gb ? 0 : PXN) | DESC_BLOCK;
     return 0;
 }
 

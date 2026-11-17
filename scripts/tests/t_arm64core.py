@@ -11,7 +11,11 @@ Each of them is asked to do the one thing that proves it is there:
   the MMU: address 0x10 is the flash on virt, readable with the MMU
   off; with it on and the first 2 MiB left unmapped, reading it
   (selftest=abort) must end in a data abort naming that address and a
-  translation fault at level 2, and nothing after it may run
+  translation fault at level 2, and nothing after it may run; and no
+  RAM but the kernel's own may be run (UXN everywhere, PXN outside the
+  kernel's gigabyte): with 2 GiB, a 'ret' written into the last page
+  and called (selftest=xn) ends in an instruction abort, a permission
+  fault, there
   the GIC and the timer: the controller is found where QEMU's virt puts
   it (distributor 0x08000000, CPU interface 0x08010000), and a hundred
   timer interrupts take a second by the core's own counter - both from
@@ -84,6 +88,20 @@ def main():
     check("and nothing after it runs",
           "Read address 0x10 without a fault" not in said and
           ARM64_READY not in said)
+
+    # Two gigabytes, so there is RAM outside the kernel's own to try
+    said = arm64_boot(mib=2048, append="selftest=xn")
+    m = re.search(r"^Running a data page at (0x[0-9a-f]+)$", said, re.M)
+    check("a 'ret' written into RAM outside the kernel's gigabyte is "
+          "called ('%s')" % said_line(said, "Running a data page"),
+          m is not None)
+    check("and ends in an instruction abort there, a permission fault - "
+          "nothing in RAM but the kernel runs ('%s')"
+          % said_line(said, "Instruction abort"),
+          m is not None and re.search(
+              r"^Instruction abort: running %s, permission fault" % m.group(1),
+              said, re.M) is not None and
+          "nothing stopped it" not in said)
 
     said = arm64_boot("virt,gic-version=3")
     check("a GICv3 is recognised and declined in words ('%s')"

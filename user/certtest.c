@@ -141,6 +141,21 @@ void _start(void)
            ecdsa_verify_der(ec_curve_p256(), ec.ec_point, ec.ec_point_len, hash, 32,
                             ec_sig, sizeof(ec_sig)));
 
+    /* A key that is not on the curve, and a signature the formulas take
+       under it (scripts/mkcertdata.py): only the check that a key lies
+       on the curve refuses it */
+    {
+        uint32_t olen = 0;
+        while (offcurve_msg[olen])
+            olen++;
+        sha256((const uint8_t *)offcurve_msg, olen, hash);
+        result("ECDSA: a key off the curve refused, its forged signature "
+               "and all",
+               !ecdsa_verify(ec_curve_p256(), offcurve_key, sizeof(offcurve_key),
+                             hash, 32, offcurve_r, sizeof(offcurve_r),
+                             offcurve_s, sizeof(offcurve_s)));
+    }
+
     /* --- a certificate on the P-384 curve (SHA-384) --- */
     struct x509_cert ec384;
     uint8_t hash384[48];

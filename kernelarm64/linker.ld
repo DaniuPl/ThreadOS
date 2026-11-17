@@ -11,6 +11,7 @@ ENTRY(_start)
 SECTIONS
 {
     . = 0x40200000;
+    __kernel_start = .;
 
     .text : {
         *(.text.boot)

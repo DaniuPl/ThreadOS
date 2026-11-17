@@ -872,8 +872,20 @@ def fonts():
     return out
 
 
+def inet_sum(data):
+    """The Internet checksum (RFC 1071) of some bytes"""
+    if len(data) % 2:
+        data += b"\0"
+    s = sum(struct.unpack("!%dH" % (len(data) // 2), data))
+    while s >> 16:
+        s = (s & 0xFFFF) + (s >> 16)
+    return ~s & 0xFFFF
+
+
 def frames():
-    """Valid Ethernet frames: ARP, ICMP, UDP and TCP."""
+    """Valid Ethernet frames: ARP, ICMP, UDP and TCP - checksums and
+    all, since the kernel drops a frame whose checksums do not add up
+    before it looks any further"""
     mac_us = bytes([0x52, 0x54, 0x00, 0x12, 0x34, 0x56])
     mac_them = bytes([0x52, 0x55, 0x0a, 0x00, 0x02, 0x02])
     ip_us = bytes([10, 0, 2, 15])
@@ -884,9 +896,19 @@ def frames():
 
     def ip(proto, payload):
         total = 20 + len(payload)
+        if proto in (6, 17):
+            pseudo = ip_them + ip_us + bytes([0, proto]) + \
+                len(payload).to_bytes(2, "big")
+            at = 16 if proto == 6 else 6
+            c = inet_sum(pseudo + payload)
+            payload = payload[:at] + c.to_bytes(2, "big") + payload[at + 2:]
+        elif proto == 1:
+            c = inet_sum(payload)
+            payload = payload[:2] + c.to_bytes(2, "big") + payload[4:]
         hdr = (bytes([0x45, 0x00]) + total.to_bytes(2, "big") +
                b"\x00\x01\x00\x00\x40" + bytes([proto]) + b"\x00\x00" +
                ip_them + ip_us)
+        hdr = hdr[:10] + inet_sum(hdr).to_bytes(2, "big") + hdr[12:]
         return eth(b"\x08\x00", hdr + payload)
 
     out = []

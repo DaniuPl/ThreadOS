@@ -28,13 +28,23 @@ What it makes, and why each piece is there:
   ec_sig         an ECDSA signature of MESSAGE under that key, as the
                  DER SEQUENCE { r, s } a TLS server would send.
   p384_cert_der  P-384 signed with SHA-384, the way ISRG Root X2 is.
+  offcurve_*     a "public key" (x, 0) that is not on P-256 - on the
+                 curve with the same p and a and another b it has order
+                 2 - and an (r, s) that the verification formulas, which
+                 never use b, accept under it for OFFCURVE_MESSAGE: u2
+                 is even, so the key's share cancels out. Made here, by
+                 this script's own arithmetic; certtest wants it
+                 refused, which only the check that a key is on the
+                 curve does.
 
 The keys are thrown away with the temporary directory. Nothing here is
 a secret worth keeping: the fixture only ever proves the code agrees
 with itself and with openssl.
 """
 
+import hashlib
 import os
+import random
 import subprocess
 import sys
 import tempfile
@@ -57,6 +67,57 @@ def c_array(name, data):
         out.append("    " + row)
     out.append("};")
     return "\n".join(out)
+
+
+# P-256 (FIPS 186-4, D.1.2.3)
+P256_P = 0xffffffff00000001000000000000000000000000ffffffffffffffffffffffff
+P256_N = 0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551
+P256_G = (0x6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296,
+          0x4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5)
+OFFCURVE_MESSAGE = b"ThreadOS: a key that is not on the curve"
+
+
+def p256_add(a, b):
+    p = P256_P
+    if a is None:
+        return b
+    if b is None:
+        return a
+    if a[0] == b[0] and (a[1] + b[1]) % p == 0:
+        return None
+    if a == b:
+        lam = (3 * a[0] * a[0] - 3) * pow(2 * a[1], -1, p) % p
+    else:
+        lam = (b[1] - a[1]) * pow(b[0] - a[0], -1, p) % p
+    x = (lam * lam - a[0] - b[0]) % p
+    return (x, (lam * (a[0] - x) - a[1]) % p)
+
+
+def p256_mul(k, pt):
+    out = None
+    while k:
+        if k & 1:
+            out = p256_add(out, pt)
+        pt = p256_add(pt, pt)
+        k >>= 1
+    return out
+
+
+def offcurve():
+    """(key, r, s) for OFFCURVE_MESSAGE as described above - seeded, so
+    the header comes out the same every time"""
+    rng = random.Random(20261117)
+    e = int.from_bytes(hashlib.sha256(OFFCURVE_MESSAGE).digest(), "big")
+    x0 = rng.randrange(1, P256_P)
+    while True:
+        s = rng.randrange(1, P256_N)
+        w = pow(s, -1, P256_N)
+        r = p256_mul(e * w % P256_N, P256_G)[0] % P256_N
+        u2 = r * w % P256_N
+        if r and u2 and u2 % 2 == 0:
+            break
+    key = b"\x04" + x0.to_bytes(32, "big") + bytes(32)
+    return key, r.to_bytes(32, "big"), s.to_bytes(32, "big")
 
 
 def main():
@@ -117,6 +178,11 @@ def main():
     text += "\n" + c_array("ec_sig", data["ec_sig"]) + "\n"
     text += MSG_BLOCK % MESSAGE
     text += "\n" + c_array("p384_cert_der", data["p384_cert_der"]) + "\n"
+    key, r, s = offcurve()
+    text += OFFCURVE_BLOCK % OFFCURVE_MESSAGE.decode()
+    text += "\n" + c_array("offcurve_key", key) + "\n"
+    text += "\n" + c_array("offcurve_r", r) + "\n"
+    text += "\n" + c_array("offcurve_s", s) + "\n"
     text += "\n#endif\n"
     with open(OUT, "w") as f:
         f.write(text)
@@ -163,6 +229,12 @@ MSG_BLOCK = '''
    sentence anybody reads: both signatures are over these exact bytes,
    so a word changed here invalidates both. */
 static const char pss_msg[] = "%s";
+'''
+
+OFFCURVE_BLOCK = '''
+/* A key off the curve and a signature its formulas accept (see
+   scripts/mkcertdata.py, offcurve) - over this message */
+static const char offcurve_msg[] = "%s";
 '''
 
 main()

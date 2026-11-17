@@ -43,6 +43,14 @@ static const uint8_t p256_gy_bytes[32] = {
     0x0f,0x9e,0x16,0x2b,0xce,0x33,0x57,0x6b,0x31,0x5e,0xce,0xcb,0xb6,
     0x40,0x68,0x37,0xbf,0x51,0xf5,
 };
+/* b of y^2 = x^3 - 3x + b: what puts a point on the curve and not on one
+   of the others with the same p and a, where nothing is hard (see
+   ec_on_curve) */
+static const uint8_t p256_b_bytes[32] = {
+    0x5a,0xc6,0x35,0xd8,0xaa,0x3a,0x93,0xe7,0xb3,0xeb,0xbd,0x55,0x76,
+    0x98,0x86,0xbc,0x65,0x1d,0x06,0xb0,0xcc,0x53,0xb0,0xf6,0x3b,0xce,
+    0x3c,0x3e,0x27,0xd2,0x60,0x4b,
+};
 
 /* The NIST P384 curve (384 bits) */
 static const uint8_t p384_p_bytes[48] = {
@@ -69,12 +77,18 @@ static const uint8_t p384_gy_bytes[48] = {
     0x31,0x13,0xb5,0xf0,0xb8,0xc0,0x0a,0x60,0xb1,0xce,0x1d,0x7e,0x81,
     0x9d,0x7a,0x43,0x1d,0x7c,0x90,0xea,0x0e,0x5f,
 };
+static const uint8_t p384_b_bytes[48] = {
+    0xb3,0x31,0x2f,0xa7,0xe2,0x3e,0xe7,0xe4,0x98,0x8e,0x05,0x6b,0xe3,
+    0xf8,0x2d,0x19,0x18,0x1d,0x9c,0x6e,0xfe,0x81,0x41,0x12,0x03,0x14,
+    0x08,0x8f,0x50,0x13,0x87,0x5a,0xc6,0x56,0x39,0x8d,0x8a,0x2e,0xd1,
+    0x9d,0x2a,0x85,0xc8,0xed,0xd3,0xec,0x2a,0xef,
+};
 
 /* The full set of curve parameters; the working numbers are computed
    on first use (ec_init) */
 struct ec_curve {
     uint32_t size;                       /* the coordinate length in bytes */
-    const uint8_t *p_bytes, *n_bytes, *gx_bytes, *gy_bytes;
+    const uint8_t *p_bytes, *n_bytes, *gx_bytes, *gy_bytes, *b_bytes;
     struct bignum p, n, r2p, r2n, one_mont;
     uint32_t pinv, ninv;
     int ready;
@@ -82,11 +96,13 @@ struct ec_curve {
 
 static struct ec_curve ec_p256 = {
     32, p256_p_bytes, p256_n_bytes, p256_gx_bytes, p256_gy_bytes,
+    p256_b_bytes,
     {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, 0, 0, 0
 };
 
 static struct ec_curve ec_p384 = {
     48, p384_p_bytes, p384_n_bytes, p384_gx_bytes, p384_gy_bytes,
+    p384_b_bytes,
     {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, {{0}, 0}, 0, 0, 0
 };
 
@@ -389,6 +405,32 @@ static inline void ec_affine(const struct ec_curve *c, const struct ec_point *p,
     }
 }
 
+/* Is (x, y) a point of the curve: y^2 = x^3 - 3x + b (mod p), both
+   coordinates below p. The formulas that add and double points never
+   use b, so they compute just as well on a curve with another b - and
+   on some of those a point has order 2 or a little more, and a
+   "public key" such as (x, 0) cancels out of the check below for half
+   of all signatures: a forgery anybody can make (certtest has one). Only a key on the curve is a key. */
+static inline int ec_on_curve(const struct ec_curve *c, const struct bignum *x,
+                              const struct bignum *y)
+{
+    if (bn_cmp(x, &c->p) >= 0 || bn_cmp(y, &c->p) >= 0)
+        return 0;
+    struct bignum mx, my, mb, b, y2, x2, x3, t1, t2, t3;
+    fp_enter(c, &mx, x);
+    fp_enter(c, &my, y);
+    bn_from_bytes(&b, c->b_bytes, c->size);
+    fp_enter(c, &mb, &b);
+    fp_mul(c, &y2, &my, &my);
+    fp_mul(c, &x2, &mx, &mx);
+    fp_mul(c, &x3, &x2, &mx);
+    fp_sub(c, &t1, &x3, &mx);
+    fp_sub(c, &t2, &t1, &mx);
+    fp_sub(c, &t3, &t2, &mx);            /* x^3 - 3x */
+    fp_add(c, &t1, &t3, &mb);
+    return bn_cmp(&y2, &t1) == 0;
+}
+
 /* d * (x, y) for a point given as 0x04 || X || Y; 0 when it is not one */
 static inline int ec_mul_bytes(struct ec_curve *c, const uint8_t *d,
                                const uint8_t *pt, uint32_t ptlen,
@@ -401,7 +443,7 @@ static inline int ec_mul_bytes(struct ec_curve *c, const uint8_t *d,
         bn_from_bytes(&k, d, c->size) < 0 ||
         bn_from_bytes(&x, pt + 1, c->size) < 0 ||
         bn_from_bytes(&y, pt + 1 + c->size, c->size) < 0 ||
-        bn_cmp(&x, &c->p) >= 0 || bn_cmp(&y, &c->p) >= 0)
+        !ec_on_curve(c, &x, &y))
         return 0;
     fp_enter(c, &p.x, &x);
     fp_enter(c, &p.y, &y);
@@ -513,7 +555,8 @@ static inline int ecdsa_verify(struct ec_curve *c, const uint8_t *pub,
     g.infinity = 0;
 
     if (bn_from_bytes(&qx, pub + 1, c->size) < 0 ||
-        bn_from_bytes(&qy, pub + 1 + c->size, c->size) < 0)
+        bn_from_bytes(&qy, pub + 1 + c->size, c->size) < 0 ||
+        !ec_on_curve(c, &qx, &qy))
         return 0;
     fp_enter(c, &q.x, &qx);
     fp_enter(c, &q.y, &qy);

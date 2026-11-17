@@ -250,6 +250,39 @@ def main():
                   "I found no initrd64.img" not in out)
         finally:
             q.close()
+
+        # --- A damaged kernel: a segment whose memory is smaller than
+        # its file. The loader cleared memsz - filesz bytes after it,
+        # which wrapped round to nearly 2^64 - all memory, until the
+        # firmware died. It has to say so and stop instead.
+        shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
+        with open(KERNEL64, "rb") as fh:
+            elf = bytearray(fh.read())
+        phoff, = struct.unpack_from("<Q", elf, 32)
+        phent, phnum = struct.unpack_from("<HH", elf, 54)
+        for i in range(phnum):
+            at = phoff + i * phent
+            kind, = struct.unpack_from("<I", elf, at)
+            filesz, memsz = struct.unpack_from("<QQ", elf, at + 32)
+            if kind == 1 and filesz > 16:
+                struct.pack_into("<Q", elf, at + 40, filesz - 16)
+                break
+        with open(os.path.join(esp, "threados64.bin"), "wb") as fh:
+            fh.write(elf)
+        shutil.copy(OVMF_VARS, nvram)
+        q = Qemu(KERNEL, INITRD, esp=esp, serial=slog,
+                 qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+        try:
+            try:
+                out = q.wait_serial("does not fit its file", timeout=90)
+            except RuntimeError:
+                out = q.serial()
+            check("a kernel segment with less memory than file: the loader "
+                  "says so and stops, rather than clearing memory",
+                  "a segment of the kernel does not fit its file" in out and
+                  "handing the machine" not in out)
+        finally:
+            q.close()
     finally:
         shutil.rmtree(esp, ignore_errors=True)
         for f in (slog, nvram):

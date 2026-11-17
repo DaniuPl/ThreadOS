@@ -588,7 +588,8 @@ static void udp_deliver(uint16_t port, uint32_t from_ip, uint16_t from_port,
     udp_dropped++;                   /* nobody is listening on that port */
 }
 
-static void handle_udp(uint32_t src_ip, const uint8_t *udp, uint16_t len)
+static void handle_udp(uint32_t src_ip, uint32_t dst_ip, const uint8_t *udp,
+                       uint16_t len)
 {
     if (len < 8)
         return;
@@ -597,6 +598,14 @@ static void handle_udp(uint32_t src_ip, const uint8_t *udp, uint16_t len)
     uint16_t ulen = get16(udp + 4);
     if (ulen < 8 || ulen > len)
         return;
+    /* Zero is "no checksum" in IPv4; any other has to add up, the
+       pseudo-header included - a datagram that does not was damaged on
+       the way or made up, and is not handed to anybody */
+    if (get16(udp + 6) &&
+        net_transport_checksum(src_ip, dst_ip, IP_PROTO_UDP, udp, ulen)) {
+        rx_dropped++;
+        return;
+    }
     udp_deliver(dst_port, src_ip, src_port, udp + 8, (uint16_t)(ulen - 8));
 }
 
@@ -670,8 +679,10 @@ static void handle_arp(const uint8_t *a, uint16_t len)
 static void handle_icmp(uint32_t src_ip, const uint8_t *src_mac, uint8_t ttl,
                         const uint8_t *icmp, uint16_t len)
 {
-    if (len < 8)
+    if (len < 8 || checksum(icmp, len)) {
+        rx_dropped++;                /* damaged, or made up */
         return;
+    }
 
     if (icmp[0] == ICMP_ECHO_REQUEST) {
         /* Somebody is pinging ThreadOS - we bounce the packet back as an echo reply */
@@ -705,16 +716,35 @@ static void handle_ip(const uint8_t *ip, uint16_t len, const uint8_t *src_mac)
     uint16_t total = get16(ip + 2);
     if (ihl < 20 || total < ihl || total > len)
         return;
+    /* The header's own checksum: summed with it, a whole header comes
+       to zero. One that does not was damaged on the way, or made up. */
+    if (checksum(ip, ihl)) {
+        rx_dropped++;
+        return;
+    }
+    /* A fragment - more to come, or a piece from further in. ThreadOS
+       does not reassemble, and the first bytes of a later piece are not
+       a TCP or UDP header, whatever they look like; a whole datagram
+       is all that is taken. Nobody sends us fragments who could not
+       send the datagram whole: TCP's segments fit a frame, and so does
+       everything ThreadOS asks for over UDP. */
+    if (get16(ip + 6) & 0x3FFF) {    /* More Fragments, or an offset */
+        rx_dropped++;
+        return;
+    }
 
     uint32_t dst_ip = get32(ip + 16);
     if (dst_ip != my_ip && dst_ip != 0xFFFFFFFFu)
         return;                      /* not for us */
 
-    if (ip[9] == IP_PROTO_ICMP)
+    /* An echo request to everybody is answered by nobody: answering it
+       is how one forged ping becomes a reply from every machine on the
+       network, all aimed at its victim (a smurf attack) */
+    if (ip[9] == IP_PROTO_ICMP && dst_ip == my_ip)
         handle_icmp(get32(ip + 12), src_mac, ip[8], ip + ihl,
                     (uint16_t)(total - ihl));
     else if (ip[9] == IP_PROTO_UDP)
-        handle_udp(get32(ip + 12), ip + ihl, (uint16_t)(total - ihl));
+        handle_udp(get32(ip + 12), dst_ip, ip + ihl, (uint16_t)(total - ihl));
     else if (ip[9] == IP_PROTO_TCP)
         tcp_input(get32(ip + 12), dst_ip, src_mac, ip + ihl,
                   (uint16_t)(total - ihl));

@@ -470,15 +470,28 @@ static UINT64 load_elf(struct blob *img)
     const UINT8 *base = img->data;
     const struct elf64_hdr *eh = (const struct elf64_hdr *)base;
 
-    if (eh->ident[0] != 0x7F || eh->ident[1] != 'E' || eh->ident[2] != 'L' ||
+    if (img->size < sizeof(*eh) ||
+        eh->ident[0] != 0x7F || eh->ident[1] != 'E' || eh->ident[2] != 'L' ||
         eh->ident[3] != 'F' || eh->ident[4] != 2)
         fail(L"this is not an ELF64", 0);
+    /* The file's numbers are checked before they are used - as
+       subtractions, so that none of them wraps round: a kernel file
+       that is damaged (or not ours) should stop the loader with a
+       message, not have it copy from outside the file or clear memory
+       until the firmware dies (memsz below filesz would). */
+    if (eh->phentsize != sizeof(struct elf64_phdr) || eh->phoff > img->size ||
+        (UINT64)eh->phnum * sizeof(struct elf64_phdr) > img->size - eh->phoff)
+        fail(L"the kernel's program headers are not in the file", 0);
 
     for (UINT16 i = 0; i < eh->phnum; i++) {
         const struct elf64_phdr *ph = (const struct elf64_phdr *)
             (base + eh->phoff + (UINTN)i * eh->phentsize);
         if (ph->type != PT_LOAD || !ph->memsz)
             continue;
+        if (ph->filesz > ph->memsz || ph->offset > img->size ||
+            ph->filesz > img->size - ph->offset ||
+            ph->paddr + ph->memsz < ph->paddr)
+            fail(L"a segment of the kernel does not fit its file", ph->paddr);
 
         /* The place the segment asks for has to be taken from the
            firmware first, or it may be holding something of its own

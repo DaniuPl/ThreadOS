@@ -2038,7 +2038,7 @@ class Qemu:
                  uefi=None, esp=None, disk2=None, audio=None, usbdisk=None,
                  usbhub=False, behind_hub=False, usbnic=False,
                  nic="rtl8139", cpus=None, devices=None, edid=None,
-                 cpu_model=None):
+                 cpu_model=None, rawnet=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".vga")
         # The kernel is Multiboot 2, which QEMU's -kernel does not load:
@@ -2073,9 +2073,23 @@ class Qemu:
                # The network card in user mode: the gateway 10.0.2.2
                # answers ARP and ICMP echo, so 'ping' can be tested with
                # no network on the host at all
-               "-netdev",
-               "user,id=n0" + (f",hostfwd=tcp::{hostfwd_port}-:{hostfwd_port}"
-                               if hostfwd_port else ""),
+               # rawnet=(ours, theirs): the card on a hub with the user
+               # network (DHCP and all, as usual) and a UDP socket of the
+               # test's - every frame the system sends reaches the port
+               # 'theirs' on the host as well, and a frame sent to the
+               # port 'ours' reaches the card as if off the wire
+               *(["-netdev", "hubport,id=n0,hubid=0",
+                  "-netdev", "user,id=u0",
+                  "-netdev", "hubport,id=h1,hubid=0,netdev=u0",
+                  "-netdev", "dgram,id=d0,local.type=inet,"
+                             "local.host=127.0.0.1,local.port=%d,"
+                             "remote.type=inet,remote.host=127.0.0.1,"
+                             "remote.port=%d" % rawnet,
+                  "-netdev", "hubport,id=h2,hubid=0,netdev=d0"]
+                 if rawnet else
+                 ["-netdev",
+                  "user,id=n0" + (f",hostfwd=tcp::{hostfwd_port}-:"
+                                  f"{hostfwd_port}" if hostfwd_port else "")]),
                # The network card: RTL8139 by default, with e1000 and
                # VirtIO available to the tests. The netdev layer chooses
                # the driver, not the network code.

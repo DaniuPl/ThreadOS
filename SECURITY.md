@@ -1,7 +1,7 @@
 # Security
 
-ThreadOS is a hobby operating system. It has had one outside review of
-its kernel (November 2026, below) and no formal audit, and it should not
+ThreadOS is a hobby operating system. It has had two outside reviews
+(November 2026, below) and no formal audit, and it should not
 hold anything you could not afford to lose. Still, some of it
 exists precisely to keep things out - privilege levels, page
 protections, certificate checking, signed updates - and a hole in any of
@@ -45,14 +45,21 @@ the fix if you want it.
   executable: the ELF loader refuses such a segment (W^X), and mmap
   never makes one. On processors that have SMEP the kernel turns it on,
   so it cannot be made to run a program's pages.
+- **The network.** A frame whose IPv4, ICMP, UDP or TCP checksum does
+  not add up is dropped before anything in it is believed, and so is a
+  fragment; a ping to the broadcast address goes unanswered; TCP's
+  first sequence numbers are random.
+- **Disks.** A filesystem reads and writes only its own blocks, and
+  nothing past a device's end is touched, whatever a damaged or foreign
+  disk's tables say.
 - **Boot.** The UEFI loader is not signed for Secure Boot; it has to be
   turned off to start ThreadOS.
 
-## The November 2026 review
+## The November 2026 reviews
 
-A static review of the x86-64 kernel at `c7e5d53` listed fifteen
-findings. Fixed, each with an attempt in `user64/hostile64.c` that
-`scripts/tests/t_hostile.py` holds the kernel to: a size check in
+The first, of the x86-64 kernel's system calls at `c7e5d53`, listed
+fifteen findings. Fixed, each with an attempt in `user64/hostile64.c`
+that `scripts/tests/t_hostile.py` holds the kernel to: a size check in
 `SYS64_BG_PREVIEW` that multiplied in 32 bits; ELF offsets that could
 wrap round 2^64 (program headers, segments, and the dynamic linker's
 section tables); segments both writable and executable; signal handlers
@@ -60,12 +67,29 @@ not checked to be the program's code; `kill` comparing privilege levels
 but not accounts; installing from a stick by any program; a password
 lock that never grew; and SMEP, now on where the processor has it.
 
+The second went through the rest of the tree. Fixed, each with a test
+that fails without it: the network stack's missing checksum checks,
+fragments taken whole, broadcast pings answered and guessable TCP
+sequence numbers (`t_netcheck`); TFS blocks past the filesystem and a
+FAT directory that loops for ever (`t_fsbounds`); a kernel file that
+made threadboot clear all memory (`t_threadboot`); ECDSA keys not
+checked to be on the curve, under which a forged signature passed
+(`certtest`); impossible kmalloc sizes; and the ARM64 kernel's
+executable RAM (`t_arm64core`). Its claims about the PNG decoder, the
+update client's buffer, the number of pipes and the timing of modular
+exponentiation did not hold against the code.
+
 Known and not changed, as design rather than slips: the desktop, the
 network stack and the drivers run in the kernel; SMAP, KPTI and KASLR
 are not used, and the kernel reads programs' memory directly, under its
 big lock; shared memory and semaphores are found by key, without an
-owner; the camera, the microphone, the clipboard and the network are
-any program's to open (the bar shows when the camera or the microphone
-is on); passwords are PBKDF2-SHA1 with 4096 rounds; and an update's
+owner, and futexes in shared memory are keyed by each process's address
+space, so they do not wake across processes; the camera, the
+microphone, the clipboard and the network are any program's to open
+(the bar shows when the camera or the microphone is on); passwords and
+PINs are PBKDF2-SHA1 with 4096 rounds (a PIN stops being taken after
+five wrong ones); the swap file is not encrypted; elliptic-curve
+multiplication is not constant-time (its secret is one TLS handshake's
+key); threadboot is not signed for Secure Boot; and an update's
 signature is checked by the update program, which only an admin can
 start, not by the kernel.

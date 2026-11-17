@@ -73,6 +73,10 @@ def main():
               "('%s')" % (what, said_line(said, "Heap: 2000")),
               "Heap: 2000 allocations, 0 refused, 0 overlapping, 0 bytes "
               "still in use after freeing them all" in said.splitlines())
+        check("[%s] and refuses sizes its arithmetic would wrap on, and "
+              "more than it has ('%s')"
+              % (what, said_line(said, "Heap: impossible")),
+              "Heap: impossible sizes given 0 times of 3" in said.splitlines())
 
         want = "Cores online: %d (started through PSCI, %s)" % (cores, conduit)
         check("[%s] every core comes up ('%s')"

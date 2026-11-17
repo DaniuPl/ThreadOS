@@ -104,14 +104,24 @@ static uint32_t fs_base;
 
 /* A whole block in one command: with AHCI that is a single DMA
    transfer instead of two separate per-sector requests */
+/* Every block the filesystem touches goes through these two, and every
+   block number in an inode or a pointer block is the disk's own word:
+   one past the filesystem's end would read or write whatever lies
+   behind it - another partition, the end of somebody else's disk - and
+   a large one wraps the 32-bit LBA round to the front, where the
+   partition table is. Only blocks of the filesystem itself. */
 static int block_read(uint32_t block, void *buf)
 {
+    if (block >= total_blocks)
+        return -1;
     return blk_read(fs_base + block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK,
                     buf);
 }
 
 static int block_write(uint32_t block, const void *buf)
 {
+    if (block >= total_blocks)
+        return -1;
     return blk_write(fs_base + block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK,
                      buf);
 }

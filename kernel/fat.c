@@ -34,6 +34,7 @@
 #define SECTOR   512
 #define ENTRY    32
 #define PER_SEC  (SECTOR / ENTRY)
+#define DIR_MAX_ENTRIES 65536u
 
 #define ATTR_RO     0x01
 #define ATTR_LABEL  0x08
@@ -390,6 +391,12 @@ static uint32_t dir_sector(uint32_t clus, uint32_t n, int grow)
 {
     if (clus == 0 && v.type != 32)
         return n < v.root_sectors ? v.root_start + n : 0;
+    /* A directory holds at most 65536 entries (the FAT specification):
+       past that the chain is not a directory's - and one that loops
+       back on itself, with no end-of-directory entry in it, would have
+       the scan below go round for ever, in the kernel */
+    if (n >= DIR_MAX_ENTRIES / PER_SEC)
+        return 0;
 
     uint32_t c = clus ? clus : v.root_clus;
     uint32_t steps = n / v.sec_per_clus;

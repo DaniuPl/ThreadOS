@@ -81,7 +81,11 @@ static struct spinlock lock = SPINLOCK_FREE;
 
 void *kmalloc(size_t size)
 {
-    if (!size)
+    /* More than the whole heap can never be given - and refused now,
+       before the arithmetic below: a size near the top of size_t
+       rounds up to zero, and size plus a header wraps to something
+       every block passes */
+    if (!size || size > heap_size)
         return (void *)0;
     size = ALIGN_UP(size, 8);
 

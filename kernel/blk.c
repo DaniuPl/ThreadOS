@@ -268,9 +268,18 @@ int blk_write(uint32_t lba, uint32_t count, const void *buf)
     return 0;
 }
 
+/* Nothing past the device's end, whoever asks: what lies past it is
+   not this disk's, and a controller that does not check (an old ATA
+   one, a cheap USB bridge) would wrap or write somewhere else */
+static int in_device(uint32_t lba, uint32_t count)
+{
+    uint32_t n = devs[cur].sectors;
+    return n && lba < n && count <= n - lba;
+}
+
 static int read_near(uint32_t lba, uint32_t count, void *buf)
 {
-    if (cur < 0 || devs[cur].gone)
+    if (cur < 0 || devs[cur].gone || !in_device(lba, count))
         return -1;
     point();
     if (devs[cur].kind == BLK_NVME)
@@ -288,7 +297,7 @@ static int read_near(uint32_t lba, uint32_t count, void *buf)
 
 static int write_near(uint32_t lba, uint32_t count, const void *buf)
 {
-    if (cur < 0 || devs[cur].gone)
+    if (cur < 0 || devs[cur].gone || !in_device(lba, count))
         return -1;
     point();
     if (devs[cur].kind == BLK_NVME)

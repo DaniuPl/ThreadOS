@@ -31,10 +31,11 @@ from ptest import check, summary, make_iso64, no64
 
 # The initrd lies in memory beside the kernel, and it grows: at 16 MiB
 # GRUB could no longer load it at all, and the machine came up with no
-# programs - and again at 32, once JavaScriptCore was in it. So the
-# machine is bigger, and what the program asks for is reckoned from
-# what 'mem' says is free once the system is up.
-RAM_MIB = 64
+# programs - and again at 32, once JavaScriptCore was in it, and at 64
+# once the web engine's libraries were (54 MB). So the machine is
+# bigger, and what the program asks for is reckoned from what 'mem'
+# says is free once the system is up.
+RAM_MIB = 128
 # How far beyond the free memory the program reaches: every page of it
 # has to go out to the swap file (8 MiB) and back, with room to spare
 OVER_MIB = 5

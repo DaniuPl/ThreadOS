@@ -25,7 +25,11 @@
  * one person's program can kill another's. 'hostile64 guess PASSWORD'
  * guesses wrong three times, waits out the lock, guesses wrong three
  * times more, and gives the right password six seconds later and then
- * eleven: a lock that grows refuses the first.
+ * eleven: a lock that grows refuses the first. 'hostile64 listen PORT
+ * SECONDS' listens on a TCP port for that long, so that the test can
+ * read the kernel's first sequence numbers off its SYN-ACKs; and
+ * 'hostile64 conns N IP PORT' opens N connections at once and says how
+ * many it got.
  */
 
 #include "usys64.h"
@@ -260,6 +264,43 @@ void _start(int argc, char **argv)
         print(", 11 s into it: ");
         print_signed(late);
         print("\n");
+        sys_exit(0);
+    }
+    if (argc > 3 && same(argv[1], "listen")) {
+        int64_t port = 0, secs = 0;
+        for (const char *s = argv[2]; *s >= '0' && *s <= '9'; s++)
+            port = port * 10 + (*s - '0');
+        for (const char *s = argv[3]; *s >= '0' && *s <= '9'; s++)
+            secs = secs * 10 + (*s - '0');
+        int64_t sock = syscall64(SYS64_TCP_LISTEN, port, 0);
+        print("[hostile64] listening on ");
+        print_signed(port);
+        print(sock < 0 ? ": refused\n" : "\n");
+        sys_sleep((uint32_t)secs * 1000);
+        print("[hostile64] listened\n");
+        sys_exit(0);
+    }
+    if (argc > 4 && same(argv[1], "conns")) {
+        int64_t want = 0, port = 0, got = 0;
+        for (const char *s = argv[2]; *s >= '0' && *s <= '9'; s++)
+            want = want * 10 + (*s - '0');
+        for (const char *s = argv[4]; *s >= '0' && *s <= '9'; s++)
+            port = port * 10 + (*s - '0');
+        struct udp_info o;
+        o.sock = 0;
+        o.ip = (uint32_t)uparse_ip(argv[3]);
+        o.port = (uint16_t)port;
+        o._padding = 0;
+        o.timeout = 5000;
+        for (int64_t i = 0; i < want; i++)
+            if (sys_tcp_connect(&o) >= 0)
+                got++;
+        print("[hostile64] connections open at once: ");
+        print_signed(got);
+        print(" of ");
+        print_signed(want);
+        print("\n");
+        sys_sleep(1000);
         sys_exit(0);
     }
     if (argc > 2 && same(argv[1], "kill")) {

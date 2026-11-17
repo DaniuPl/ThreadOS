@@ -27,8 +27,13 @@
 #include "include/printk.h"
 #include "include/string.h"
 #include "include/io.h"
+#include "include/random.h"
+#include "include/heap.h"
 
-#define TCP_CONNS     6
+/* Every connection of every program - a web page opens several at once,
+   and a listener's half-open ones (at most ACCEPT_QUEUE) take room too;
+   six was a page and a half. About 10 KiB each. */
+#define TCP_CONNS     32
 #define RX_BUF        8192
 #define TX_BUF        1460      /* one data segment at a time */
 #define ACCEPT_QUEUE  4
@@ -149,6 +154,18 @@ static void tcp_reap(void)
         if (conns[i].used && conns[i].owner >= 0 &&
             !task_alive(conns[i].owner))
             conns[i].used = 0;
+}
+
+/* The first sequence number of a connection. It has to be unguessable:
+   whoever can guess it can send a segment the connection takes as its
+   own - an RST that ends it, or data in the middle of it - without
+   seeing a byte of it. It used to be the uptime times a constant, and
+   the uptime is no secret. */
+static uint32_t initial_seq(void)
+{
+    uint32_t isn;
+    random_bytes(&isn, sizeof(isn));
+    return isn;
 }
 
 static struct tcp_conn *conn_alloc(void)
@@ -298,7 +315,7 @@ static void accept_syn(struct tcp_conn *lis, uint32_t src_ip,
                                             is no point asking ARP about
                                             somebody who has just spoken */
     c->rcv_nxt = get32(seg + 4) + 1;
-    c->snd_una = c->snd_nxt = pit_ticks() * 2654435761u;
+    c->snd_una = c->snd_nxt = initial_seq();
     c->snd_wnd = get16(seg + 14);
     c->state = TCP_SYN_RECEIVED;
     c->pending_flags = SYN;
@@ -323,8 +340,13 @@ static void deliver_data(struct tcp_conn *c, const uint8_t *data, uint16_t len)
 void tcp_input(uint32_t src_ip, uint32_t dst_ip, const uint8_t *src_mac,
                const uint8_t *seg, uint16_t len)
 {
-    (void)dst_ip;
     if (len < 20)
+        return;
+    /* The checksum, over the pseudo-header too: a segment that does not
+       add up is dropped before anything in it is believed - ports,
+       numbers, flags. Summed with its own checksum a whole segment
+       comes to zero. */
+    if (net_transport_checksum(src_ip, dst_ip, 6, seg, len))
         return;
 
     uint16_t src_port = get16(seg + 0);
@@ -489,7 +511,7 @@ int tcp_connect_start(uint32_t ip, uint16_t port, int owner)
     c->remote_ip = ip;
     c->remote_port = port;
     memcpy(c->remote_mac, mac, 6);
-    c->snd_una = c->snd_nxt = pit_ticks() * 2654435761u;
+    c->snd_una = c->snd_nxt = initial_seq();
     c->state = TCP_SYN_SENT;
     c->pending_flags = SYN;
     c->snd_wnd = MSS;
@@ -657,12 +679,20 @@ int tcp_recv(int conn, int owner, void *buf, uint16_t max, uint32_t timeout_ms)
     if (!c)
         return -1;
 
+    /* The data goes into the program's buffer only with interrupts on:
+       the page was checked when the call came in, but this waits, and
+       a page can be swapped out meanwhile - bringing it back in with
+       interrupts off would wait for a disk that cannot answer. So it is
+       taken under the lock into a buffer of the kernel's own first. */
+    uint8_t *tmp = kmalloc(max ? max : 1);
+    if (!tmp)
+        return -1;
     uint32_t waited = 0;
     for (;;) {
         uint32_t irq = irq_save();
         if (c->rx_len) {
             int n = c->rx_len < max ? c->rx_len : max;
-            memcpy(buf, c->rx, n);
+            memcpy(tmp, c->rx, n);
             if (n < c->rx_len)
                 memcpy(c->rx, c->rx + n, c->rx_len - n);
             c->rx_len -= n;
@@ -674,6 +704,8 @@ int tcp_recv(int conn, int owner, void *buf, uint16_t max, uint32_t timeout_ms)
             int announce = (c->adv_wnd < MSS && rx_window(c) >= MSS &&
                             c->state == TCP_ESTABLISHED);
             irq_restore(irq);
+            memcpy(buf, tmp, n);
+            kfree(tmp);
             if (announce)
                 tcp_out(c, ACK, c->snd_nxt, 0, 0);
             return n;
@@ -682,16 +714,19 @@ int tcp_recv(int conn, int owner, void *buf, uint16_t max, uint32_t timeout_ms)
         int failed = c->error;
         irq_restore(irq);
 
-        if (failed)
-            return -1;
-        if (done)
-            return 0;                    /* end of stream */
-        if (waited >= timeout_ms)
-            return -1;
-        task_sleep(10);
-        waited += 10;
-        if (task_killed() || !c->used)
-            return -1;
+        int out = failed ? -1 : done ? 0 : 1;
+        if (out == 1 && waited >= timeout_ms)
+            out = -1;
+        if (out == 1) {
+            task_sleep(10);
+            waited += 10;
+            if (task_killed() || !c->used)
+                out = -1;
+        }
+        if (out != 1) {
+            kfree(tmp);
+            return out;                  /* 0 is the end of the stream */
+        }
     }
 }
 

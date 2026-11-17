@@ -108,6 +108,26 @@ static void selftest_abort(void)
     printk("Read address 0x10 without a fault (0x%x)\n", v);
 }
 
+/* A 'ret' written into the last page of RAM, made visible to the
+   instruction side, and called: outside the kernel's gigabyte RAM may
+   not be run (mmu.c), so this has to end in an instruction abort. With
+   one gigabyte there is no RAM outside the kernel's to try. */
+static void selftest_xn(uint64_t ram_base, uint64_t ram_size)
+{
+    uint64_t last = ram_base + ram_size - 4096;
+    if (last / (1UL << 30) == (uint64_t)(uintptr_t)selftest_xn / (1UL << 30)) {
+        printk("No RAM outside the kernel's gigabyte to try running\n");
+        return;
+    }
+    volatile uint32_t *code = (volatile uint32_t *)(uintptr_t)last;
+    code[0] = 0xd65f03c0;                /* ret */
+    __asm__ volatile("dc cvau, %0\n dsb ish\n ic ivau, %0\n dsb ish\n isb"
+                     : : "r"(last) : "memory");
+    printk("Running a data page at 0x%lx\n", last);
+    ((void (*)(void))(uintptr_t)last)();
+    printk("Ran code from a data page - nothing stopped it\n");
+}
+
 /* Blocks of many sizes, each filled with its own byte and read back
    whole before any is freed: two blocks handed out over each other
    would overwrite one another's byte. Ten rounds, freed in a different
@@ -145,6 +165,17 @@ static void heap_selftest(void)
     printk("Heap: %u allocations, %u refused, %u overlapping, %u bytes "
            "still in use after freeing them all\n", N * ROUNDS, missing,
            bad, heap_used_bytes() - before);
+    /* Sizes the arithmetic could wrap on - near the top of size_t,
+       rounding up to 8 makes 0 - and one just past the whole heap:
+       none of them can be had (kernel/heap.c) */
+    unsigned given = 0;
+    if (kmalloc((size_t)-3))
+        given++;
+    if (kmalloc((size_t)-64))
+        given++;
+    if (kmalloc((size_t)heap_total_bytes() + 1))
+        given++;
+    printk("Heap: impossible sizes given %u times of 3\n", given);
 }
 
 /* Threads that never give the processor up of their own accord: only
@@ -270,6 +301,8 @@ void kmain(uint64_t x0)
         selftest_brk();
     if (has_word(fi.bootargs, "selftest=abort"))
         selftest_abort();
+    if (has_word(fi.bootargs, "selftest=xn"))
+        selftest_xn(fi.mem_base, fi.mem_total);
 
     sched_init();
     if (gic_init(fi.gic_version, fi.gic_dist, fi.gic_cpu) < 0) {

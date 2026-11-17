@@ -50,7 +50,10 @@ static inline int rsa_verify_pkcs1_sha256(const uint8_t *mod, uint32_t modlen,
                                           uint32_t siglen,
                                           const uint8_t *hash)
 {
-    static uint8_t em[RSA_MAX_BYTES];
+    /* On the stack, not static: two threads checking two certificates
+       at once would each have the other's numbers half written into
+       theirs */
+    uint8_t em[RSA_MAX_BYTES];
 
     if (rsa_public(mod, modlen, exp, sig, siglen, em) < 0)
         return 0;
@@ -117,9 +120,9 @@ static inline int rsa_verify_pss_sha256(const uint8_t *mod, uint32_t modlen,
                                         uint32_t siglen, const uint8_t *hash,
                                         uint32_t modbits)
 {
-    static uint8_t em[RSA_MAX_BYTES];
-    static uint8_t db[RSA_MAX_BYTES];
-    static uint8_t mask[RSA_MAX_BYTES];
+    uint8_t em[RSA_MAX_BYTES];       /* on the stack: see above */
+    uint8_t db[RSA_MAX_BYTES];
+    uint8_t mask[RSA_MAX_BYTES];
     uint8_t mprime[8 + 32 + 32];
     uint8_t hprime[32];
 

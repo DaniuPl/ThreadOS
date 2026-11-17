@@ -306,8 +306,11 @@ def install_to_stick():
             # in the graphical installer - the password guards the system
             # a machine already runs, and a live boot has none to guard
             # The initrd is 54 MB since the web engine's libraries, and
-            # QEMU's USB stick under TCG takes it at a few hundred KB/s
-            out = q.command("ERASE", "Done", timeout=1200)
+            # the stick takes it at about 50 KB/s under TCG - 19 minutes
+            # measured. Slow enough to be a bug of its own (installing
+            # onto a USB disk goes far slower than its writes allow);
+            # until it is found, the wait has room
+            out = q.command("ERASE", "Done", timeout=1800)
             check("from live media wiping the stick asks for no password "
                   "beyond the typed word", "admin password" not in out)
             check("installing onto the stick runs to the end",

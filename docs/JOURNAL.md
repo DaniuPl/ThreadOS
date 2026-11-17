@@ -8761,3 +8761,90 @@ works and is checked by `make test`.
       lock and taken after it, SMEP on both cores of a 'max' processor
       as QEMU reads CR4, programs still running there, and the kernel
       saying it has no SMEP on QEMU's default processor.
+
+- [x] **The full review: the network, the disks, the loaders, the
+      cryptography** (kernel/net.c, tcp.c, blk.c, fs.c, fat.c, heap.c,
+      boot/efi/efiboot.c, kernelarm64/mmu.c, kmain.c, linker.ld,
+      user/uecdsa.h, ursa.h, certtest.c, certdata.h,
+      scripts/mkcertdata.py, user64/hostile64.c, scripts/ptest.py,
+      scripts/tests/t_netcheck.py, t_fsbounds.py, t_threadboot.py,
+      t_arm64core.py, t_arm64threads.py, t_usbdisk.py,
+      tests/fuzz/kernel_harness.c, tests/fuzz/kstub/include/,
+      scripts/fuzz_parsers.py, SECURITY.md)
+      A second, wider review (twenty-five findings) went past the system
+      calls. Read against the code, these were real and are fixed:
+      - The network believed every frame. IPv4 header, ICMP, UDP and TCP
+        checksums are checked now (the pseudo-header included), and a
+        frame that does not add up is dropped first; fragments are
+        dropped, since nothing is reassembled and a later piece's first
+        bytes are not a header; a ping to the broadcast address is not
+        answered (a smurf amplifier otherwise). TCP's first sequence
+        number was the uptime times a constant - guessable, and with it
+        an RST or data that a connection takes as its own; it comes from
+        the kernel's ChaCha20 generator. Six connections for the whole
+        system become 32, and tcp_recv copies into the program's buffer
+        only with interrupts on (through a kernel buffer), since that
+        page may have been swapped out while it waited.
+      - TFS read and wrote any block an inode named - one past the
+        filesystem is another partition, and a large one wraps the
+        32-bit LBA round to the partition table. Only blocks of the
+        filesystem now, and the block layer refuses anything past the
+        device's end, whoever asks.
+      - A FAT directory whose chain loops back on itself, with no
+        end-of-directory entry, had the kernel scan it for ever; a
+        directory holds at most 65536 entries, and the scan stops there.
+      - kmalloc of a size near the top of size_t rounded up to zero and
+        was given; anything over the whole heap is refused before the
+        arithmetic.
+      - threadboot cleared memsz - filesz bytes after a segment: with
+        memsz below filesz that wrapped to nearly 2^64 and the loader
+        cleared memory until the firmware died. The kernel file's
+        headers and segments are checked against the file first.
+      - ECDSA never checked that a public key lies on the curve. The
+        formulas do not use b, so a key (x, 0) - order 2 on a curve with
+        another b - cancels out of the check for half of all signatures:
+        a forgery anybody can make, verified here against the old code.
+        Keys and ECDH peers are now checked to be on P-256 or P-384.
+      - rsa_verify kept its scratch in static buffers; on the stack now.
+      - The ARM64 kernel ran with all RAM executable. RAM is never
+        executable at EL0 now, and at EL1 only in the kernel's own
+        gigabyte.
+      Not real, or not as described: PNG's IDAT sum is checked against
+      the buffer before it is used (and cannot outgrow the file); the
+      update client's names are cut to 31 characters and its buffer has
+      room; pipes are socket-pair ends, 512 pairs, not 8; bn_modexp only
+      ever has public exponents. Left as they are and written down in
+      SECURITY.md: futexes in shared memory keyed by address space, swap
+      unencrypted, PBKDF2-SHA1 with 4096 rounds (the PIN stops after
+      five tries), ec_mul not constant-time (its secret is one
+      handshake's), no Secure Boot.
+      Tests, each failing without its fix:
+      - t_netcheck puts the card on a hub with the user network and a
+        UDP socket of the test's (ptest's rawnet), and sends frames
+        made byte by byte: a well-made ping answered; a wrong IP header
+        checksum, a wrong ICMP checksum, a first and a later fragment
+        and a broadcast ping not; a well-made one answered again after
+        them; a SYN to a closed port answered with an RST, the same with
+        a wrong TCP checksum not; five SYN-ACKs from a listener whose
+        sequence numbers, undone by the old constant's inverse, are not
+        a few thousand ticks; ten connections at once.
+      - t_fsbounds: a 40 MiB disk with TFS on its first 32 MiB, a marker
+        past the filesystem, a file whose first block the host points
+        at it - cat shows no marker; and a FAT32 stick made by mtools
+        whose directory's cluster points at itself, full of deleted
+        entries - fatls ends and the system answers.
+      - t_threadboot: a kernel file with a segment smaller in memory
+        than in the file is refused in words.
+      - certtest (t_tls64): the off-curve key and its forged signature,
+        made by scripts/mkcertdata.py's own arithmetic, are refused.
+      - t_arm64core: with 2 GiB, a 'ret' written into the last page of
+        RAM and called ends in an instruction abort, a permission fault;
+        t_arm64threads: the heap gives none of three impossible sizes.
+      make fuzz's packet harness gives every frame twice - as it came,
+        and with its checksums made right - so the corruption still
+        reaches the code past them; its seeds carry real checksums.
+      (Also seen: installing onto a USB stick in QEMU now writes 59 MB
+      at about 50 KB/s - 19 minutes. t_usbdisk waits up to 30; why it is
+      that slow is a task of its own. And t_swap64's machine grows to
+      128 MiB: with the 54 MB initrd its 64 MiB no longer held the
+      programs, and 'run swaptest64' found nothing to run.)
