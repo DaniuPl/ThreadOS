@@ -18,12 +18,19 @@ FLAGS="-m64 -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
 -fno-asynchronous-unwind-tables -nostdinc -isystem $LIBS/include \
 -isystem $MUSL/include -isystem $(gcc -print-file-name=include)"
 
-# A question about the compiler itself is the host gcc's to answer
+# A question about the compiler itself is the host gcc's to answer -
+# except where libraries are looked for, which a build system (meson)
+# asks to find one by name: ThreadOS's own come first, so that what it
+# finds is never the host's (a glibc build of libatomic, say)
 link=1
 for a in "$@"; do
     case "$a" in
+    -print-search-dirs|--print-search-dirs)
+        gcc -print-search-dirs |
+            sed "s|^libraries: =|libraries: =$LIBS/lib:$MUSL/lib:|"
+        exit 0 ;;
     -c|-S|-E|-M|-MM) link=0 ;;
-    --version|-v|-dumpversion|-dumpmachine|-dumpfullversion|-print-*)
+    --version|-v|-dumpversion|-dumpmachine|-dumpfullversion|-print-*|--print-*)
         exec gcc "$@" ;;
     esac
 done
@@ -31,6 +38,25 @@ done
 if [ $link = 0 ]; then
     exec gcc $FLAGS "$@"
 fi
+
+# A shared library or module: nothing on ThreadOS can load one (a musl
+# program is static, with no dynamic loader), and a build system that
+# makes one anyway - glib-networking makes its TLS module so, and its
+# static library out of the module's objects - gets an empty file in
+# its place
+for a in "$@"; do
+    case "$a" in
+    -shared)
+        out=a.out
+        prev=
+        for b in "$@"; do
+            [ "$prev" = -o ] && out=$b
+            prev=$b
+        done
+        : > "$out"
+        exit 0 ;;
+    esac
+done
 exec gcc $FLAGS -static -no-pie -nostdlib -Wl,--build-id=none \
     -Wl,-z,max-page-size=0x1000 -T "$REPO/libc/libc64.ld" \
     -L"$LIBS/lib" -L"$MUSL/lib" "$MUSL/lib/crt1.o" "$MUSL/lib/crti.o" \

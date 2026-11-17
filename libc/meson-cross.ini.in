@@ -15,6 +15,7 @@ pkg-config = 'pkg-config'
 
 [built-in options]
 default_library = 'static'
+prefer_static = true
 b_staticpic = false
 b_pie = false
 

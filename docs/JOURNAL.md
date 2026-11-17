@@ -8571,3 +8571,56 @@ works and is checked by `make test`.
       same archives, and one of ours for FreeType - a page's fonts are
       untrusted, and FreeType's archive has no fuzzers - every face
       opened, glyphs loaded hinted and not, rendered, kerned.
+
+- [x] **The network for the web engine: OpenSSL, nghttp2, libpsl,
+      libsoup and glib-networking** (Makefile, libc/threados-cc.in,
+      libc/meson-cross.ini.in, libc/tests/souptest.c,
+      scripts/tests/t_soup.py, scripts/fuzz_parsers.py,
+      tests/fuzz/openssl_shim.c, tests/fuzz/nghttp2_harness.c)
+      What WPE's network process fetches pages with, each from its
+      release by its own build into BUILD/libs64: OpenSSL 3.5.9 (its
+      Configure; no async jobs, which need ucontext, no secure heap,
+      no engines or programs), nghttp2 1.70.0 (the library alone),
+      libpsl 0.23.1 (meson, the list from its archive built in),
+      libsoup 3.8.1 (meson, over GLib, nghttp2, libpsl and the tree's
+      SQLite) and glib-networking 2.90.1 with its OpenSSL backend.
+      GnuTLS, glib-networking's other backend, would have brought
+      nettle, GMP and libtasn1 along; OpenSSL is one library.
+      Two things in the toolchain had to give. GLib and libsoup ask the
+      linker for -latomic, and with the wrapper's search path the one
+      found was the host's, a glibc build: BUILD/libs64 now has an empty
+      libatomic.a (on x86-64 the compiler does atomics itself), and
+      threados-cc answers -print-search-dirs, in both spellings meson
+      and libtool use, with ThreadOS's directories first. And
+      glib-networking makes a loadable GIO module and its static library
+      out of the module's objects; ThreadOS loads no modules, so a
+      `-shared` link through threados-cc now writes an empty file and
+      the program registers the module itself (g_io_openssl_load(NULL)),
+      the objects position-independent (b_staticpic) as meson wants for
+      a module.
+      t_soup stands up an HTTP server, an HTTPS one with certificates
+      from a CA it makes, one whose certificate names another address
+      and, with Python's h2, an HTTP/2-only one, and runs souptest
+      against them: a page and its type, a megabyte sent in chunks, a
+      gzip body decoded, a redirect followed, a cookie set and sent
+      back, a POST whose length and SHA-256 the server checks, a 404,
+      four requests at once on the main loop; TLS 1.3 to the right
+      server with its certificate's subject and issuer, refused without
+      the CA (unknown CA) and refused for the wrong name; HTTP/2 spoken;
+      the base domains of five hosts, which the test works out itself
+      from the public suffix list in libpsl's archive with its own
+      reading of the rules; SHA-256 and HMAC against Python's hashlib.
+      Each body is said as its length and SHA-256, which the test knows
+      from what its servers sent. (The CA file had to be named by an
+      absolute path for GTlsFileDatabase, and the desktop session's
+      working directory is home, not /.)
+      make fuzz builds the four for the host under ASan and UBSan from
+      the same archives - libsoup against the sanitized GLib it already
+      builds - and runs OpenSSL's own fuzzers for certificates, ASN.1,
+      PEM and both ends of a handshake (the hellos and answers Python's
+      ssl writes, in TLS 1.3 and 1.2), libpsl's three, libsoup's seven
+      (headers of requests and responses, cookies, dates, data: URIs,
+      content sniffing) and one of ours for nghttp2, whose archive has
+      none: a client that has sent a request and reads the input as a
+      server's frames, then a server reading it as a client's, from
+      frames built here with RFC 7541's HPACK examples in them.

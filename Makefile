@@ -675,7 +675,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/bigram.elf \
                $(BUILD)/user64/glibtest.elf \
                $(BUILD)/user64/imgtest.elf $(BUILD)/user64/xmltest.elf \
-               $(BUILD)/user64/fctest.elf \
+               $(BUILD)/user64/fctest.elf $(BUILD)/user64/souptest.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
@@ -850,6 +850,16 @@ $(MESON_CROSS): libc/meson-cross.ini.in
 	sed -e 's|@TOOLCHAIN@|$(abspath $(TOOLCHAIN64))|' \
 	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
 
+# GLib asks for -latomic. On x86-64 the compiler does every atomic
+# operation itself, so ThreadOS's libatomic is empty - and being first
+# in the search, it is the one found, never the host's (a glibc build).
+LIBS64_ATOMIC := $(LIBS64)/lib/libatomic.a
+$(LIBS64_ATOMIC): $(TOS_CC)
+	mkdir -p $(LIBS64)/lib
+	echo > $(BUILD)/libatomic-empty.c
+	$(TOS_CC) -c $(BUILD)/libatomic-empty.c -o $(BUILD)/libatomic-empty.o
+	rm -f $@ && ar rcs $@ $(BUILD)/libatomic-empty.o
+
 LIBS64_ZLIB := $(LIBS64)/lib/libz.a
 $(LIBS64_ZLIB): $(ZLIB_A)
 	mkdir -p $(LIBS64)/include $(LIBS64)/lib/pkgconfig
@@ -900,7 +910,7 @@ GLIB_TAR  := third_party/glib-2.90.1.tar.xz
 GLIB_TREE := $(BUILD)/glib
 GLIB_A    := $(LIBS64)/lib/libglib-2.0.a
 $(GLIB_A): $(GLIB_TAR) $(MESON_CROSS) $(TOS_CC) $(LIBFFI_A) $(PCRE2_A) \
-           $(LIBS64_ZLIB)
+           $(LIBS64_ZLIB) $(LIBS64_ATOMIC)
 	rm -rf $(GLIB_TREE) && mkdir -p $(GLIB_TREE)
 	tar -xf $< -C $(GLIB_TREE) --strip-components=1
 	cd $(GLIB_TREE) && meson setup build \
@@ -1050,6 +1060,134 @@ $(BUILD)/user64/fctest.elf: libc/tests/fctest.c $(FONTCONFIG_A) $(TOS_CC) \
                             | $(BUILD)/user64
 	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs fontconfig freetype2)
+
+# --- The network: OpenSSL, nghttp2, libpsl, libsoup, glib-networking ---
+# OpenSSL: TLS for glib-networking, the one backend of it ThreadOS can
+# build (GnuTLS would bring nettle, GMP and libtasn1). No async (it
+# needs ucontext), no secure heap (mlock and guard pages mean nothing
+# here), no loadable engines or providers; its certificates are where
+# musl's overlay serves the CA bundle, /etc/ssl/cert.pem.
+OPENSSL_TAR := third_party/openssl-3.5.9.tar.gz
+OPENSSL_A   := $(LIBS64)/lib/libssl.a
+$(OPENSSL_A): $(OPENSSL_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/openssl && mkdir -p $(BUILD)/openssl
+	tar -xf $< -C $(BUILD)/openssl --strip-components=1
+	cd $(BUILD)/openssl && ./Configure linux-x86_64 no-shared no-dso \
+	    no-engine no-async no-afalgeng no-secure-memory no-tests no-docs \
+	    no-apps --prefix=$(abspath $(LIBS64)) --libdir=lib \
+	    --openssldir=/etc/ssl CC=$(abspath $(TOS_CC)) \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/openssl build_libs > $(BUILD)/openssl/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/openssl/make.log; exit 1; }
+	$(MAKE) -C $(BUILD)/openssl install_dev > $(BUILD)/openssl/install.log \
+	    2>&1 || { tail -20 $(BUILD)/openssl/install.log; exit 1; }
+
+# nghttp2: HTTP/2's framing, for libsoup - the library alone
+NGHTTP2_TAR := third_party/nghttp2-1.70.0.tar.xz
+NGHTTP2_A   := $(LIBS64)/lib/libnghttp2.a
+$(NGHTTP2_A): $(NGHTTP2_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/nghttp2 && mkdir -p $(BUILD)/nghttp2
+	tar -xf $< -C $(BUILD)/nghttp2 --strip-components=1
+	cd $(BUILD)/nghttp2 && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    --enable-lib-only > configure.log 2>&1 \
+	    || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/nghttp2 install > $(BUILD)/nghttp2/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/nghttp2/make.log; exit 1; }
+
+# libpsl: the public suffix list - which domains a cookie may be set
+# for - with the list from its archive built in, and no IDNA library
+# (GLib turns international names to ASCII before libpsl sees them)
+LIBPSL_TAR := third_party/libpsl-0.23.1.tar.gz
+LIBPSL_A   := $(LIBS64)/lib/libpsl.a
+$(LIBPSL_A): $(LIBPSL_TAR) $(MESON_CROSS) $(TOS_CC)
+	rm -rf $(BUILD)/libpsl && mkdir -p $(BUILD)/libpsl
+	tar -xf $< -C $(BUILD)/libpsl --strip-components=1
+	cd $(BUILD)/libpsl && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Druntime=no -Dbuiltin=true \
+	    -Dtests=false -Ddocs=false \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(BUILD)/libpsl/build > $(BUILD)/libpsl/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(BUILD)/libpsl/ninja.log | head -60; exit 1; }
+	meson install -C $(BUILD)/libpsl/build --no-rebuild --tags devel \
+	    > $(BUILD)/libpsl/install.log 2>&1 \
+	    || { tail -20 $(BUILD)/libpsl/install.log; exit 1; }
+
+# SQLite, the one built above, for libsoup's cookie and HSTS stores
+LIBS64_SQLITE := $(LIBS64)/lib/libsqlite3.a
+$(LIBS64_SQLITE): $(BUILD)/libc64/sqlite3.o $(SQLITE_SRC)/sqlite3.c
+	mkdir -p $(LIBS64)/include $(LIBS64)/lib/pkgconfig
+	rm -f $@ && ar rcs $@ $(BUILD)/libc64/sqlite3.o
+	cp $(SQLITE_SRC)/sqlite3.h $(SQLITE_SRC)/sqlite3ext.h $(LIBS64)/include/
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: SQLite\nDescription: an SQL database engine\nVersion: %s\nLibs: -L$${libdir} -lsqlite3\nCflags: -I$${includedir}\n' \
+	    $(abspath $(LIBS64)) \
+	    $$(sed -n 's/^#define SQLITE_VERSION *"\(.*\)"/\1/p' $(SQLITE_SRC)/sqlite3.h) \
+	    > $(LIBS64)/lib/pkgconfig/sqlite3.pc
+
+# libsoup: HTTP for the engine's network process. Without the parts
+# that need what ThreadOS has not (Kerberos, NTLM's helper program,
+# Brotli and zstd decoding for now) or that are not for it (tests,
+# introspection, documentation).
+LIBSOUP_TAR  := third_party/libsoup-3.8.1.tar.xz
+LIBSOUP_TREE := $(BUILD)/libsoup
+LIBSOUP_A    := $(LIBS64)/lib/libsoup-3.0.a
+$(LIBSOUP_A): $(LIBSOUP_TAR) $(MESON_CROSS) $(TOS_CC) $(GLIB_A) \
+              $(NGHTTP2_A) $(LIBPSL_A) $(LIBS64_SQLITE)
+	rm -rf $(LIBSOUP_TREE) && mkdir -p $(LIBSOUP_TREE)
+	tar -xf $< -C $(LIBSOUP_TREE) --strip-components=1
+	cd $(LIBSOUP_TREE) && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Dgssapi=disabled -Dntlm=disabled \
+	    -Dbrotli=disabled -Dzstd=disabled -Dtls_check=false \
+	    -Dintrospection=disabled -Dvapi=disabled -Ddocs=disabled \
+	    -Ddoc_tests=false -Dtests=false -Dautobahn=disabled \
+	    -Dinstalled_tests=false -Dsysprof=disabled -Dfuzzing=disabled \
+	    -Dpkcs11_tests=disabled \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(LIBSOUP_TREE)/build > $(LIBSOUP_TREE)/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(LIBSOUP_TREE)/ninja.log | head -60; exit 1; }
+	meson install -C $(LIBSOUP_TREE)/build --no-rebuild --tags devel \
+	    > $(LIBSOUP_TREE)/install.log 2>&1 \
+	    || { tail -20 $(LIBSOUP_TREE)/install.log; exit 1; }
+
+# glib-networking: TLS for GIO, through OpenSSL, and proxies from the
+# environment. Its modules are built into a program (static_library,
+# in BUILD/libs64/lib/gio/modules) and registered by it -
+# g_io_openssl_load(NULL) - since nothing loads modules here. It makes
+# a loadable module first and its static library out of the module's
+# objects, so those are position-independent (b_staticpic), and the
+# module itself is the empty file libc/threados-cc leaves.
+GIONET_TAR  := third_party/glib-networking-2.90.1.tar.xz
+GIONET_TREE := $(BUILD)/glib-networking
+GIONET_A    := $(LIBS64)/lib/gio/modules/libgioopenssl.a
+$(GIONET_A): $(GIONET_TAR) $(MESON_CROSS) $(TOS_CC) $(GLIB_A) $(OPENSSL_A)
+	rm -rf $(GIONET_TREE) && mkdir -p $(GIONET_TREE)
+	tar -xf $< -C $(GIONET_TREE) --strip-components=1
+	cd $(GIONET_TREE) && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Db_staticpic=true -Dgnutls=disabled \
+	    -Dopenssl=enabled -Denvironment_proxy=enabled -Dlibproxy=disabled \
+	    -Dgnome_proxy=disabled -Dtests=false -Dinstalled_tests=false \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(GIONET_TREE)/build > $(GIONET_TREE)/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(GIONET_TREE)/ninja.log | head -60; exit 1; }
+	meson install -C $(GIONET_TREE)/build --no-rebuild \
+	    > $(GIONET_TREE)/install.log 2>&1 \
+	    || { tail -20 $(GIONET_TREE)/install.log; exit 1; }
+
+libs64: $(LIBSOUP_A) $(GIONET_A)
+
+# souptest: HTTP, HTTPS and HTTP/2 against t_soup's servers on the host
+$(BUILD)/user64/souptest.elf: libc/tests/souptest.c $(LIBSOUP_A) $(GIONET_A) \
+                              $(TOS_CC) | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
+	    $$($(LIBS64_PC):$(abspath $(LIBS64))/lib/gio/modules/pkgconfig \
+	       pkg-config --cflags --static --libs libsoup-3.0 gioopenssl openssl)
 
 # --- WebKit: JavaScriptCore -------------------------------------------
 # WebKitGTK's release (third_party/README.md), built by its own CMake
@@ -1248,6 +1386,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    imgtest=$(BUILD)/user64/imgtest.elf \
 	    xmltest=$(BUILD)/user64/xmltest.elf \
 	    fctest=$(BUILD)/user64/fctest.elf \
+	    souptest=$(BUILD)/user64/souptest.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
 	    randtest=$(BUILD)/user64/randtest.elf \

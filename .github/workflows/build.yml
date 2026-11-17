@@ -74,8 +74,9 @@ jobs:
           python3 -m pip install --user meson
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           # FreeType and fontTools are what the TrueType test compares
-          # the kernel's glyphs with
-          python3 -m pip install --user freetype-py fonttools
+          # the kernel's glyphs with; h2 is the HTTP/2 server t_soup
+          # stands up for libsoup
+          python3 -m pip install --user freetype-py fonttools h2
 
       - name: Build everything the tests boot
         run: |
@@ -101,7 +102,7 @@ jobs:
       - name: The groups that cover the most ground
         if: github.event_name != 'schedule'
         run: |
-          make test J=2 T=k64core,k64shell,k64proc,k64disk,tfs,arm64boot,arm64core,arm64threads,libc,pthread,sqlite,socket,ipc,glib,images,xml,fontconfig,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,http,tls64,net64,desktop64,files,ginstal,stick,power
+          make test J=2 T=k64core,k64shell,k64proc,k64disk,tfs,arm64boot,arm64core,arm64threads,libc,pthread,sqlite,socket,ipc,glib,images,xml,fontconfig,soup,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,http,tls64,net64,desktop64,files,ginstal,stick,power
 
       - name: Everything, once a night
         if: github.event_name == 'schedule'

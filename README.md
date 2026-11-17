@@ -126,7 +126,7 @@ python3 -m pip install --user meson     # 1.4 or newer, for GLib
 | discs (`iso`, `iso64`) | `grub-pc-bin`, `grub-efi-amd64-bin`, `xorriso`, `mtools` |
 | threadboot (`efi`, `stick`) | `clang`, `lld`, `mtools` |
 | running and testing | `qemu-system-x86`, `ovmf`, `openssl` |
-| optional tests and tools | Python `freetype-py` and `fonttools` (font tests), `Pillow` (screenshots), Node.js (JavaScript comparison tests), `libglib2.0-dev` and `libfontconfig-dev` (the GLib and fontconfig comparison tests) |
+| optional tests and tools | Python `freetype-py` and `fonttools` (font tests), `Pillow` (screenshots), Node.js (JavaScript comparison tests), `libglib2.0-dev` and `libfontconfig-dev` (the GLib and fontconfig comparison tests), Python `h2` (the HTTP/2 server of the libsoup test) |
 
 A test that is missing an optional tool prints `SKIPPED` and the reason.
 

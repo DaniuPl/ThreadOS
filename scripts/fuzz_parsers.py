@@ -13,7 +13,12 @@ WebKit's processes, with its own fuzzers: key files, GVariant in text
 and binary, URIs, dates, bookmark files (its XML), UTF-8, D-Bus
 messages, DNS replies and network addresses; and what a web page's
 pictures, documents and fonts go through: libpng, libjpeg-turbo and
-libxml2 with their own fuzzers, FreeType with ours. In the kernel an error does
+libxml2 with their own fuzzers, FreeType with ours; and what the web
+engine's network process reads from servers: OpenSSL's certificates,
+ASN.1, PEM and both ends of a TLS handshake with its own fuzzers,
+HTTP/2 frames through nghttp2 with ours, the public suffix list
+(libpsl) and libsoup's HTTP headers, cookies, dates, data: URIs and
+content sniffing with theirs. In the kernel an error does
 not end in the death of a process but in the system going down, so it
 is all the more worth looking for.
 
@@ -470,6 +475,211 @@ def media_seeds(corpus):
         "libxml2-xpath": xpath, "libxml2-uri": uri,
         "freetype": fonts,
     }
+
+
+# The libraries under the web engine's network process (Makefile, 'The
+# network'): OpenSSL's own fuzzers - certificates, ASN.1, PEM and both
+# ends of a TLS handshake - ours for nghttp2, whose archive has none,
+# libpsl's and libsoup's own
+OPENSSL_FUZZERS = ("x509", "asn1", "pem", "client", "server")
+LIBPSL_FUZZERS = ("libpsl_fuzzer", "libpsl_load_fuzzer",
+                  "libpsl_load_dafsa_fuzzer")
+SOUP_FUZZERS = ("cookie_parse", "date_time", "decode_data_uri",
+                "header_parsing", "headers_parse_request",
+                "headers_parse_response", "content_sniffer")
+
+
+def build_net(workdir):
+    """OpenSSL, nghttp2, libpsl and libsoup built for the host under the
+    sanitizers from the archives the Makefile names, libsoup against
+    build_glib()'s GLib and the other two installed beside it; each
+    fuzzer linked with tests/fuzz/onefile.c"""
+    driver = os.path.join(FUZZ, "onefile.c")
+    root = os.path.join(workdir, "net-root")
+    binaries = {}
+
+    ssl = unpack("OPENSSL_TAR", workdir, "openssl")
+    # (as OSS-Fuzz builds it: FUZZING_BUILD_MODE lets a handshake past
+    # the checks a fuzzer cannot satisfy, and its assembly reads words
+    # at any alignment, on purpose)
+    must(["./Configure", "linux-x86_64", "no-shared", "no-tests", "no-docs",
+          "no-apps", "enable-asan", "enable-ubsan", "-DPEDANTIC",
+          "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION",
+          "-fno-sanitize=alignment", "CC=gcc"], "OpenSSL", cwd=ssl)
+    must(["make", "-j8", "build_libs"], "OpenSSL", cwd=ssl)
+    fz = os.path.join(ssl, "fuzz")
+    for name in OPENSSL_FUZZERS:
+        b = os.path.join(workdir, "fz-openssl-" + name)
+        must(["gcc", *SAN, "-fno-sanitize=alignment",
+              "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION", "-w",
+              "-I", os.path.join(ssl, "include"), "-I", fz, "-o", b,
+              os.path.join(fz, name + ".c"), os.path.join(fz, "fuzz_rand.c"),
+              os.path.join(FUZZ, "openssl_shim.c"), driver,
+              os.path.join(ssl, "libssl.a"), os.path.join(ssl, "libcrypto.a"),
+              "-lpthread", "-ldl"], "OpenSSL's fuzz " + name)
+        binaries["openssl-" + name] = b
+
+    h2 = unpack("NGHTTP2_TAR", workdir, "nghttp2")
+    must(["./configure", "--disable-shared", "--enable-static",
+          "--enable-lib-only", "--prefix=" + root, "--libdir=" + root + "/lib",
+          "CFLAGS=" + " ".join(SAN)], "nghttp2", cwd=h2)
+    must(["make", "-j8", "-C", "lib", "install"], "nghttp2", cwd=h2)
+    b = os.path.join(workdir, "fz-nghttp2")
+    must(["gcc", *SAN, "-I", os.path.join(root, "include"), "-o", b,
+          os.path.join(FUZZ, "nghttp2_harness.c"), driver,
+          os.path.join(root, "lib", "libnghttp2.a")], "the nghttp2 harness")
+    binaries["nghttp2"] = b
+
+    psl = unpack("LIBPSL_TAR", workdir, "libpsl")
+    must(["meson", "setup", "build", "--wrap-mode=nodownload",
+          "--prefix=" + root, "--libdir=lib", "--buildtype=debugoptimized",
+          "-Ddefault_library=static", "-Db_sanitize=address,undefined",
+          "-Druntime=no", "-Dbuiltin=true", "-Dtests=false", "-Ddocs=false"],
+         "libpsl", cwd=psl)
+    must(["ninja", "-C", "build", "install"], "libpsl", cwd=psl)
+    for name in LIBPSL_FUZZERS:
+        b = os.path.join(workdir, "fz-" + name)
+        # (they include the config.h meson wrote; their own driver,
+        # main.c, reads the corpus directories itself)
+        must(["gcc", *SAN, "-w", "-I", os.path.join(psl, "build"),
+              "-I", os.path.join(psl, "include"),
+              "-I", os.path.join(psl, "fuzz"), "-o", b,
+              os.path.join(psl, "fuzz", name + ".c"), driver,
+              os.path.join(root, "lib", "libpsl.a")], "libpsl's " + name)
+        binaries[name.replace("_fuzzer", "").replace("_", "-")] = b
+
+    soup = unpack("LIBSOUP_TAR", workdir, "libsoup")
+    env = dict(os.environ, PKG_CONFIG_PATH=":".join(
+        [os.path.join(root, "lib", "pkgconfig"),
+         os.path.join(workdir, "glib-root", "lib", "pkgconfig")]))
+    must(["meson", "setup", "build", "--wrap-mode=nodownload",
+          "--prefix=" + root, "--libdir=lib", "--buildtype=debugoptimized",
+          "-Ddefault_library=static", "-Db_sanitize=address,undefined",
+          "-Dgssapi=disabled", "-Dntlm=disabled", "-Dbrotli=disabled",
+          "-Dzstd=disabled", "-Dtls_check=false", "-Dintrospection=disabled",
+          "-Dvapi=disabled", "-Ddocs=disabled", "-Ddoc_tests=false",
+          "-Dtests=false", "-Dautobahn=disabled", "-Dinstalled_tests=false",
+          "-Dsysprof=disabled", "-Dfuzzing=disabled",
+          "-Dpkcs11_tests=disabled"], "libsoup", cwd=soup, env=env)
+    must(["ninja", "-C", "build", "install"], "libsoup", cwd=soup, env=env)
+    flags = subprocess.run(["pkg-config", "--static", "--cflags", "--libs",
+                            "libsoup-3.0"], env=env, capture_output=True,
+                           text=True, check=True).stdout.split()
+    fz = os.path.join(soup, "fuzzing")
+    for name in SOUP_FUZZERS:
+        b = os.path.join(workdir, "fz-soup-" + name)
+        must(["gcc", *SAN, "-DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION",
+              "-w", "-I", fz, "-o", b, os.path.join(fz, "fuzz_%s.c" % name),
+              driver, *flags], "libsoup's fuzz_" + name)
+        binaries["soup-" + name.replace("_", "-")] = b
+    return binaries, {"psl": os.path.join(psl, "fuzz"), "soup": soup}
+
+
+def h2_frame(kind, flags, stream, payload):
+    return struct.pack(">I", len(payload))[1:] + bytes([kind, flags]) + \
+        struct.pack(">I", stream) + payload
+
+
+def tls_flights(workdir):
+    """What both ends of a TLS handshake send first, as Python's ssl
+    (the host's OpenSSL, a separate build) writes it: the client's
+    hellos for OpenSSL's server fuzzer and the server's answers for its
+    client fuzzer, in TLS 1.3 and 1.2, with RSA and ECDSA certificates
+    from seeds()"""
+    import ssl
+    hellos, answers = [], []
+    for tag in ("rsa", "p256"):
+        for top in (ssl.TLSVersion.TLSv1_3, ssl.TLSVersion.TLSv1_2):
+            srv = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            srv.load_cert_chain(os.path.join(workdir, tag + ".pem"),
+                                os.path.join(workdir, tag + ".key"))
+            cli = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            cli.check_hostname = False
+            cli.verify_mode = ssl.CERT_NONE
+            cli.maximum_version = top
+            cli.set_alpn_protocols(["h2", "http/1.1"])
+            pipes = [ssl.MemoryBIO() for _ in range(4)]
+            c = cli.wrap_bio(pipes[0], pipes[1], server_hostname="localhost")
+            s = srv.wrap_bio(pipes[2], pipes[3], server_side=True)
+            try:
+                c.do_handshake()
+            except ssl.SSLWantReadError:
+                pass
+            hello = pipes[1].read()
+            pipes[2].write(hello)
+            try:
+                s.do_handshake()
+            except ssl.SSLWantReadError:
+                pass
+            hellos.append(hello)
+            answers.append(pipes[3].read())
+    return hellos, answers
+
+
+def net_seeds(workdir, corpus, dirs):
+    """Certificates, keys and signatures from seeds() for OpenSSL's
+    parsers and TLS flights for its handshakes; HTTP/2 frames as a
+    server and a client send them; libpsl's and libsoup's corpora from
+    their archives"""
+    def files(d, limit=20000):
+        if not os.path.isdir(d):
+            return []
+        return [open(os.path.join(d, f), "rb").read()
+                for f in sorted(os.listdir(d))
+                if os.path.isfile(os.path.join(d, f))
+                and os.path.getsize(os.path.join(d, f)) <= limit]
+    pem = [open(os.path.join(workdir, t + ext), "rb").read()
+           for t in ("rsa", "p256", "p384") for ext in (".pem", ".key")]
+    hellos, answers = tls_flights(workdir)
+
+    settings = h2_frame(4, 0, 0, struct.pack(">HIHI", 3, 100, 4, 65535))
+    ack = h2_frame(4, 1, 0, b"")
+    # RFC 7541's examples: a response (C.6.1, Huffman-coded) and a
+    # request (C.4.1); then indexed, literal and a table size update
+    response = bytes.fromhex(
+        "488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a6"
+        "2d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3")
+    request = bytes.fromhex("828684418cf1e3c2e5f23a6ba0ab90f4ff")
+    server = (settings + ack +
+              h2_frame(1, 4, 1, response) +
+              h2_frame(0, 8, 1, b"\x03hello, world\x00\x00\x00") +
+              h2_frame(0, 1, 1, b"!") +
+              h2_frame(8, 0, 0, struct.pack(">I", 1 << 20)) +
+              h2_frame(6, 0, 0, b"12345678") +
+              h2_frame(5, 4, 1, struct.pack(">I", 2) + b"\x88") +
+              h2_frame(7, 0, 0, struct.pack(">II", 1, 0)))
+    split = (settings + h2_frame(1, 0, 1, b"\x3f\xe1\x1f\x88") +
+             h2_frame(9, 4, 1, b"\x5f\x09text/html") +
+             h2_frame(3, 0, 1, struct.pack(">I", 8)))
+    client = (settings + ack +
+              h2_frame(1, 4 | 1, 1, request) +
+              h2_frame(1, 4 | 0x20, 3, struct.pack(">IB", 1, 15) + request) +
+              h2_frame(0, 1, 3, b"posted") +
+              h2_frame(2, 0, 3, struct.pack(">IB", 0, 200)) +
+              h2_frame(3, 0, 3, struct.pack(">I", 8)))
+
+    psl = {name: files(os.path.join(dirs["psl"], name + ".in"))
+           for name in LIBPSL_FUZZERS}
+    soup = {name: files(os.path.join(dirs["soup"], "fuzzing", "corpus",
+                                     "fuzz_" + name))
+            for name in SOUP_FUZZERS}
+    soup["content_sniffer"] = files(os.path.join(dirs["soup"], "tests",
+                                                 "resources"))
+    out = {
+        "openssl-x509": list(corpus["x509"]),
+        "openssl-asn1": (list(corpus["x509"]) + list(corpus["ecdsa"]) +
+                         list(corpus["mbedtls-privkey"]) +
+                         list(corpus["mbedtls-pubkey"])),
+        "openssl-pem": pem,
+        "openssl-client": answers,
+        "openssl-server": hellos,
+        "nghttp2": [server, split, client],
+    }
+    for name, seeds in psl.items():
+        out[name.replace("_fuzzer", "").replace("_", "-")] = seeds
+    for name, seeds in soup.items():
+        out["soup-" + name.replace("_", "-")] = seeds
+    return {k: v for k, v in out.items() if v}
 
 
 def mbedtls_seeds(workdir):
@@ -1022,6 +1232,8 @@ def main():
         gbinaries, gfuzz = build_glib(workdir)
         mbinaries.update(gbinaries)
         mbinaries.update(build_media(workdir))
+        nbinaries, ndirs = build_net(workdir)
+        mbinaries.update(nbinaries)
         hbinary = build_hid(workdir)
         fbinary = build_fdt(workdir)
         corpus = seeds(workdir)
@@ -1035,6 +1247,7 @@ def main():
             mbedtls_seeds(workdir)
         corpus.update(glib_seeds(gfuzz))
         corpus.update(media_seeds(corpus))
+        corpus.update(net_seeds(workdir, corpus, ndirs))
         print("the harness is built, cases per parser: %d" % CASES)
         wrong = fdt_layouts(fbinary, workdir)
         print("  device trees against what they were made with: %d wrong"

@@ -28,6 +28,11 @@ as code of our own around it (`apps/js`).
 | `libjpeg-turbo-3.2.1.tar.gz` | libjpeg-turbo, JPEG coding, for web pages' pictures | 3.2.1 | IJG, BSD-3-Clause and zlib (`LICENSE.md`, `README.ijg` in the archive) | https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.1/libjpeg-turbo-3.2.1.tar.gz (SHA-256 `c27ad72a68da151177929aa969ae773a2da5ac2af9ce946079314fdac8cece7f`, computed on download; the release signs it instead) |
 | `libxml2-2.15.4.tar.xz` | libxml2, an XML parser, for XHTML, SVG and XML documents and fontconfig's configuration | 2.15.4 | MIT (`Copyright` in the archive) | https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.tar.xz (SHA-256 `98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821`, as GNOME's libxml2-2.15.4.sha256sum lists it) |
 | `fontconfig-2.18.3.tar.xz` | fontconfig, which font for a family a page names | 2.18.3 | MIT-style (`COPYING` in the archive) | https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.3/fontconfig-2.18.3.tar.xz (SHA-256 `4f7b554a38cdf78c033f666c8871f3749e14a094f65a07f630c91ed0b43d35e3`, as the release's .sha256sum lists it) |
+| `openssl-3.5.9.tar.gz` | OpenSSL, TLS and the cryptography under it, for glib-networking | 3.5.9 (LTS) | Apache-2.0 (`LICENSE.txt` in the archive) | https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz (SHA-256 `603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a`, as the release's .sha256 lists it) |
+| `nghttp2-1.70.0.tar.xz` | nghttp2, HTTP/2 framing and header compression, for libsoup | 1.70.0 | MIT (`COPYING` in the archive) | https://github.com/nghttp2/nghttp2/releases/download/v1.70.0/nghttp2-1.70.0.tar.xz (SHA-256 `e05cb1388eaca3830aded4ccf20044b6e1ac1a61411dcca11b0437c4285c8bc2`, computed on download; the release signs it instead) |
+| `libpsl-0.23.1.tar.gz` | libpsl, the public suffix list: which domains a cookie may be set for | 0.23.1 | MIT (`COPYING` in the archive); the list itself MPL-2.0 (the header of `list/public_suffix_list.dat`) | https://github.com/rockdaboot/libpsl/releases/download/0.23.1/libpsl-0.23.1.tar.gz (SHA-256 `8fbb03054556498ba9c4cc48fcaa36a4483748c6504a65bdb9ba348f555b0e56`, computed on download; the release signs it instead) |
+| `libsoup-3.8.1.tar.xz` | libsoup, an HTTP client library: HTTP/1.1 and HTTP/2, cookies, redirects, content decoding - the web engine's network process | 3.8.1 | LGPL-2.0-or-later (`COPYING` in the archive) | https://download.gnome.org/sources/libsoup/3.8/libsoup-3.8.1.tar.xz (SHA-256 `5013dcef9136f6f861e6529fca578af50c1f52a39219027fb5aff652d1371a04`, as GNOME's libsoup-3.8.1.sha256sum lists it) |
+| `glib-networking-2.90.1.tar.xz` | glib-networking, TLS for GIO (through OpenSSL) and proxies from the environment | 2.90.1 | LGPL-2.1-or-later with an exception for linking OpenSSL (`COPYING` and `LICENSE_EXCEPTION` in the archive) | https://download.gnome.org/sources/glib-networking/2.90/glib-networking-2.90.1.tar.xz (SHA-256 `ea95636590098355a05e3027579dba1a9a950b05e456b2488ea03d82e4b6c18a`, as GNOME's glib-networking-2.90.1.sha256sum lists it) |
 | `iwlwifi/` | Firmware for the Intel Wireless 3160 Wi-Fi card (`iwlwifi-3160-17.ucode`), a binary the card runs itself | 17.bfb58538.0 | Intel's firmware licence: redistribution in binary form only, unmodified (`LICENCE.iwlwifi_firmware`) | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git (`intel/iwlwifi/`) |
 
 Trimmed, not modified:
@@ -138,3 +143,33 @@ Trimmed, not modified:
   draw with, `BUILD/libs64` gets the whole library from the same
   archive, built by its `configure` with zlib and libpng, for
   fontconfig and the web engine.
+- **OpenSSL**: the archive is kept intact and built static by its
+  `Configure` (`linux-x86_64`, the compiler `libc/threados-cc`): the two
+  libraries only - no programs, tests or documentation - without the
+  asynchronous jobs (they need ucontext), the secure heap (its guard
+  pages and mlock mean nothing on ThreadOS), loadable engines and
+  modules, and the kernel's crypto interface. It looks for certificates
+  under `/etc/ssl`, where musl's overlay serves the CA bundle. Its own
+  fuzzers (`fuzz/`) are what `scripts/fuzz_parsers.py` runs against it
+  on the host, through `tests/fuzz/openssl_shim.c`.
+- **nghttp2**: the archive is kept intact and built static by its
+  `configure`, the library only (`--enable-lib-only`): not its server,
+  client, proxy or Python bindings. The archive has no fuzzers;
+  `tests/fuzz/nghttp2_harness.c` is ours.
+- **libpsl**: the archive is kept intact and built static by its meson
+  with the list from the archive (`list/public_suffix_list.dat`) built
+  in, and no IDNA library: GLib turns international names into ASCII
+  before libpsl sees them.
+- **libsoup**: the archive is kept intact and built static by its meson
+  against GLib, nghttp2, libpsl, SQLite and zlib from the tree, without
+  Kerberos, NTLM's helper program, Brotli and zstd decoding, the check
+  for a TLS backend at configure time, introspection, the tests and the
+  documentation.
+- **glib-networking**: the archive is kept intact and built by its meson
+  with the OpenSSL backend (not GnuTLS) and the environment's proxies.
+  Its modules are made to be loaded; ThreadOS loads none, so programs
+  link their static library (`BUILD/libs64/lib/gio/modules`) and
+  register it themselves, `g_io_openssl_load(NULL)`. The loadable module
+  it makes first is the empty file `libc/threados-cc` writes for any
+  `-shared` link, and its objects are position-independent
+  (`b_staticpic`), as meson insists for what goes into a module.
