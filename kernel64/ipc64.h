@@ -23,9 +23,10 @@
 #define IPC_MAP      7   /* (fd, offset, length) -> its pages at an address */
 #define IPC_UNMAP    8   /* (address, length) -> those pages let go */
 
-#define IPC_IN  1
-#define IPC_OUT 2
-#define IPC_HUP 4
+#define IPC_IN   1                 /* a read would not wait: data, or the end */
+#define IPC_OUT  2
+#define IPC_HUP  4                 /* the peer is gone */
+#define IPC_DATA 8                 /* bytes are waiting (a pipe's POLLIN) */
 
 /* One send or receive. 'fds' are descriptor numbers: those to send,
    or room for those received; 'nfds' how many, in and out. 'len' is
@@ -57,6 +58,10 @@ struct ipc_io {
 #define IPC_EMSGSIZE 90
 
 long ipc64_call(uint64_t op, uint64_t a, uint64_t b, uint64_t c);
+
+/* A pipe: a stream pair whose first end only reads and second only
+   writes (pipe64.c); 0, or -IPC_ENOMEM */
+int usock64_pipe(int *reader, int *writer);
 
 /* A socket end through read() and write(): bytes only */
 long usock64_read(int end, void *buf, uint32_t len);

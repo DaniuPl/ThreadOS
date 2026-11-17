@@ -226,7 +226,6 @@ void task64_fd_drop(struct fd_entry *e);
 
 int task64_fd_open(int slot);        /* returns a descriptor number or -1 */
 int task64_slot_open(int slot);      /* is the inode open anywhere */
-int task64_fd_pipe(int idx, int reader_task);
 int task64_fd_new(int kind, int slot);   /* the first free number, or -1 */
 int task64_fd_kind(int fd);
 int task64_fd_dup2(int old, int fresh_one);

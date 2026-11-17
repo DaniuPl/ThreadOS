@@ -1675,26 +1675,6 @@ int task64_fd_open(int slot)
     return fd;
 }
 
-/* A number for a pipe end. We look from the third, because zero and
-   one have a conventional meaning and are only put there through
-   dup2. */
-int task64_fd_pipe(int idx, int reader_task)
-{
-    irqflags_t flags = irq_save();
-    int fd = -1;
-    for (int i = FD_FIRST; i < FD_MAX; i++) {
-        if (current->fds[i].kind == FDK_FREE) {
-            current->fds[i].kind = reader_task ? FDK_POTOK_R : FDK_POTOK_W;
-            current->fds[i].slot = idx;
-            current->fds[i].pos = 0;
-            fd = i;
-            break;
-        }
-    }
-    irq_restore(flags);
-    return fd;
-}
-
 int task64_fd_kind(int fd)
 {
     if (fd < 0 || fd >= FD_MAX)
@@ -1744,10 +1724,8 @@ int task64_fd_seek(int fd, uint32_t pos)
    number (dup2), another process (fork), or a message (ipc64.c) */
 static void hold(const struct fd_entry *e)
 {
-    if (e->kind == FDK_POTOK_R)
-        pipe64_ref(e->slot, 1);
-    else if (e->kind == FDK_POTOK_W)
-        pipe64_ref(e->slot, 0);
+    if (e->kind == FDK_POTOK_R || e->kind == FDK_POTOK_W)
+        pipe64_ref(e->slot);
     else if (e->kind == FDK_USOCK)
         usock64_ref(e->slot);
     else if (e->kind == FDK_MEMFD)
@@ -1759,10 +1737,8 @@ static void hold(const struct fd_entry *e)
    the same for a socket's peer */
 static void let_go(const struct fd_entry *e)
 {
-    if (e->kind == FDK_POTOK_R)
-        pipe64_unref(e->slot, 1);
-    else if (e->kind == FDK_POTOK_W)
-        pipe64_unref(e->slot, 0);
+    if (e->kind == FDK_POTOK_R || e->kind == FDK_POTOK_W)
+        pipe64_unref(e->slot);
     else if (e->kind == FDK_USOCK)
         usock64_unref(e->slot);
     else if (e->kind == FDK_MEMFD)
@@ -1779,6 +1755,9 @@ static void release(struct task64 *t, int fd)
     let_go(&e);
 }
 
+/* A number for a pipe's end, a socket's or a memfd. We look from the
+   third, because zero and one have a conventional meaning and are only
+   put there through dup2. */
 int task64_fd_new(int kind, int slot)
 {
     irqflags_t flags = irq_save();

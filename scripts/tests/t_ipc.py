@@ -33,9 +33,15 @@ one core and on four:
   sleeping until its timeout, woken by a write from a thread, and what
   it says once the other end is gone; EOF and EPIPE
 
+  pipes, which are pairs of the same ends now: what poll says of each
+  end (a main loop waits on a pipe), O_NONBLOCK and pipe2, EAGAIN on an
+  empty and on a full one, a hundred open at once where the whole
+  system used to have eight, a megabyte from a child
+
 And ThreadOS's own numbers: a message there and back between two
-processes takes well under the 10 ms tick a poll used to nap for, and
-the machine has its memory back once it is all over.
+processes, over a socket pair and over two pipes, takes well under the
+10 ms a waiting read or poll used to nap for, and the machine has its
+memory back once it is all over.
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -113,6 +119,10 @@ def one(cpus, want):
               f"processes takes under 2 ms ({tagged.get('~round trip')}): "
               f"waking, not a 10 ms nap",
               trip is not None and int(trip.group(1)) < 2000)
+        pipe = re.match(r"(\d+) us", tagged.get("~pipe round trip", ""))
+        check(f"({cpus} core(s)) and through two pipes too "
+              f"({tagged.get('~pipe round trip')})",
+              pipe is not None and int(pipe.group(1)) < 2000)
         print(f"   ({cpus} core(s)) poll: {tagged.get('~poll(120 ms) took')}, "
               f"{tagged.get('~woken after')}; a full socket held "
               f"{tagged.get('~queued before it was full')}")

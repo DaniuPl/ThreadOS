@@ -25,6 +25,10 @@
  * the owner back. The memfd itself holds one more, so the memory lives
  * while either a descriptor or a mapping does.
  *
+ * A pipe is a pair too, a stream used one way: its read end only
+ * reads and its write end only writes (pipe64.c), and so it sleeps,
+ * polls and holds a quarter of a megabyte like a socket.
+ *
  * Everything here is under one lock. User memory is never touched
  * while holding it - a page fault there would need the disk - so the
  * bytes cross into a kernel buffer first, and out of one after.
@@ -41,7 +45,7 @@
 #include "../kernel/include/spinlock.h"
 #include "../kernel/include/string.h"
 
-#define ENDS       256               /* 128 pairs */
+#define ENDS       1024              /* 512 pairs: sockets and pipes */
 #define QUEUE_MAX  (256 * 1024)      /* bytes waiting at one end */
 #define WAITERS    8                 /* tasks asleep on one end */
 #define WAIT_MAX   64                /* ends one IPC_WAIT watches */
@@ -138,9 +142,16 @@ static void msg_free(struct umsg *m)
     kfree(m);
 }
 
-static int end_of(int fd)
+/* The end behind a descriptor, for 'op': a socket's for anything, a
+   pipe's read end only to read (IPC_RECV) and its write end only to
+   write (IPC_SEND), both to be polled and waited on */
+static int end_for(int fd, int op)
 {
-    if (task64_fd_kind(fd) != FDK_USOCK)
+    int kind = task64_fd_kind(fd);
+    if (kind != FDK_USOCK && kind != FDK_POTOK_R && kind != FDK_POTOK_W)
+        return -1;
+    if ((kind == FDK_POTOK_R && (op == IPC_SEND || op == IPC_SHUTDOWN)) ||
+        (kind == FDK_POTOK_W && (op == IPC_RECV || op == IPC_SHUTDOWN)))
         return -1;
     int e = task64_fd_slot(fd);
     return e >= 0 && e < ENDS ? e : -1;
@@ -328,6 +339,8 @@ static int ready(int me)
         r |= IPC_OUT;
     if (e->peer < 0)
         r |= IPC_HUP;
+    if (e->head)
+        r |= IPC_DATA;
     return r;
 }
 
@@ -623,12 +636,9 @@ static long memfd_unmap(uint64_t addr, uint64_t len)
 
 /* --- the calls ---------------------------------------------------------------- */
 
-static long pair(int type, uint64_t sv)
+/* Two connected ends, each held once */
+static int new_pair(int type, int *pa, int *pb)
 {
-    if (type != 1 && type != 5)
-        return -IPC_EINVAL;
-    if (!paging64_user_writable(sv, 2 * sizeof(int)))
-        return -IPC_EINVAL;
     irqflags_t flags = spin_lock_irq(&lock);
     int a = -1, b = -1;
     for (int i = 0; i < ENDS && b < 0; i++)
@@ -651,6 +661,25 @@ static long pair(int type, uint64_t sv)
         e->seqpacket = type == 5;
     }
     spin_unlock_irq(&lock, flags);
+    *pa = a;
+    *pb = b;
+    return 0;
+}
+
+int usock64_pipe(int *reader, int *writer)
+{
+    return new_pair(1, reader, writer);
+}
+
+static long pair(int type, uint64_t sv)
+{
+    if (type != 1 && type != 5)
+        return -IPC_EINVAL;
+    if (!paging64_user_writable(sv, 2 * sizeof(int)))
+        return -IPC_EINVAL;
+    int a, b;
+    if (new_pair(type, &a, &b) < 0)
+        return -IPC_ENOMEM;
     int fa = task64_fd_new(FDK_USOCK, a);
     int fb = fa >= 0 ? task64_fd_new(FDK_USOCK, b) : -1;
     if (fb < 0) {
@@ -669,7 +698,7 @@ static long pair(int type, uint64_t sv)
 
 static long io_call(int op, int fd, uint64_t iop)
 {
-    int me = end_of(fd);
+    int me = end_for(fd, op);
     if (me < 0)
         return -IPC_EBADF;
     if (!paging64_user_writable(iop, sizeof(struct ipc_io)))
@@ -727,7 +756,7 @@ static long wait_many(uint64_t fdsp, uint64_t n, int64_t ms)
     int k = 0;
     for (uint64_t i = 0; i < n; i++) {
         int v = ((const int *)(uintptr_t)fdsp)[i];
-        int e = end_of(v & 0xFFFF);
+        int e = end_for(v & 0xFFFF, IPC_WAIT);
         if (e >= 0) {
             idx[k] = e;
             want[k] = (v >> 16) & (IPC_IN | IPC_OUT);
@@ -767,7 +796,7 @@ long ipc64_call(uint64_t op, uint64_t a, uint64_t b, uint64_t c)
     case IPC_RECV:
         return io_call((int)op, (int)a, b);
     case IPC_POLL: {
-        int me = end_of((int)a);
+        int me = end_for((int)a, IPC_POLL);
         if (me < 0)
             return -IPC_EBADF;
         irqflags_t flags = spin_lock_irq(&lock);
@@ -778,7 +807,7 @@ long ipc64_call(uint64_t op, uint64_t a, uint64_t b, uint64_t c)
     case IPC_WAIT:
         return wait_many(a, b, (int64_t)c);
     case IPC_SHUTDOWN: {
-        int me = end_of((int)a);
+        int me = end_for((int)a, IPC_SHUTDOWN);
         if (me < 0)
             return -IPC_EBADF;
         irqflags_t flags = spin_lock_irq(&lock);

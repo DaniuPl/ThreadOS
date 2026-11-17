@@ -667,20 +667,19 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        int idx = pipe64_new();
-        if (idx < 0) {
+        int rend, wend;
+        if (pipe64_new(&rend, &wend) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
-        int rfd = task64_fd_pipe(idx, 1);
-        int wfd = task64_fd_pipe(idx, 0);
-        if (rfd < 0 || wfd < 0) {
+        int rfd = task64_fd_new(FDK_POTOK_R, rend);
+        int wfd = rfd >= 0 ? task64_fd_new(FDK_POTOK_W, wend) : -1;
+        if (wfd < 0) {
             if (rfd >= 0)
                 task64_fd_close(rfd);
-            if (wfd >= 0)
-                task64_fd_close(wfd);
             else
-                pipe64_unref(idx, 0);
+                pipe64_unref(rend);
+            pipe64_unref(wend);
             r->rax = (uint64_t)-1;
             return;
         }

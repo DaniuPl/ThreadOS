@@ -47,9 +47,10 @@
 #define IPC_POLL     3
 #define IPC_WAIT     4
 #define IPC_SHUTDOWN 5
-#define IPC_IN  1
-#define IPC_OUT 2
-#define IPC_HUP 4
+#define IPC_IN   1
+#define IPC_OUT  2
+#define IPC_HUP  4
+#define IPC_DATA 8
 #define IPC_DONTWAIT 1
 #define IPC_PEEK     2
 #define MSG_MAX  (64 * 1024)
@@ -401,6 +402,30 @@ HIDDEN short __tos_unix_events(int fd, short want)
 	if (bits & IPC_HUP)
 		got |= POLLHUP;
 	return got & (want | POLLHUP);
+}
+
+/* A pipe's end, as Linux tells it: the read end is readable while
+   bytes wait and hung up once no writer is left; the write end is
+   writable while there is room, and in error (and writable, so the
+   write fails at once) once no reader is left */
+HIDDEN short __tos_pipe_events(int fd, short want, int writer)
+{
+	long bits = tos(T_IPC, IPC_POLL, fd, 0, 0);
+	if (bits < 0)
+		return POLLNVAL;
+	short got = 0;
+	if (writer) {
+		if (bits & (IPC_OUT | IPC_HUP))
+			got |= POLLOUT | POLLWRNORM;
+		if (bits & IPC_HUP)
+			got |= POLLERR;
+	} else {
+		if (bits & IPC_DATA)
+			got |= POLLIN | POLLRDNORM;
+		if (bits & IPC_HUP)
+			got |= POLLHUP;
+	}
+	return got & (want | POLLHUP | POLLERR);
 }
 
 /* An entry of __tos_unix_wait's list: the descriptor and what poll

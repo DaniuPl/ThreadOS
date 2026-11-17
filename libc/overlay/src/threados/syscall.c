@@ -337,7 +337,9 @@ static long do_read(int fd, void *buf, size_t n)
 	int k = kind_of(fd);
 	if (k == K_NONE || k == K_PIPE_W)
 		return -EBADF;
-	if (k == K_USOCK)
+	/* (a pipe is a pair of socket ends in the kernel: one that may not
+	   wait reads the way a socket does) */
+	if (k == K_USOCK || (k == K_PIPE_R && (flags_of(fd) & O_NONBLOCK)))
 		return __tos_unix(SYS_read, fd, (long)buf, n, 0, 0, 0);
 	if (n > T_CHUNK)
 		n = T_CHUNK;
@@ -354,7 +356,7 @@ static long do_write(int fd, const void *buf, size_t n)
 	int k = kind_of(fd);
 	if (k == K_PIPE_R || (k == K_NONE && fd != 1))
 		return -EBADF;
-	if (k == K_USOCK)
+	if (k == K_USOCK || (k == K_PIPE_W && (flags_of(fd) & O_NONBLOCK)))
 		return __tos_unix(SYS_write, fd, (long)buf, n, 0, 0, 0);
 	touch(buf, n);
 	size_t done = 0;
@@ -1335,8 +1337,9 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		touch(fds, 2 * sizeof(int));
 		if (tos(T_PIPE, a, 0, 0, 0) < 0)
 			return -EMFILE;
-		set_flags(fds[0], O_RDONLY);
-		set_flags(fds[1], O_WRONLY);
+		int nb = n == SYS_pipe2 && (b & O_NONBLOCK) ? O_NONBLOCK : 0;
+		set_flags(fds[0], O_RDONLY | nb);
+		set_flags(fds[1], O_WRONLY | nb);
 		return 0;
 	}
 	case SYS_memfd_create: {

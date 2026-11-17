@@ -8433,3 +8433,28 @@ works and is checked by `make test`.
       back through read(); the machine has every kilobyte back after.
       On 1.5 GiB the ACPI tables lie at 0x5FFE1C52, in the programs'
       gigabyte, and ACPI still runs the firmware's AML.
+
+- [x] **Pipes are socket-pair ends: they sleep, poll and number in the
+      hundreds** (kernel64/pipe64.c, kernel64/pipe64.h, kernel64/ipc64.c,
+      kernel64/syscall64.c, kernel64/task64.c,
+      libc/overlay/src/threados/unix.c, socket.c, syscall.c,
+      libc/tests/ipctest.c, scripts/tests/t_ipc.py)
+      The fourth thing, found while looking at how WebKit's processes
+      start and wait: a main loop (GLib's, which WebKit's runs on) waits
+      in poll() on a pipe of its own, and ThreadOS's pipes were eight in
+      the whole system, held 2 KiB, waited in 10 ms naps and counted as
+      always ready to poll - a main loop would have spun. A pipe is now a
+      pair of ipc64.c's ends used one way: the read end only reads and
+      the write end only writes (the descriptor's kind says which), so
+      it sleeps until the other side acts, poll() waits on it with the
+      sockets, it holds 256 KiB, and there are as many as there are
+      free ends (1024 now, for both). poll() says of each end what Linux
+      says - the read end readable while bytes wait and hung up when the
+      writers are gone, the write end writable, and in error once the
+      readers are - and O_NONBLOCK and pipe2(O_NONBLOCK) work. (exec
+      already kept a process's descriptors, so a child started with
+      fork and exec gets the socket it is to talk over, as WebKit's
+      web process does.) ipctest's new part, held to glibc's output
+      like the rest, opens a hundred pipes at once and sends a
+      megabyte through one from a child; t_ipc wants a byte there and
+      back through two pipes in under 2 ms.

@@ -13,8 +13,9 @@
  * so a signal is seen between them. poll() and select() look at every
  * descriptor in turn and sleep a tick between rounds: a file or a pipe
  * counts as always ready, a socket as the kernel says (SYS64_TCP_POLL,
- * SYS64_UDP_POLL). Unix socket pairs are the kernel's own descriptors
- * (unix.c); a poll on those alone sleeps until one of them changes.
+ * SYS64_UDP_POLL). Unix socket pairs and pipes are the kernel's own
+ * descriptors (unix.c); a poll on those alone sleeps until one of them
+ * changes.
  *
  * Name lookups are musl's own resolver, which reads /etc/resolv.conf.
  * A ThreadOS disk has none, so when there is no such file a read-only
@@ -85,10 +86,13 @@ NET_HIDDEN long __tos_unix_pair(long type, long proto, int *sv);
 NET_HIDDEN long __tos_unix(long n, long fd, long b, long c, long d, long e,
                            long f);
 NET_HIDDEN short __tos_unix_events(int fd, short want);
+NET_HIDDEN short __tos_pipe_events(int fd, short want, int writer);
 NET_HIDDEN void __tos_unix_wait(const int *fds, int n, long ms);
 NET_HIDDEN int __tos_unix_want(int fd, short events);
 
-#define K_USOCK 4                    /* FDK_USOCK, kernel64/task64.h */
+#define K_PIPE_R 2                   /* FDK_POTOK_R, kernel64/task64.h */
+#define K_PIPE_W 3
+#define K_USOCK  4
 
 static long tos(long n, long a1, long a2, long a3, long a4)
 {
@@ -733,8 +737,12 @@ static short fd_events(int fd, short want, int *pair)
 		*pair = 1;
 		return __tos_unix_events(fd, want);
 	}
-	/* a file, a pipe, the console: a read or a write would not wait
-	   long, which is as much as the kernel lets anyone tell */
+	if (fi.kind == K_PIPE_R || fi.kind == K_PIPE_W) {
+		*pair = 1;               /* (a pipe is a pair of ends too) */
+		return __tos_pipe_events(fd, want, fi.kind == K_PIPE_W);
+	}
+	/* a file, the console: a read or a write would not wait long,
+	   which is as much as the kernel lets anyone tell */
 	return want & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM);
 }
 

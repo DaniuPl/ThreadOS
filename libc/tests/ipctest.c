@@ -14,7 +14,10 @@
  * writes; seqpacket messages kept whole and their truncation told;
  * a stream gathering what came; a megabyte between processes; poll
  * waking when there is something, sleeping when not; shutdown, EOF,
- * EPIPE, and how fast a message goes there and back.
+ * EPIPE, and how fast a message goes there and back. And pipes, which
+ * a main loop waits on the same way: what poll says of each end, a
+ * pipe that may not wait, a hundred of them at once, a megabyte
+ * through one from a child.
  */
 
 #define _GNU_SOURCE
@@ -22,6 +25,7 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -51,7 +55,10 @@ static long now_us(void)
 
 static const char *events(short r)
 {
-    static char s[32];
+    /* (two in one printf: each call its own buffer) */
+    static char ring[4][32];
+    static int turn;
+    char *s = ring[turn++ & 3];
     s[0] = 0;
     if (r & POLLIN)
         strcat(s, " IN");
@@ -59,6 +66,8 @@ static const char *events(short r)
         strcat(s, " OUT");
     if (r & POLLHUP)
         strcat(s, " HUP");
+    if (r & POLLERR)
+        strcat(s, " ERR");
     return s[0] ? s + 1 : "none";
 }
 
@@ -520,6 +529,160 @@ static void truncated_rights(void)
     close(sv[1]);
 }
 
+static void *write_later(void *arg)
+{
+    int fd = *(int *)arg;
+    struct timespec t = { 0, 150 * 1000 * 1000 };
+    nanosleep(&t, 0);
+    write(fd, "!", 1);
+    return 0;
+}
+
+static void pipes(void)
+{
+    int p[2];
+    say("pipe", pipe(p) == 0);
+    struct pollfd pf[2] = { { p[0], POLLIN | POLLOUT, 0 },
+                            { p[1], POLLIN | POLLOUT, 0 } };
+    poll(pf, 2, 0);
+    printf("poll on a fresh pipe: read end %s, write end %s\n",
+           events(pf[0].revents), events(pf[1].revents));
+    write(p[1], "data", 4);
+    poll(pf, 2, 0);
+    printf("with bytes in it: read end %s, write end %s\n",
+           events(pf[0].revents), events(pf[1].revents));
+    char buf[4096];
+    int r = (int)read(p[0], buf, sizeof(buf));
+    printf("read: %d \"%.*s\"\n", r, r > 0 ? r : 0, buf);
+
+    fcntl(p[0], F_SETFL, fcntl(p[0], F_GETFL) | O_NONBLOCK);
+    errno = 0;
+    r = (int)read(p[0], buf, sizeof(buf));
+    say("an empty pipe with O_NONBLOCK says EAGAIN", r < 0 && errno == EAGAIN);
+    fcntl(p[0], F_SETFL, fcntl(p[0], F_GETFL) & ~O_NONBLOCK);
+
+    /* poll sleeps until a thread writes */
+    pthread_t t;
+    pf[0].events = POLLIN;
+    pthread_create(&t, 0, write_later, &p[1]);
+    long t0 = now_us();
+    r = poll(pf, 1, 5000);
+    long took = (now_us() - t0) / 1000;
+    printf("poll on a read end, woken by a write from a thread: %d, %s\n", r,
+           events(pf[0].revents));
+    say("soon after the write", took >= 100 && took < 1000);
+    pthread_join(t, 0);
+    read(p[0], buf, 1);
+
+    close(p[1]);
+    pf[0].events = POLLIN | POLLOUT;
+    poll(pf, 1, 0);
+    printf("once the write end is closed the read end says: %s, "
+           "and reads %d\n", events(pf[0].revents), (int)read(p[0], buf, 1));
+    close(p[0]);
+
+    pipe(p);
+    close(p[0]);
+    pf[1].fd = p[1];
+    pf[1].events = POLLIN | POLLOUT;
+    poll(&pf[1], 1, 0);
+    printf("once the read end is closed the write end says: %s\n",
+           events(pf[1].revents));
+    signal(SIGPIPE, SIG_IGN);
+    errno = 0;
+    r = (int)write(p[1], "x", 1);
+    say("and a write there says EPIPE", r < 0 && errno == EPIPE);
+    signal(SIGPIPE, SIG_DFL);
+    close(p[1]);
+
+    /* one that may not wait, filled */
+    say("pipe2(O_NONBLOCK)", pipe2(p, O_NONBLOCK) == 0);
+    memset(buf, 'p', sizeof(buf));
+    long held = 0;
+    for (int i = 0; i < 4096; i++) {
+        r = (int)write(p[1], buf, sizeof(buf));
+        if (r < 0)
+            break;
+        held += r;
+    }
+    say("a full pipe that may not wait says EAGAIN", r < 0 && errno == EAGAIN);
+    printf("~a pipe holds: %ld bytes\n", held);
+    close(p[0]);
+    close(p[1]);
+
+    /* a hundred at once (there used to be eight in the whole system) */
+    int many[100][2], made = 0;
+    for (int i = 0; i < 100; i++)
+        made += pipe(many[i]) == 0;
+    int through = 0;
+    for (int i = 0; i < made; i++) {
+        char c = (char)i, back = 0;
+        write(many[i][1], &c, 1);
+        through += read(many[i][0], &back, 1) == 1 && back == c;
+    }
+    for (int i = 0; i < made; i++) {
+        close(many[i][0]);
+        close(many[i][1]);
+    }
+    printf("a hundred pipes open at once, a byte through each: %d of %d\n",
+           through, made);
+
+    /* a megabyte from a child, and a message there and back */
+    int down[2], up[2];
+    pipe(down);
+    pipe(up);
+    fflush(stdout);
+    pid_t pid = fork();
+    if (pid == 0) {
+        close(down[0]);
+        close(up[1]);
+        static char mb[1 << 20];
+        for (int i = 0; i < (int)sizeof(mb); i++)
+            mb[i] = (char)(i * 7 + i / 4096);
+        int at = 0;
+        while (at < (int)sizeof(mb)) {
+            r = (int)write(down[1], mb + at, sizeof(mb) - at);
+            if (r <= 0)
+                _exit(1);
+            at += r;
+        }
+        char c;
+        while (read(up[0], &c, 1) == 1)
+            write(down[1], &c, 1);
+        _exit(0);
+    }
+    close(down[1]);
+    close(up[0]);
+    static char mb[1 << 20];
+    int at = 0;
+    while (at < (int)sizeof(mb)) {
+        r = (int)read(down[0], mb + at, sizeof(mb) - at);
+        if (r <= 0)
+            break;
+        at += r;
+    }
+    int same = at == (int)sizeof(mb);
+    for (int i = 0; i < at && same; i++)
+        same = mb[i] == (char)(i * 7 + i / 4096);
+    printf("a megabyte through a pipe from a child: %d bytes, %s\n", at,
+           same ? "intact" : "different");
+    t0 = now_us();
+    int rounds = 0;
+    for (; rounds < 500; rounds++)
+        if (write(up[1], "p", 1) != 1 || read(down[0], buf, 1) != 1)
+            break;
+    printf("500 bytes there and back through two pipes: %s\n",
+           rounds == 500 ? "yes" : "no");
+    printf("~pipe round trip: %ld us\n", (now_us() - t0) / (rounds ? rounds : 1));
+    close(up[1]);
+    r = (int)read(down[0], buf, 1);
+    printf("the child's end of the data: %d\n", r);
+    int status = 0;
+    waitpid(pid, &status, 0);
+    printf("the child ended with %d\n", WIFEXITED(status) ? WEXITSTATUS(status) : -1);
+    close(down[0]);
+}
+
 int main(void)
 {
     setvbuf(stdout, 0, _IOLBF, 0);
@@ -529,6 +692,7 @@ int main(void)
     truncated_rights();
     polling();
     processes();
+    pipes();
     printf("everything as expected: %s\n", failed ? "no" : "yes");
     return failed;
 }
