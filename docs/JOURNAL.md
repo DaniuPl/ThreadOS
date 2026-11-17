@@ -8641,3 +8641,44 @@ works and is checked by `make test`.
       paints with Skia on the processor into a shared-memory swap chain,
       and the UI process receives WPEBufferSHM buffers - which a
       ThreadOS platform only has to copy into a window.
+
+- [x] **Only the first x86-64's instructions: a laptop's installer
+      stopped with Invalid Opcode** (Makefile, libc/threados-cc.in,
+      apps/webkit/threados.cmake, .github/workflows/,
+      scripts/checkisa.py, scripts/tests/t_isa.py)
+      A photo from a laptop: "ginstal was stopped: Invalid Opcode at
+      0x4000088c". At that address alpha.84's ginstal has vmovq - AVX,
+      in a program built from C that asks for nothing of the kind. The
+      release was built on GitHub's ubuntu-latest, which had become
+      Ubuntu 26.04, whose archive is built for x86-64-v3 (Haswell): its
+      GCC 15 aims there by default, and so do its libgcc and libstdc++,
+      which every C++ program here links. The release's kernel held 366
+      BMI2 and MOVBE instructions and nearly every program AVX. The
+      kernel enables SSE's register state (FXSAVE) and never AVX's, so
+      on real hardware the first AVX instruction is an Invalid Opcode
+      whatever the processor; on QEMU's default processor, which has no
+      BMI2 either, that kernel did not even start. Nothing saw it: the
+      release workflow builds and publishes without running a test, and
+      "build and test" runs by hand only. (Also found: libsoup's build
+      needs glib-mkenums on the host, which 26.04's image no longer had
+      - the c7e5d53 release failed on it.)
+      Three things now. ARCH64 (-march=x86-64 -mtune=generic) is in
+      every flag set the Makefile has for ThreadOS code, in the musl
+      wrapper and in WebKit's CMake toolchain file, and the EFI loader
+      is built with it too. Both workflows run on ubuntu-24.04, the
+      system the tree is built and tested on, and install
+      libglib2.0-dev-bin. And scripts/checkisa.py disassembles the
+      kernel and every program of an initrd and lists any instruction
+      beyond the first x86-64 - VEX/EVEX, BMI1/2, LZCNT, POPCNT, MOVBE,
+      SSE3 to 4.2, AES-NI and the rest - outside the code that asks the
+      processor first (OpenSSL's assembly, Mbed TLS's AES-NI, simdutf in
+      JavaScriptCore, RDRAND in the kernel; tzcnt everywhere, which a
+      processor without BMI1 runs as bsf). The release workflow runs it
+      before signing, so a build like alpha.84's is not published.
+      t_isa: the checker sees AVX and BMI2 in a function GCC compiled
+      for x86-64-v3 and nothing in the same compiled for x86-64; the
+      Makefile's ARCH64 placed after -march=x86-64-v3, as a
+      distribution's default and our flags meet, leaves none of it; and
+      the images under test pass, every exception still naming a file
+      that is there and holds such code. On alpha.84's images it fails
+      with 78 files.

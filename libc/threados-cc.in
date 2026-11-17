@@ -14,7 +14,7 @@ MUSL=@MUSL@
 REPO=@REPO@
 LIBS=@LIBS@
 
-FLAGS="-m64 -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
+FLAGS="-m64 -march=x86-64 -mtune=generic -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
 -fno-asynchronous-unwind-tables -nostdinc -isystem $LIBS/include \
 -isystem $MUSL/include -isystem $(gcc -print-file-name=include)"
 

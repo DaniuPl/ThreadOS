@@ -33,7 +33,7 @@ execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libstdc++.a
 execute_process(COMMAND sh -c "echo | ${CMAKE_CXX_COMPILER} -xc++ -E -v - 2>&1 | sed -n 's/^ \\(.*c++.*\\)$/-isystem \\1/p' | tr '\\n' ' '"
                 OUTPUT_VARIABLE _cxx_includes OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-set(_common "-m64 -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
+set(_common "-m64 -march=x86-64 -mtune=generic -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
 -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections \
 -DTHREADOS_LIBC")
 set(CMAKE_C_FLAGS_INIT "${_common} -nostdinc -isystem ${THREADOS_MUSL}/include \

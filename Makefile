@@ -93,8 +93,18 @@ USER_DYN := cryptotest certtest httpget gweb nslookup dynlib
 # the same kernel/ files; it was removed, and kernel/ still carries the
 # names that came with it (task.h, for one), which kernel64/compat64.c
 # answers.
+#
+# The processor everything is built for: the first x86-64 one, by name.
+# Leaving it to the compiler is not the same thing - distributions build
+# GCC to aim at newer processors (Ubuntu's GCC 15 defaults to
+# x86-64-v3, Haswell's), and then the kernel is full of BMI2 and MOVBE
+# and every program of AVX. The kernel never enables AVX's register
+# state, so on real hardware the first such instruction in a program is
+# an Invalid Opcode, and on a processor without BMI2 the kernel itself
+# does not start. scripts/checkisa.py holds a build to this.
+ARCH64 := -march=x86-64 -mtune=generic
 KERNEL64 := $(BUILD)/threados64.bin
-CFLAGS64 := -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
+CFLAGS64 := -m64 $(ARCH64) -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
             -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -Wshadow -O2 -g
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
@@ -146,7 +156,7 @@ INITRD64 := $(BUILD)/initrd64.img
 # registers when it switches tasks. The kernel itself stays without
 # SSE: there is nothing to compute in an interrupt handler, and every
 # such instruction would mean saving the interrupted program's state.
-USER64_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
+USER64_CFLAGS := -m64 $(ARCH64) -std=gnu11 -ffreestanding -fno-stack-protector \
                  -fno-pic -no-pie -static -nostdlib -mno-red-zone \
                  -O2 -Wall -Wextra \
                  -Wl,--build-id=none -Wl,-z,max-page-size=0x1000
@@ -230,7 +240,7 @@ LIB_DECL64  := $(patsubst %,$(BUILD)/decl/%,$(LIB_HEADERS))
 
 $(LIBTHREAD64): $(BUILD)/libsrc/libthread.c $(LIB_SRC) user64/libthread64.ld \
                 $(USER_HEADERS) Makefile
-	$(CC) -m64 -std=gnu11 -ffreestanding -fno-stack-protector -fPIC \
+	$(CC) -m64 $(ARCH64) -std=gnu11 -ffreestanding -fno-stack-protector -fPIC \
 	    -mno-red-zone -O2 -Wall -Wextra -I$(BUILD)/libsrc -Iuser \
 	    -c $< -o $(BUILD)/libthread64.o
 	$(CC) -m64 -shared -nostdlib -Wl,--build-id=none -Wl,-Bsymbolic \
@@ -238,7 +248,7 @@ $(LIBTHREAD64): $(BUILD)/libsrc/libthread.c $(LIB_SRC) user64/libthread64.ld \
 	    -Wl,-z,max-page-size=0x1000 \
 	    -T user64/libthread64.ld -o $@ $(BUILD)/libthread64.o
 
-USER64_DYN_CFLAGS := -m64 -std=gnu11 -ffreestanding -fno-stack-protector \
+USER64_DYN_CFLAGS := -m64 $(ARCH64) -std=gnu11 -ffreestanding -fno-stack-protector \
                      -fno-pic -no-pie -nostdlib -mno-red-zone \
                      -O2 -Wall -Wextra \
                      -Wl,--build-id=none -Wl,-z,max-page-size=0x1000
@@ -271,7 +281,7 @@ MUSL_TREE    := $(BUILD)/musl/tree
 MUSL_ROOT    := $(BUILD)/musl/root
 MUSL_OVERLAY := $(shell find libc/overlay -type f)
 LIBC64       := $(MUSL_ROOT)/lib/libc.a
-MUSL_CFLAGS  := -O2 -mno-red-zone -fno-stack-protector -fno-pic \
+MUSL_CFLAGS  := -O2 $(ARCH64) -mno-red-zone -fno-stack-protector -fno-pic \
                 -fno-asynchronous-unwind-tables
 
 # A header of the overlay is included all over musl, and musl's
@@ -329,7 +339,7 @@ $(FFMPEG_CONFIG): third_party/ffmpeg-9.0.tar.xz Makefile $(LIBC64)
 	    --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,flac,vorbis,opus,pcm_s16le,pcm_s24le,pcm_s32le,pcm_u8,mjpeg,png,bmp \
 	    --enable-parser=h264,hevc,aac,mpegaudio,vorbis,opus \
 	    --enable-swscale --enable-swresample \
-	    --extra-cflags="-m64 -std=gnu11 -O2 -mno-red-zone -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -nostdinc -isystem $(abspath $(MUSL_ROOT)/include) -isystem $(shell $(CC) -print-file-name=include) -D_GNU_SOURCE" \
+	    --extra-cflags="-m64 $(ARCH64) -std=gnu11 -O2 -mno-red-zone -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -nostdinc -isystem $(abspath $(MUSL_ROOT)/include) -isystem $(shell $(CC) -print-file-name=include) -D_GNU_SOURCE" \
 	    --extra-ldflags="-no-pie" --disable-logging \
 	    > configure.log 2>&1 || { cat configure.log; exit 1; }
 
@@ -387,7 +397,7 @@ $(BUILD)/user64/gmedia.elf: user64/gmedia.c user/uapi.h user/udraw.h \
 # them (for what a C library does not carry - stdatomic.h, the vector
 # intrinsics), musl's start files around the objects, libgcc for the
 # arithmetic the processor has no instruction for.
-LIBC64_CFLAGS := -m64 -std=gnu11 -O2 -mno-red-zone -fno-stack-protector \
+LIBC64_CFLAGS := -m64 $(ARCH64) -std=gnu11 -O2 -mno-red-zone -fno-stack-protector \
                  -fno-pic -fno-asynchronous-unwind-tables \
                  -nostdinc -isystem $(MUSL_ROOT)/include \
                  -isystem $(shell $(CC) -print-file-name=include)
@@ -694,7 +704,7 @@ CXX64_INCS := $(shell echo | $(CXX) -xc++ -E -v - 2>&1 | sed -n 's/^ \(.*c++.*\)
 LIBSTDCXX  := $(shell $(CXX) -print-file-name=libstdc++.a)
 # -Os and a section per function: whatever is in the initrd is memory
 # the machine never gets back, and the swap test runs in 16 MiB
-CXX64_FLAGS := -m64 -std=gnu++17 -Os -ffunction-sections -fdata-sections \
+CXX64_FLAGS := -m64 $(ARCH64) -std=gnu++17 -Os -ffunction-sections -fdata-sections \
                -mno-red-zone -fno-stack-protector \
                -fno-pic -fno-asynchronous-unwind-tables -fno-exceptions \
                -fno-threadsafe-statics -nostdinc -nostdinc++ $(CXX64_INCS) \
@@ -1567,7 +1577,7 @@ clean:
 # does them, and that is the only borrowed thing here: the file format.
 # The code is all ours, with no gnu-efi and no EDK2.
 EFI_OUT := $(BUILD)/BOOTX64.EFI
-EFI_CC  := clang -target x86_64-unknown-windows -ffreestanding \
+EFI_CC  := clang -target x86_64-unknown-windows $(ARCH64) -ffreestanding \
            -fshort-wchar -mno-red-zone -Wall -Wextra -O2
 
 $(EFI_OUT): boot/efi/efiboot.c boot/efi/efi.h | $(BUILD)

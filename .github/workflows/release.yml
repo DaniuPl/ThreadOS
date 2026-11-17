@@ -28,7 +28,12 @@ concurrency:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # Ubuntu 24.04, not ubuntu-latest: from 26.04 on, Ubuntu's archive -
+    # GCC's defaults, libgcc and libstdc++ - is built for x86-64-v3, and
+    # alpha.84 built on it stopped a laptop's installer with Invalid
+    # Opcode. The 'Only the first x86-64' step below holds the images
+    # to that, whatever runner they come from.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -38,7 +43,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential grub-pc-bin grub-efi-amd64-bin xorriso mtools \
             clang lld python3 openssl xz-utils cmake ninja-build ruby \
-            pkg-config gperf
+            pkg-config gperf libglib2.0-dev-bin
           python3 -m pip install --user meson
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -51,6 +56,11 @@ jobs:
           make VERSION=${{ github.run_number }} \
             VERSION_LABEL="$VERSION_LABEL" iso64 stick
           xz -T0 -9 -k build/threados-stick.img
+
+      # Nothing is published that the first x86-64 processor cannot run
+      # (scripts/tests/t_isa.py says why)
+      - name: Only the first x86-64's instructions
+        run: python3 scripts/checkisa.py build/threados64.bin build/initrd64.img
 
       - name: Sign
         env:
