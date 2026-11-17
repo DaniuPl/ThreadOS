@@ -114,10 +114,11 @@ def run(q, command, timeout=120):
     out = out[start:] if start >= 0 else out
     m = re.search(r"\[%s\] done, exit code (-?\d+)" % re.escape(name), out)
     # fontconfig says on stderr that it has nowhere to write a cache,
-    # which is so: that is not the program's output
+    # which is so, and lists the places it tried a line each, indented:
+    # that is not the program's output
     body = [l.rstrip() for l in out.replace("\r", "").split("\n")[1:]
-            if l.strip() and not l.strip().startswith(
-                ("[", "Fontconfig ") + PROMPTS)]
+            if l.strip() and not l.startswith("\t") and
+            not l.strip().startswith(("[", "Fontconfig ") + PROMPTS)]
     return body, int(m.group(1)) if m else None
 
 

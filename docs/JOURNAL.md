@@ -9154,3 +9154,28 @@ works and is checked by `make test`.
       ignored the module and found no bigprog. The ARM64 groups pass
       with the shared initrd.c. (Not yet: the installer and the update
       do not write apps64.img onto the installed system.)
+
+- [x] **The system's fonts where Linux programs look for them**
+      (libc/overlay/src/threados/socket.c, syscall.c,
+      libc/overlay/include/linux/memfd.h, libc/tests/fctest.c,
+      scripts/tests/t_fontconfig.py, apps/webkit/wpewebproc.cpp)
+      WebKit's web process finds its fonts through fontconfig, which
+      wants files in a directory and a configuration naming it; the
+      desktop's three fonts are in the initrd. The C library now makes
+      them up: /usr/share/fonts/threados lists sans.ttf, bold.ttf and
+      mono.ttf (opendir, stat, open and read out of the initrd, as the
+      CA bundle is), and /etc/fonts/fonts.conf names the directory,
+      prefers the sans for sans-serif and serif and the mono for
+      monospace, gives a family the system has not got the sans, and
+      makes the bold file the bold of "DejaVu Sans ThreadOS" (it is a
+      family of its own in the file). fontconfig's own default path is
+      where the libraries were built, so the web process points
+      FONTCONFIG_FILE at it. (And <linux/memfd.h>, without which
+      WebKit's shared memory would look for files under /dev/shm.)
+      fctest --system asks the configuration a program gets when it
+      asks for none: on ThreadOS the three fonts, sans-serif bold to
+      bold.ttf, monospace to mono.ttf, Helvetica to sans.ttf - the
+      same ten lines the host's fontconfig says given the same
+      configuration (read out of socket.c) and copies of the fonts.
+      (fontconfig warns on stderr that it has nowhere to write a cache;
+      it has not, and scans three small fonts each time instead.)
