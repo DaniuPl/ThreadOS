@@ -1352,8 +1352,21 @@ NET_HIDDEN long __tos_net(long n, long a, long b, long c, long d, long e, long f
 		return pidfd_waitid(b, (siginfo_t *)c, d);
 	}
 
-	if ((v = vfile_of(a)))
+	if ((v = vfile_of(a))) {
+		/* pread: a read from where it says, the position left as it
+		   was. Skia reads font files so when it cannot map them
+		   (SkFILEStream), and these cannot be mapped. */
+		if (n == SYS_pread64 && !v->random && !v->dir) {
+			if (d < 0)
+				return -EINVAL;
+			int keep = v->pos;
+			v->pos = d < v->len ? (int)d : v->len;
+			long r = vfile_call(v, SYS_read, a, b, c);
+			v->pos = keep;
+			return r;
+		}
 		return vfile_call(v, n, a, b, c);
+	}
 	struct pf *pf = pidfd_of(a);
 	if (pf) {
 		switch (n) {

@@ -23,6 +23,7 @@
 
 #include "wpethreados.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "usys64.h"
 
@@ -45,6 +46,12 @@
 #define FRAME_US (G_USEC_PER_SEC / 60)
 
 static guint64 frames_shown;
+static gboolean tracing;
+
+void wpe_threados_trace(gboolean on)
+{
+    tracing = on;
+}
 
 guint64 wpe_threados_frames_shown(void)
 {
@@ -452,6 +459,11 @@ static void pointer_move(WPEToplevelThreadOS *self, WPEView *view, int x,
 static void handle(WPEToplevelThreadOS *self, WPEView *view,
                    const struct win_event *ev)
 {
+    if (tracing) {
+        printf("[webview] event %d at %d,%d val %d\n", ev->type, ev->x,
+               ev->y, ev->val);
+        fflush(stdout);
+    }
     switch (ev->type) {
     case WEV_CLICK:
         /* What comes with the press that follows: the keys held */

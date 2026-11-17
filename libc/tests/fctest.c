@@ -27,9 +27,11 @@
  * configuration and the same fonts.
  */
 
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -157,6 +159,34 @@ static void freetype(FT_Library lib, const char *path)
     FT_Done_Face(face);
 }
 
+/* Sixteen bytes of the file matched for a name, read with pread, which
+   leaves the position where it was - Skia reads fonts so when it cannot
+   map them - and then with read from the start, to see it did */
+static void piece(FcConfig *cfg, const char *name, long at)
+{
+    FcPattern *pat = prepared(cfg, name);
+    FcResult r;
+    FcPattern *m = FcFontMatch(cfg, pat, &r);
+    FcChar8 *file = NULL;
+    if (m)
+        FcPatternGetString(m, FC_FILE, 0, &file);
+    unsigned char b[16], head[4];
+    int fd = file ? open((const char *)file, O_RDONLY) : -1;
+    long n = fd >= 0 ? (long)pread(fd, b, sizeof(b), at) : -1;
+    long h = fd >= 0 ? (long)read(fd, head, sizeof(head)) : -1;
+    printf("%s: pread %ld at %ld:", file ? base(file) : "nothing", n, at);
+    for (long i = 0; i < n; i++)
+        printf(" %02x", b[i]);
+    printf("; then read %ld from the start: %02x%02x%02x%02x\n", h,
+           h == 4 ? head[0] : 0, h == 4 ? head[1] : 0, h == 4 ? head[2] : 0,
+           h == 4 ? head[3] : 0);
+    if (fd >= 0)
+        close(fd);
+    if (m)
+        FcPatternDestroy(m);
+    FcPatternDestroy(pat);
+}
+
 static int system_fonts(const char *file)
 {
     setenv("FONTCONFIG_FILE", file, 1);
@@ -185,6 +215,8 @@ static int system_fonts(const char *file)
     match(cfg, "sans\\-serif:bold");
     match(cfg, "DejaVu Sans ThreadOS:bold");
     match(cfg, "Helvetica");
+    piece(cfg, "sans\\-serif", 1000);
+    piece(cfg, "monospace", 20000);
     FcObjectSetDestroy(os);
     FcPatternDestroy(all);
     FcConfigDestroy(cfg);

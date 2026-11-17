@@ -162,6 +162,17 @@ def wait_line(q, seen, prefix, timeout):
     return None
 
 
+def tell(q, seen):
+    """What the programs and the kernel said since 'seen', when a step
+    did not happen: the lines worth reading, the last forty of them"""
+    out = q.serial()[seen:].encode("latin1").decode("utf-8", "replace")
+    keep = [l for l in out.replace("\r", "").split("\n")
+            if re.search(r"webview|wpe|WebKit|GLib|Gtk|kernel\]|!!|"
+                         r"error|ERROR|CRITICAL|WARNING|failed", l)]
+    for line in keep[-40:]:
+        print("   | " + line[:200])
+
+
 def main():
     print()
     print("--- WebKit in a desktop window (64-bit kernel) ---")
@@ -181,7 +192,10 @@ def main():
                 "row=20+95 125+190 325+95 num=" + (node_number() or "?"))
     num = node_number()
 
-    SERVED["/page.html"] = PAGE
+    # As a web server says it - a page served as bytes of no known type
+    # is a download, which a browser does not show
+    ROUTES["/page.html"] = lambda h, body: (
+        200, [("Content-Type", "text/html; charset=utf-8")], PAGE)
     port, stop = start_http_server()
     work = tempfile.mkdtemp()
     iso = os.path.join(work, "t.iso")
@@ -207,6 +221,9 @@ def main():
             done = wait_line(q, seen, "[webview] load finished", 300)
             check(f"WebKit fetches and loads the page ({done})",
                   done is not None and "/page.html" in done)
+            if done is None or "/page.html" not in done:
+                time.sleep(5)
+                tell(q, seen)
             title = wait_line(q, seen, "[webview] title ready", 120)
             got = title[len("[webview] title "):] if title else None
             check(f"the page's script ran and measured the page: ThreadOS "

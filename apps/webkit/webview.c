@@ -2,6 +2,7 @@
  *
  *   webview [URL]
  *   webview --eval SCRIPT URL
+ *   webview --trace URL       (every event from the desktop said too)
  *
  * The UI process of WebKit's three: it opens a window through the
  * ThreadOS platform (apps/webkit/wpethreados.c), and WebKit starts the
@@ -133,6 +134,8 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--eval") && i + 1 < argc)
             eval_script = argv[++i];
+        else if (!strcmp(argv[i], "--trace"))
+            wpe_threados_trace(TRUE);
         else
             uri = argv[i];
     }

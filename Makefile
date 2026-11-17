@@ -1443,9 +1443,12 @@ $(WEBKIT_SRC)/CMakeLists.txt: $(WEBKIT_TAR)
 	tar -xf $< -C $(WEBKIT_DIR)
 	touch $@
 
+# CMake is run again in the same directory, not a fresh one (as for the
+# WPE port below): a change to the toolchain file relinks jsc rather
+# than compiling JavaScriptCore again
 $(JSC_DIR)/build.ninja: $(WEBKIT_SRC)/CMakeLists.txt apps/webkit/threados.cmake \
                         $(ICU_STAMP)
-	rm -rf $(JSC_DIR) && mkdir -p $(JSC_DIR)
+	mkdir -p $(JSC_DIR)
 	cd $(JSC_DIR) && cmake -G Ninja $(abspath $(WEBKIT_SRC)) \
 	    -DCMAKE_TOOLCHAIN_FILE=$(abspath apps/webkit/threados.cmake) \
 	    -DTHREADOS_MUSL=$(abspath $(MUSL_ROOT)) -DTHREADOS_REPO=$(CURDIR) \
