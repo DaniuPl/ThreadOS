@@ -350,7 +350,7 @@ FFMPEG_LIBS := $(FFMPEG_TREE)/libavformat/libavformat.a \
 FFMPEG_STAMP := $(FFMPEG_TREE)/threados-libs.stamp
 FFMPEG_COMMA := ,
 
-$(FFMPEG_CONFIG): third_party/ffmpeg-9.0.tar.xz Makefile $(LIBC64)
+$(FFMPEG_CONFIG): third_party/ffmpeg-9.0.tar.xz Makefile $(MUSL_HEADERS)
 	rm -rf $(FFMPEG_TREE) && mkdir -p $(FFMPEG_TREE)
 	tar -xf $< -C $(FFMPEG_TREE) --strip-components=1
 	cd $(FFMPEG_TREE) && ./configure --prefix=/ --arch=x86_64 \
@@ -494,7 +494,7 @@ $(ZLIB_TREE)/zlib.h: $(ZLIB_TAR)
 	tar -xf $< -C $(ZLIB_TREE) --strip-components=1
 	touch $@
 
-$(ZLIB_TREE)/%.o: $(ZLIB_TREE)/zlib.h $(LIBC64)
+$(ZLIB_TREE)/%.o: $(ZLIB_TREE)/zlib.h $(MUSL_HEADERS)
 	$(CC) $(LIBC64_CFLAGS) -w -DHAVE_UNISTD_H -DHAVE_STDARG_H \
 	    -c $(ZLIB_TREE)/$*.c -o $@
 
@@ -531,7 +531,7 @@ MBEDTLS_A     := $(MBEDTLS_TREE)/lib/libmbedtls.a \
                  $(MBEDTLS_TREE)/lib/libmbedx509.a \
                  $(MBEDTLS_TREE)/lib/libmbedcrypto.a
 
-$(MBEDTLS_STAMP): $(MBEDTLS_TAR) Makefile $(LIBC64)
+$(MBEDTLS_STAMP): $(MBEDTLS_TAR) Makefile $(MUSL_HEADERS)
 	rm -rf $(MBEDTLS_TREE) && mkdir -p $(MBEDTLS_TREE)
 	tar -xf $< -C $(MBEDTLS_TREE) --strip-components=1
 	$(MAKE) -s -C $(MBEDTLS_TREE)/library CC="$(CC)" \
@@ -622,7 +622,7 @@ $(FT_TREE)/include/ft2build.h: $(FT_TAR)
 	touch $@
 
 $(FT_TREE)/%.o: $(FT_TREE)/include/ft2build.h apps/fonts/ftmodule.h \
-                $(ZLIB_A) $(LIBC64)
+                $(ZLIB_A) $(MUSL_HEADERS)
 	@mkdir -p $(dir $@)
 	$(CC) $(LIBC64_CFLAGS) -w $(FT_CFLAGS) -c $(FT_TREE)/src/$*.c -o $@
 
@@ -630,7 +630,7 @@ $(FT_A): $(patsubst %,$(FT_TREE)/%.o,$(FT_SRC))
 	rm -f $@ && ar rcs $@ $^
 
 $(HB_O): $(wildcard $(HB_DIR)/src/*.cc $(HB_DIR)/src/*.hh $(HB_DIR)/src/*.h) \
-         $(FT_TREE)/include/ft2build.h $(LIBC64)
+         $(FT_TREE)/include/ft2build.h $(MUSL_HEADERS)
 	mkdir -p $(dir $@)
 	$(CXX) $(CXX64_FLAGS) -w -fno-rtti -DHAVE_FREETYPE=1 \
 	    -I$(FT_TREE)/include -c $(HB_DIR)/src/harfbuzz.cc -o $@
@@ -661,10 +661,10 @@ $(SQLITE_SRC)/sqlite3.c: $(SQLITE_ZIP)
 
 $(SQLITE_SRC)/shell.c: $(SQLITE_SRC)/sqlite3.c
 
-$(BUILD)/libc64/sqlite3.o: $(SQLITE_SRC)/sqlite3.c $(LIBC64) | $(BUILD)/libc64
+$(BUILD)/libc64/sqlite3.o: $(SQLITE_SRC)/sqlite3.c $(MUSL_HEADERS) | $(BUILD)/libc64
 	$(CC) $(LIBC64_CFLAGS) -w $(SQLITE_OPTS) -c $< -o $@
 
-$(BUILD)/libc64/sqlite-shell.o: $(SQLITE_SRC)/shell.c $(LIBC64) | $(BUILD)/libc64
+$(BUILD)/libc64/sqlite-shell.o: $(SQLITE_SRC)/shell.c $(MUSL_HEADERS) | $(BUILD)/libc64
 	$(CC) $(LIBC64_CFLAGS) -w $(SQLITE_OPTS) -I$(SQLITE_SRC) -c $< -o $@
 
 $(BUILD)/user64/sqlite3.elf: $(BUILD)/libc64/sqlite3.o $(BUILD)/libc64/sqlite-shell.o \
@@ -686,7 +686,7 @@ QJS_CFLAGS := $(LIBC64_CFLAGS) -Os -D_GNU_SOURCE -fwrapv \
               -DCONFIG_VERSION=\"$(shell cat third_party/quickjs/VERSION)\" \
               -Wno-sign-compare -Wno-unused-parameter
 
-$(BUILD)/libc64/qjs-%.o: third_party/quickjs/%.c $(QJS_HDRS) $(LIBC64) \
+$(BUILD)/libc64/qjs-%.o: third_party/quickjs/%.c $(QJS_HDRS) $(MUSL_HEADERS) \
                          | $(BUILD)/libc64
 	$(CC) $(QJS_CFLAGS) -c $< -o $@
 
@@ -790,19 +790,19 @@ $(BUILD)/litehtml/%.cpp: $(LH_DIR)/src/%.cpp apps/browser/patches/%.patch Makefi
 # (static patterns: a plain pattern rule would lose to the one below,
 # whose source exists without being made, and build the unpatched file)
 $(patsubst %,$(BUILD)/litehtml/lh-%.o,$(LH_PATCHED)): \
-$(BUILD)/litehtml/lh-%.o: $(BUILD)/litehtml/%.cpp $(LH_HDRS) $(LIBC64) \
+$(BUILD)/litehtml/lh-%.o: $(BUILD)/litehtml/%.cpp $(LH_HDRS) $(MUSL_HEADERS) \
                           | $(BUILD)/litehtml
 	$(CXX) $(CXX64_FLAGS) -w $(LH_INC) -c $< -o $@
 
-$(BUILD)/litehtml/lh-%.o: $(LH_DIR)/src/%.cpp $(LH_HDRS) $(LIBC64) \
+$(BUILD)/litehtml/lh-%.o: $(LH_DIR)/src/%.cpp $(LH_HDRS) $(MUSL_HEADERS) \
                           | $(BUILD)/litehtml
 	$(CXX) $(CXX64_FLAGS) -w $(LH_INC) -c $< -o $@
 
-$(BUILD)/litehtml/lhgrid.o: apps/browser/lhgrid.cpp $(LH_HDRS) $(LIBC64) \
+$(BUILD)/litehtml/lhgrid.o: apps/browser/lhgrid.cpp $(LH_HDRS) $(MUSL_HEADERS) \
                            | $(BUILD)/litehtml
 	$(CXX) $(CXX64_FLAGS) -Wall $(LH_INC) -c $< -o $@
 
-$(BUILD)/litehtml/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c $(LIBC64) \
+$(BUILD)/litehtml/gumbo-%.o: $(LH_DIR)/src/gumbo/src/%.c $(MUSL_HEADERS) \
                              | $(BUILD)/litehtml
 	$(CC) $(LIBC64_CFLAGS) -w -c $< -o $@
 
@@ -895,11 +895,15 @@ $(LIBS64_ATOMIC): $(TOS_CC)
 	$(TOS_CC) -c $(BUILD)/libatomic-empty.c -o $(BUILD)/libatomic-empty.o
 	rm -f $@ && ar rcs $@ $(BUILD)/libatomic-empty.o
 
+# (install -C: zlib is compiled again whenever libc.a changes, into the
+# same library, and a copy that came out the same keeps its time - so
+# the libraries built on it, from GLib to FreeType and HarfBuzz, and
+# WebKit above them, are not built again for a fix in the C library)
 LIBS64_ZLIB := $(LIBS64)/lib/libz.a
 $(LIBS64_ZLIB): $(ZLIB_A)
 	mkdir -p $(LIBS64)/include $(LIBS64)/lib/pkgconfig
-	cp $(ZLIB_TREE)/zlib.h $(ZLIB_TREE)/zconf.h $(LIBS64)/include/
-	cp $(ZLIB_A) $@
+	install -C -m 644 $(ZLIB_TREE)/zlib.h $(ZLIB_TREE)/zconf.h $(LIBS64)/include/
+	install -C -m 644 $(ZLIB_A) $@
 	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: zlib\nDescription: zlib compression library\nVersion: %s\nLibs: -L$${libdir} -lz\nCflags: -I$${includedir}\n' \
 	    $(abspath $(LIBS64)) $(patsubst third_party/zlib-%.tar.xz,%,$(ZLIB_TAR)) \
 	    > $(LIBS64)/lib/pkgconfig/zlib.pc
@@ -1153,10 +1157,14 @@ $(LIBPSL_A): $(LIBPSL_TAR) $(MESON_CROSS) $(TOS_CC)
 
 # SQLite, the one built above, for libsoup's cookie and HSTS stores
 LIBS64_SQLITE := $(LIBS64)/lib/libsqlite3.a
+# (installed only where it changed, as zlib is above)
 $(LIBS64_SQLITE): $(BUILD)/libc64/sqlite3.o $(SQLITE_SRC)/sqlite3.c
 	mkdir -p $(LIBS64)/include $(LIBS64)/lib/pkgconfig
-	rm -f $@ && ar rcs $@ $(BUILD)/libc64/sqlite3.o
-	cp $(SQLITE_SRC)/sqlite3.h $(SQLITE_SRC)/sqlite3ext.h $(LIBS64)/include/
+	rm -f $(BUILD)/libc64/libsqlite3.a
+	ar rcs $(BUILD)/libc64/libsqlite3.a $(BUILD)/libc64/sqlite3.o
+	install -C -m 644 $(BUILD)/libc64/libsqlite3.a $@
+	install -C -m 644 $(SQLITE_SRC)/sqlite3.h $(SQLITE_SRC)/sqlite3ext.h \
+	    $(LIBS64)/include/
 	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: SQLite\nDescription: an SQL database engine\nVersion: %s\nLibs: -L$${libdir} -lsqlite3\nCflags: -I$${includedir}\n' \
 	    $(abspath $(LIBS64)) \
 	    $$(sed -n 's/^#define SQLITE_VERSION *"\(.*\)"/\1/p' $(SQLITE_SRC)/sqlite3.h) \
@@ -1662,6 +1670,11 @@ VERSION_LABEL ?= 0.1.0-dev
 VERSION_FILE := $(BUILD)/version.txt
 VERSION_CODE_FILE := $(BUILD)/version-code.txt
 $(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERSION_LABEL)" ] || echo "$(VERSION_LABEL)" > $(VERSION_FILE); } && { [ "$$(cat $(VERSION_CODE_FILE) 2>/dev/null)" = "$(VERSION)" ] || echo "$(VERSION)" > $(VERSION_CODE_FILE); })
+
+# Every program is linked again when the C library changed: their own
+# objects, and the libraries in libs64, depend on its headers only
+# (MUSL_HEADERS), so a fix in libc.a reaches them here
+$(filter $(BUILD)/user64/%,$(USER64_ELFS) $(DISK64_ELFS)): $(LIBC64)
 
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
              $(VERSION_FILE) $(VERSION_CODE_FILE) \

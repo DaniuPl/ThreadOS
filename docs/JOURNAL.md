@@ -9179,3 +9179,52 @@ works and is checked by `make test`.
       configuration (read out of socket.c) and copies of the fonts.
       (fontconfig warns on stderr that it has nowhere to write a cache;
       it has not, and scans three small fonts each time instead.)
+
+- [x] **WebKit runs on ThreadOS: WPE's web engine in a desktop window**
+      (apps/webkit/, Makefile `make webkit`, apps/webkit/patches/,
+      libc/cxx/cxxrt.cpp, libc/overlay/src/threados/socket.c,
+      scripts/checkisa.py, scripts/tests/t_webkit.py, t_isa.py)
+      WebCore and WebKit from WPE WebKit 2.54.2, built by WebKit's own
+      CMake through apps/webkit/threados.cmake into three static
+      programs of about 60 MB each, in apps64.img: webview, the window
+      (the ThreadOS platform in apps/webkit/wpethreados.c), and WebKit's
+      network process (wpenetproc: libsoup, glib-networking's OpenSSL)
+      and web process (wpewebproc: the page's DOM, CSS, JavaScriptCore
+      with the C loop, and Skia painting on the processor into shared
+      memory). No GPU, no EGL, no GStreamer, no JIT.
+      What it took, besides the platform: three patches (the web
+      process paints and composites nothing with GL when there is no
+      EGL; the processes have names of 15 characters; the DRM format
+      code a port without libdrm still names); four glibc names the
+      host's libstdc++ calls (lseek64, fstat64, __openat_2 and
+      __cxa_thread_atexit_impl, with thread_local destructors run from
+      a pthread key); pread on the C library's made-up files, which
+      Skia reads fonts with; and the test page served as text/html - a
+      page served as bytes of no type is a download, which WebKit
+      rightly would not show. (The first frame also showed a bug of
+      ours: a release counts no presses, and WPE refused an event
+      that said one.)
+      t_webkit boots a disc that brings apps64.img, starts the desktop
+      and runs `webview <a page on the host>`. The page's script
+      measures absolutely placed boxes and a flex row with a gap, and
+      writes 1234567.891 with Intl in Polish: the same page in Chromium
+      (Playwright) and Node's ICU give the same title, byte for byte.
+      On the screen the red box is 200 x 100 of its exact colour, the
+      blue one 120 x 120 with its corners rounded off, the flex items
+      95, 190 and 95 pixels wide, and the Polish sentence is drawn; a
+      click in the text field, "abc" typed and a click on the button
+      run the page's handler, which says what was typed (13 checks).
+      t_isa checks the three programs too, when the build has
+      apps64.img: outside simdutf's and Skia's run-time picks and
+      OpenSSL's assembly, only the first x86-64's instructions.
+      Building WebKit takes hours on four cores, so `make webkit` is not
+      part of the default build or of CI. The build itself was made to
+      stop rebuilding what is under it for nothing: objects compiled
+      against musl depend on its headers, programs on libc.a, and zlib
+      and SQLite go into libs64 only when their contents changed - a
+      real change to libc.a now relinks the programs and rebuilds curl,
+      and nothing in libs64, ICU or WebKit.
+      Not yet: webview is a window and a page, without an address bar,
+      tabs or the desktop's dock tile; the installer does not write
+      apps64.img onto the installed system; fontconfig has no cache
+      (it scans three small fonts each time).

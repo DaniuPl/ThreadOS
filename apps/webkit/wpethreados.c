@@ -356,8 +356,12 @@ static guint32 now_ms(void)
     return (guint32)(g_get_monotonic_time() / 1000);
 }
 
+/* (an event WPE refused to make - its arguments were wrong - is NULL,
+   and is dropped rather than passed on) */
 static void send(WPEView *view, WPEEvent *event)
 {
+    if (!event)
+        return;
     wpe_view_event(view, event);
     wpe_event_unref(event);
 }
@@ -490,10 +494,11 @@ static void handle(WPEToplevelThreadOS *self, WPEView *view,
         if (ev->x != self->x || ev->y != self->y)
             pointer_move(self, view, ev->x, ev->y);
         self->buttons = 0;
+        /* (a release counts no presses: WPE wants 0 there) */
         send(view, wpe_event_pointer_button_new(
                        WPE_EVENT_POINTER_UP, view, WPE_INPUT_SOURCE_MOUSE,
                        now_ms(), held | self->keys, button, ev->x, ev->y,
-                       1));
+                       0));
         break;
     }
     case WEV_SCROLL:

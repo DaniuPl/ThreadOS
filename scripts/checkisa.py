@@ -16,8 +16,8 @@ below with its reason: code that asks the processor (CPUID) before it
 uses an extension, and tzcnt, which a processor without BMI1 runs as
 bsf - the compiler emits it only where the two agree.
 
-Usage: checkisa.py KERNEL INITRD   (exit status 1 when something is
-beyond the baseline)
+Usage: checkisa.py KERNEL INITRD [APPS]   (exit status 1 when something
+is beyond the baseline; APPS is the applications' image, apps64.img)
 """
 
 import collections
@@ -69,6 +69,19 @@ ASKS_FIRST = {
                 "OSXSAVE bit says the system has it", {"xgetbv"}),
 }
 
+# The same for the applications' image (apps64.img, make webkit), which
+# a build has only when WebKit was built
+APPS_ASKS_FIRST = {
+    "webview": ("WebKit's simdutf (CPUID and XGETBV) and Skia's SkOpts "
+                "(SkCpu::Supports) pick their SSSE3, AVX2 and AVX-512 "
+                "kernels at run time", None),
+    "wpewebproc": ("WebKit's simdutf (CPUID and XGETBV) and Skia's SkOpts "
+                   "(SkCpu::Supports) pick their SSSE3, AVX2 and AVX-512 "
+                   "kernels at run time", None),
+    "wpenetproc": ("OpenSSL's assembly (OPENSSL_cpuid_setup), and simdutf "
+                   "and Skia as in the others", None),
+}
+
 
 def beyond_baseline(path):
     """Counts of the instructions in an ELF file's code that the first
@@ -102,13 +115,17 @@ def initrd_programs(initrd):
             yield name.rstrip(b"\0").decode(), blob
 
 
-def check(kernel, initrd):
+def check(kernel, initrd, apps=None):
     """[(name, Counter of what is not allowed)] for the kernel and the
-    initrd's programs, and [(name, reason)] of the exceptions used"""
+    programs of the initrd (and of the applications' image), and
+    [(name, reason)] of the exceptions used"""
     wrong, excused = [], []
+    asks = dict(ASKS_FIRST, **(APPS_ASKS_FIRST if apps else {}))
     with tempfile.TemporaryDirectory() as tmp:
         files = [("kernel", kernel)]
-        for name, blob in initrd_programs(initrd):
+        images = list(initrd_programs(initrd)) + \
+            (list(initrd_programs(apps)) if apps else [])
+        for name, blob in images:
             path = os.path.join(tmp, name)
             with open(path, "wb") as f:
                 f.write(blob)
@@ -117,8 +134,8 @@ def check(kernel, initrd):
             found = beyond_baseline(path)
             for op in EVERYWHERE:
                 found.pop(op, None)
-            if name in ASKS_FIRST and found:
-                reason, allowed = ASKS_FIRST[name]
+            if name in asks and found:
+                reason, allowed = asks[name]
                 if allowed is None:
                     excused.append((name, reason))
                     continue
@@ -131,10 +148,11 @@ def check(kernel, initrd):
 
 
 def main():
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         print(__doc__)
         return 2
-    wrong, excused = check(sys.argv[1], sys.argv[2])
+    wrong, excused = check(sys.argv[1], sys.argv[2],
+                           sys.argv[3] if len(sys.argv) == 4 else None)
     for name, reason in excused:
         print("  %-12s asks first: %s" % (name, reason))
     for name, found in wrong:

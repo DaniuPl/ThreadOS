@@ -169,6 +169,7 @@ A test that is missing an optional tool prints `SKIPPED` and the reason.
 |---|---|
 | `make` (or `make kernel64`) | `build/threados64.bin`, `build/initrd64.img` |
 | `make efi` | `build/BOOTX64.EFI` (threadboot) |
+| `make webkit` | `build/apps64.img`: WebKit's WPE port, the three programs of the web engine (hours on four cores, so not part of `make`) |
 | `make kernelarm64` | `build/threados-arm64.elf`, the ARM64 kernel for QEMU's virt machine (clang + lld), and `build/initrd-arm64.img`, its fonts. `make run-arm64` boots it on the serial console, `make run-phone` as a phone with a screen and a touchscreen (the mouse is the finger) |
 | `make iso64` | `build/threados64.iso` (builds the 64-bit kernel and threadboot first) |
 | `make stick` | `build/threados-stick.img` |
@@ -387,18 +388,22 @@ what bringing one in involves.
   - TLS 1.3 with X.509 validation
   - AES-GCM/CCM, ChaCha20-Poly1305, X25519, ECDSA, RSA, SHA-1/2
   - WPA2 key derivation
-- **WebKit, on its way:** JavaScriptCore runs, and what WPE's port of
-  WebKit is built on is built from source and tested on ThreadOS against
-  other implementations: GLib, libsoup, OpenSSL, ICU, FreeType,
-  fontconfig, HarfBuzz, libxml2, libpng, libjpeg-turbo, libwebp,
-  libgcrypt, libtasn1, libepoxy and libxkbcommon.
+- **WebKit:** WPE WebKit 2.54 runs in a desktop window (`make webkit`
+  builds it into `apps64.img`, which the loader brings beside the
+  initrd): pages fetched by libsoup, laid out by WebCore exactly as
+  Chromium lays them out, scripts in JavaScriptCore, painted by Skia on
+  the processor, with the mouse and the keyboard (Polish letters too).
+  Under it, built from source and tested on ThreadOS against other
+  implementations: GLib, libsoup, OpenSSL, ICU, FreeType, fontconfig,
+  HarfBuzz, libxml2, libpng, libjpeg-turbo, libwebp, libgcrypt,
+  libtasn1, libepoxy and libxkbcommon.
 
 ## Roadmap
 
 - Wi-Fi: joining a network with the Intel 3160 (it scans already) and
   an 802.11 layer. The WPA2 cryptography is already done.
-- WebKit itself (WebCore and WebKit2 through the WPE port), drawn by
-  Skia on the processor into a ThreadOS window.
+- WebKit as the browser: an address bar, tabs and the dock's Web tile
+  on WPE, and apps64.img written by the installer.
 - Drivers for what laptops still list without one: the SD card reader,
   the SMBus.
 - Images and external style sheets in the browser.
