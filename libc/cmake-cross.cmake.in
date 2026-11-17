@@ -1,0 +1,17 @@
+# CMake's toolchain file for the libraries built for ThreadOS with CMake
+# (libc/cmake-cross.cmake.in; libjpeg-turbo so far)
+#
+# The same as libc/meson-cross.ini.in says to meson: libc/threados-cc as
+# the compiler, Linux as the system (musl answers Linux's calls), and
+# BUILD/libs64 as the only place libraries and headers are looked for.
+# The Makefile writes the paths in.
+
+set(CMAKE_SYSTEM_NAME Linux)
+set(CMAKE_SYSTEM_PROCESSOR x86_64)
+set(CMAKE_C_COMPILER @TOOLCHAIN@/threados-cc)
+set(CMAKE_FIND_ROOT_PATH @LIBS@)
+set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+set(CMAKE_POSITION_INDEPENDENT_CODE OFF)
+set(BUILD_SHARED_LIBS OFF)

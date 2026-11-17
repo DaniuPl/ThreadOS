@@ -24,10 +24,11 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential \
             grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-            clang lld python3 cmake ninja-build ruby pkg-config
+            clang lld python3 cmake ninja-build ruby pkg-config gperf
           # (cmake, ninja and ruby build WebKit's JavaScriptCore;
           # meson and pkg-config build GLib - meson from pip, since
-          # GLib wants a newer one than the runner's)
+          # GLib wants a newer one than the runner's; gperf makes
+          # fontconfig's object table)
           python3 -m pip install --user meson
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
@@ -63,11 +64,13 @@ jobs:
             qemu-system-x86 qemu-system-arm grub-pc-bin grub-efi-amd64-bin \
             xorriso mtools ovmf clang lld python3 openssl libssl-dev \
             acpica-tools qemu-system-gui cmake ninja-build ruby \
-            pkg-config libglib2.0-dev
+            pkg-config gperf libglib2.0-dev libfontconfig-dev \
+            libfreetype-dev python3-pil
           # (iasl, from acpica-tools, compiles the batteries t_power
           # gives the machine; qemu-system-gui has QEMU's SDL sound,
           # whose disk driver is t_mic's microphone; t_glib holds
-          # ThreadOS's GLib to the runner's, libglib2.0-dev)
+          # ThreadOS's GLib to the runner's, t_fontconfig its fontconfig
+          # and FreeType, and t_images its pictures to Pillow's)
           python3 -m pip install --user meson
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           # FreeType and fontTools are what the TrueType test compares
@@ -98,7 +101,7 @@ jobs:
       - name: The groups that cover the most ground
         if: github.event_name != 'schedule'
         run: |
-          make test J=2 T=k64core,k64shell,k64proc,k64disk,tfs,arm64boot,arm64core,arm64threads,libc,pthread,sqlite,socket,ipc,glib,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,http,tls64,net64,desktop64,files,ginstal,stick,power
+          make test J=2 T=k64core,k64shell,k64proc,k64disk,tfs,arm64boot,arm64core,arm64threads,libc,pthread,sqlite,socket,ipc,glib,images,xml,fontconfig,fat,aes,wpa,bt,usbdisk,usbnet,sound,xhci,ehci,ttf,uefi,threadboot,http,tls64,net64,desktop64,files,ginstal,stick,power
 
       - name: Everything, once a night
         if: github.event_name == 'schedule'

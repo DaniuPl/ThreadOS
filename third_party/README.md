@@ -24,6 +24,10 @@ as code of our own around it (`apps/js`).
 | `glib-2.90.1.tar.xz` | GLib, GObject and GIO: the main loop, threads, objects and signals, data structures, streams - what WebKit's processes are built on | 2.90.1 | LGPL-2.1-or-later (`COPYING` in the archive) | https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz (SHA-256 `93c941aa17d5eb1d53fe838365f29a8b4e539c222a256d974ec8f30fc413e396`, as GNOME's glib-2.90.1.sha256sum lists it) |
 | `libffi-3.5.2.tar.gz` | libffi, calls to C functions described at run time, for GObject's signals | 3.5.2 | MIT (`LICENSE` in the archive) | https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz (SHA-256 `f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc`, computed on download; the release lists none) |
 | `pcre2-10.48.tar.bz2` | PCRE2, regular expressions, for GLib's GRegex | 10.48 | BSD-3-Clause with the PCRE2 exception (`LICENCE.md` in the archive) | https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2 (SHA-256 `b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed`, computed on download; the release signs it with a GPG key instead) |
+| `libpng-1.6.59.tar.xz` | libpng, the PNG reference library, for web pages' pictures | 1.6.59 | libpng License v2 (`LICENSE` in the archive) | https://download.sourceforge.net/libpng/libpng-1.6.59.tar.xz (SHA-256 `d80dd2a38a37f803cb9b6ac7b14bd6e74ddc3b654780a8380bdf93523fdb4389`, computed on download; the release signs it instead) |
+| `libjpeg-turbo-3.2.1.tar.gz` | libjpeg-turbo, JPEG coding, for web pages' pictures | 3.2.1 | IJG, BSD-3-Clause and zlib (`LICENSE.md`, `README.ijg` in the archive) | https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.1/libjpeg-turbo-3.2.1.tar.gz (SHA-256 `c27ad72a68da151177929aa969ae773a2da5ac2af9ce946079314fdac8cece7f`, computed on download; the release signs it instead) |
+| `libxml2-2.15.4.tar.xz` | libxml2, an XML parser, for XHTML, SVG and XML documents and fontconfig's configuration | 2.15.4 | MIT (`Copyright` in the archive) | https://download.gnome.org/sources/libxml2/2.15/libxml2-2.15.4.tar.xz (SHA-256 `98087fd181d9070724f3fbc65c7377db03038eb92bd882374daff44940138821`, as GNOME's libxml2-2.15.4.sha256sum lists it) |
+| `fontconfig-2.18.3.tar.xz` | fontconfig, which font for a family a page names | 2.18.3 | MIT-style (`COPYING` in the archive) | https://gitlab.freedesktop.org/api/v4/projects/890/packages/generic/fontconfig/2.18.3/fontconfig-2.18.3.tar.xz (SHA-256 `4f7b554a38cdf78c033f666c8871f3749e14a094f65a07f630c91ed0b43d35e3`, as the release's .sha256sum lists it) |
 | `iwlwifi/` | Firmware for the Intel Wireless 3160 Wi-Fi card (`iwlwifi-3160-17.ucode`), a binary the card runs itself | 17.bfb58538.0 | Intel's firmware licence: redistribution in binary form only, unmodified (`LICENCE.iwlwifi_firmware`) | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git (`intel/iwlwifi/`) |
 
 Trimmed, not modified:
@@ -116,3 +120,21 @@ Trimmed, not modified:
 - **PCRE2**: the archive is kept intact and built static by its
   `configure`: the 8-bit library only, without the JIT (ThreadOS hands
   out no memory a program may both write and run).
+- **libpng**: the archive is kept intact and built static by its
+  `configure` against the tree's zlib.
+- **libjpeg-turbo**: the archive is kept intact and built static by its
+  CMake (`libc/cmake-cross.cmake.in`), without the SIMD code, which is
+  written for NASM; the C it falls back on gives the same pixels. Its
+  programs and tests are not built.
+- **libxml2**: the archive is kept intact and built static by its meson,
+  without Python, readline, HTTP, ICU or modules. Only the library is
+  built (its default targets include a loadable module for its tests,
+  which a static program cannot load).
+- **fontconfig**: the archive is kept intact and built static by its
+  meson, reading its configuration with libxml2 (no expat), with its
+  object table made by the host's gperf; its programs, tests,
+  documentation and translations are not built.
+- **FreeType** (again): besides the trimmed build the system's programs
+  draw with, `BUILD/libs64` gets the whole library from the same
+  archive, built by its `configure` with zlib and libpng, for
+  fontconfig and the web engine.

@@ -22,7 +22,9 @@
  * one is made up here from the name server the network was given.
  */
 
+#include <dirent.h>
 #include <errno.h>
+#include <stddef.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <stdlib.h>
@@ -80,7 +82,7 @@
 #define SOCK_BASE 512                /* above them, under FD_SETSIZE */
 #define SOCKS     32
 #define VFILE_BASE (SOCK_BASE + SOCKS)
-#define VFILES    8
+#define VFILES    16
 
 /* unix.c */
 NET_HIDDEN int __tos_unix_owns(long fd);
@@ -157,9 +159,10 @@ static struct sk *sock_of(long fd)
    kernel's generator (kernel/random.c). Libraries that do not know
    musl has getrandom() - Mbed TLS asks for it only from glibc - open
    the file instead.
-   big: a file too large for data[], on the heap - the CA bundle. */
+   big: a file too large for data[], on the heap - the CA bundle.
+   dir: a directory's entries, as getdents64 hands them out (big). */
 static struct vf {
-	int used, random;
+	int used, random, dir;
 	char data[64];
 	char *big;
 	int len, pos;
@@ -288,6 +291,108 @@ static long vfile_new(int random)
 	}
 	unlock();
 	return -EMFILE;
+}
+
+/* --- Directories ------------------------------------------------------
+ *
+ * opendir() and readdir(): musl opens the directory and reads Linux's
+ * records from it (getdents64). The kernel lists only the working
+ * directory, an entry a call by its number (SYS64_READDIR) - so opening
+ * one goes there, lists it whole into records here, and comes back;
+ * what readdir then hands out is that list. (Going there is changing
+ * the process's working directory for a moment, as is_dir() in
+ * syscall.c does; a thread opening a relative path in that moment would
+ * miss.) */
+#define T_READDIR 19
+#define T_CHDIR   17
+#define T_GETCWD  18
+#ifndef DT_DIR                       /* (<dirent.h> has them for BSD and GNU) */
+#define DT_DIR 4
+#define DT_REG 8
+#endif
+
+struct k_dirent {
+	char name[64];
+	unsigned size;
+	int is_dir;
+};
+
+static int add_record(char **buf, int *len, int *cap, const char *name,
+                      unsigned char type, long ino)
+{
+	size_t n = strlen(name);
+	int reclen = (int)((offsetof(struct dirent, d_name) + n + 1 + 7) & ~7UL);
+	if (*len + reclen > *cap) {
+		int want = (*len + reclen) * 2;
+		char *more = realloc(*buf, want);
+		if (!more)
+			return -1;
+		*buf = more;
+		*cap = want;
+	}
+	struct dirent *d = (struct dirent *)(*buf + *len);
+	memset(d, 0, reclen);
+	d->d_ino = ino;
+	d->d_off = *len + reclen;          /* where the next one starts */
+	d->d_reclen = reclen;
+	d->d_type = type;
+	memcpy(d->d_name, name, n + 1);
+	*len += reclen;
+	return 0;
+}
+
+NET_HIDDEN long __tos_open_dir(const char *path)
+{
+	char here[256];
+	touch(here, sizeof(here));
+	if (tos(T_GETCWD, (long)here, sizeof(here), 0, 0) < 0)
+		return -EIO;
+	if (tos(T_CHDIR, (long)path, strlen(path), 0, 0) < 0)
+		return -ENOTDIR;
+	char *buf = NULL;
+	int len = 0, cap = 0;
+	int bad = add_record(&buf, &len, &cap, ".", DT_DIR, 1) ||
+	          add_record(&buf, &len, &cap, "..", DT_DIR, 2);
+	struct k_dirent e;
+	touch(&e, sizeof(e));
+	for (int i = 0; !bad && tos(T_READDIR, i, (long)&e, 0, 0) == 0; i++) {
+		e.name[sizeof(e.name) - 1] = 0;
+		bad = add_record(&buf, &len, &cap, e.name,
+		                 e.is_dir ? DT_DIR : DT_REG, 3 + i);
+	}
+	tos(T_CHDIR, (long)here, strlen(here), 0, 0);
+	if (bad) {
+		free(buf);
+		return -ENOMEM;
+	}
+	long fd = vfile_new(0);
+	if (fd < 0) {
+		free(buf);
+		return fd;
+	}
+	struct vf *v = &vfiles[fd - VFILE_BASE];
+	v->dir = 1;
+	v->big = buf;
+	v->len = len;
+	return fd;
+}
+
+/* Whole records from where the reader stands, as many as fit */
+static long dir_read(struct vf *v, char *out, long room)
+{
+	long done = 0;
+	touch(out, room);
+	while (v->pos < v->len) {
+		struct dirent *d = (struct dirent *)(v->big + v->pos);
+		if (done + d->d_reclen > room)
+			break;
+		memcpy(out + done, d, d->d_reclen);
+		done += d->d_reclen;
+		v->pos += d->d_reclen;
+	}
+	if (!done && v->pos < v->len)
+		return -EINVAL;                /* not even one fits */
+	return done;
 }
 
 /* --- The certificates TLS checks servers against --------------------
@@ -965,6 +1070,7 @@ NET_HIDDEN int __tos_net_owns(long n, long fd)
 	case SYS_read: case SYS_write: case SYS_readv: case SYS_writev:
 	case SYS_close: case SYS_fstat: case SYS_fcntl: case SYS_ioctl:
 	case SYS_lseek: case SYS_pread64: case SYS_pwrite64:
+	case SYS_getdents64:
 		return fd >= SOCK_BASE && fd < PIDFD_BASE + PIDFDS;
 	}
 	return 0;
@@ -972,7 +1078,11 @@ NET_HIDDEN int __tos_net_owns(long n, long fd)
 
 static long vfile_call(struct vf *v, long n, long a, long b, long c)
 {
+	if (v->dir && (n == SYS_read || n == SYS_readv))
+		return -EISDIR;
 	switch (n) {
+	case SYS_getdents64:
+		return v->dir ? dir_read(v, (char *)b, c) : -ENOTDIR;
 	case SYS_read: {
 		if (v->random) {
 			long done = 0;
@@ -1026,7 +1136,8 @@ static long vfile_call(struct vf *v, long n, long a, long b, long c)
 		struct kstat *st = (void *)b;
 		touch(st, sizeof(*st));
 		memset(st, 0, sizeof(*st));
-		st->st_mode = v->random ? S_IFCHR | 0444 : S_IFREG | 0444;
+		st->st_mode = v->dir ? S_IFDIR | 0755 :
+		              v->random ? S_IFCHR | 0444 : S_IFREG | 0444;
 		st->st_size = v->random ? 0 : v->len;
 		st->st_nlink = 1;
 		return 0;

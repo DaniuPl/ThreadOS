@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:t="urn:threados:test" t:kind="news">
+  <title>Default namespace</title>
+  <entry t:id="a1">
+    <title type="text">First</title>
+    <t:extra xmlns:t="urn:threados:other" t:flag="yes">redeclared prefix</t:extra>
+  </entry>
+  <entry t:id="a2">
+    <title>Second</title>
+    <plain xmlns="">no namespace here</plain>
+  </entry>
+</feed>

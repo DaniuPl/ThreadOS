@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<!DOCTYPE letter [
+  <!ENTITY company "ThreadOS &amp; friends">
+  <!ENTITY sign "<signature>The &company; team</signature>">
+  <!ATTLIST paragraph align CDATA "left">
+]>
+<letter>
+  <paragraph>Greetings from &company;.</paragraph>
+  <paragraph align="right">Signed below.</paragraph>
+  &sign;
+</letter>

@@ -8515,3 +8515,59 @@ works and is checked by `make test`.
       within one tick run in the order they were added rather than of
       their times - glibtest's are 50 ms apart for that. A finer clock,
       from the TSC, is for later; WebKit's animations will want it.)
+
+- [x] **Pictures, XML and fonts for the web engine: libpng,
+      libjpeg-turbo, libxml2, FreeType and fontconfig; directories for
+      musl programs** (Makefile, libc/cmake-cross.cmake.in,
+      libc/overlay/src/threados/socket.c, syscall.c,
+      libc/tests/imgtest.c, xmltest.c, fctest.c,
+      scripts/tests/t_images.py, t_xml.py, t_fontconfig.py,
+      scripts/tests/xml/, scripts/fuzz_parsers.py,
+      tests/fuzz/onefile.c, tests/fuzz/freetype_harness.c)
+      The next libraries under WebKit, each from its release by its own
+      build into BUILD/libs64: libpng 1.6.59 (configure), libjpeg-turbo
+      3.2.1 (CMake, through a toolchain file like meson's cross file;
+      without its NASM SIMD code), libxml2 2.15.4 (meson, the library
+      alone), the whole of FreeType 2.15.0 once more by its configure
+      with zlib and libpng (the system's own build has only the modules
+      its programs draw with), and fontconfig 2.18.3 (meson), which
+      reads its configuration with libxml2, so expat is not needed.
+      fontconfig scans a font directory, and a musl program could not
+      list one: open() of a directory was ENOSYS. Opening one now lists
+      it through the kernel (SYS64_READDIR, which reads the working
+      directory, so the overlay goes there and back) into Linux's
+      records, which getdents64, and so readdir(), hands out. (t_sqlite
+      caught the first try: SQLite makes its temporary files with
+      open(dir, O_RDWR | O_TMPFILE), and O_TMPFILE carries O_DIRECTORY's
+      bit - the open that used to fail and send it to a named file now
+      handed it a directory's listing to write its sort into. O_TMPFILE
+      is EOPNOTSUPP now, as on Linux's file systems without unnamed
+      files, and a directory opened for writing EISDIR.)
+      Each is held to another implementation:
+      - t_images: Pillow makes PNGs (RGB, RGBA, palette with a
+        transparent entry, grey, grey with alpha, 16-bit grey) and
+        JPEGs (4:2:0, progressive, 4:4:4, grey), the test writes a
+        16-bit interlaced RGBA PNG itself, and imgtest's RGBA of each -
+        a hash of every pixel and three pixels - is Pillow's to the
+        bit, JPEGs included; a PNG cut short, one with a byte changed
+        under its CRC and a false JPEG are errors, as Pillow finds too;
+        PNG round-trips exactly, JPEG at quality 90 within 1.8 levels
+        on average;
+      - t_xml: xmltest's canonical trees of the documents in
+        scripts/tests/xml/ (namespaces, a DTD's entities and default
+        attributes, CDATA, ISO-8859-2, UTF-16, SVG) and its XPath
+        answers are ElementTree's (expat) line for line; a broken
+        document and the "billion laughs" are refused, as expat
+        refuses them, and every document written out and read again
+        keeps its tree;
+      - t_fontconfig: fctest, given the system's three fonts in a
+        directory and no configuration, lists, matches and sorts them
+        and reads their glyphs with FreeType exactly as the same
+        program does on the host with the host's fontconfig and
+        FreeType.
+      make fuzz runs libpng's, libjpeg-turbo's and libxml2's own
+      fuzzers (five of libxml2's: the parser, the reader, validation,
+      XPath, URIs), built for the host under ASan and UBSan from the
+      same archives, and one of ours for FreeType - a page's fonts are
+      untrusted, and FreeType's archive has no fuzzers - every face
+      opened, glyphs loaded hinted and not, rendered, kerned.

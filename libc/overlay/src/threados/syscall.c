@@ -66,6 +66,8 @@ __attribute__((__visibility__("hidden")))
 long __tos_net(long n, long a, long b, long c, long d, long e, long f);
 __attribute__((__visibility__("hidden")))
 long __tos_open_virtual(const char *path);
+__attribute__((__visibility__("hidden")))
+long __tos_open_dir(const char *path);
 
 /* src/threados/unix.c: Unix socket pairs, which are kernel descriptors */
 __attribute__((__visibility__("hidden")))
@@ -492,9 +494,15 @@ static long do_open(const char *path, int flags)
 			set_cloexec(fd, 1);
 		return fd;
 	}
-	if (flags & O_DIRECTORY)
-		return is_dir(path) ? -ENOSYS : -ENOTDIR;
 	int acc = flags & O_ACCMODE;
+	/* O_TMPFILE, an unnamed file in a directory, carries O_DIRECTORY's
+	   bit with it: the file system has no unnamed files, and saying so
+	   as Linux's file systems without them do sends the program to a
+	   named one (SQLite does exactly that) */
+	if ((flags & O_TMPFILE) == O_TMPFILE)
+		return -EOPNOTSUPP;
+	if (flags & O_DIRECTORY)
+		return acc != O_RDONLY ? -EISDIR : __tos_open_dir(path);
 	if ((flags & O_CREAT) && (flags & O_EXCL)) {
 		long fd = tos(T_OPEN, (long)path, slen(path), 0, 0);
 		if (fd >= 0) {
@@ -521,7 +529,7 @@ static long do_open(const char *path, int flags)
 		return -EACCES;
 	if (fd < 0) {
 		if (is_dir(path))
-			return acc == O_RDONLY ? -ENOSYS : -EISDIR;
+			return acc == O_RDONLY ? __tos_open_dir(path) : -EISDIR;
 		/* a file the system makes up when the disk has none
 		   (/etc/resolv.conf, socket.c) */
 		if (acc == O_RDONLY && !(flags & O_CREAT)) {

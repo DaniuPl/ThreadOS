@@ -11,7 +11,9 @@ kernel's device tree reader (kernelarm64/fdt.c), because the tree is
 the firmware's and the firmware is somebody else's - and GLib, under
 WebKit's processes, with its own fuzzers: key files, GVariant in text
 and binary, URIs, dates, bookmark files (its XML), UTF-8, D-Bus
-messages, DNS replies and network addresses. In the kernel an error does
+messages, DNS replies and network addresses; and what a web page's
+pictures, documents and fonts go through: libpng, libjpeg-turbo and
+libxml2 with their own fuzzers, FreeType with ours. In the kernel an error does
 not end in the death of a process but in the system going down, so it
 is all the more worth looking for.
 
@@ -321,6 +323,152 @@ def glib_seeds(fz):
         "glib-inet_address_new_from_string": [b"192.168.1.20", b"fe80::1",
                                               b"::ffff:10.0.2.15"],
         "glib-network_address_parse_uri": uris,
+    }
+
+
+# The libraries a web page's pictures, documents and fonts go through
+# (Makefile, 'Libraries for WebKit's processes'): libpng's and
+# libjpeg-turbo's own fuzzers, libxml2's, and ours for FreeType, whose
+# archive has none
+MEDIA_FUZZERS = {
+    "libpng": "libpng_read_fuzzer",
+    "libjpeg": "decompress",
+    "libjpeg-api": "decompress_libjpeg",
+    "libxml2-xml": "xml",
+    "libxml2-reader": "reader",
+    "libxml2-valid": "valid",
+    "libxml2-xpath": "xpath",
+    "libxml2-uri": "uri",
+    "freetype": "freetype",
+}
+SAN = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+       "-fno-omit-frame-pointer", "-g", "-O1"]
+
+
+def tarball(var):
+    with open(os.path.join(ROOT, "Makefile")) as f:
+        return os.path.join(ROOT, next(l.split(":=")[1].strip() for l in f
+                                       if l.startswith(var + " ")))
+
+
+def unpack(var, workdir, name):
+    src = os.path.join(workdir, name)
+    os.makedirs(src)
+    subprocess.run(["tar", "-xf", tarball(var), "-C", src,
+                    "--strip-components=1"], check=True)
+    return src
+
+
+def must(cmd, what, **kw):
+    out = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    if out.returncode != 0:
+        print(out.stdout[-2000:], out.stderr[-2000:])
+        raise SystemExit(what + " could not be built for fuzzing")
+
+
+def build_media(workdir):
+    """libpng, libjpeg-turbo, libxml2 and FreeType built for the host
+    under the sanitizers from the archives the Makefile names, each
+    fuzzer linked with tests/fuzz/onefile.c"""
+    cflags = "CFLAGS=" + " ".join(SAN)
+    driver = os.path.join(ROOT, "tests", "fuzz", "onefile.c")
+    binaries = {}
+
+    png = unpack("LIBPNG_TAR", workdir, "libpng")
+    must(["./configure", "--disable-shared", "--enable-static", cflags],
+         "libpng", cwd=png)
+    must(["make", "-j8", "libpng16.la"], "libpng", cwd=png)
+    fz = os.path.join(png, "contrib", "oss-fuzz")
+    b = os.path.join(workdir, "fz-libpng")
+    # (nalloc.h, its allocation-failure wrapper, takes the sanitizer's
+    # own allocator only when it sees clang; with gcc it is told)
+    must(["g++", *SAN, "-DNALLOC_ASAN=1", "-w", "-I", png, "-I", fz, "-o", b,
+          os.path.join(fz, "libpng_read_fuzzer.cc"), "-x", "c", driver,
+          "-x", "none", os.path.join(png, ".libs", "libpng16.a"), "-lz"],
+         "libpng's fuzzer")
+    binaries["libpng"] = b
+
+    jpeg = unpack("LIBJPEG_TAR", workdir, "libjpeg")
+    must(["cmake", "-S", jpeg, "-B", os.path.join(jpeg, "b"), "-G", "Ninja",
+          "-DENABLE_SHARED=OFF", "-DWITH_SIMD=OFF", "-DWITH_TOOLS=OFF",
+          "-DWITH_TESTS=OFF", "-DCMAKE_C_FLAGS=" + " ".join(SAN)],
+         "libjpeg-turbo")
+    must(["ninja", "-C", os.path.join(jpeg, "b"), "turbojpeg-static",
+          "jpeg-static"], "libjpeg-turbo")
+    for name, src in (("libjpeg", "decompress"),
+                      ("libjpeg-api", "decompress_libjpeg")):
+        b = os.path.join(workdir, "fz-" + name)
+        must(["g++", *SAN, "-w", "-I", jpeg, "-I", os.path.join(jpeg, "src"),
+              "-I", os.path.join(jpeg, "b"), "-o", b,
+              os.path.join(jpeg, "fuzz", src + ".cc"), "-x", "c", driver,
+              "-x", "none", os.path.join(jpeg, "b", "libturbojpeg.a"),
+              os.path.join(jpeg, "b", "libjpeg.a")], "libjpeg-turbo's " + src)
+        binaries[name] = b
+
+    xml = unpack("LIBXML2_TAR", workdir, "libxml2")
+    must(["./configure", "--disable-shared", "--enable-static",
+          "--without-python", "--without-readline", "--without-http",
+          cflags], "libxml2", cwd=xml)
+    must(["make", "-j8", "libxml2.la"], "libxml2", cwd=xml)
+    for name in ("xml", "reader", "valid", "xpath", "uri"):
+        b = os.path.join(workdir, "fz-libxml2-" + name)
+        must(["gcc", *SAN, "-w", "-I", os.path.join(xml, "include"),
+              "-I", xml, "-o", b, os.path.join(xml, "fuzz", name + ".c"),
+              os.path.join(xml, "fuzz", "fuzz.c"), driver,
+              os.path.join(xml, ".libs", "libxml2.a"), "-lz", "-lm"],
+             "libxml2's fuzz " + name)
+        binaries["libxml2-" + name] = b
+
+    ft = unpack("FT_TAR", workdir, "freetype")
+    must(["./configure", "--disable-shared", "--enable-static",
+          "--with-zlib=yes", "--with-png=no", "--with-harfbuzz=no",
+          "--with-brotli=no", "--with-bzip2=no", cflags], "FreeType", cwd=ft)
+    must(["make", "-j8"], "FreeType", cwd=ft)
+    b = os.path.join(workdir, "fz-freetype")
+    must(["gcc", *SAN, "-w", "-I", os.path.join(ft, "include"), "-o", b,
+          os.path.join(ROOT, "tests", "fuzz", "freetype_harness.c"), driver,
+          os.path.join(ft, "objs", ".libs", "libfreetype.a"), "-lz"],
+         "the FreeType harness")
+    binaries["freetype"] = b
+    return binaries
+
+
+def media_seeds(corpus):
+    """Pictures from the decoders of our own above, the XML test's
+    documents in the form libxml2's fuzzers read (options, then each
+    entity's name and text ending in a backslash and a newline), and
+    the system's fonts"""
+    def entity(text):
+        return text.replace(b"\\", b"\\\\") + b"\\\n"
+    docs = []
+    xdir = os.path.join(ROOT, "scripts", "tests", "xml")
+    for name in sorted(os.listdir(xdir)):
+        if name.endswith(".xml"):
+            docs.append((name.encode(), open(os.path.join(xdir, name),
+                                             "rb").read()))
+    xml, reader, xpath, uri = [], [], [], []
+    for name, text in docs:
+        ents = entity(name) + entity(text)
+        xml.append(struct.pack(">III", 0, 0, 0) + ents)
+        reader.append(struct.pack(">II", 0, 0) + entity(b"") + ents)
+        xpath.append(struct.pack(">I", 0) + entity(b"//*[@id] | count(//*)")
+                     + entity(text))
+    for u in (b"https://user@example.org:8080/a/b?c=d#e", b"../up/./x.svg",
+              b"file:///home/a%20b.xml", b"urn:isbn:0451450523"):
+        uri.append(struct.pack(">I", 0) + entity(u) +
+                   entity(b"http://base.example/dir/page.html"))
+    fonts = [open(os.path.join(ROOT, "fonts", f), "rb").read()
+             for f in sorted(os.listdir(os.path.join(ROOT, "fonts")))
+             if f.endswith(".ttf")]
+    return {
+        "libpng": list(corpus.get("png", [])),
+        "libjpeg": list(corpus.get("jpeg", [])),
+        "libjpeg-api": list(corpus.get("jpeg", [])),
+        "libxml2-xml": xml, "libxml2-reader": reader,
+        "libxml2-valid": [struct.pack(">II", 0, 0) + entity(n) + entity(t)
+                          for n, t in docs],
+        "libxml2-xpath": xpath, "libxml2-uri": uri,
+        "freetype": fonts,
     }
 
 
@@ -873,6 +1021,7 @@ def main():
         mbinaries = build_mbedtls(workdir)
         gbinaries, gfuzz = build_glib(workdir)
         mbinaries.update(gbinaries)
+        mbinaries.update(build_media(workdir))
         hbinary = build_hid(workdir)
         fbinary = build_fdt(workdir)
         corpus = seeds(workdir)
@@ -885,6 +1034,7 @@ def main():
         corpus["mbedtls-pubkey"], corpus["mbedtls-privkey"] = \
             mbedtls_seeds(workdir)
         corpus.update(glib_seeds(gfuzz))
+        corpus.update(media_seeds(corpus))
         print("the harness is built, cases per parser: %d" % CASES)
         wrong = fdt_layouts(fbinary, workdir)
         print("  device trees against what they were made with: %d wrong"

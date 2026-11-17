@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- a catalogue, with a comment before it -->
+<catalog version="2" lang="pl">
+  <title>Zażółć gęślą jaźń &amp; &lt;inne&gt; &#x17C;&#246;</title>
+  <section name="fruit">
+    <item id="1" price="2.50">apple<!-- inside -->s</item>
+    <item id="2" price="1.20" note="a &quot;quoted&quot; word">pear</item>
+    <item id="3"><![CDATA[<raw> & unparsed]]> and more</item>
+  </section>
+  <section name="tools">
+    <item id="4">hammer</item>
+    <empty/>
+    <item id="5" note="tab	and
+newline">saw</item>
+  </section>
+  <?processing instruction?>
+  trailing text
+</catalog>

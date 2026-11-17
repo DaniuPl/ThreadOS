@@ -1,0 +1,8 @@
+<?xml version="1.0" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="120" height="80" viewBox="0 0 120 80">
+  <defs><linearGradient id="g"><stop offset="0" stop-color="#05f"/><stop offset="1" stop-color="#f50"/></linearGradient></defs>
+  <rect x="10" y="10" width="100" height="60" rx="8" fill="url(#g)"/>
+  <circle cx="60" cy="40" r="15" fill="white"/>
+  <use xlink:href="#g"/>
+  <text x="60" y="75" text-anchor="middle">ThreadOS</text>
+</svg>

@@ -674,6 +674,8 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/ipctest.elf \
                $(BUILD)/user64/bigram.elf \
                $(BUILD)/user64/glibtest.elf \
+               $(BUILD)/user64/imgtest.elf $(BUILD)/user64/xmltest.elf \
+               $(BUILD)/user64/fctest.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
@@ -924,6 +926,131 @@ $(BUILD)/user64/glibtest.elf: libc/tests/glibtest.c $(GLIB_A) $(TOS_CC) \
 	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs gio-2.0 gio-unix-2.0)
 
+# CMake gets libc/cmake-cross.cmake.in the way meson gets its cross file
+CMAKE_CROSS := $(TOOLCHAIN64)/cross.cmake
+$(CMAKE_CROSS): libc/cmake-cross.cmake.in
+	mkdir -p $(TOOLCHAIN64)
+	sed -e 's|@TOOLCHAIN@|$(abspath $(TOOLCHAIN64))|' \
+	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
+
+# libpng: PNG pictures
+LIBPNG_TAR := third_party/libpng-1.6.59.tar.xz
+LIBPNG_A   := $(LIBS64)/lib/libpng16.a
+$(LIBPNG_A): $(LIBPNG_TAR) $(TOS_CC) $(LIBS64_ZLIB)
+	rm -rf $(BUILD)/libpng && mkdir -p $(BUILD)/libpng
+	tar -xf $< -C $(BUILD)/libpng --strip-components=1
+	cd $(BUILD)/libpng && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    CPPFLAGS=-I$(abspath $(LIBS64))/include \
+	    LDFLAGS=-L$(abspath $(LIBS64))/lib \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libpng install > $(BUILD)/libpng/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/libpng/make.log; exit 1; }
+
+# libjpeg-turbo: JPEG pictures. Without its SIMD code, which is written
+# for NASM; the C it falls back on gives the same pixels.
+LIBJPEG_TAR := third_party/libjpeg-turbo-3.2.1.tar.gz
+LIBJPEG_A   := $(LIBS64)/lib/libjpeg.a
+$(LIBJPEG_A): $(LIBJPEG_TAR) $(TOS_CC) $(CMAKE_CROSS)
+	rm -rf $(BUILD)/libjpeg && mkdir -p $(BUILD)/libjpeg
+	tar -xf $< -C $(BUILD)/libjpeg --strip-components=1
+	cmake -S $(BUILD)/libjpeg -B $(BUILD)/libjpeg/build -G Ninja \
+	    -DCMAKE_TOOLCHAIN_FILE=$(abspath $(CMAKE_CROSS)) \
+	    -DCMAKE_BUILD_TYPE=Release \
+	    -DCMAKE_INSTALL_PREFIX=$(abspath $(LIBS64)) \
+	    -DCMAKE_INSTALL_LIBDIR=lib -DENABLE_SHARED=OFF -DENABLE_STATIC=ON \
+	    -DWITH_SIMD=OFF -DWITH_TURBOJPEG=ON -DWITH_TOOLS=OFF \
+	    -DWITH_TESTS=OFF > $(BUILD)/libjpeg/cmake.log 2>&1 \
+	    || { tail -40 $(BUILD)/libjpeg/cmake.log; exit 1; }
+	ninja -C $(BUILD)/libjpeg/build install > $(BUILD)/libjpeg/ninja.log 2>&1 \
+	    || { tail -40 $(BUILD)/libjpeg/ninja.log; exit 1; }
+
+# libxml2: XML, for the engine's XHTML, SVG and XML documents. Only the
+# library is built and installed: its default targets include a module
+# for its tests, and a module is something a static ThreadOS program
+# cannot load.
+LIBXML2_TAR  := third_party/libxml2-2.15.4.tar.xz
+LIBXML2_TREE := $(BUILD)/libxml2
+LIBXML2_A    := $(LIBS64)/lib/libxml2.a
+$(LIBXML2_A): $(LIBXML2_TAR) $(MESON_CROSS) $(TOS_CC) $(LIBS64_ZLIB)
+	rm -rf $(LIBXML2_TREE) && mkdir -p $(LIBXML2_TREE)
+	tar -xf $< -C $(LIBXML2_TREE) --strip-components=1
+	cd $(LIBXML2_TREE) && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Dpython=disabled -Dreadline=disabled \
+	    -Dhistory=disabled -Ddocs=disabled -Dmodules=disabled \
+	    -Dhttp=disabled -Dicu=disabled -Dlegacy=disabled -Diconv=enabled \
+	    -Dzlib=enabled -Dthreads=enabled \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(LIBXML2_TREE)/build libxml2.a > $(LIBXML2_TREE)/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(LIBXML2_TREE)/ninja.log | head -60; exit 1; }
+	meson install -C $(LIBXML2_TREE)/build --no-rebuild --tags devel \
+	    > $(LIBXML2_TREE)/install.log 2>&1 \
+	    || { tail -20 $(LIBXML2_TREE)/install.log; exit 1; }
+
+# FreeType once more, whole this time, by its own configure: the one
+# above (FT_A) has only the modules the system's programs draw with,
+# and fontconfig, and later the engine, ask more of it - BDF and Type 1
+# fonts, colour glyphs in PNG.
+LIBS64_FT_A := $(LIBS64)/lib/libfreetype.a
+$(LIBS64_FT_A): $(FT_TAR) $(TOS_CC) $(LIBS64_ZLIB) $(LIBPNG_A)
+	rm -rf $(BUILD)/freetype64 && mkdir -p $(BUILD)/freetype64
+	tar -xf $< -C $(BUILD)/freetype64 --strip-components=1
+	cd $(BUILD)/freetype64 && $(LIBS64_PC) ./configure \
+	    --host=x86_64-pc-linux-musl --build=x86_64-pc-linux-gnu \
+	    CC=$(abspath $(TOS_CC)) CFLAGS=-O2 --prefix=$(abspath $(LIBS64)) \
+	    --disable-shared --enable-static --with-zlib=yes --with-png=yes \
+	    --with-harfbuzz=no --with-brotli=no --with-bzip2=no \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/freetype64 > $(BUILD)/freetype64/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/freetype64/make.log; exit 1; }
+	$(MAKE) -C $(BUILD)/freetype64 install > $(BUILD)/freetype64/install.log \
+	    2>&1 || { tail -20 $(BUILD)/freetype64/install.log; exit 1; }
+
+# fontconfig: which font for the family a page names. Its configuration
+# is read with libxml2 (no expat needed), its object table made with the
+# host's gperf; its programs, tests and translations are not built.
+FONTCONFIG_TAR  := third_party/fontconfig-2.18.3.tar.xz
+FONTCONFIG_TREE := $(BUILD)/fontconfig
+FONTCONFIG_A    := $(LIBS64)/lib/libfontconfig.a
+$(FONTCONFIG_A): $(FONTCONFIG_TAR) $(MESON_CROSS) $(TOS_CC) $(LIBS64_FT_A) \
+                 $(LIBXML2_A)
+	rm -rf $(FONTCONFIG_TREE) && mkdir -p $(FONTCONFIG_TREE)
+	tar -xf $< -C $(FONTCONFIG_TREE) --strip-components=1
+	cd $(FONTCONFIG_TREE) && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Ddoc=disabled -Dnls=disabled \
+	    -Dtests=disabled -Dtools=disabled -Dcache-build=disabled \
+	    -Dxml-backend=libxml2 -Diconv=disabled \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(FONTCONFIG_TREE)/build > $(FONTCONFIG_TREE)/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(FONTCONFIG_TREE)/ninja.log | head -60; exit 1; }
+	meson install -C $(FONTCONFIG_TREE)/build --no-rebuild --tags devel \
+	    > $(FONTCONFIG_TREE)/install.log 2>&1 \
+	    || { tail -20 $(FONTCONFIG_TREE)/install.log; exit 1; }
+
+libs64: $(LIBPNG_A) $(LIBJPEG_A) $(LIBXML2_A) $(FONTCONFIG_A)
+
+# Their tests: pictures held to Pillow (t_images), XML to ElementTree
+# (t_xml), fonts to the host's fontconfig (t_fontconfig)
+$(BUILD)/user64/imgtest.elf: libc/tests/imgtest.c $(LIBPNG_A) $(LIBJPEG_A) \
+                             $(TOS_CC) | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
+	    $$($(LIBS64_PC) pkg-config --cflags --static --libs libpng16 libjpeg)
+
+$(BUILD)/user64/xmltest.elf: libc/tests/xmltest.c $(LIBXML2_A) $(TOS_CC) \
+                             | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
+	    $$($(LIBS64_PC) pkg-config --cflags --static --libs libxml-2.0)
+
+$(BUILD)/user64/fctest.elf: libc/tests/fctest.c $(FONTCONFIG_A) $(TOS_CC) \
+                            | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
+	    $$($(LIBS64_PC) pkg-config --cflags --static --libs fontconfig freetype2)
+
 # --- WebKit: JavaScriptCore -------------------------------------------
 # WebKitGTK's release (third_party/README.md), built by its own CMake
 # through apps/webkit/threados.cmake: the JSCOnly port, the C loop
@@ -1118,6 +1245,9 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    ipctest=$(BUILD)/user64/ipctest.elf \
 	    bigram=$(BUILD)/user64/bigram.elf \
 	    glibtest=$(BUILD)/user64/glibtest.elf \
+	    imgtest=$(BUILD)/user64/imgtest.elf \
+	    xmltest=$(BUILD)/user64/xmltest.elf \
+	    fctest=$(BUILD)/user64/fctest.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
 	    randtest=$(BUILD)/user64/randtest.elf \
