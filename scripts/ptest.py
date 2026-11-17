@@ -3577,7 +3577,7 @@ def stick_starts_live(esp):
 
 
 def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
-               kernel=None, initrd=None, gfxmode=None):
+               kernel=None, initrd=None, gfxmode=None, apps=None):
     """Assembles a disc with the 64-bit kernel and its initrd.
 
     The kernel cannot be started through -kernel: QEMU loads only
@@ -3589,6 +3589,8 @@ def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
     look for at 0xB8000. 'cmdline' is what the kernel is started with.
     'gfxmode' ("1920x1080") is the mode GRUB sets with graphics, which
     is the one the loading screen is drawn in; GRUB picks otherwise.
+    'apps' is an applications' image (apps64.img, the web engine) to
+    hand over beside the initrd.
 
     Returns True when the disc was created.
     """
@@ -3600,6 +3602,9 @@ def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
     if initrd and os.path.exists(initrd):
         shutil.copy(initrd, workdir + "/boot/initrd64.img")
         mod = "    module2 /boot/initrd64.img initrd64\n"
+    if apps:
+        shutil.copy(apps, workdir + "/boot/apps64.img")
+        mod += "    module2 /boot/apps64.img apps\n"
     header = ("insmod all_video\n" +
               ("set gfxmode=%s\n" % gfxmode if gfxmode else "") +
               "set gfxpayload=keep\n" if graphics

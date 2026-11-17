@@ -23,6 +23,20 @@
 const void *prog_image(const char *name, uint32_t *size_out, void **buf_out);
 void prog_release(void *buf);
 
+/* A program found, to be loaded into the current address space. One
+   from the initrd, or a small one from disk, lies in memory (image);
+   a larger one from disk is a file (slot) read as it loads. */
+struct prog {
+    const void *image;
+    uint32_t size;
+    void *buf;                  /* for prog_release */
+    int slot;                   /* the file, or -1 */
+};
+int prog_open(const char *name, struct prog *p);
+/* elf64_load or elf64_load_file, whichever the program needs */
+int prog_load(struct prog *p, uint64_t *entry, uint64_t *brk_base);
+void prog_close(struct prog *p);
+
 /* Is a program of this name anywhere at all. A cheap check: it does
    not read the file, only asks the initrd and the filesystem. */
 int prog_exists(const char *name);

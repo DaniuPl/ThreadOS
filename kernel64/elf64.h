@@ -67,6 +67,18 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
                uint64_t *brk_base);
 
 /* Allocates and maps the program's stack. Returns its top or 0. */
+/* The same for a program read from a file as it loads, rather than
+   lying in memory whole: read(ctx, offset, dst, len) gives the file's
+   bytes and returns how many it gave. A program bound to the shared
+   library is refused - binding needs the whole image. */
+struct elf64_file {
+    int (*read)(void *ctx, uint64_t off, void *dst, uint32_t len);
+    void *ctx;
+    uint64_t size;
+};
+int elf64_load_file(const struct elf64_file *f, uint64_t *entry,
+                    uint64_t *brk_base);
+
 uint64_t elf64_make_stack(void);
 
 #endif

@@ -28,6 +28,7 @@ _Static_assert((USER64_MMAP_BASE >> 39) == PAGING64_MMAP_PML4 &&
 #include "../kernel/include/dynlink.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
+#include "../kernel/include/heap.h"
 
 /* ELF64 headers - only the fields we really use. Compared to ELF32
    more than the size of addresses changed: in the segment header the
@@ -164,7 +165,9 @@ static int write_addr(void *ctx, uint64_t addr, uint64_t value)
     return 0;
 }
 
-static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
+/* What a segment's pages may do, as the file says; -1 for a segment
+   the loader refuses */
+static int segment_flags(const struct elf64_phdr *ph, uint64_t *out)
 {
     if (ph->p_vaddr < USER64_BASE ||
         ph->p_vaddr + ph->p_memsz < ph->p_vaddr ||     /* overflow */
@@ -189,6 +192,15 @@ static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
         flags |= PG_WRITE;
     if (!(ph->p_flags & PF_X))
         flags |= PG_NX;
+    *out = flags;
+    return 0;
+}
+
+static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
+{
+    uint64_t flags;
+    if (segment_flags(ph, &flags) < 0)
+        return -1;
 
     uint64_t file_end = ph->p_vaddr + ph->p_filesz;
 
@@ -274,6 +286,145 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
     /* The heap starts past the image, at the nearest page boundary -
        below lies the program's memory, above it is free all the way up
        to the stack */
+    if (brk_base)
+        *brk_base = (top + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
+    return 0;
+}
+
+/* --- A program read off a disk as it loads ---------------------------
+ *
+ * The loader above wants the whole file in kernel memory, and a file
+ * from disk had to be read into the kernel's heap first - which is
+ * what limited such a program to 2 MiB (kernel/prog.c). A web engine
+ * is tens of megabytes. So a large program is read where it is going:
+ * its pages are taken and mapped first, and then the file's bytes are
+ * read, a piece at a time, through a small buffer straight into them.
+ * The checks are the ones elf64_load makes, on headers read the same
+ * way.
+ */
+
+#define FILE_PHDRS_MAX 16            /* a static program has a handful */
+#define FILE_PIECE     (64 * 1024)   /* bytes read at a time */
+#define SHT_RELA       4
+
+static int read_exact(const struct elf64_file *f, uint64_t off, void *dst,
+                      uint32_t len)
+{
+    return f->read(f->ctx, off, dst, len) == (int)len ? 0 : -1;
+}
+
+/* Programs bound to the shared library are told by a relocation
+   section (kernel/dynlink.c), and binding one needs the whole image in
+   memory; one read as it loads is refused rather than run unbound */
+static int file_is_dynamic(const struct elf64_file *f,
+                           const struct elf64_ehdr *eh)
+{
+    if (!eh->e_shnum)
+        return 0;
+    if (eh->e_shentsize != 64 || eh->e_shoff > f->size ||
+        (uint64_t)eh->e_shnum * 64 > f->size - eh->e_shoff)
+        return 1;                  /* not readable: not run either */
+    for (uint16_t i = 0; i < eh->e_shnum; i++) {
+        uint32_t type;
+        if (read_exact(f, eh->e_shoff + (uint64_t)i * 64 + 4, &type, 4) < 0)
+            return 1;
+        if (type == SHT_RELA)
+            return 1;
+    }
+    return 0;
+}
+
+static int stream_segment(const struct elf64_file *f,
+                          const struct elf64_phdr *ph, uint8_t *piece)
+{
+    uint64_t flags;
+    if (segment_flags(ph, &flags) < 0)
+        return -1;
+    for (uint64_t va = ph->p_vaddr & ~(uint64_t)(PAGE_SIZE - 1);
+         va < ph->p_vaddr + ph->p_memsz; va += PAGE_SIZE)
+        if (!page_frame_for(va, flags))
+            return -1;
+
+    for (uint64_t done = 0; done < ph->p_filesz;) {
+        uint32_t n = ph->p_filesz - done < FILE_PIECE
+                         ? (uint32_t)(ph->p_filesz - done) : FILE_PIECE;
+        if (read_exact(f, ph->p_offset + done, piece, n) < 0) {
+            printk("[kernel] elf64: the program cannot be read off the disk\n");
+            return -1;
+        }
+        for (uint32_t k = 0; k < n;) {
+            uint64_t va = ph->p_vaddr + done + k;
+            uint64_t page = va & ~(uint64_t)(PAGE_SIZE - 1);
+            uint32_t in = (uint32_t)(va - page);
+            uint32_t c = PAGE_SIZE - in < n - k ? PAGE_SIZE - in : n - k;
+            memcpy(phys_ptr(paging64_lookup(page) + in), piece + k, c);
+            k += c;
+        }
+        done += n;
+    }
+    return 0;
+}
+
+int elf64_load_file(const struct elf64_file *f, uint64_t *entry,
+                    uint64_t *brk_base)
+{
+    struct elf64_ehdr eh;
+    if (f->size > 0xFFFFFFFFull || read_exact(f, 0, &eh, sizeof(eh)) < 0 ||
+        !elf_valid(&eh, (uint32_t)f->size)) {
+        printk("[kernel] elf64: this is not an ELF64 x86-64 program\n");
+        return -1;
+    }
+    if (eh.e_phnum > FILE_PHDRS_MAX) {
+        printk("[kernel] elf64: %u segment headers is more than a program has\n",
+               (unsigned)eh.e_phnum);
+        return -1;
+    }
+    struct elf64_phdr ph[FILE_PHDRS_MAX];
+    if (read_exact(f, eh.e_phoff, ph,
+                   (uint32_t)(eh.e_phnum * sizeof(struct elf64_phdr))) < 0)
+        return -1;
+    if (file_is_dynamic(f, &eh)) {
+        printk("[kernel] elf64: a program bound to %s has to fit in memory "
+               "to be bound\n", dyn_name());
+        return -1;
+    }
+    if (eh.e_entry < USER64_BASE || eh.e_entry >= USER64_TOP) {
+        printk("[kernel] elf64: the entry point is outside the program (%x)\n",
+               (uint32_t)eh.e_entry);
+        return -1;
+    }
+
+    uint8_t *piece = kmalloc(FILE_PIECE);
+    if (!piece)
+        return -1;
+    int loaded = 0, bad = 0;
+    uint64_t top = USER64_BASE;
+    for (uint16_t i = 0; i < eh.e_phnum && !bad; i++) {
+        if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0)
+            continue;
+        if (ph[i].p_offset > f->size ||
+            ph[i].p_filesz > f->size - ph[i].p_offset ||
+            ph[i].p_filesz > ph[i].p_memsz) {
+            printk("[kernel] elf64: a segment sticks out past the file\n");
+            bad = 1;
+            break;
+        }
+        if (stream_segment(f, &ph[i], piece) < 0) {
+            bad = 1;
+            break;
+        }
+        if (ph[i].p_vaddr + ph[i].p_memsz > top)
+            top = ph[i].p_vaddr + ph[i].p_memsz;
+        loaded++;
+    }
+    kfree(piece);
+    if (bad)
+        return -1;
+    if (!loaded) {
+        printk("[kernel] elf64: no segments to load\n");
+        return -1;
+    }
+    *entry = eh.e_entry;
     if (brk_base)
         *brk_base = (top + PAGE_SIZE - 1) & ~(uint64_t)(PAGE_SIZE - 1);
     return 0;

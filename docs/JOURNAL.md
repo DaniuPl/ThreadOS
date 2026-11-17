@@ -9094,3 +9094,63 @@ works and is checked by `make test`.
       installed beside another on a smaller EFI partition still needs
       twice the system free there; a smaller initrd - compressed, or
       without the test programs - is what lifts that.
+
+- [x] **Programs larger than 2 MiB from the disk** (kernel/prog.c,
+      kernel/include/prog.h, kernel64/elf64.c, kernel64/elf64.h,
+      kernel64/proc64.c, libc/tests/bigprog.c, scripts/mkblob.py,
+      scripts/tests/t_bigprog.py, Makefile)
+      The next thing WebKit needs of the kernel. A program on the disk
+      was read into the kernel's heap whole and handed to the loader,
+      which held such programs to 2 MiB; WebKit's processes are tens of
+      megabytes. A program larger than that is no longer read into the
+      heap at all: prog_open() keeps it a file, and the loader
+      (elf64_load_file) reads its headers, takes and maps each
+      segment's pages, and then reads the file's bytes straight into
+      them through a 64 KiB buffer, with the checks elf64_load makes.
+      The shell's 'run' and execv go through the same three calls
+      (prog_open, prog_load, prog_close). A program bound to the shared
+      library is refused that way: binding needs the whole image.
+      t_bigprog fetches bigprog onto the disk and runs it: 10 MiB, with
+      5 MiB of known read-only bytes, 1 MiB of known writable ones and
+      3 MiB zeroed (scripts/mkblob.py makes the bytes on both sides).
+      It says the SHA-256 of each, and the test holds them to
+      hashlib's, started by the shell and again after it replaced
+      itself with execv. The kernel before this refused to load it and
+      failed seven of the ten checks. (Not changed: TFS3 holds files of
+      up to 64 MiB, and a program's image and heap share 240 MiB.)
+
+- [x] **A Makefile edit no longer rebuilds everything above musl**
+      (Makefile)
+      Any change to the Makefile copied musl afresh and installed it
+      again, and every library built on it - GLib, libsoup, ICU, the
+      rest of libs64 - saw a newer libc.a and was built again: twenty
+      minutes, and for WebKit hours. musl is now installed with
+      `install -C`, which leaves a file whose contents did not change
+      as it was, time and all, and make looks at a target's time again
+      after its recipe: a copy rebuilt the same leaves libc.a and the
+      headers as old as they were, and nothing above them is rebuilt.
+      (ar is deterministic here, so the same objects make the same
+      archive.)
+
+- [x] **The applications' image: apps64.img beside the initrd**
+      (kernel/initrd.c, kernel/include/initrd.h, kernel64/initrd64.c,
+      boot/efi/efiboot.c, boot/grub64.cfg, scripts/mkstick.py,
+      scripts/ptest.py, scripts/tests/t_bigprog.py, Makefile)
+      Where the web engine is to live. Its three programs come to 100
+      MB and more: too much for the initrd, which every boot carries
+      into memory whether the browser is started or not, and too much
+      for TFS3, which holds 32 MiB in all. They go into an image of
+      their own in the initrd's format, apps64.img, which the loader
+      brings as a second module named "apps" when it finds one -
+      threadboot beside initrd64.img in the same three places, GRUB on
+      the disc when /boot/apps64.img is there - and the kernel finds a
+      program in the initrd first and in it second. The disc and the
+      stick carry it once `make webkit` has made it (the stick grows to
+      hold it). The cost is memory: the image is in memory from the
+      start, as the initrd is.
+      t_bigprog makes an image with bigprog in it and boots a disc that
+      brings it: the kernel says it took it (its size), and bigprog runs
+      from it with the hashes hashlib makes; the kernel before this
+      ignored the module and found no bigprog. The ARM64 groups pass
+      with the shared initrd.c. (Not yet: the installer and the update
+      do not write apps64.img onto the installed system.)

@@ -230,17 +230,15 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
             args.v[0][i] = kname[i];
     }
 
-    uint32_t size = 0;
-    void *loaded = (void *)0;
-    const void *image = prog_image(kname, &size, &loaded);
-    if (!image) {
+    struct prog prog;
+    if (prog_open(kname, &prog) < 0) {
         printk("[kernel] exec: there is no program '%s'\n", kname);
         return -1;
     }
 
     uint64_t space = paging64_new_space();
     if (!space) {
-        prog_release(loaded);
+        prog_close(&prog);
         return -1;
     }
 
@@ -252,13 +250,13 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     uint64_t old = task64_swap_space(space, 0);
 
     uint64_t entry, rsp, brk_base;
-    if (elf64_load(image, size, &entry, &brk_base) < 0 ||
+    if (prog_load(&prog, &entry, &brk_base) < 0 ||
         !(rsp = elf64_make_stack())) {
         /* The old image no longer exists and the new one did not load -
            the process has nothing to return to */
         printk("[kernel] exec: '%s' cannot be loaded\n", kname);
         paging64_free_space(old);
-        prog_release(loaded);
+        prog_close(&prog);
         task64_exit_code(-1);
     }
     paging64_free_space(old);
@@ -269,7 +267,7 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     task64_mmap_release();
     /* The image has already been copied into the program's pages - the
        copy in kernel memory is not needed for anything */
-    prog_release(loaded);
+    prog_close(&prog);
     task64_set_brk_base(brk_base);   /* new image, new heap */
     task64_rename(kname);
 
@@ -318,15 +316,14 @@ static void spawn_thread(void *arg)
         name[i] = req->name[i];
     kfree(req);
 
-    uint32_t size = 0;
-    void *loaded = (void *)0;
-    const void *image = prog_image(name, &size, &loaded);
-    if (!image) {
+    struct prog prog;
+    if (prog_open(name, &prog) < 0) {
         printk("[ !! ] there is no program '%s' in the initrd or on the disk\n",
                name);
         task64_exit();
     }
     const char *from_where = prog_source();
+    uint32_t size = prog.size;
 
     /* Its own address space. From this moment the program's gigabyte
        belongs to it alone - and kernel memory is still visible, because
@@ -334,6 +331,7 @@ static void spawn_thread(void *arg)
     uint64_t space = paging64_new_space();
     if (!space) {
         printk("[ !! ] no memory for an address space\n");
+        prog_close(&prog);
         task64_exit();
     }
 
@@ -342,8 +340,8 @@ static void spawn_thread(void *arg)
     task64_enter_space(space, kstack & ~0xFULL);
 
     uint64_t entry, brk_base;
-    int loaded_flag = elf64_load(image, size, &entry, &brk_base) == 0;
-    prog_release(loaded);        /* the image is already in the program's pages */
+    int loaded_flag = prog_load(&prog, &entry, &brk_base) == 0;
+    prog_close(&prog);           /* the image is already in the program's pages */
     if (!loaded_flag)
         task64_exit();
     task64_set_brk_base(brk_base);

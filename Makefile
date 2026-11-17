@@ -24,7 +24,7 @@ BUILD   := build
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
 
 .PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
-        kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone
+        kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone webkit
 
 all: kernel64
 
@@ -306,11 +306,34 @@ $(MUSL_TREE)/config.mak: Makefile third_party/musl/VERSION \
 	cd $(MUSL_TREE) && CC="$(CC)" AR=ar RANLIB=ranlib CFLAGS="$(MUSL_CFLAGS)" ./configure \
 	    --target=x86_64 --prefix=/ --disable-shared >/dev/null
 
-$(LIBC64): $(MUSL_TREE)/config.mak $(MUSL_OVERLAY)
+# The library and its headers are installed only where their contents
+# changed (install -C leaves an identical file, and its time, alone),
+# and make looks at the time again after a recipe: a copy of musl
+# rebuilt the same - after any edit to this Makefile, say - leaves
+# libc.a as old as it was, and what is built on it (the libraries in
+# libs64, ICU, WebKit, whose builds take hours) is not built again.
+#
+# And what is compiled against musl depends on its headers, not on
+# libc.a (MUSL_HEADERS: their checksums, written only when one changed):
+# a fix in the overlay's C files changes libc.a alone, and costs the
+# programs their link, not the libraries under them their build.
+MUSL_STAMP   := $(MUSL_TREE)/installed.stamp
+MUSL_HEADERS := $(MUSL_ROOT)/headers.sum
+
+$(MUSL_STAMP): $(MUSL_TREE)/config.mak $(MUSL_OVERLAY)
 	cp -r libc/overlay/. $(MUSL_TREE)/
 	$(MAKE) -s -C $(MUSL_TREE) lib/libc.a lib/crt1.o lib/crti.o lib/crtn.o
 	$(MAKE) -s -C $(MUSL_TREE) install-libs install-headers \
-	    DESTDIR=$(abspath $(MUSL_ROOT))
+	    DESTDIR=$(abspath $(MUSL_ROOT)) INSTALL="install -C"
+	touch $@
+
+$(LIBC64): $(MUSL_STAMP)
+	@test -f $@
+
+$(MUSL_HEADERS): $(MUSL_STAMP)
+	cd $(MUSL_ROOT)/include && find . -type f | LC_ALL=C sort | \
+	    xargs sha256sum > $(abspath $@).new
+	cmp -s $@.new $@ && rm -f $@.new || mv $@.new $@
 
 libc64: $(LIBC64)
 
@@ -714,7 +737,7 @@ CXX64_FLAGS := -m64 $(ARCH64) -std=gnu++17 -Os -ffunction-sections -fdata-sectio
                -isystem $(shell $(CC) -print-file-name=include) \
                -include libc/cxx/compat.h -DTHREADOS_LIBC
 
-$(BUILD)/libc64/cxxrt.o: libc/cxx/cxxrt.cpp libc/cxx/compat.h $(LIBC64) \
+$(BUILD)/libc64/cxxrt.o: libc/cxx/cxxrt.cpp libc/cxx/compat.h $(MUSL_HEADERS) \
                          | $(BUILD)/libc64
 	$(CXX) $(CXX64_FLAGS) -Wall -c $< -o $@
 
@@ -825,7 +848,7 @@ $(ICU_DAT): $(ICU_HOST)/bin/genccode apps/webkit/icu-data.py
 	    -r $(dir $@)remove.txt $@ 2> /dev/null
 
 # Thread-safe statics: ICU runs on JavaScriptCore's threads too
-$(ICU_STAMP): $(ICU_DAT) apps/webkit/icu.mk $(LIBC64) libc/cxx/compat.h
+$(ICU_STAMP): $(ICU_DAT) apps/webkit/icu.mk $(MUSL_HEADERS) libc/cxx/compat.h
 	$(MAKE) -f apps/webkit/icu.mk SRC=$(ICU_SRC) OUT=$(ICU_DIR)/obj \
 	    DAT=$(ICU_DAT) CXX="$(CXX)" CC="$(CC)" AR="$(AR)" \
 	    GENCCODE="$(ICU_HOSTRUN) $(abspath $(ICU_HOST))/bin/genccode" \
@@ -851,7 +874,7 @@ TOS_CC      := $(TOOLCHAIN64)/threados-cc
 MESON_CROSS := $(TOOLCHAIN64)/cross.ini
 LIBS64_PC   := PKG_CONFIG_LIBDIR=$(abspath $(LIBS64))/lib/pkgconfig
 
-$(TOS_CC): libc/threados-cc.in $(LIBC64)
+$(TOS_CC): libc/threados-cc.in $(MUSL_HEADERS)
 	mkdir -p $(TOOLCHAIN64)
 	sed -e 's|@MUSL@|$(abspath $(MUSL_ROOT))|' -e 's|@REPO@|$(CURDIR)|' \
 	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
@@ -943,7 +966,7 @@ libs64: $(GLIB_A)
 # glibtest: GLib's main loop, threads, GObject, data and processes on
 # ThreadOS, held by t_glib to the same program built against the host's
 # GLib
-$(BUILD)/user64/glibtest.elf: libc/tests/glibtest.c $(GLIB_A) $(TOS_CC) \
+$(BUILD)/user64/glibtest.elf: libc/tests/glibtest.c $(GLIB_A) $(TOS_CC) $(LIBC64) \
                               | $(BUILD)/user64
 	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs gio-2.0 gio-unix-2.0)
@@ -1059,16 +1082,16 @@ libs64: $(LIBPNG_A) $(LIBJPEG_A) $(LIBXML2_A) $(FONTCONFIG_A)
 # Their tests: pictures held to Pillow (t_images), XML to ElementTree
 # (t_xml), fonts to the host's fontconfig (t_fontconfig)
 $(BUILD)/user64/imgtest.elf: libc/tests/imgtest.c $(LIBPNG_A) $(LIBJPEG_A) \
-                             $(TOS_CC) | $(BUILD)/user64
+                             $(TOS_CC) $(LIBC64) | $(BUILD)/user64
 	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs libpng16 libjpeg)
 
-$(BUILD)/user64/xmltest.elf: libc/tests/xmltest.c $(LIBXML2_A) $(TOS_CC) \
+$(BUILD)/user64/xmltest.elf: libc/tests/xmltest.c $(LIBXML2_A) $(TOS_CC) $(LIBC64) \
                              | $(BUILD)/user64
 	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs libxml-2.0)
 
-$(BUILD)/user64/fctest.elf: libc/tests/fctest.c $(FONTCONFIG_A) $(TOS_CC) \
+$(BUILD)/user64/fctest.elf: libc/tests/fctest.c $(FONTCONFIG_A) $(TOS_CC) $(LIBC64) \
                             | $(BUILD)/user64
 	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs fontconfig freetype2)
@@ -1195,7 +1218,7 @@ $(GIONET_A): $(GIONET_TAR) $(MESON_CROSS) $(TOS_CC) $(GLIB_A) $(OPENSSL_A)
 libs64: $(LIBSOUP_A) $(GIONET_A)
 
 # souptest: HTTP, HTTPS and HTTP/2 against t_soup's servers on the host
-$(BUILD)/user64/souptest.elf: libc/tests/souptest.c $(LIBSOUP_A) $(GIONET_A) \
+$(BUILD)/user64/souptest.elf: libc/tests/souptest.c $(LIBSOUP_A) $(GIONET_A) $(LIBC64) \
                               $(TOS_CC) | $(BUILD)/user64
 	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
 	    $$($(LIBS64_PC):$(abspath $(LIBS64))/lib/gio/modules/pkgconfig \
@@ -1350,7 +1373,7 @@ HB64_A     := $(LIBS64)/lib/libharfbuzz.a
 HB64_ICU_A := $(LIBS64)/lib/libharfbuzz-icu.a
 HB64_VER   := $(shell sed -n 's/^\#define HB_VERSION_STRING "\(.*\)"/\1/p' $(HB_DIR)/src/hb-version.h)
 $(HB64_A): $(wildcard $(HB_DIR)/src/*.cc $(HB_DIR)/src/*.hh $(HB_DIR)/src/*.h) \
-           $(HB_DIR)/src/hb-features.h.in $(LIBS64_FT_A) $(ICU_PC) $(LIBC64)
+           $(HB_DIR)/src/hb-features.h.in $(LIBS64_FT_A) $(ICU_PC) $(MUSL_HEADERS)
 	mkdir -p $(BUILD)/hb64 $(LIBS64)/include/harfbuzz $(LIBS64)/lib/pkgconfig
 	$(CXX) $(CXX64_FLAGS) -w -fno-rtti -DHAVE_FREETYPE=1 \
 	    -I$(LIBS64)/include/freetype2 -c $(HB_DIR)/src/harfbuzz.cc \
@@ -1378,12 +1401,31 @@ libs64: $(WEBP_A) $(TASN1_A) $(GCRYPT_A) $(EPOXY_A) $(XKB_A) $(HB64_A)
 WPEDEPS_PC := libgcrypt libtasn1 libwebp libwebpdemux xkbcommon harfbuzz-icu epoxy
 $(BUILD)/user64/wpedeps.elf: libc/tests/wpedeps.c $(WEBP_A) $(TASN1_A) \
                              $(GCRYPT_A) $(EPOXY_A) $(XKB_A) $(HB64_A) \
-                             $(BUILD)/libc64/cxxrt.o $(TOS_CC) | $(BUILD)/user64
+                             $(BUILD)/libc64/cxxrt.o $(TOS_CC) $(LIBC64) | $(BUILD)/user64
 	$(TOS_CC) -O2 -Wall -Wextra -c -o $(BUILD)/libc64/wpedeps.o $< \
 	    $$($(LIBS64_PC) pkg-config --cflags $(WPEDEPS_PC))
 	$(TOS_CC) -s -Wl,--gc-sections -o $@ $(BUILD)/libc64/wpedeps.o \
 	    $(BUILD)/libc64/cxxrt.o \
 	    $$($(LIBS64_PC) pkg-config --static --libs $(WPEDEPS_PC)) $(LIBSTDCXX)
+
+# bigprog: a program of 9 MiB, most of it known bytes (scripts/mkblob.py)
+# in each kind of segment, which says their SHA-256 - larger than the
+# 2 MiB a program from the disk used to be held to (kernel/prog.c). Not
+# in the initrd: t_bigprog fetches it onto the disk and runs it there.
+$(BUILD)/gen/bigprog-ro.bin: scripts/mkblob.py
+	@mkdir -p $(BUILD)/gen
+	python3 scripts/mkblob.py ro $$((5 << 20)) $@
+$(BUILD)/gen/bigprog-rw.bin: scripts/mkblob.py
+	@mkdir -p $(BUILD)/gen
+	python3 scripts/mkblob.py rw $$((1 << 20)) $@
+$(BUILD)/user64/bigprog.elf: libc/tests/bigprog.c $(BUILD)/gen/bigprog-ro.bin \
+                             $(BUILD)/gen/bigprog-rw.bin $(OPENSSL_A) \
+                             $(TOS_CC) $(LIBC64) | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -Wa,-I$(BUILD)/gen -s -o $@ $< \
+	    $$($(LIBS64_PC) pkg-config --cflags --static --libs libcrypto)
+
+# Programs built for the disk rather than the initrd
+DISK64_ELFS := $(BUILD)/user64/bigprog.elf
 
 # --- WebKit: JavaScriptCore -------------------------------------------
 # WPE WebKit's release (third_party/README.md), built by its own CMake
@@ -1428,6 +1470,120 @@ $(BUILD)/user64/jsc.elf: $(JSC_DIR)/build.ninja $(LIBC64) \
 	strip -o $@ $(JSC_DIR)/bin/jsc
 
 USER64_ELFS += $(BUILD)/user64/jsc.elf
+
+# --- WebKit: the WPE port ---------------------------------------------
+# WebCore and WebKit from the same release, through the WPE port: the
+# browser engine itself, in three programs (apps/webkit/programs.cmake)
+# - webview, the window; wpewebproc, which lays out, runs the scripts
+# of and paints a page; wpenetproc, which fetches. It paints with Skia
+# on the processor into shared memory, which apps/webkit/wpethreados.c
+# copies into a window: there is no EGL, no GPU, no GStreamer (so no
+# video or audio yet), no Wayland or DRM, no accessibility bus, no
+# spelling, and no JIT.
+#
+# What ThreadOS needs changed in WebKit is in apps/webkit/patches, each
+# patch saying why. They are applied to the files they touch, taken
+# from the archive afresh, so a changed patch costs the rebuild of those
+# files and not of the tree (the archive keeps its files' times).
+#
+# It takes hours on four cores, so it is not part of the default build:
+# `make webkit`. The programs are tens of megabytes - too large for the
+# initrd, which is memory - and t_webkit fetches them onto the disk.
+WPE_DIR      := $(WEBKIT_DIR)/wpe
+WPE_PATCHES  := $(sort $(wildcard apps/webkit/patches/*.patch))
+WPE_PATCHED  := $(WEBKIT_DIR)/patched.stamp
+WPE_PROGRAMS := webview wpewebproc wpenetproc
+WPE_ELFS     := $(WPE_PROGRAMS:%=$(BUILD)/user64/%.elf)
+WPE_PC       := glib-2.0 gio-2.0 gio-unix-2.0 gobject-2.0 gmodule-2.0 \
+                gthread-2.0 libsoup-3.0 libxml-2.0 sqlite3 libpng16 libjpeg \
+                harfbuzz harfbuzz-icu epoxy libgcrypt libtasn1 xkbcommon \
+                libwebp libwebpdemux freetype2 fontconfig zlib icu-uc \
+                icu-i18n gioopenssl openssl
+WPE_PKGPATH  := $(abspath $(LIBS64))/lib/pkgconfig:$(abspath $(LIBS64))/lib/gio/modules/pkgconfig
+WPE_LIBS     := $(GLIB_A) $(LIBSOUP_A) $(GIONET_A) $(LIBXML2_A) \
+                $(LIBS64_SQLITE) $(LIBPNG_A) $(LIBJPEG_A) $(FONTCONFIG_A) \
+                $(WEBP_A) $(TASN1_A) $(GCRYPT_A) $(EPOXY_A) $(XKB_A) \
+                $(HB64_A) $(ICU_PC)
+WPE_OPTIONS  := -DPORT=WPE -DENABLE_JIT=OFF -DENABLE_C_LOOP=ON \
+                -DENABLE_DFG_JIT=OFF -DENABLE_FTL_JIT=OFF \
+                -DENABLE_WEBASSEMBLY=OFF -DENABLE_SAMPLING_PROFILER=OFF \
+                -DUSE_SYSTEM_MALLOC=ON -DENABLE_API_TESTS=OFF \
+                -DDEVELOPER_MODE=OFF -DENABLE_DOCUMENTATION=OFF \
+                -DENABLE_INTROSPECTION=OFF -DENABLE_JOURNALD_LOG=OFF \
+                -DENABLE_WPE_PLATFORM=ON -DENABLE_WPE_PLATFORM_DRM=OFF \
+                -DENABLE_WPE_PLATFORM_HEADLESS=ON \
+                -DENABLE_WPE_PLATFORM_WAYLAND=OFF -DENABLE_WPE_LEGACY_API=OFF \
+                -DENABLE_WPE_QT_API=OFF -DUSE_ATK=OFF -DUSE_FLITE=OFF \
+                -DUSE_GBM=OFF -DUSE_LIBBACKTRACE=OFF -DUSE_LIBDRM=OFF \
+                -DUSE_LIBHYPHEN=OFF -DUSE_SYSPROF_CAPTURE=OFF -DUSE_AVIF=OFF \
+                -DUSE_LCMS=OFF -DUSE_JPEGXL=OFF -DUSE_WOFF2=OFF \
+                -DENABLE_SPELLCHECK=OFF -DENABLE_XSLT=OFF \
+                -DENABLE_SPEECH_SYNTHESIS=OFF -DENABLE_PDFJS=OFF \
+                -DENABLE_WEBDRIVER=OFF -DENABLE_ENCRYPTED_MEDIA=OFF \
+                -DENABLE_VIDEO=OFF -DENABLE_WEB_AUDIO=OFF \
+                -DENABLE_MEDIA_STREAM=OFF -DENABLE_MEDIA_RECORDER=OFF \
+                -DENABLE_WEB_CODECS=OFF -DENABLE_MEDIA_SESSION=OFF \
+                -DENABLE_MEDIA_SOURCE=OFF -DENABLE_WEB_RTC=OFF \
+                -DENABLE_WEBGL=OFF -DENABLE_GAMEPAD=OFF \
+                -DENABLE_BUBBLEWRAP_SANDBOX=OFF -DENABLE_GPU_PROCESS=OFF \
+                -DENABLE_WEBXR=OFF -DENABLE_MEMORY_SAMPLER=OFF \
+                -DENABLE_RESOURCE_USAGE=OFF -DUSE_SKIA_OPENTYPE_SVG=OFF \
+                -DUSE_GSTREAMER=OFF -DUSE_GSTREAMER_GL=OFF \
+                -DUSE_GSTREAMER_WEBRTC=OFF
+
+$(WPE_PATCHED): $(WEBKIT_SRC)/CMakeLists.txt $(WPE_PATCHES)
+	cd $(WEBKIT_DIR) && tar -xf $(abspath $(WEBKIT_TAR)) \
+	    $$(sed -n 's|^+++ b/|wpewebkit-2.54.2/|p' $(abspath $(WPE_PATCHES)))
+	for p in $(WPE_PATCHES); do \
+	    patch -s -d $(WEBKIT_SRC) -p1 < $$p || exit 1; done
+	touch $@
+
+# CMake is run again in the same directory, never in a fresh one: the
+# objects stay, and ninja rebuilds what the new configuration changed
+$(WPE_DIR)/build.ninja: $(WPE_PATCHED) apps/webkit/threados.cmake \
+                        apps/webkit/static.cmake apps/webkit/programs.cmake \
+                        $(ICU_STAMP) $(BUILD)/libc64/cxxrt.o | $(WPE_LIBS)
+	mkdir -p $(WPE_DIR)
+	cd $(WPE_DIR) && PKG_CONFIG_LIBDIR=$(WPE_PKGPATH) cmake -G Ninja \
+	    $(abspath $(WEBKIT_SRC)) -Wno-dev \
+	    -DCMAKE_TOOLCHAIN_FILE=$(abspath apps/webkit/threados.cmake) \
+	    -DCMAKE_PROJECT_INCLUDE=$(abspath apps/webkit/static.cmake) \
+	    -DTHREADOS_PROGRAMS=$(abspath apps/webkit/programs.cmake) \
+	    -DTHREADOS_MUSL=$(abspath $(MUSL_ROOT)) -DTHREADOS_REPO=$(CURDIR) \
+	    -DTHREADOS_CXXRT=$(abspath $(BUILD)/libc64/cxxrt.o) \
+	    -DTHREADOS_LIBS=$(abspath $(LIBS64)) \
+	    "-DTHREADOS_LINK=$$(PKG_CONFIG_LIBDIR=$(WPE_PKGPATH) pkg-config --static --libs $(WPE_PC))" \
+	    -DICU_ROOT=$(abspath $(ICU_ROOT)) \
+	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-Os -DNDEBUG" \
+	    -DCMAKE_CXX_FLAGS_RELEASE="-Os -DNDEBUG" $(WPE_OPTIONS) > cmake.log \
+	    || { tail -30 cmake.log; exit 1; }
+	touch $@
+
+# As with jsc, ninja knows which of WebKit's files changed, and the
+# programs are linked again every time this runs
+$(WPE_ELFS) &: $(WPE_DIR)/build.ninja $(LIBC64) $(BUILD)/libc64/cxxrt.o \
+               libc/cxx/compat.h apps/webkit/webview.c \
+               apps/webkit/wpethreados.c apps/webkit/wpethreados.h \
+               apps/webkit/wpewebproc.cpp apps/webkit/wpenetproc.cpp \
+               user64/usys64.h | $(BUILD)/user64
+	rm -f $(WPE_PROGRAMS:%=$(WPE_DIR)/bin/%)
+	ninja -C $(WPE_DIR) $(WPE_PROGRAMS:%=bin/%) > $(WPE_DIR)/ninja.log || \
+	    { grep -A20 FAILED $(WPE_DIR)/ninja.log | head -60; exit 1; }
+	for p in $(WPE_PROGRAMS); do \
+	    strip -o $(BUILD)/user64/$$p.elf $(WPE_DIR)/bin/$$p || exit 1; done
+
+# The applications' image: the three programs in the initrd's format,
+# a second module beside the initrd which the loader brings when it is
+# there (boot/efi/efiboot.c, boot/grub64.cfg) and whose programs the
+# kernel runs like the initrd's (kernel/initrd.c). The disc and the
+# stick carry it once it has been built.
+APPS64 := $(BUILD)/apps64.img
+
+$(APPS64): $(WPE_ELFS) scripts/mkinitrd.py
+	python3 scripts/mkinitrd.py $@ \
+	    $(foreach p,$(WPE_PROGRAMS),$(p)=$(BUILD)/user64/$(p).elf)
+
+webkit: $(APPS64)
 
 # layouttest lays pages out with a font of known sizes and prints every
 # box; scripts/tests/t_browser.py holds what it prints on ThreadOS
@@ -1671,7 +1827,7 @@ $(BUILD)/64/%.o: kernel/%.c $(ACPICA_STAMP) kernel/acpica/acthreados.h \
 $(KERNEL64): $(OBJS64) $(ACPICA_LIB) kernel64/linker64.ld
 	$(CC) $(LDFLAGS64) $(OBJS64) $(ACPICA_LIB) -o $@
 
-kernel64: $(KERNEL64) $(INITRD64)
+kernel64: $(KERNEL64) $(INITRD64) $(DISK64_ELFS)
 	@echo "Done: $(KERNEL64) (long mode, loaded by GRUB)"
 
 # An ISO with the 64-bit kernel that boots under an old BIOS and under
@@ -1686,7 +1842,8 @@ ISO64 := $(BUILD)/threados64.iso
 # disk, which then boots without GRUB (see boot/grub64.cfg)
 ISO64_LOADER := $(if $(shell command -v clang 2>/dev/null),$(BUILD)/BOOTX64.EFI)
 
-$(ISO64): $(KERNEL64) $(INITRD64) boot/grub64.cfg $(ISO64_LOADER)
+$(ISO64): $(KERNEL64) $(INITRD64) boot/grub64.cfg $(ISO64_LOADER) \
+          $(wildcard $(APPS64))
 	@command -v grub-mkrescue >/dev/null || { \
 	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
@@ -1697,6 +1854,7 @@ grub-common xorriso mtools"; \
 	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
 	cp boot/grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
 	$(if $(ISO64_LOADER),cp $(ISO64_LOADER) $(BUILD)/isodir64/boot/threadboot.efi)
+	$(if $(wildcard $(APPS64)),cp $(APPS64) $(BUILD)/isodir64/boot/apps64.img)
 	grub-mkrescue -o $@ $(BUILD)/isodir64
 	@echo "Done: $@ (BIOS + UEFI)"
 
@@ -1873,10 +2031,13 @@ OVMF_VARS := /usr/share/OVMF/OVMF_VARS_4M.fd
 # Torito.
 STICK := $(BUILD)/threados-stick.img
 
-$(STICK): $(EFI_OUT) $(KERNEL64) $(INITRD64) scripts/mkstick.py
+# With the applications' image when it has been built (make webkit)
+$(STICK): $(EFI_OUT) $(KERNEL64) $(INITRD64) scripts/mkstick.py \
+          $(wildcard $(APPS64))
 	@command -v mformat >/dev/null || { \
 	    echo "ERROR: no mtools (apt install mtools)"; exit 1; }
-	python3 scripts/mkstick.py $@ $(EFI_OUT) $(KERNEL64) $(INITRD64)
+	python3 scripts/mkstick.py $@ $(EFI_OUT) $(KERNEL64) $(INITRD64) \
+	    $(if $(wildcard $(APPS64)),--apps $(APPS64))
 
 stick: $(STICK)
 

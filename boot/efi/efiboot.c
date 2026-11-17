@@ -960,6 +960,22 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     read_one(initrds, 3, &initrd, L"I found no initrd64.img",
              L"There is not enough memory for initrd64.img");
 
+    /* The applications' image, where there is one: the web engine's
+     * programs, too large to be in the initrd every boot carries. It is
+     * not needed to boot, and a system without it simply has no web
+     * engine; one that does not fit in memory is left behind the same
+     * way rather than stopping the boot. */
+    struct blob apps;
+    apps.data = 0;
+    apps.size = 0;
+    static const CHAR16 *const appss[] = {
+        L"\\apps64.img", L"\\EFI\\BOOT\\apps64.img",
+        L"\\EFI\\ThreadOS\\apps64.img"
+    };
+    for (int i = 0; i < 3 && !apps.data; i++)
+        if (read_file(appss[i], &apps) <= 0)
+            apps.data = 0;
+
     /* And the loader itself, as a file.
      *
      * Not because it is needed to boot - it is already running - but
@@ -1079,6 +1095,8 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     tag_module((UINTN)kernel.data, kernel.size, "the kernel");
     if (self.data)
         tag_module((UINTN)self.data, self.size, "loader");
+    if (apps.data)
+        tag_module((UINTN)apps.data, apps.size, "apps");
 
     if (sc.have) {
         UINT8 *p = tag_open(TAG_FRAMEBUF, 8 + 22 + 6);

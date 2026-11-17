@@ -124,18 +124,28 @@ def main():
     ap.add_argument("kernel")
     ap.add_argument("initrd")
     ap.add_argument("--mib", type=int, default=192)
+    # The applications' image (apps64.img, the web engine), beside the
+    # initrd, where the loader looks for it
+    ap.add_argument("--apps")
     args = ap.parse_args()
 
-    for f in (args.loader, args.kernel, args.initrd):
-        if not os.path.exists(f):
+    for f in (args.loader, args.kernel, args.initrd, args.apps):
+        if f and not os.path.exists(f):
             sys.stderr.write("mkstick: there is no %s\n" % f)
             return 1
 
-    total = args.mib * 2048
+    # With the applications' image, room for the files and as much
+    # again for the system to grow by, if that is more than asked
+    mib = args.mib
+    if args.apps:
+        files = sum(os.path.getsize(f) for f in
+                    (args.loader, args.kernel, args.initrd, args.apps))
+        mib = max(mib, (2 * files) // (1 << 20) + 64)
+    total = mib * 2048
     first = 2048
     last = total - 34                       # the copy at the end is not ours
     if last - first < 64 * 2048:
-        sys.stderr.write("mkstick: %d MiB is too little\n" % args.mib)
+        sys.stderr.write("mkstick: %d MiB is too little\n" % mib)
         return 1
 
     write_gpt(args.out, total, first, last)
@@ -156,12 +166,14 @@ def main():
         ["mcopy", "-i", at, args.kernel, "::/threados64.bin"],
         ["mcopy", "-i", at, args.initrd, "::/initrd64.img"],
     ]
+    if args.apps:
+        steps.append(["mcopy", "-i", at, args.apps, "::/apps64.img"])
     for step in steps:
         if not mtool(step, env):
             sys.stderr.write("mkstick: it did not work: %s\n" % " ".join(step))
             return 1
 
-    print("Done: %s (%d MiB)" % (args.out, args.mib))
+    print("Done: %s (%d MiB)" % (args.out, mib))
     print("To a stick:  dd if=%s of=/dev/sdX bs=4M conv=fsync" % args.out)
     print("WARNING: /dev/sdX is the WHOLE stick, not a partition - and everything")
     print("         on it will be gone.")

@@ -18,19 +18,33 @@ struct pird_entry {
     uint32_t size;
 } __attribute__((packed));
 
-static const uint8_t *base;
-static uint32_t total_size;
-static uint32_t file_count;
-static const struct pird_entry *entries;
+/* The images programs are found in: the initrd, and - when the loader
+   brought one - the applications' image beside it (apps64.img: the
+   web engine, too large to be part of every boot's initrd for those
+   who never start it, and kept apart so the initrd is the size it
+   was). A name is looked for in the initrd first. */
+struct image {
+    const uint8_t *base;
+    uint32_t size, count;
+    const struct pird_entry *entries;
+};
+static struct image initrd, apps;
 
 const void *initrd_image(uint32_t *size)
 {
     if (size)
-        *size = total_size;
-    return base;
+        *size = initrd.size;
+    return initrd.base;
 }
 
-int initrd_use(const void *image, uint32_t size)
+const void *initrd_apps_image(uint32_t *size)
+{
+    if (size)
+        *size = apps.size;
+    return apps.base;
+}
+
+static int take(struct image *img, const void *image, uint32_t size)
 {
     const uint8_t *p = image;
     if (!p || size < 8 || p[0] != 'T' || p[1] != 'I' || p[2] != 'R' ||
@@ -48,37 +62,61 @@ int initrd_use(const void *image, uint32_t size)
             e[i].size > size - e[i].offset)
             return -1;                 /* a name with no end, or outside */
     }
-    base = p;
-    total_size = size;
-    file_count = count;
-    entries = e;
+    img->base = p;
+    img->size = size;
+    img->count = count;
+    img->entries = e;
     return 0;
+}
+
+int initrd_use(const void *image, uint32_t size)
+{
+    return take(&initrd, image, size);
+}
+
+int initrd_use_apps(const void *image, uint32_t size)
+{
+    return take(&apps, image, size);
 }
 
 uint32_t initrd_file_count(void)
 {
-    return file_count;
+    return initrd.count;
 }
 
-const void *initrd_find(const char *name, uint32_t *size)
+static const void *find_in(const struct image *img, const char *name,
+                           uint32_t *size)
 {
-    for (uint32_t i = 0; i < file_count; i++) {
-        if (!strcmp(entries[i].name, name)) {
+    for (uint32_t i = 0; i < img->count; i++) {
+        if (!strcmp(img->entries[i].name, name)) {
             if (size)
-                *size = entries[i].size;
-            return base + entries[i].offset;
+                *size = img->entries[i].size;
+            return img->base + img->entries[i].offset;
         }
     }
     return (void *)0;
 }
 
+const void *initrd_find(const char *name, uint32_t *size)
+{
+    const void *f = find_in(&initrd, name, size);
+    return f ? f : find_in(&apps, name, size);
+}
+
+static void list(const char *what, const struct image *img)
+{
+    printk("%s (%u B):\n", what, img->size);
+    for (uint32_t i = 0; i < img->count; i++)
+        printk("  %s  (%u B)\n", img->entries[i].name, img->entries[i].size);
+}
+
 void initrd_ls(void)
 {
-    if (!file_count) {
+    if (!initrd.count) {
         printk("initrd: no files\n");
         return;
     }
-    printk("initrd (%u B):\n", total_size);
-    for (uint32_t i = 0; i < file_count; i++)
-        printk("  %s  (%u B)\n", entries[i].name, entries[i].size);
+    list("initrd", &initrd);
+    if (apps.count)
+        list("apps64.img", &apps);
 }
