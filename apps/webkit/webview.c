@@ -143,10 +143,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* No EGL and no GPU: pages are painted on the processor */
+    /* (No EGL and no GPU: the web process paints pages on the processor
+       by itself - apps/webkit/patches/web-process-without-egl.patch) */
     WebKitSettings *settings = webkit_settings_new();
-    webkit_settings_set_hardware_acceleration_policy(
-        settings, WEBKIT_HARDWARE_ACCELERATION_POLICY_NEVER);
 
     /* Cookies and the cache in memory: the disk is TFS3's 32 MiB, and a
        system started from a stick may have none */

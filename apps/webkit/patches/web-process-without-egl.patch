@@ -11,6 +11,10 @@ ProcessCapabilities::canUseAcceleratedBuffers() first. So when
 libepoxy finds no EGL (epoxy_has_egl() asks without aborting), the
 web process says buffers cannot be accelerated and makes no display.
 
+And with no display a page is neither accelerated nor composited (WPE's
+settings have no policy for it, as GTK's do): each page's drawing area
+turns both off, so it paints with NonCompositedFrameRenderer.
+
 --- a/Source/WebKit/WebProcess/glib/WebProcessGLib.cpp
 +++ b/Source/WebKit/WebProcess/glib/WebProcessGLib.cpp
 @@ -39,6 +39,7 @@
@@ -37,3 +41,30 @@ web process says buffers cannot be accelerated and makes no display.
  #if USE(GBM)
      if (m_rendererBufferTransportMode.contains(RendererBufferTransportMode::Hardware)) {
          bool disabled = false;
+--- a/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/DrawingAreaCoordinatedGraphicsGLib.cpp
++++ b/Source/WebKit/WebProcess/WebPage/CoordinatedGraphics/DrawingAreaCoordinatedGraphicsGLib.cpp
+@@ -43,6 +43,7 @@
+ #include <WebCore/LocalFrameView.h>
+ #include <WebCore/Page.h>
+ #include <WebCore/PageOverlayController.h>
++#include <WebCore/PlatformDisplay.h>
+ #include <WebCore/Region.h>
+ #include <WebCore/Settings.h>
+ #include <WebCore/ShareableBitmap.h>
+@@ -121,6 +122,16 @@
+     }
+ #endif
+     settings.setForceCompositingMode(store.getBoolValueForKey(WebPreferencesKey::forceCompositingModeKey()));
++#if PLATFORM(WPE)
++    // Without EGL the web process makes no display (WebProcessGLib.cpp),
++    // and nothing can be composited: the page is painted on the processor
++    // into shared memory a frame at a time (NonCompositedFrameRenderer)
++    if (!PlatformDisplay::sharedDisplayIfExists()) {
++        settings.setHardwareAccelerationEnabled(false);
++        settings.setAcceleratedCompositingEnabled(false);
++        settings.setForceCompositingMode(false);
++    }
++#endif
+     // Fixed position elements need to be composited and create stacking contexts
+     // in order to be scrolled by the ScrollingCoordinator.
+     settings.setAcceleratedCompositingForFixedPositionEnabled(settings.acceleratedCompositingEnabled());
