@@ -24,8 +24,11 @@
 #include <cwchar>
 #include <new>
 #include <string>
+#include <fcntl.h>
+#include <pthread.h>
 #include <unistd.h>
 #include <sys/random.h>
+#include <sys/stat.h>
 
 [[noreturn]] static void die(const char *what, const char *detail)
 {
@@ -165,9 +168,18 @@ size_t __mbsnrtowcs_chk(wchar_t *d, const char **s, size_t nms, size_t n,
 {
     return mbsnrtowcs(d, s, nms, n, ps);
 }
-// The large-file names: off_t is 64 bits here already
+// The large-file names: off_t is 64 bits here already (std::fstream's
+// members call the descriptor ones)
 off_t ftello64(FILE *f) { return ftello(f); }
 int fseeko64(FILE *f, off_t off, int whence) { return fseeko(f, off, whence); }
+off_t lseek64(int fd, off_t off, int whence) { return lseek(fd, off, whence); }
+int fstat64(int fd, struct stat *st) { return fstat(fd, st); }
+// openat checked for a missing mode: std::filesystem's directory
+// iterators open with it, never with O_CREAT
+int __openat_2(int dir, const char *path, int flags)
+{
+    return openat(dir, path, flags);
+}
 unsigned long __isoc23_strtoul(const char *s, char **end, int base)
 {
     return std::strtoul(s, end, base);
@@ -179,4 +191,44 @@ unsigned int arc4random(void)
     return v;
 }
 
+}
+
+// Destructors of thread_local objects (WebKit has many). libstdc++ hands
+// them to glibc's __cxa_thread_atexit_impl, which runs them when the
+// thread ends; musl has none. Here each thread keeps a list, newest
+// first so that they run in the reverse of the order they were made, in
+// a pthread key whose destructor runs it when the thread ends.
+namespace {
+struct thread_dtor {
+    void (*fn)(void *);
+    void *obj;
+    thread_dtor *next;
+};
+pthread_key_t dtor_key;
+pthread_once_t dtor_once = PTHREAD_ONCE_INIT;
+
+void run_thread_dtors(void *p)
+{
+    for (auto *d = static_cast<thread_dtor *>(p); d;) {
+        auto *next = d->next;
+        d->fn(d->obj);
+        std::free(d);
+        d = next;
+    }
+}
+
+void make_dtor_key() { pthread_key_create(&dtor_key, run_thread_dtors); }
+}
+
+extern "C" int __cxa_thread_atexit_impl(void (*fn)(void *), void *obj, void *)
+{
+    pthread_once(&dtor_once, make_dtor_key);
+    auto *d = static_cast<thread_dtor *>(std::malloc(sizeof(thread_dtor)));
+    if (!d)
+        return -1;
+    d->fn = fn;
+    d->obj = obj;
+    d->next = static_cast<thread_dtor *>(pthread_getspecific(dtor_key));
+    pthread_setspecific(dtor_key, d);
+    return 0;
 }
