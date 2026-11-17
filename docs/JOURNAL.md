@@ -8458,3 +8458,60 @@ works and is checked by `make test`.
       like the rest, opens a hundred pipes at once and sends a
       megabyte through one from a child; t_ipc wants a byte there and
       back through two pipes in under 2 ms.
+
+- [x] **GLib, and what starting a process needs: close-on-exec,
+      posix_spawn, pidfds, /dev/null** (Makefile "Libraries for WebKit's
+      processes", libc/threados-cc.in, libc/meson-cross.ini.in,
+      kernel64/task64.c, kernel64/proc64.c, kernel64/ipc64.c,
+      kernel64/syscall64.c, libc/overlay/src/threados/syscall.c,
+      socket.c, unix.c, libc/overlay/src/thread/x86_64/clone.s,
+      libc/overlay/include/linux/wait.h, libc/tests/glibtest.c,
+      scripts/tests/t_glib.py, scripts/fuzz_parsers.py)
+      The first of the libraries WebKit's processes are built on: GLib
+      2.90.1, with libffi 3.5.2 under GObject's signals and PCRE2 10.48
+      under its regular expressions, each from its release archive and
+      built by its own configure or meson. They all get one compiler,
+      libc/threados-cc (the host's gcc with musl's headers, and, when it
+      links, musl's start files and libraries around the objects), and
+      install into one place, BUILD/libs64, where the next finds them
+      through pkg-config; meson's downloads are off and zlib is ours.
+      GLib ran its main loop, threads, GObject and data on ThreadOS at
+      the first try - the sleeping pipes and poll of the last entries
+      are what its loop waits on. Starting a process was what did not
+      work, and WebKit starts its web and network processes that way:
+      - close-on-exec: GLib (and musl's posix_spawn) learns that exec
+        worked from a pipe marked close-on-exec closing; ThreadOS kept
+        every descriptor across exec, so the parent waited until the
+        child ended. Descriptors carry the flag now (SYS64_FDCTL), exec
+        closes the marked ones, and fcntl, open, pipe2, dup3,
+        socketpair, memfd_create and recvmsg(MSG_CMSG_CLOEXEC) set it;
+      - posix_spawn: musl starts its child with clone(CLONE_VM |
+        CLONE_VFORK), which was ENOSYS; it is a fork now, running the
+        same child code on its own copy;
+      - pidfds: GLib watches a child by a descriptor that turns
+        readable when it ends, or by SIGCHLD, which ThreadOS does not
+        send. pidfd_open and waitid(P_PIDFD) are made in libc (a
+        descriptor of socket.c's, the child's end asked of the kernel
+        when poll looks), and <linux/wait.h>, by which GLib knows they
+        are there, is a header of the overlay's;
+      - /dev/null: GSubprocess gives a child its standard input from
+        it, so it is a kind of the kernel's own descriptor now (reads
+        end at once, writes vanish) - it has to outlive exec as fd 0.
+      glibtest goes through the main loop (idles, timeouts, a pipe and
+      a socket pair written by threads, a callback sent from a thread),
+      threads (a queue, a pool, a condition, once-only), a GObject class
+      with a signal through libffi, data (hash tables, Polish UTF-8,
+      PCRE2 with named groups, GVariant, key files, dates, SHA-256,
+      HMAC, base64, GIO streams and files) and processes (a child given
+      pipes and fd 3, GSubprocess with a socket at fd 3, as WebKit's
+      launcher does); t_glib holds what it prints to the same program
+      built against the host's GLib, on one core and on four, and wants
+      the loop to wake within the tick a pipe is written and a spawn to
+      take under a second. make fuzz builds GLib for the host under
+      ASan and UBSan and runs fourteen of its own fuzzers - key files,
+      GVariant, URIs, dates, bookmark XML, UTF-8, D-Bus messages, DNS
+      replies, addresses. (Noticed on the way: a program's monotonic
+      clock moves in the timer's 10 ms ticks, so two GLib timeouts due
+      within one tick run in the order they were added rather than of
+      their times - glibtest's are 50 ms apart for that. A finer clock,
+      from the TSC, is for later; WebKit's animations will want it.)

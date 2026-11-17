@@ -4,14 +4,14 @@
      entry, stack, tls, parent_tid, clear_tid
 
    musl calls __clone(func, stack, flags, arg, ptid, tls, ctid). A
-   thread (CLONE_THREAD) is the only thing SYS64_CLONE makes, so
-   anything else - posix_spawn's vfork-like child, which would exec in
-   memory it shares with its parent - gets ENOSYS, and posix_spawn and
-   system() fail cleanly as they did before. func and arg go on the
-   new stack, and the
-   new thread starts at 1: below, where it takes them off and calls
-   func(arg); what func returns is the thread's exit code (SYS64_EXIT,
-   2, which ends only the calling thread). */
+   thread (CLONE_THREAD) is the only thing SYS64_CLONE makes. Anything
+   else is posix_spawn's vfork-like child, which would exec in memory
+   it shares with its parent: that one is a fork, which runs func(arg)
+   on its own copy (__tos_clone_process, src/threados/syscall.c). For
+   a thread, func and arg go on the new stack, and the new thread
+   starts at 1: below, where it takes them off and calls func(arg);
+   what func returns is the thread's exit code (SYS64_EXIT, 2, which
+   ends only the calling thread). */
 .text
 .global __clone
 .hidden __clone
@@ -19,8 +19,8 @@
 __clone:
 	test $0x10000,%edx       /* CLONE_THREAD */
 	jnz 3f
-	mov $-38,%rax            /* -ENOSYS */
-	ret
+	mov %rcx,%rsi            /* arg */
+	jmp __tos_clone_process
 3:	and $-16,%rsi
 	sub $16,%rsi
 	mov %rdi,(%rsi)          /* func */

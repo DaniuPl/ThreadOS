@@ -22,6 +22,7 @@
 #define IPC_MEMFD    6   /* () -> a descriptor for shared memory of size 0 */
 #define IPC_MAP      7   /* (fd, offset, length) -> its pages at an address */
 #define IPC_UNMAP    8   /* (address, length) -> those pages let go */
+#define IPC_NULL     9   /* () -> a descriptor that is /dev/null */
 
 #define IPC_IN   1                 /* a read would not wait: data, or the end */
 #define IPC_OUT  2

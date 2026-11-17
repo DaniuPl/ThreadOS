@@ -66,6 +66,7 @@ struct ipc_io {
 
 int __tos_fd_flags(int fd);
 void __tos_fd_set_flags(int fd, int flags);
+void __tos_set_cloexec(int fd);
 
 static long tos(long n, long a1, long a2, long a3, long a4)
 {
@@ -132,6 +133,10 @@ HIDDEN long __tos_unix_pair(long type, long proto, int *sv)
 	for (int i = 0; i < 2; i++)
 		__tos_fd_set_flags(pair[i], O_RDWR |
 		                   (type & SOCK_NONBLOCK ? O_NONBLOCK : 0));
+	if (type & SOCK_CLOEXEC) {
+		__tos_set_cloexec(pair[0]);
+		__tos_set_cloexec(pair[1]);
+	}
 	touch(sv, 2 * sizeof(int));
 	sv[0] = pair[0];
 	sv[1] = pair[1];
@@ -369,8 +374,11 @@ static long do_recvmsg(int fd, struct msghdr *m, int flags)
 		size_t used = CMSG_SPACE(g.nfds * sizeof(int));
 		if (used < m->msg_controllen)
 			m->msg_controllen = used;
-		for (int i = 0; i < g.nfds; i++)
+		for (int i = 0; i < g.nfds; i++) {
 			__tos_fd_set_flags(g.fds[i], O_RDWR);
+			if (flags & MSG_CMSG_CLOEXEC)
+				__tos_set_cloexec(g.fds[i]);
+		}
 	} else {
 		m->msg_controllen = 0;
 	}

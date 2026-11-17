@@ -1,0 +1,38 @@
+#!/bin/sh
+# The host's gcc, aimed at ThreadOS (libc/threados-cc.in)
+#
+# Libraries written elsewhere come with build systems of their own -
+# configure scripts, meson, CMake - and each asks "the C compiler" to
+# compile and to link. This one answers for ThreadOS: musl's headers in
+# place of the host's, and, when it links, a static program at the
+# address libc/libc64.ld gives it, between musl's start files, with the
+# libraries already built for ThreadOS (BUILD/libs64) and musl after
+# the objects. The Makefile writes the paths in (@MUSL@, @REPO@,
+# @LIBS@) when it makes the copy in BUILD/toolchain.
+
+MUSL=@MUSL@
+REPO=@REPO@
+LIBS=@LIBS@
+
+FLAGS="-m64 -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
+-fno-asynchronous-unwind-tables -nostdinc -isystem $LIBS/include \
+-isystem $MUSL/include -isystem $(gcc -print-file-name=include)"
+
+# A question about the compiler itself is the host gcc's to answer
+link=1
+for a in "$@"; do
+    case "$a" in
+    -c|-S|-E|-M|-MM) link=0 ;;
+    --version|-v|-dumpversion|-dumpmachine|-dumpfullversion|-print-*)
+        exec gcc "$@" ;;
+    esac
+done
+
+if [ $link = 0 ]; then
+    exec gcc $FLAGS "$@"
+fi
+exec gcc $FLAGS -static -no-pie -nostdlib -Wl,--build-id=none \
+    -Wl,-z,max-page-size=0x1000 -T "$REPO/libc/libc64.ld" \
+    -L"$LIBS/lib" -L"$MUSL/lib" "$MUSL/lib/crt1.o" "$MUSL/lib/crti.o" \
+    "$@" -Wl,--start-group "$MUSL/lib/libc.a" "$(gcc -print-libgcc-file-name)" \
+    -Wl,--end-group "$MUSL/lib/crtn.o"

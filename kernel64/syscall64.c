@@ -388,6 +388,10 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
             return;
         }
+        if (kind == FDK_NULL) {
+            r->rax = a3;             /* taken, and gone */
+            return;
+        }
         if (kind == FDK_MEMFD) {
             long n = memfd64_rw(task64_fd_slot((int)a1), task64_fd_pos((int)a1),
                                 (void *)buf, (uint32_t)a3, 1);
@@ -490,6 +494,10 @@ static void handle(struct regs *r)
             long n = usock64_read(task64_fd_slot((int)a1),
                                   (void *)(uintptr_t)a2, (uint32_t)a3);
             r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
+            return;
+        }
+        if (kind == FDK_NULL) {
+            r->rax = 0;              /* the end of nothing */
             return;
         }
         if (kind == FDK_MEMFD) {
@@ -1084,6 +1092,9 @@ static void handle(struct regs *r)
         return;
     case SYS64_IPC:
         r->rax = (uint64_t)ipc64_call(a1, a2, a3, a4);
+        return;
+    case SYS64_FDCTL:
+        r->rax = (uint64_t)(int64_t)task64_fd_cloexec((int)a1, (int)a2);
         return;
     case SYS64_DISCARD:
         /* Only the program's own memory: a range that leaves it is

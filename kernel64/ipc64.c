@@ -828,6 +828,13 @@ long ipc64_call(uint64_t op, uint64_t a, uint64_t b, uint64_t c)
         return memfd_map((int)a, b, c);
     case IPC_UNMAP:
         return memfd_unmap(a, b);
+    case IPC_NULL: {
+        /* A program's standard input from nowhere, its output to
+           nowhere - and it has to outlive exec as descriptor 0 or 1,
+           so it is the kernel's, not a made-up file in libc */
+        int fd = task64_fd_new(FDK_NULL, 0);
+        return fd < 0 ? -IPC_EMFILE : fd;
+    }
     }
     return -IPC_EINVAL;
 }

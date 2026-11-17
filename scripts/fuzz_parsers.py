@@ -8,7 +8,10 @@ the kernel's HID report descriptor reader (hid.c), because a descriptor
 comes from whatever is plugged in, Mbed TLS's certificate and key
 parsers, which curl hands whatever a server sends, and the ARM64
 kernel's device tree reader (kernelarm64/fdt.c), because the tree is
-the firmware's and the firmware is somebody else's. In the kernel an error does
+the firmware's and the firmware is somebody else's - and GLib, under
+WebKit's processes, with its own fuzzers: key files, GVariant in text
+and binary, URIs, dates, bookmark files (its XML), UTF-8, D-Bus
+messages, DNS replies and network addresses. In the kernel an error does
 not end in the death of a process but in the system going down, so it
 is all the more worth looking for.
 
@@ -204,6 +207,121 @@ def build_mbedtls(workdir):
             raise SystemExit("Mbed TLS's fuzz_%s could not be built" % name)
         binaries["mbedtls-" + name] = binary
     return binaries
+
+
+# GLib's own fuzzers (fuzzing/ in its archive) that read what can come
+# from outside: files, URIs, messages, network replies
+GLIB_FUZZERS = ("key", "variant_text", "variant_binary", "uri_parse",
+                "uri_parse_params", "bookmark",
+                "date_time_new_from_iso8601", "utf8_validate",
+                "utf8_normalize", "data_input_stream_read_line",
+                "dbus_message", "resolver", "inet_address_new_from_string",
+                "network_address_parse_uri")
+
+
+def build_glib(workdir):
+    """GLib (third_party/, the archive the Makefile names) built for the
+    host by its own meson under the sanitizers, with libffi, PCRE2 and
+    zlib from the host, and its fuzzers linked against it with their
+    driver for one file (driver.c)"""
+    with open(os.path.join(ROOT, "Makefile")) as f:
+        tar = next(l.split(":=")[1].strip() for l in f
+                   if l.startswith("GLIB_TAR "))
+    src = os.path.join(workdir, "glib")
+    os.makedirs(src)
+    subprocess.run(["tar", "-xf", os.path.join(ROOT, tar), "-C", src,
+                    "--strip-components=1"], check=True)
+    prefix = os.path.join(workdir, "glib-root")
+    out = subprocess.run(
+        ["meson", "setup", "build", "--wrap-mode=nodownload",
+         "--prefix=" + prefix, "--libdir=lib", "--buildtype=debugoptimized",
+         "-Ddefault_library=static", "-Db_sanitize=address,undefined",
+         "-Dtests=false", "-Dintrospection=disabled", "-Dnls=disabled",
+         "-Dlibmount=disabled", "-Dselinux=disabled", "-Dxattr=false",
+         "-Dlibelf=disabled", "-Dsysprof=disabled", "-Ddocumentation=false",
+         "-Dman-pages=disabled"], cwd=src, capture_output=True, text=True)
+    if out.returncode == 0:
+        out = subprocess.run(["ninja", "-C", "build", "install"], cwd=src,
+                             capture_output=True, text=True)
+    if out.returncode != 0:
+        print(out.stdout[-3000:], out.stderr[-2000:])
+        raise SystemExit("GLib could not be built for fuzzing")
+    env = dict(os.environ,
+               PKG_CONFIG_PATH=os.path.join(prefix, "lib", "pkgconfig"))
+    flags = subprocess.run(["pkg-config", "--static", "--cflags", "--libs",
+                            "gio-2.0"], env=env, capture_output=True,
+                           text=True, check=True).stdout.split()
+    san = ["-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+           "-fno-omit-frame-pointer", "-g", "-O1"]
+    fz = os.path.join(src, "fuzzing")
+    binaries = {}
+    for name in GLIB_FUZZERS:
+        binary = os.path.join(workdir, "glib-" + name)
+        out = subprocess.run(
+            # (the fuzzers name GLib's headers as its source tree has
+            # them, "glib/glib.h")
+            ["gcc", *san, "-w", "-I", fz, "-I", src, "-o", binary,
+             os.path.join(fz, "driver.c"), os.path.join(fz, "fuzz_%s.c" % name),
+             *flags], capture_output=True, text=True)
+        if out.returncode != 0:
+            print(out.stderr[:3000])
+            raise SystemExit("GLib's fuzz_%s could not be built" % name)
+        binaries["glib-" + name] = binary
+    return binaries, fz
+
+
+def glib_seeds(fz):
+    """What each of GLib's fuzzers starts from: its own corpora where it
+    has them, and a few well-formed inputs of each kind"""
+    def corpus(name):
+        d = os.path.join(fz, "fuzz_%s.corpus" % name)
+        if not os.path.isdir(d):
+            return []
+        return [open(os.path.join(d, f), "rb").read()
+                for f in sorted(os.listdir(d))]
+    uris = [b"https://user:pw@example.org:8080/a/b%20c?x=1&y=%C5%BC#frag",
+            b"file:///home/user/a%20file.txt", b"http://[::1]:80/",
+            b"mailto:someone@example.org", b"data:text/plain;base64,QUJD"]
+    variant = [b"{'name': <'ThreadOS'>, 'list': <[1, 2, 3]>}",
+               b"(true, @y 7, [@u 1, 2], {'a': <@d 1.5>})",
+               b"@a{sv} {'x': <'y'>}", b"[<(1, 'two')>, <@ay [0x01]>]"]
+    return {
+        "glib-key": corpus("key") or [
+            b"[group]\nkey=value\nlist=a;b;c;\n[other]\nnum=12\n"],
+        "glib-variant_text": variant,
+        "glib-variant_binary": [b"\x00\x01\x02\x03ThreadOS\x00\x00s",
+                                b"(\x00\x00\x00\x01\x02\x03\x04)",
+                                b"\x01\x00\x00\x00\x02\x00\x00\x00au"],
+        "glib-uri_parse": uris,
+        "glib-uri_parse_params": [b"a=1&b=2;c=%C5%BC&d", b"x=&=y&&z=1"],
+        "glib-bookmark": corpus("bookmark") or [
+            b'<?xml version="1.0"?><xbel version="1.0"></xbel>'],
+        "glib-date_time_new_from_iso8601": [
+            b"2026-11-17T01:02:03Z", b"2026-W46-2T10:00:00+01:00",
+            b"2026-321T23:59:60.123456-05:30"],
+        "glib-utf8_validate": ["Zażółć gęślą jaźń".encode(),
+                               b"\xf0\x9f\x98\x80 \xe2\x82\xac"],
+        "glib-utf8_normalize": ["é Å ﬁ".encode(),
+                                "Zażółć".encode()],
+        "glib-data_input_stream_read_line": [b"one\ntwo\r\nthree\rfour"],
+        "glib-dbus_message": [
+            # a method call, little-endian, as GDBus writes one
+            b"l\x01\x00\x01\x00\x00\x00\x00\x01\x00\x00\x00"
+            b"m\x00\x00\x00\x01\x01o\x00\x15\x00\x00\x00"
+            b"/org/freedesktop/DBus\x00\x00\x00\x02\x01s\x00"
+            b"\x14\x00\x00\x00org.freedesktop.DBus\x00\x00\x00\x00"
+            b"\x03\x01s\x00\x05\x00\x00\x00Hello\x00\x00\x00"
+            b"\x06\x01s\x00\x14\x00\x00\x00org.freedesktop.DBus\x00"],
+        "glib-resolver": [
+            # a DNS reply: one question, one A record
+            b"\x12\x34\x81\x80\x00\x01\x00\x01\x00\x00\x00\x00"
+            b"\x07example\x03org\x00\x00\x01\x00\x01"
+            b"\xc0\x0c\x00\x01\x00\x01\x00\x00\x0e\x10\x00\x04"
+            b"\x5d\xb8\xd7\x0e"],
+        "glib-inet_address_new_from_string": [b"192.168.1.20", b"fe80::1",
+                                              b"::ffff:10.0.2.15"],
+        "glib-network_address_parse_uri": uris,
+    }
 
 
 def mbedtls_seeds(workdir):
@@ -753,6 +871,8 @@ def main():
         kbinary = build_kernel(workdir)
         tbinary = build_ttf(workdir)
         mbinaries = build_mbedtls(workdir)
+        gbinaries, gfuzz = build_glib(workdir)
+        mbinaries.update(gbinaries)
         hbinary = build_hid(workdir)
         fbinary = build_fdt(workdir)
         corpus = seeds(workdir)
@@ -764,6 +884,7 @@ def main():
         corpus["mbedtls-x509crt"] = list(corpus["x509"])
         corpus["mbedtls-pubkey"], corpus["mbedtls-privkey"] = \
             mbedtls_seeds(workdir)
+        corpus.update(glib_seeds(gfuzz))
         print("the harness is built, cases per parser: %d" % CASES)
         wrong = fdt_layouts(fbinary, workdir)
         print("  device trees against what they were made with: %d wrong"

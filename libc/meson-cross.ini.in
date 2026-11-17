@@ -1,0 +1,29 @@
+# Meson's cross file for ThreadOS (libc/meson-cross.ini.in)
+#
+# The libraries built with meson (GLib and those after it) are built
+# for ThreadOS from the host: with libc/threados-cc as their compiler,
+# static, finding each other through the pkg-config files installed in
+# BUILD/libs64. ThreadOS runs Linux programs' system calls (libc/overlay),
+# so to these libraries it is Linux. Nothing built here runs on the
+# host, which needs_exe_wrapper says. The Makefile writes the paths in.
+
+[binaries]
+c = '@TOOLCHAIN@/threados-cc'
+ar = 'ar'
+strip = 'strip'
+pkg-config = 'pkg-config'
+
+[built-in options]
+default_library = 'static'
+b_staticpic = false
+b_pie = false
+
+[properties]
+pkg_config_libdir = '@LIBS@/lib/pkgconfig'
+needs_exe_wrapper = true
+
+[host_machine]
+system = 'linux'
+cpu_family = 'x86_64'
+cpu = 'x86_64'
+endian = 'little'

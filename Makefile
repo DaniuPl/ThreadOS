@@ -23,7 +23,7 @@ BUILD   := build
 # committed, so building needs neither fonttools nor the DejaVu package
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
 
-.PHONY: all iso64 initrd64 libc64 browser run run-iso64-uefi test fuzz clean \
+.PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick kernelarm64 run-arm64
 
 all: kernel64
@@ -673,6 +673,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/bigmap.elf \
                $(BUILD)/user64/ipctest.elf \
                $(BUILD)/user64/bigram.elf \
+               $(BUILD)/user64/glibtest.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
@@ -820,6 +821,108 @@ $(ICU_STAMP): $(ICU_DAT) apps/webkit/icu.mk $(LIBC64) libc/cxx/compat.h
 	    $(ICU_ROOT)/include/unicode/
 	cp $(ICU_DIR)/obj/*.a $(ICU_ROOT)/lib/
 	touch $@
+
+# --- Libraries for WebKit's processes: GLib and what it needs -----------
+# What WebKit's processes are built on, each built from its release
+# archive in third_party/ by its own build system - configure or meson -
+# for ThreadOS, and installed into one place, BUILD/libs64 (include/,
+# lib/, lib/pkgconfig/), where the next one finds it. The compiler they
+# are all given is libc/threados-cc.in, written out for this build into
+# BUILD/toolchain with its paths; meson gets libc/meson-cross.ini.in the
+# same way. Nothing is fetched: meson's fallbacks are off
+# (--wrap-mode=nodownload), and zlib is ours, installed with a .pc file.
+LIBS64      := $(BUILD)/libs64
+TOOLCHAIN64 := $(BUILD)/toolchain
+TOS_CC      := $(TOOLCHAIN64)/threados-cc
+MESON_CROSS := $(TOOLCHAIN64)/cross.ini
+LIBS64_PC   := PKG_CONFIG_LIBDIR=$(abspath $(LIBS64))/lib/pkgconfig
+
+$(TOS_CC): libc/threados-cc.in $(LIBC64)
+	mkdir -p $(TOOLCHAIN64)
+	sed -e 's|@MUSL@|$(abspath $(MUSL_ROOT))|' -e 's|@REPO@|$(CURDIR)|' \
+	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
+	chmod +x $@
+
+$(MESON_CROSS): libc/meson-cross.ini.in
+	mkdir -p $(TOOLCHAIN64)
+	sed -e 's|@TOOLCHAIN@|$(abspath $(TOOLCHAIN64))|' \
+	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
+
+LIBS64_ZLIB := $(LIBS64)/lib/libz.a
+$(LIBS64_ZLIB): $(ZLIB_A)
+	mkdir -p $(LIBS64)/include $(LIBS64)/lib/pkgconfig
+	cp $(ZLIB_TREE)/zlib.h $(ZLIB_TREE)/zconf.h $(LIBS64)/include/
+	cp $(ZLIB_A) $@
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: zlib\nDescription: zlib compression library\nVersion: %s\nLibs: -L$${libdir} -lz\nCflags: -I$${includedir}\n' \
+	    $(abspath $(LIBS64)) $(patsubst third_party/zlib-%.tar.xz,%,$(ZLIB_TAR)) \
+	    > $(LIBS64)/lib/pkgconfig/zlib.pc
+
+# libffi: calls a C function given its signature at run time - GObject's
+# signals reach their handlers through it. Its static trampolines read
+# the kernel's headers, and are only for closures, which GLib does not
+# make.
+LIBFFI_TAR := third_party/libffi-3.5.2.tar.gz
+LIBFFI_A   := $(LIBS64)/lib/libffi.a
+$(LIBFFI_A): $(LIBFFI_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/libffi && mkdir -p $(BUILD)/libffi
+	tar -xf $< -C $(BUILD)/libffi --strip-components=1
+	cd $(BUILD)/libffi && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    --disable-docs --disable-multi-os-directory \
+	    --disable-exec-static-tramp \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libffi install > $(BUILD)/libffi/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/libffi/make.log; exit 1; }
+
+# PCRE2: GLib's regular expressions. No JIT: it writes code into memory
+# and runs it, and ThreadOS hands out no memory that is both.
+PCRE2_TAR := third_party/pcre2-10.48.tar.bz2
+PCRE2_A   := $(LIBS64)/lib/libpcre2-8.a
+$(PCRE2_A): $(PCRE2_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/pcre2 && mkdir -p $(BUILD)/pcre2
+	tar -xf $< -C $(BUILD)/pcre2 --strip-components=1
+	cd $(BUILD)/pcre2 && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    --disable-jit --enable-pcre2-8 --disable-pcre2-16 \
+	    --disable-pcre2-32 --enable-unicode \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/pcre2 install > $(BUILD)/pcre2/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/pcre2/make.log; exit 1; }
+
+# GLib: the main loop, threads, GObject, GIO. What a desktop Linux
+# system has and ThreadOS does not - libmount, SELinux, extended
+# attributes, translations - is switched off.
+GLIB_TAR  := third_party/glib-2.90.1.tar.xz
+GLIB_TREE := $(BUILD)/glib
+GLIB_A    := $(LIBS64)/lib/libglib-2.0.a
+$(GLIB_A): $(GLIB_TAR) $(MESON_CROSS) $(TOS_CC) $(LIBFFI_A) $(PCRE2_A) \
+           $(LIBS64_ZLIB)
+	rm -rf $(GLIB_TREE) && mkdir -p $(GLIB_TREE)
+	tar -xf $< -C $(GLIB_TREE) --strip-components=1
+	cd $(GLIB_TREE) && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --buildtype=release \
+	    -Ddefault_library=static -Dtests=false -Dintrospection=disabled \
+	    -Dnls=disabled -Dlibmount=disabled -Dselinux=disabled \
+	    -Dxattr=false -Dlibelf=disabled -Dsysprof=disabled \
+	    -Ddocumentation=false -Dman-pages=disabled -Ddtrace=disabled \
+	    -Dsystemtap=disabled -Dglib_debug=disabled \
+	    -Dbsymbolic_functions=false -Dinstalled_tests=false \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(GLIB_TREE)/build install > $(GLIB_TREE)/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(GLIB_TREE)/ninja.log | head -60; exit 1; }
+
+libs64: $(GLIB_A)
+
+# glibtest: GLib's main loop, threads, GObject, data and processes on
+# ThreadOS, held by t_glib to the same program built against the host's
+# GLib
+$(BUILD)/user64/glibtest.elf: libc/tests/glibtest.c $(GLIB_A) $(TOS_CC) \
+                              | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
+	    $$($(LIBS64_PC) pkg-config --cflags --static --libs gio-2.0 gio-unix-2.0)
 
 # --- WebKit: JavaScriptCore -------------------------------------------
 # WebKitGTK's release (third_party/README.md), built by its own CMake
@@ -1014,6 +1117,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    bigmap=$(BUILD)/user64/bigmap.elf \
 	    ipctest=$(BUILD)/user64/ipctest.elf \
 	    bigram=$(BUILD)/user64/bigram.elf \
+	    glibtest=$(BUILD)/user64/glibtest.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
 	    randtest=$(BUILD)/user64/randtest.elf \

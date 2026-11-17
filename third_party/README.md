@@ -21,6 +21,9 @@ as code of our own around it (`apps/js`).
 | `acpica-unix-20260408.tar.gz` | ACPICA, the interpreter of the firmware's ACPI AML | 20260408 | BSD-3-Clause, taken under that one of its three licences (Intel's own, BSD-3-Clause or GPL-2.0, the header of every file) | https://mirrors.mit.edu/libreboot/misc/acpica/acpica-unix-20260408.tar.gz (Libreboot's mirror of Intel's release archives; SHA-256 `e66ceb26d6d514ce164fe22f5a4f7ca165cc38349d7a97f41a21f19b364647a2`, as the mirror's .sha256 lists it) |
 | `webkit/webkitgtk-2.54.2.tar.xz` | WebKitGTK's release of WebKit: so far its JavaScript engine, JavaScriptCore, with WTF under it | 2.54.2 | LGPL-2.1-or-later and BSD-2-Clause (each file's header; JavaScriptCore and WTF are mostly BSD) | https://webkitgtk.org/releases/webkitgtk-2.54.2.tar.xz (SHA-256 `a76345b391bef6211fb5ab6cfab2e86b285d18cda17cbb9ade595f1252b86065`, as the release's .sums lists it) |
 | `icu/icu4c-78.3-sources.tgz` | ICU, Unicode and locale data and algorithms, for WebKit | 78.3 | Unicode-3.0 (`LICENSE` in the archive) | https://github.com/unicode-org/icu/releases/download/release-78.3/icu4c-78.3-sources.tgz (SHA-512 `04a49455e1489030c520a4bfd2664fa2171e7938d08f2acdbbcb1fda976639fd8b1f0704f2eec89ba59a7b6d118ceaab6ec5a096e40d9085a0895d91ce225245`, as the release's SHASUM512.txt lists it) |
+| `glib-2.90.1.tar.xz` | GLib, GObject and GIO: the main loop, threads, objects and signals, data structures, streams - what WebKit's processes are built on | 2.90.1 | LGPL-2.1-or-later (`COPYING` in the archive) | https://download.gnome.org/sources/glib/2.90/glib-2.90.1.tar.xz (SHA-256 `93c941aa17d5eb1d53fe838365f29a8b4e539c222a256d974ec8f30fc413e396`, as GNOME's glib-2.90.1.sha256sum lists it) |
+| `libffi-3.5.2.tar.gz` | libffi, calls to C functions described at run time, for GObject's signals | 3.5.2 | MIT (`LICENSE` in the archive) | https://github.com/libffi/libffi/releases/download/v3.5.2/libffi-3.5.2.tar.gz (SHA-256 `f3a3082a23b37c293a4fcd1053147b371f2ff91fa7ea1b2a52e335676bac82dc`, computed on download; the release lists none) |
+| `pcre2-10.48.tar.bz2` | PCRE2, regular expressions, for GLib's GRegex | 10.48 | BSD-3-Clause with the PCRE2 exception (`LICENCE.md` in the archive) | https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.48/pcre2-10.48.tar.bz2 (SHA-256 `b6c68fdf6f3ac31388b50aa89ff0fc49c00c987c16e7b5146491d12003f2c8ed`, computed on download; the release signs it with a GPG key instead) |
 | `iwlwifi/` | Firmware for the Intel Wireless 3160 Wi-Fi card (`iwlwifi-3160-17.ucode`), a binary the card runs itself | 17.bfb58538.0 | Intel's firmware licence: redistribution in binary form only, unmodified (`LICENCE.iwlwifi_firmware`) | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git (`intel/iwlwifi/`) |
 
 Trimmed, not modified:
@@ -99,3 +102,17 @@ Trimmed, not modified:
   converters, transliteration, the spoof checker, character names and
   the word dictionaries of Chinese, Japanese, Thai, Lao, Khmer and
   Burmese.
+- **GLib**: the archive is kept intact and built static by its own
+  meson for ThreadOS (`Makefile`, "Libraries for WebKit's processes";
+  `libc/meson-cross.ini.in`), with meson's downloads off - zlib is the
+  tree's own, and `gvdb`, which the archive carries as a subproject, is
+  built from it. Switched off: tests, introspection, translations,
+  libmount, SELinux, extended attributes, libelf, sysprof, dtrace and
+  the documentation. Its own fuzzers (`fuzzing/`) are what
+  `scripts/fuzz_parsers.py` runs against it on the host.
+- **libffi**: the archive is kept intact and built static by its
+  `configure`, without the static trampolines (they read the kernel's
+  headers, and serve only closures, which GLib does not make).
+- **PCRE2**: the archive is kept intact and built static by its
+  `configure`: the 8-bit library only, without the JIT (ThreadOS hands
+  out no memory a program may both write and run).

@@ -1752,6 +1752,7 @@ static void release(struct task64 *t, int fd)
 {
     struct fd_entry e = t->fds[fd];
     t->fds[fd].kind = FDK_FREE;
+    t->fds[fd].cloexec = 0;      /* the number's next owner starts clean */
     let_go(&e);
 }
 
@@ -1793,6 +1794,7 @@ int task64_fd_install(const struct fd_entry *e)
     for (int i = FD_FIRST; i < FD_MAX; i++)
         if (current->fds[i].kind == FDK_FREE) {
             current->fds[i] = *e;
+            current->fds[i].cloexec = 0;   /* not the sender's flag */
             fd = i;
             break;
         }
@@ -1850,6 +1852,7 @@ int task64_fd_dup2(int old, int fresh_one)
     if (current->fds[fresh_one].kind != FDK_FREE)
         release(current, fresh_one);
     current->fds[fresh_one] = current->fds[old];
+    current->fds[fresh_one].cloexec = 0;    /* a copy is open across exec */
     hold(&current->fds[fresh_one]);
     irq_restore(flags);
     return fresh_one;
@@ -1863,6 +1866,29 @@ void task64_fd_close_all(void)
     for (int i = 0; i < FD_MAX; i++)
         if (current->fds[i].kind != FDK_FREE)
             release(current, i);
+}
+
+int task64_fd_cloexec(int fd, int value)
+{
+    if (fd < 0 || fd >= FD_MAX || current->fds[fd].kind == FDK_FREE)
+        return -1;
+    if (value >= 0)
+        current->fds[fd].cloexec = value ? 1 : 0;
+    return (int)current->fds[fd].cloexec;
+}
+
+/* A program that starts another hands it some descriptors and not
+   others; the ones it marked are not the new program's business. It
+   matters more than tidiness: a parent learns that exec worked by a
+   marked pipe closing (GLib's spawning, musl's posix_spawn) - kept
+   open, the parent would wait until the child ended. */
+void task64_fd_close_on_exec(void)
+{
+    irqflags_t flags = irq_save();
+    for (int i = 0; i < FD_MAX; i++)
+        if (current->fds[i].kind != FDK_FREE && current->fds[i].cloexec)
+            release(current, i);
+    irq_restore(flags);
 }
 
 /* A child inherits open files together with the position they stand

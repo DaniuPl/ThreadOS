@@ -37,7 +37,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-            clang lld python3 openssl xz-utils cmake ninja-build ruby
+            clang lld python3 openssl xz-utils cmake ninja-build ruby \
+            pkg-config
+          python3 -m pip install --user meson
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build 0.1.0-alpha.${{ github.run_number }}
         run: |

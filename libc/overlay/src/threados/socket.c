@@ -35,6 +35,7 @@
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include "syscall.h"
 #include "kstat.h"
 
@@ -63,6 +64,7 @@
 #define T_OPEN      13
 #define T_CLOSE     14
 #define T_INITRD_READ 76
+#define T_TRYWAIT   48
 
 /* kernel/include/tcp.h */
 #define P_IN        0x01
@@ -169,6 +171,91 @@ static struct vf *vfile_of(long fd)
 		return 0;
 	struct vf *v = &vfiles[fd - VFILE_BASE];
 	return v->used ? v : 0;
+}
+
+/* --- pidfds -------------------------------------------------------------
+ *
+ * A descriptor that turns readable when a child ends (pidfd_open), and
+ * waitid(P_PIDFD) on it: that is how GLib watches its children - and
+ * WebKit its web and network processes - rather than by SIGCHLD, which
+ * ThreadOS does not send. The kernel has no such descriptor: whether
+ * the child has ended is asked when poll looks (SYS64_TRYWAIT), and its
+ * exit code kept here from then on. */
+#define PIDFD_BASE (VFILE_BASE + VFILES)
+#define PIDFDS     32
+
+static struct pf {
+	unsigned char used, ended;
+	int pid, code;
+} pidfds[PIDFDS];
+
+static struct pf *pidfd_of(long fd)
+{
+	if (fd < PIDFD_BASE || fd >= PIDFD_BASE + PIDFDS)
+		return 0;
+	struct pf *p = &pidfds[fd - PIDFD_BASE];
+	return p->used ? p : 0;
+}
+
+static int pidfd_ended(struct pf *p)
+{
+	if (!p->ended) {
+		int code = 0;
+		long r = tos(T_TRYWAIT, p->pid, (long)&code, 0, 0);
+		if (r != -3) {           /* -3: still running */
+			p->ended = 1;
+			p->code = r == 0 ? code : 0;   /* (gone already: no code) */
+		}
+	}
+	return p->ended;
+}
+
+static long pidfd_open(long pid, long flags)
+{
+	if (pid <= 0 || (flags & ~O_NONBLOCK))
+		return -EINVAL;
+	int code = 0;
+	long r = tos(T_TRYWAIT, pid, (long)&code, 0, 0);
+	if (r != 0 && r != -3)
+		return -ESRCH;           /* not a child of ours */
+	lock();
+	for (int i = 0; i < PIDFDS; i++)
+		if (!pidfds[i].used) {
+			pidfds[i] = (struct pf){ 1, r == 0, (int)pid, code };
+			unlock();
+			return PIDFD_BASE + i;
+		}
+	unlock();
+	return -EMFILE;
+}
+
+static long pidfd_waitid(long fd, siginfo_t *info, long options)
+{
+	struct pf *p = pidfd_of(fd);
+	if (!p)
+		return -EBADF;
+	if (!(options & WEXITED))
+		return -EINVAL;
+	while (!pidfd_ended(p)) {
+		if (options & WNOHANG) {
+			if (info) {
+				touch(info, sizeof(*info));
+				memset(info, 0, sizeof(*info));
+			}
+			return 0;
+		}
+		tos(T_SLEEP, 10, 0, 0, 0);
+	}
+	if (info) {
+		touch(info, sizeof(*info));
+		memset(info, 0, sizeof(*info));
+		info->si_signo = SIGCHLD;
+		info->si_pid = p->pid;
+		/* -1 is the kernel's "killed" (task64_kill) */
+		info->si_code = p->code < 0 ? CLD_KILLED : CLD_EXITED;
+		info->si_status = p->code < 0 ? SIGKILL : (p->code & 0xff);
+	}
+	return 0;
 }
 
 static int put_ip(char *out, unsigned ip)
@@ -727,6 +814,9 @@ static short fd_events(int fd, short want, int *pair)
 		return sock_events(s, want);
 	if (vfile_of(fd))
 		return want & (POLLIN | POLLOUT);
+	struct pf *pf = pidfd_of(fd);
+	if (pf)
+		return pidfd_ended(pf) ? want & POLLIN : 0;
 	if (fd >= T_FDS)
 		return POLLNVAL;
 	struct { int kind; unsigned size, pos; } fi;
@@ -868,11 +958,14 @@ NET_HIDDEN int __tos_net_owns(long n, long fd)
 	case SYS_shutdown: case SYS_getsockname: case SYS_getpeername:
 	case SYS_setsockopt: case SYS_getsockopt:
 	case SYS_poll: case SYS_ppoll: case SYS_select: case SYS_pselect6:
+	case SYS_pidfd_open:
 		return 1;
+	case SYS_waitid:
+		return fd == P_PIDFD;
 	case SYS_read: case SYS_write: case SYS_readv: case SYS_writev:
 	case SYS_close: case SYS_fstat: case SYS_fcntl: case SYS_ioctl:
 	case SYS_lseek: case SYS_pread64: case SYS_pwrite64:
-		return fd >= SOCK_BASE && fd < VFILE_BASE + VFILES;
+		return fd >= SOCK_BASE && fd < PIDFD_BASE + PIDFDS;
 	}
 	return 0;
 }
@@ -978,10 +1071,32 @@ NET_HIDDEN long __tos_net(long n, long a, long b, long c, long d, long e, long f
 	case SYS_pselect6:
 		return do_select(a, (void *)b, (void *)c, (void *)d,
 		                 ts_ms((const void *)e));
+	case SYS_pidfd_open:
+		return pidfd_open(a, b);
+	case SYS_waitid:
+		return pidfd_waitid(b, (siginfo_t *)c, d);
 	}
 
 	if ((v = vfile_of(a)))
 		return vfile_call(v, n, a, b, c);
+	struct pf *pf = pidfd_of(a);
+	if (pf) {
+		switch (n) {
+		case SYS_close:
+			pf->used = 0;
+			return 0;
+		case SYS_fcntl:
+			return b == F_GETFL ? O_RDONLY : 0;
+		case SYS_fstat: {
+			struct kstat *st = (void *)b;
+			touch(st, sizeof(*st));
+			memset(st, 0, sizeof(*st));
+			st->st_nlink = 1;
+			return 0;
+		}
+		}
+		return -EINVAL;
+	}
 	if (a >= 0 && a < T_FDS && __tos_unix_owns(a))
 		return __tos_unix(n, a, b, c, d, e, f);
 	if (!(s = sock_of(a)))

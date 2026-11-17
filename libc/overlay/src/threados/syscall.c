@@ -113,11 +113,13 @@ long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
 #define T_GETRANDOM 98
 #define T_DISCARD  104
 #define T_IPC      105
+#define T_FDCTL    106               /* FD_CLOEXEC: (fd, -1 ask / 0 / 1) */
 
 /* SYS64_IPC's operations (kernel64/ipc64.h) used here */
 #define IPC_MEMFD 6
 #define IPC_MAP   7
 #define IPC_UNMAP 8
+#define IPC_NULL  9
 
 #define T_FUTEX_WAIT    0
 #define T_FUTEX_WAKE    1
@@ -132,6 +134,7 @@ long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
 #define K_PIPE_W 3
 #define K_USOCK  4                   /* an end of a socket pair (unix.c) */
 #define K_MEMFD  5                   /* shared memory, memfd_create */
+#define K_NULL   6                   /* /dev/null */
 
 #define T_FDS    256                 /* FD_MAX in kernel64/task64.c */
 #define T_HZ     100                 /* the timer, kernel64/kmain64.c */
@@ -234,6 +237,19 @@ static void set_flags(int fd, int flags)
 		fd_flags[fd] = flags;
 		fd_known[fd] = 1;
 	}
+}
+
+/* Close-on-exec is the kernel's to keep: exec is where it acts, and a
+   descriptor's flag outlives this program's memory */
+static int set_cloexec(int fd, int on)
+{
+	return tos(T_FDCTL, fd, on ? 1 : 0, 0, 0) < 0 ? -1 : 0;
+}
+
+__attribute__((__visibility__("hidden")))
+void __tos_set_cloexec(int fd)
+{
+	set_cloexec(fd, 1);
 }
 
 /* (for unix.c, whose sockets are kernel descriptors with flags here) */
@@ -467,6 +483,15 @@ static long do_open(const char *path, int flags)
 	touch(path, slen(path) + 1);
 	path = tidy(path, buf);
 
+	if (!strcmp(path, "/dev/null")) {
+		long fd = tos(T_IPC, IPC_NULL, 0, 0, 0);
+		if (fd < 0)
+			return -EMFILE;
+		set_flags(fd, flags & O_ACCMODE);
+		if (flags & O_CLOEXEC)
+			set_cloexec(fd, 1);
+		return fd;
+	}
 	if (flags & O_DIRECTORY)
 		return is_dir(path) ? -ENOSYS : -ENOTDIR;
 	int acc = flags & O_ACCMODE;
@@ -507,6 +532,8 @@ static long do_open(const char *path, int flags)
 		return -ENOENT;
 	}
 	set_flags(fd, flags & ~(O_CREAT | O_EXCL | O_TRUNC | O_NOCTTY | O_CLOEXEC));
+	if (flags & O_CLOEXEC)
+		set_cloexec(fd, 1);
 	return fd;
 }
 
@@ -548,6 +575,10 @@ static long do_fstat(int fd, struct kstat *st)
 	case K_MEMFD:
 		fill_stat(st, S_IFREG | 0600, fi.size, 4000 + fd);
 		return 0;
+	case K_NULL:
+		fill_stat(st, S_IFCHR | 0666, 0, 5000);
+		st->st_rdev = 0x0103;    /* 1, 3: Linux's numbers for it */
+		return 0;
 	case K_USOCK:
 		return __tos_unix(SYS_fstat, fd, (long)st, 0, 0, 0, 0);
 	}
@@ -568,6 +599,11 @@ static long do_stat(const char *path, struct kstat *st)
 	touch(path, slen(path) + 1);
 	touch(st, sizeof(*st));
 	path = tidy(path, buf);
+	if (!strcmp(path, "/dev/null")) {
+		fill_stat(st, S_IFCHR | 0666, 0, 5000);
+		st->st_rdev = 0x0103;
+		return 0;
+	}
 	long fd = tos(T_OPEN, (long)path, slen(path), 0, 0);
 	if (fd >= 0) {
 		struct fdinfo fi = { 0 };
@@ -652,10 +688,21 @@ static long do_fcntl(int fd, int cmd, long arg)
 		return -EBADF;
 	switch (cmd) {
 	case F_DUPFD:
-	case F_DUPFD_CLOEXEC:
-		return do_dupfd(fd, arg);
-	case F_GETFD:
+	case F_DUPFD_CLOEXEC: {
+		long r = do_dupfd(fd, arg);
+		if (r >= 0 && cmd == F_DUPFD_CLOEXEC)
+			set_cloexec(r, 1);
+		return r;
+	}
+	case F_GETFD: {
+		long r = tos(T_FDCTL, fd, -1, 0, 0);
+		if (r < 0)            /* the console is no descriptor of the kernel's */
+			return fd <= 2 ? 0 : -EBADF;
+		return r ? FD_CLOEXEC : 0;
+	}
 	case F_SETFD:
+		if (set_cloexec(fd, arg & FD_CLOEXEC) < 0)
+			return fd <= 2 ? 0 : -EBADF;
 		return 0;
 	case F_GETFL:
 		return flags_of(fd);
@@ -1128,6 +1175,21 @@ static long do_wait4(int pid, int *status, int opts)
 	return id;
 }
 
+/* posix_spawn's child (thread/x86_64/clone.s): musl makes it with
+   clone(CLONE_VM | CLONE_VFORK), a child in the parent's memory that
+   sets its descriptors up and execs. A fork runs the same code on its
+   own copy - nothing a vfork child may do is out of a fork child's
+   reach - and the parent learns whether exec worked from the
+   close-on-exec pipe musl gives the child, as it would after a vfork. */
+__attribute__((__visibility__("hidden")))
+long __tos_clone_process(int (*func)(void *), void *arg)
+{
+	long pid = tos(T_FORK, 0, 0, 0, 0);
+	if (pid == 0)
+		tos(T_EXIT_GROUP, func(arg) & 0xff, 0, 0, 0);
+	return pid < 0 ? -EAGAIN : pid;
+}
+
 static long do_execve(const char *path, char *const argv[])
 {
 	int e = path_ok(path);
@@ -1330,7 +1392,14 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_fcntl:      return do_fcntl(a, b, c);
 	case SYS_dup:        return do_dupfd(a, 3);
 	case SYS_dup2:       return do_dup2(a, b);
-	case SYS_dup3:       return a == b ? -EINVAL : do_dup2(a, b);
+	case SYS_dup3: {
+		if (a == b)
+			return -EINVAL;
+		long r = do_dup2(a, b);
+		if (r >= 0 && (c & O_CLOEXEC))
+			set_cloexec(r, 1);
+		return r;
+	}
 	case SYS_pipe:
 	case SYS_pipe2: {
 		int *fds = (int *)a;
@@ -1340,6 +1409,10 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		int nb = n == SYS_pipe2 && (b & O_NONBLOCK) ? O_NONBLOCK : 0;
 		set_flags(fds[0], O_RDONLY | nb);
 		set_flags(fds[1], O_WRONLY | nb);
+		if (n == SYS_pipe2 && (b & O_CLOEXEC)) {
+			set_cloexec(fds[0], 1);
+			set_cloexec(fds[1], 1);
+		}
 		return 0;
 	}
 	case SYS_memfd_create: {
@@ -1351,6 +1424,8 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		if (fd < 0)
 			return fd == -ENOMEM ? -ENFILE : fd;
 		set_flags(fd, O_RDWR);
+		if (b & 1)                   /* MFD_CLOEXEC */
+			set_cloexec(fd, 1);
 		return fd;
 	}
 	case SYS_fsync:

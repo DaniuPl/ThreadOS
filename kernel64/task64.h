@@ -207,6 +207,7 @@ void task64_set_mmap_next(uint64_t adr);
 #define FDK_POTOK_W 3
 #define FDK_USOCK   4                /* an end of a Unix socket pair (ipc64.c) */
 #define FDK_MEMFD   5                /* shared memory with a descriptor (ipc64.c) */
+#define FDK_NULL    6                /* /dev/null: reads end at once, writes vanish */
 
 /* What a descriptor number stands for. Public because a descriptor can
    travel: ipc64.c carries copies of these from one process to another */
@@ -214,6 +215,7 @@ struct fd_entry {
     int kind;
     int slot;                    /* a TFS inode, a pipe, a socket end, a memfd */
     uint32_t pos;                /* where this particular reader stands */
+    uint32_t cloexec;            /* closed by exec (FD_CLOEXEC) */
 };
 
 /* For ipc64.c: a copy of descriptor 'fd' with its own hold on what it
@@ -230,6 +232,12 @@ int task64_fd_new(int kind, int slot);   /* the first free number, or -1 */
 int task64_fd_kind(int fd);
 int task64_fd_dup2(int old, int fresh_one);
 void task64_fd_close_all(void);
+
+/* FD_CLOEXEC: 'value' -1 asks, 0 or 1 sets; the flag (0/1), or -1 for
+   no such descriptor. exec closes the marked ones
+   (task64_fd_close_on_exec). */
+int task64_fd_cloexec(int fd, int value);
+void task64_fd_close_on_exec(void);
 int task64_fd_slot(int fd);          /* TFS inode / pipe number */
 uint32_t task64_fd_pos(int fd);
 void task64_fd_advance(int fd, uint32_t n);

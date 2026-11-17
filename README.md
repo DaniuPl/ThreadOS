@@ -115,16 +115,18 @@ Debian/Ubuntu:
 ```sh
 sudo apt-get install build-essential make python3 \
     qemu-system-x86 grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-    ovmf clang lld openssl
+    ovmf clang lld openssl cmake ninja-build ruby pkg-config
+python3 -m pip install --user meson     # 1.4 or newer, for GLib
 ```
 
 | Needed for | Packages |
 |---|---|
 | the kernel and initrd | `gcc`, `make`, `python3` |
+| the libraries in the initrd (JavaScriptCore, GLib) | `cmake`, `ninja-build`, `ruby`, `pkg-config`, meson 1.4 or newer |
 | discs (`iso`, `iso64`) | `grub-pc-bin`, `grub-efi-amd64-bin`, `xorriso`, `mtools` |
 | threadboot (`efi`, `stick`) | `clang`, `lld`, `mtools` |
 | running and testing | `qemu-system-x86`, `ovmf`, `openssl` |
-| optional tests and tools | Python `freetype-py` and `fonttools` (font tests), `Pillow` (screenshots), Node.js (JavaScript comparison tests) |
+| optional tests and tools | Python `freetype-py` and `fonttools` (font tests), `Pillow` (screenshots), Node.js (JavaScript comparison tests), `libglib2.0-dev` (the GLib comparison test) |
 
 A test that is missing an optional tool prints `SKIPPED` and the reason.
 
@@ -173,7 +175,8 @@ system, `hardware` lists PCI devices and `disks` lists block devices.
 make test                   # every group, 4 at once
 make test T=files,filetree  # selected groups
 make test J=8               # more parallel VMs
-make fuzz                   # parsers under ASan/UBSan on the host
+make fuzz                   # parsers under ASan/UBSan on the host (GLib's
+                            # need meson, libffi-dev and libpcre2-dev)
 ```
 
 The suite (`scripts/run_tests.py`) has more than 100 groups and over 1800

@@ -262,6 +262,8 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
         task64_exit_code(-1);
     }
     paging64_free_space(old);
+    /* Past the point of no return: what was marked close-on-exec goes */
+    task64_fd_close_on_exec();
     /* The file mappings described the old space, which is gone - the new
        image starts with an empty table */
     task64_mmap_release();
