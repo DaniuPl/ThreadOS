@@ -1,0 +1,22 @@
+WPE without libdrm: the one DRM format code the UI process names
+
+The UI process's backing store compares a DMA-BUF buffer's format with
+DRM_FORMAT_XRGB8888 when it takes a snapshot, and includes DRM's header
+of formats only with libdrm (USE_LIBDRM). A port without libdrm -
+ThreadOS has neither DRM nor DMA-BUF - does not compile. The code is
+defined where the header is not: the fourcc 'X' 'R' '2' '4', as
+drm_fourcc.h has it.
+
+--- a/Source/WebKit/UIProcess/wpe/AcceleratedBackingStore.cpp
++++ b/Source/WebKit/UIProcess/wpe/AcceleratedBackingStore.cpp
+@@ -41,6 +41,10 @@
+ #include <drm/drm_fourcc.h>
+ #elif USE(LIBDRM)
+ #include <drm_fourcc.h>
++#else
++// Without libdrm there is no header of DRM's formats, and no DMA-BUF
++// buffer either; the one code compared with below is XRGB8888's
++#define DRM_FORMAT_XRGB8888 0x34325258 // 'X' 'R' '2' '4'
+ #endif
+ 
+ WTF_IGNORE_WARNINGS_IN_THIRD_PARTY_CODE_BEGIN
