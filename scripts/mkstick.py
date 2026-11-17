@@ -162,7 +162,7 @@ def main():
             return 1
 
     print("Done: %s (%d MiB)" % (args.out, args.mib))
-    print("Na pendrive:  dd if=%s of=/dev/sdX bs=4M conv=fsync" % args.out)
+    print("To a stick:  dd if=%s of=/dev/sdX bs=4M conv=fsync" % args.out)
     print("WARNING: /dev/sdX is the WHOLE stick, not a partition - and everything")
     print("         on it will be gone.")
     return 0

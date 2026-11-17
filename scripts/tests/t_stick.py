@@ -6,12 +6,10 @@ with a GPT, an EFI system partition in it, a FAT filesystem in that and
 a loader at a name the firmware knows. `make stick` writes exactly
 that, and this group checks the image the way the firmware will read it
 - the table here in Python, with both CRCs, the filesystem through
-mtools, the three files byte for byte - and then boots it.
-
-And the two commands one types first on a machine nobody has tried
-before: 'hardware', which says what is in it, and 'disks', which says
-what it has to install onto. Both were missing from the 64-bit shell
-until now, which is the kernel that will run on that machine.
+mtools, the three files byte for byte - and then boots it, to where a
+person who boots a stick is going: the installer, on the whole screen,
+with no menu and no desktop before it (threadboot hands the kernel
+'install' when it is not the installed system's own loader).
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -126,27 +124,34 @@ def main():
             out = q.wait_serial("The 64-bit system is ready", timeout=120)
             check("and the system on the stick comes up",
                   "Multiboot OK (Multiboot 2)" in out)
-            # threadboot starts the desktop; the shell behind it takes
-            # the keys no window wants once somebody has signed in
-            check("and reaches its desktop", q.wait_desktop())
+            check("the loader asks for the installer, not a desktop",
+                  "The installer is starting" in
+                  q.wait_serial("The installer is starting", timeout=60)
+                  and "The desktop is starting" not in q.serial())
 
-            # --- the two commands one types first on a strange machine
-            # (the signed-in profile is an admin: its prompt ends in #)
-            out = q.command("hardware", "64# ", timeout=30)
-            check("'hardware' is in the 64-bit kernel - that is the one that will go there",
-                  "Unknown command" not in out)
-            check("and it says what screen the loader gave",
-                  "screen:" in out and "from the loader" in out)
-            check("what is on the PS/2 ports", "PS/2:" in out)
-            check("what is on the USB ports", "USB:" in out)
-            check("and what it sees on the PCI bus",
-                  "PCI:" in out and "class" in out)
-
-            out = q.command("disks", "64# ", timeout=30)
-            check("'disks' lists the machine's disks",
-                  "disk 1:" in out and "in use" in out)
-            check("and says what is on the one it uses",
-                  "EFI (ESP)" in out)
+            # The installer's own screen, read the way t_ginstal reads
+            # it: no menu bar over the aurora, and its heading. Polled -
+            # it is drawn once the program has started
+            head, top, w = "", 0, 1
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                q.mouse_goto(900, 600)
+                time.sleep(0.8)
+                w, h, at = q.screen_raw()
+                top = sum(1 for x in range(0, w, 8)
+                          if at(x, 3) == aurora_px(x, 3, w, h))
+                head = q.read_ui(14, ui_font_baseline_in(BAR_PX + 2, 8, 20),
+                                 width=260, px=BAR_PX + 2, face="bold",
+                                 fg=(255, 255, 255),
+                                 under=lambda x, y: aurora_px(x, y, w, h))
+                if "ThreadOS - installation" in head and top == w // 8:
+                    break
+            check("and it is on the whole screen ('%s', bare aurora %d/%d "
+                  "along the top)" % (head, top, w // 8),
+                  "ThreadOS - installation" in head and top == w // 8)
+            check("nothing stopped it",
+                  "was stopped" not in q.serial() and
+                  "Invalid Opcode" not in q.serial())
         finally:
             q.close()
     finally:

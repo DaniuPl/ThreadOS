@@ -73,11 +73,14 @@ def make_target(path, with_fallback):
 
 def boot_stick(where):
     """The stick the machine is started from: our loader and the two
-    files it reads."""
+    files it reads - and a cmdline.txt, which has it start the Live
+    desktop with its shell behind it rather than the installer on the
+    whole screen, since this group types at that shell"""
     os.makedirs(os.path.join(where, "EFI", "BOOT"), exist_ok=True)
     shutil.copy(LOADER, os.path.join(where, "EFI", "BOOT", "BOOTX64.EFI"))
     shutil.copy(KERNEL64, os.path.join(where, "threados64.bin"))
     shutil.copy(INITRD64, os.path.join(where, "initrd64.img"))
+    stick_starts_live(where)
 
 
 def main():
@@ -136,6 +139,8 @@ def main():
             check("the loader hands over the kernel and ITSELF as modules - without that "
                   "there is nothing to install from",
                   f"loader: {len(want_loader)} B" in head)
+            check("and starts the system as the stick's cmdline.txt says",
+                  'command line from \\cmdline.txt: "desktop live"' in head)
             q.wait_serial("The 64-bit system is ready", timeout=90)
             # threadboot starts the desktop, and its shell takes the
             # keys no window wants once somebody has signed in

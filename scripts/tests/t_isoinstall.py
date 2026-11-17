@@ -5,23 +5,28 @@ The stick image (make stick) starts through threadboot, which hands the
 installer the files it writes. The disc starts through GRUB - and
 people put a disc image on a stick with whatever program they have
 (Rufus, Etcher, Ventoy, dd) rather than with ours. So the disc has to
-be able to install too: it carries threadboot as a plain file, and
-every one of its menu entries has GRUB hand over the kernel's file and
-threadboot as modules, by the names threadboot itself gives them.
+be able to install too: it carries threadboot as a plain file, and its
+menu entry has GRUB hand over the kernel's file and threadboot as
+modules, by the names threadboot itself gives them. It is there to
+install and nothing else: the menu is hidden and its one entry that
+starts the system is the installer.
 
 Checked from outside, on the disc 'make iso64' really builds:
 
-  its GRUB menu is the one in boot/grub64.cfg, and threadboot is on it byte
-  for byte
+  its GRUB menu is the one in boot/grub64.cfg - hidden, with the
+  installer as its one entry that starts the system - and threadboot is
+  on it byte for byte
 
-  started under UEFI firmware (OVMF), with somebody else's disk behind
+  started under UEFI firmware (OVMF) at a shell (the same disc with the
+  word 'install' taken off the entry), with somebody else's disk behind
   an AHCI controller, 'sudo install text' writes the three files - read
   back off the image by mtools and compared with the build's own - and
   leaves the other system's loader alone
 
   that disk then boots on its own, through threadboot, with no disc
 
-  and the menu's install entry starts the installer by itself
+  and the disc as it is starts the installer by itself, on the whole
+  screen
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -66,10 +71,13 @@ def iso_file(iso, path, out):
     return blob(out) if r.returncode == 0 and os.path.exists(out) else None
 
 
-def remaster(iso, work, default):
+def remaster(iso, work, default, shell=False):
     """The same disc with another menu entry chosen and no wait: the
-    tree off the disc, its grub.cfg with only 'default' changed"""
-    tree = os.path.join(work, "tree%d" % default)
+    tree off the disc, its grub.cfg with only 'default' changed - and
+    with 'shell', the installer's entry made the shell's by taking the
+    word 'install' off the kernel's line"""
+    tag = "%d%s" % (default, "s" if shell else "")
+    tree = os.path.join(work, "tree" + tag)
     subprocess.run(["xorriso", "-osirrox", "on", "-indev", iso,
                     "-extract", "/boot", os.path.join(tree, "boot")],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -77,13 +85,16 @@ def remaster(iso, work, default):
     os.chmod(cfg, 0o644)
     text = blob(cfg).decode()
     text = text.replace("set default=0", "set default=%d" % default)
-    text = text.replace("set timeout=2", "set timeout=0")
+    text = text.replace("set timeout=1", "set timeout=0")
+    if shell:
+        text = text.replace("multiboot2 /boot/threados64.bin install",
+                            "multiboot2 /boot/threados64.bin")
     with open(cfg, "w") as fh:
         fh.write(text)
     for root, dirs, files in os.walk(tree):
         for n in dirs + files:
             os.chmod(os.path.join(root, n), 0o755)
-    out = os.path.join(work, "menu%d.iso" % default)
+    out = os.path.join(work, "menu%s.iso" % tag)
     r = subprocess.run(["grub-mkrescue", "-o", out, tree],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return out if r.returncode == 0 else None
@@ -152,25 +163,31 @@ def main():
         entries = re.findall(r'menuentry "([^"]+)" \{(.*?)\}',
                              (cfg or b"").decode(), re.S)
         systems = [(n, b) for n, b in entries if "multiboot2" in b]
-        check(f"every one of its {len(systems)} entries that start the "
-              "system hands over the kernel's file and threadboot, by the "
+        check(f"one entry starts the system ({len(systems)}), and it is "
+              "the installer",
+              len(systems) == 1 and
+              "multiboot2 /boot/threados64.bin install\n" in systems[0][1])
+        check("it hands over the kernel's file and threadboot, by the "
               "names the installer looks for",
-              len(systems) == 3 and all(
-                  "module2 /boot/threados64.bin the kernel" in body
-                  and "module2 /boot/threadboot.efi loader" in body
-                  for _, body in systems))
+              len(systems) == 1 and
+              "module2 /boot/threados64.bin the kernel" in systems[0][1]
+              and "module2 /boot/threadboot.efi loader" in systems[0][1])
+        text = (cfg or b"").decode()
+        check("and the menu is not shown: hidden, a second's wait, the "
+              "installer first",
+              "set timeout_style=hidden" in text and "set timeout=1" in text
+              and "set default=0" in text and entries
+              and " install\n" in entries[0][1])
         register = [i for i, (n, b) in enumerate(entries)
                     if "chainloader /boot/threadboot.efi register" in b]
         check("and one more starts threadboot to add the installed system "
               "to the firmware's boot menu", len(register) == 1)
-        check("one of them is the installer",
-              any(" install\n" in body for _, body in entries))
         got = iso_file(ISO, "/boot/threadboot.efi", os.path.join(work, "l.efi"))
         check(f"threadboot is on the disc byte for byte ({len(want_loader)} B)",
               got == want_loader)
 
-        shell_iso = remaster(ISO, work, 2)
-        install_iso = remaster(ISO, work, 1)
+        shell_iso = remaster(ISO, work, 0, shell=True)
+        install_iso = remaster(ISO, work, 0)
         register_iso = remaster(ISO, work, register[0]) if register else None
         check("(the same disc, with the shell, the installer or the boot "
               "menu entry chosen)",
@@ -229,7 +246,7 @@ def main():
         finally:
             q.close()
 
-        # --- The menu's own install entry
+        # --- The disc as it is: the installer, by itself
         shutil.copy(OVMF_VARS, nvram)
         q = Qemu(KERNEL, INITRD, cdrom=install_iso,
                  disk=os.path.join(work, "target.img"), sata=True,

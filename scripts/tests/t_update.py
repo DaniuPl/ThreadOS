@@ -212,6 +212,7 @@ def main():
         stick = os.path.join(work, "stick")
         os.makedirs(os.path.join(stick, "EFI", "BOOT"))
         shutil.copy(LOADER, os.path.join(stick, "EFI", "BOOT", "BOOTX64.EFI"))
+        stick_starts_live(stick)     # this group types at the shell
         shutil.copy(KERNEL64, os.path.join(stick, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(stick, "initrd64.img"))
         disk = os.path.join(work, "disk.img")

@@ -397,6 +397,7 @@ def main():
                             os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
                 shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
                 shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
+                stick_starts_live(esp)   # this group types at the shell
                 shutil.copy(OVMF_VARS, nvram)
 
                 q4 = Qemu(KERNEL, INITRD, esp=esp, serial=slogu,

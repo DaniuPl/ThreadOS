@@ -174,18 +174,26 @@ def main():
                   "ring 3" in elf and "exit code 7" in elf)
 
             q.wait_serial("The 64-bit system is ready", timeout=60)
-            desktop = q.wait_serial("The desktop is starting", timeout=30)
-            check("the installed-system loader starts directly in the desktop",
-                  "The desktop is starting - the console goes away" in desktop)
-            q.wait_desktop()
+            # From \EFI\BOOT - a stick - the loader asks for the
+            # installer; the installed system's own start (desktop
+            # installed) is t_install's to boot
+            started = q.wait_serial("The installer is starting", timeout=30)
+            check("a loader started from a stick asks for the installer, "
+                  "not a desktop",
+                  "The installer is starting" in started
+                  and "The desktop is starting" not in started)
             w, h, at = q.screen_raw()
             check(f"the screen resolution matches the loader's ({w}x{h})",
                   w == loader_w and h == loader_h)
-            time.sleep(4)
-            _, _, at = q.screen_raw()
-            mid = (w // 2, h // 2)
-            check("the desktop fills the installed system's screen",
-                  at(*mid) == aurora_px(*mid, w=w, h=h))
+            corner = (w - 4, h - 4)
+            deadline = time.time() + 30
+            while time.time() < deadline:
+                _, _, at = q.screen_raw()
+                if at(*corner) == aurora_px(*corner, w=w, h=h):
+                    break
+                time.sleep(1)
+            check("and the installer's screen fills it, to the corner",
+                  at(*corner) == aurora_px(*corner, w=w, h=h))
         finally:
             q.close()
 

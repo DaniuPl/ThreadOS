@@ -89,15 +89,17 @@ Every push to `main` produces a
 
 | Asset | Contents |
 |---|---|
-| `threados64.iso` | Hybrid BIOS/UEFI disc: live system and installer |
+| `threados64.iso` | Hybrid BIOS/UEFI disc: starts the installer |
 | `threados-stick.img.xz` | Raw GPT disk image for a USB stick (UEFI only) |
 | `update.txt`, `threados64.bin`, `initrd64.img`, `BOOTX64.EFI` | A signed system update |
 
 1. Write `threados64.iso` to a USB stick: Rufus in **DD image** mode,
    balenaEtcher, or `dd if=threados64.iso of=/dev/sdX bs=4M conv=fsync`.
 2. Disable Secure Boot. threadboot is not signed.
-3. Boot from the stick and choose **Install ThreadOS onto this computer's
-   disk**. There are two modes:
+3. Boot from the stick. The installer starts by itself, with no menu
+   (on a UEFI machine, Esc in the first second shows the one other
+   entry, which adds an installed ThreadOS to the firmware's boot
+   menu). There are two modes:
    - *beside another system*: copies three files into `\EFI\ThreadOS\` on
      the existing EFI partition and adds a boot entry at the end of the
      boot order;

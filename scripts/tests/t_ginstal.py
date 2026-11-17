@@ -13,10 +13,10 @@ This group checks both halves of that: that nothing of the desktop is
 there, and that everything the program says can be read off the screen,
 in the font the kernel drew it with.
 
-The machine is started from a disc under UEFI, at the shell entry
-boot/grub64.cfg also has - a stick starts through threadboot straight
-into the Live desktop, and the whole screen cannot be taken from a
-desktop that already holds it. The disc hands the installer the
+The machine is started from a disc under UEFI at a shell - the
+shipped disc and stick start the installer by themselves (t_isoinstall,
+t_stick), and this group starts it from the shell to watch it from the
+first frame. The disc hands the installer the
 kernel's file and threadboot, as the real one does. The disk of the
 'other machine' hangs behind an AHCI controller with somebody else's
 boot loader on it. What lands there is read back by mtools byte for
@@ -125,8 +125,8 @@ def wait_text(q, cx, cy, want, tries=10, rows=16):
 def shell_disc(work):
     """A GRUB disc that starts the kernel at its shell, handing over the
     two files the installer writes as modules, by the names threadboot
-    gives them - the shell entry of boot/grub64.cfg, made from the
-    build under test"""
+    gives them - boot/grub64.cfg's entry without the word 'install',
+    made from the build under test"""
     root = os.path.join(work, "disc")
     os.makedirs(os.path.join(root, "boot", "grub"))
     shutil.copy(KERNEL64, os.path.join(root, "boot", "threados64.bin"))

@@ -8682,3 +8682,32 @@ works and is checked by `make test`.
       the images under test pass, every exception still naming a file
       that is there and holds such code. On alpha.84's images it fails
       with 78 files.
+
+- [x] **The stick and the disc start the installer, with no menu**
+      (boot/efi/efiboot.c, boot/grub64.cfg, scripts/ptest.py,
+      scripts/tests/t_stick.py, t_isoinstall.py, t_threadboot.py,
+      t_install.py, t_wholedisk.py, t_disks.py, t_usbdisk.py,
+      t_xhci.py, t_update.py, t_ginstal.py, README.md)
+      A person who boots a stick has come to install; a choice between
+      that, a Live desktop and a shell only stood in the way. threadboot
+      started from anywhere but the installed system's own place now
+      hands the kernel 'install' instead of 'desktop live', and the
+      disc's GRUB menu has one entry that starts the system - the
+      installer - shown to nobody: hidden, a second's wait, Esc in that
+      second for the one other entry (UEFI only), which adds an
+      installed system to the firmware's boot menu.
+      Some groups type at the shell behind the Live desktop of a stick,
+      and the machine can still be wanted for looking into: threadboot
+      reads \cmdline.txt beside the kernel, if there is one, and starts
+      as its first line says (printable ASCII; never for the installed
+      system). The helper ptest.stick_starts_live writes "desktop live"
+      there for those groups.
+      t_stick boots the stick image as a firmware does and reads the
+      installer's heading on a screen with no menu bar, with nothing
+      stopped on the serial port; t_isoinstall wants exactly one entry
+      that starts the system, the installer, a hidden menu, and the disc
+      as it is to start the installer on the whole screen (its text
+      install now from the same disc with 'install' taken off the
+      line); t_threadboot wants the installer from \EFI\BOOT; t_install
+      checks threadboot's line from cmdline.txt. The rest of the groups
+      that boot a stick to type at its shell write that file.

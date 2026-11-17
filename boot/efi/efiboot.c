@@ -965,6 +965,34 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
         !read_file(L"\\EFI\\ThreadOS\\BOOTX64.EFI", &self))
         self.data = 0;
 
+    /* A command line of one's own: \cmdline.txt on the stick, beside
+     * the kernel, starts it as its first line says - an empty line is
+     * the shell, 'desktop live' the Live desktop - instead of the
+     * installer. Whoever just boots the stick is offered no choice;
+     * whoever needs another start (a machine to look into, the tests
+     * that drive the shell) writes one line. Printable ASCII only, and
+     * never for the installed system, whose start is its own. */
+    static char own_line[128];
+    int have_line = 0;
+    struct blob cl;
+    if (!installed_boot && read_file(L"\\cmdline.txt", &cl) > 0) {
+        const UINT8 *p = (const UINT8 *)cl.data;
+        UINTN n = 0;
+        while (n < cl.size && n < sizeof(own_line) - 1 &&
+               p[n] >= 0x20 && p[n] < 0x7F) {
+            own_line[n] = (char)p[n];
+            n++;
+        }
+        own_line[n] = 0;
+        have_line = 1;
+        put(L"  command line from \\cmdline.txt: \"");
+        for (UINTN i = 0; i < n; i++) {
+            CHAR16 c[2] = { (CHAR16)own_line[i], 0 };
+            put(c);
+        }
+        put(L"\"\r\n");
+    }
+
     /* Where the firmware put this loader: above four gigabytes is the
        case move_trampoline exists for, and on a photo of a screen that
        did not boot this is the first thing worth knowing */
@@ -1019,9 +1047,16 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     mbi_room = mbi_pages * 4096;
     mbi_at = 8;                           /* total_size and a reserved word */
 
+    /* Started from where the installer puts it, it is the installed
+       system and goes to its desktop. From anywhere else - the stick -
+       it is there to install, and the installer takes the screen at
+       once: a person who boots a stick has come to install, and a
+       choice between that, a Live desktop and a shell only stood in
+       the way. */
     tag_string(TAG_BOOTLOADER, "threadboot");
-    tag_string(TAG_CMDLINE, installed_boot ? "desktop installed" :
-                                             "desktop live");
+    tag_string(TAG_CMDLINE, have_line ? own_line :
+                            installed_boot ? "desktop installed" :
+                                             "install");
 
     /* The initrd comes first and is nameless, because that is the
        module the kernel has always taken by position. The two behind

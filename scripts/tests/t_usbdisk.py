@@ -268,6 +268,7 @@ def install_to_stick():
     try:
         os.makedirs(os.path.join(esp, "EFI", "BOOT"))
         shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
+        stick_starts_live(esp)       # this group types at the shell
         shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
 
@@ -304,7 +305,9 @@ def install_to_stick():
             # is a live boot: the typed word is the whole confirmation, as
             # in the graphical installer - the password guards the system
             # a machine already runs, and a live boot has none to guard
-            out = q.command("ERASE", "Done", timeout=300)
+            # The initrd is 54 MB since the web engine's libraries, and
+            # QEMU's USB stick under TCG takes it at a few hundred KB/s
+            out = q.command("ERASE", "Done", timeout=1200)
             check("from live media wiping the stick asks for no password "
                   "beyond the typed word", "admin password" not in out)
             check("installing onto the stick runs to the end",

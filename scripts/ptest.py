@@ -3548,6 +3548,16 @@ def summary():
 
 
 
+def stick_starts_live(esp):
+    """A stick (a directory QEMU serves as the ESP) that starts the Live
+    desktop with its shell behind it, not the installer threadboot
+    starts from a stick - through the stick's own command line,
+    cmdline.txt (boot/efi/efiboot.c). For the groups that type at that
+    shell."""
+    with open(os.path.join(esp, "cmdline.txt"), "w") as fh:
+        fh.write("desktop live\n")
+
+
 def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
                kernel=None, initrd=None):
     """Assembles a disc with the 64-bit kernel and its initrd.
