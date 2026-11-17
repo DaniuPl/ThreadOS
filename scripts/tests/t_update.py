@@ -160,6 +160,28 @@ def signed_in(q):
           "ordinary user again" in out)
 
 
+def disk_writes(q):
+    """What the system says it has written to its disks since it
+    started, from its own disk list: (sectors, writes), all disks
+    together - or None."""
+    seen = len(q.serial())
+    q.type_line("disks")
+    out = ""
+    deadline = time.time() + 20
+    while time.time() < deadline:
+        out = q.serial()[seen:]
+        # the whole list: a disk's line, and the prompt back after it
+        if re.search(r"written since start: [^\n]*\n[\s\S]*thread64[>#]",
+                     out):
+            break
+        time.sleep(0.3)
+    found = re.findall(r"written since start: (\d+) sectors in (\d+) writes",
+                       out)
+    if not found:
+        return None
+    return (sum(int(s) for s, _ in found), sum(int(w) for _, w in found))
+
+
 def run(q, line, end="[update] done", timeout=240, password=False):
     seen = len(q.serial())
     q.type_line(line)
@@ -282,6 +304,7 @@ def main():
             check("without sudo the system is not replaced",
                   "only an admin may replace the system" in out)
 
+            before = disk_writes(q)
             out = run(q, "sudo run update " + base + "rel/",
                       end="[update] done, exit code", password=True)
             check("with sudo: downloaded, every hash checked, written",
@@ -289,6 +312,21 @@ def main():
                   out.count("[update] written:") == 3 and
                   "updated to release sequence 7" in out and
                   "[update] done, exit code 0" in out)
+            # The installed files are copied aside first (the previous
+            # system, for a rollback) and then written over: each of
+            # them twice. Both go to the disk a run of clusters per
+            # write, about 50 sectors a write - the copy used to take a
+            # write per sector, and then one per cluster for the
+            # allocation table it walked in two places at once.
+            done = disk_writes(q)
+            sectors = done[0] - before[0] if before and done else 0
+            writes = done[1] - before[1] if before and done else 0
+            files = len(kernel) + len(initrd7) + len(loader)
+            check("the previous system kept and the new one written in "
+                  "runs, not a sector a write: %d sectors in %d writes "
+                  "(%.1f a write, at least 16)"
+                  % (sectors, writes, sectors / max(writes, 1)),
+                  sectors * 512 >= 2 * files and sectors >= 16 * writes > 0)
         finally:
             q.close()
 

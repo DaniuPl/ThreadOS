@@ -34,6 +34,10 @@ struct dev {
     int unit;                    /* which one, within that driver */
     uint32_t sectors;
     int gone;                    /* pulled out of the socket */
+    /* Written since start, and in how many writes: every write costs
+       a disk a fixed price before the first byte moves, so the two
+       together say whether a filesystem talks to it sensibly */
+    uint32_t written, writes;
 };
 
 static struct dev devs[BLK_MAX];
@@ -65,6 +69,8 @@ static void add(enum backend kind, int unit, uint32_t sectors)
     devs[ndevs].unit = unit;
     devs[ndevs].sectors = sectors;
     devs[ndevs].gone = 0;
+    devs[ndevs].written = 0;
+    devs[ndevs].writes = 0;
     ndevs++;
 }
 
@@ -197,6 +203,12 @@ uint32_t blk_sectors_of(int i)
     return (i < 0 || i >= ndevs) ? 0 : devs[i].sectors;
 }
 
+void blk_write_stats(int i, uint32_t *sectors, uint32_t *writes)
+{
+    *sectors = (i < 0 || i >= ndevs) ? 0 : devs[i].written;
+    *writes = (i < 0 || i >= ndevs) ? 0 : devs[i].writes;
+}
+
 const char *blk_name(void)
 {
     return blk_name_of(cur);
@@ -291,6 +303,8 @@ static int write_near(uint32_t lba, uint32_t count, const void *buf)
     if (cur < 0 || devs[cur].gone)
         return -1;
     point();
+    devs[cur].written += count;
+    devs[cur].writes++;
     if (devs[cur].kind == BLK_NVME)
         return nvme_write(lba, count, buf);
     if (devs[cur].kind == BLK_AHCI)

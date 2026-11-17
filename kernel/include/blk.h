@@ -43,6 +43,10 @@ int blk_has_ata(void);
 uint32_t blk_sectors(void);
 uint32_t blk_sectors_of(int i);
 
+/* Sectors written to a disk since start, and in how many writes -
+   one per request that reached its driver */
+void blk_write_stats(int i, uint32_t *sectors, uint32_t *writes);
+
 /* A disk plugged in while the machine runs, and one pulled out. The
    numbers on the list never move: a disk that leaves keeps its place
    and is marked gone, because somebody is reading that list and about

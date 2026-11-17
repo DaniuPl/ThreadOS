@@ -26,6 +26,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
@@ -36,6 +37,17 @@ from ptest import (check, summary, no64, make_iso64, make_mbr_fat_disk,
 STICK_MIB = 64
 INSTALL_MIB = 400          # room for the EFI partition and ours
 FROM_HOST = b"mtools wrote this on the host, not us.\n"
+
+# Installing onto the stick. With the stick's answers waited for asleep,
+# a tick at a time, the files went at 2.4 MB/s even written in runs of
+# clusters; awake, at 49 to 65 MB/s (four cores, TCG, with other groups
+# running beside it or not). The line is drawn between the two, far
+# enough from both for a slower runner.
+MIN_MB_PER_S = 6
+# Sectors per write the stick is given: 1 while a file went one sector
+# per command, about 60 now - the data in runs of 128, the allocation
+# table's sectors one at a time between them.
+MIN_SECTORS_PER_WRITE = 16
 
 
 def sudo(q, cmd, text, timeout=30):
@@ -52,6 +64,22 @@ def usb_disk_number(listing):
     numbering rather than the disk."""
     m = re.search(r"disk (\d+): USB \(mass storage\)", listing)
     return int(m.group(1)) if m else 0
+
+
+def stick_writes(q, usbno):
+    """What the system says it has written to the stick since it
+    started: (sectors, writes), from its own disk list - or None."""
+    pattern = (r"disk %d: USB \(mass storage\)[^\n]*\n\s*written since "
+               r"start: (\d+) sectors in (\d+) writes" % usbno)
+    start = len(q.serial())
+    q.type_line("disks")
+    end = time.time() + 20
+    while time.time() < end:
+        m = re.search(pattern, q.serial()[start:])
+        if m:
+            return int(m.group(1)), int(m.group(2))
+        time.sleep(0.3)
+    return None
 
 
 OVMF_CODE = "/usr/share/OVMF/OVMF_CODE_4M.fd"
@@ -297,6 +325,7 @@ def install_to_stick():
             if not usbno:
                 return
 
+            before = stick_writes(q, usbno)
             out = q.command("install text whole %d" % usbno,
                             "Type ERASE", timeout=60)
             check("the plan is about the stick, not the machine's disk",
@@ -304,16 +333,40 @@ def install_to_stick():
             # A machine started from removable media (EFI/BOOT/BOOTX64.EFI)
             # is a live boot: the typed word is the whole confirmation, as
             # in the graphical installer - the password guards the system
-            # a machine already runs, and a live boot has none to guard
-            # The initrd is 54 MB since the web engine's libraries, and
-            # QEMU's USB stick under TCG takes it at a few hundred KB/s
-            out = q.command("ERASE", "Done", timeout=1200)
+            # a machine already runs, and a live boot has none to guard.
+            # About 59 MB go onto the stick, the initrd 54 of them. That
+            # takes about a second on a four-core host under TCG; it
+            # took up to 1137 s while every sector was a command of its
+            # own and a command could sleep a tick waiting for the
+            # stick's answer (docs/JOURNAL.md) - hence the room left.
+            start = time.time()
+            out = q.command("ERASE", "Done", timeout=120)
+            took = time.time() - start
             check("from live media wiping the stick asks for no password "
                   "beyond the typed word", "admin password" not in out)
             check("installing onto the stick runs to the end",
                   "partition table (GPT) - done" in out
                   and "EFI partition (FAT32) - done" in out
                   and "/EFI/BOOT/BOOTX64.EFI - done" in out)
+
+            # How fast, and why. The files are what the installer had to
+            # write; the rest - the tables, the directories - is small.
+            files = (os.path.getsize(KERNEL64) + os.path.getsize(INITRD64)
+                     + 2 * os.path.getsize(LOADER))
+            rate = files / max(took, 0.1) / 1e6
+            check("the %.1f MB went onto the stick at %.1f MB/s (%.1f s),"
+                  " at least %.0f MB/s" % (files / 1e6, rate, took,
+                                           MIN_MB_PER_S),
+                  "Done" in out and rate >= MIN_MB_PER_S)
+            after = stick_writes(q, usbno)
+            sectors = after[0] - before[0] if before and after else 0
+            writes = after[1] - before[1] if before and after else 0
+            check("in writes of whole runs of clusters, not a sector each:"
+                  " %d sectors in %d writes (%.1f a write, at least %d)"
+                  % (sectors, writes, sectors / max(writes, 1),
+                     MIN_SECTORS_PER_WRITE),
+                  sectors * 512 >= files
+                  and sectors >= MIN_SECTORS_PER_WRITE * writes > 0)
         finally:
             q.close()
 
