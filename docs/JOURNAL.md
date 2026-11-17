@@ -8974,3 +8974,49 @@ works and is checked by `make test`.
       ICU, which is C++, without a C++ runtime. And scripts/checkisa.py
       lets wpedeps' one XGETBV through: libgcrypt asks CPUID for OSXSAVE
       before it.
+
+- [x] **ThreadOS mobile, the first stage: the ARM64 kernel as a phone**
+      (kernelarm64/fwcfg.c, video.c, rtc.c, virtio.c, touch.c, mobile.c,
+      fdt.c, kmain.c, uart.c; kernel/initrd.c, kernel64/initrd64.c;
+      Makefile SHAREDARM, run-phone; scripts/ptest.py Phone;
+      scripts/tests/t_arm64mobile.py; scripts/screenshots.py phone)
+      QEMU's virt machine given what a phone has, and the kernel using
+      it. The device tree now also names QEMU's fw_cfg, the PL031 clock
+      and the 32 virtio-mmio slots with their interrupts. Through fw_cfg
+      (its directory, and transfers by DMA) the kernel sets up its own
+      screen - ramfb, 720x1280 upright, at two pixels to one, so 360x640
+      of layout as a phone draws - and reads the initrd with the fonts
+      (-fw_cfg name=opt/threados/initrd): QEMU puts no initrd in the
+      tree for a kernel that is not Linux. kernel/initrd.c is now the
+      image taken apart - every entry checked to lie inside it - and how
+      it arrives is the machine's: kernel64/initrd64.c the Multiboot
+      module, fw_cfg here. A modern virtio-mmio transport and its split
+      queues carry virtio-input: the first device with absolute X and Y
+      (a tablet, or a multitouch panel's first finger) is the
+      touchscreen, its range mapped to the nearest logical pixel.
+      What is drawn is the PC's own code built for ARM64 - gfx.c, ttf.c,
+      uitext.c, mark.c, aurora.c, fonts.c, bootsplash.c - over
+      kernelarm64/video.c, which answers video.h with a back buffer
+      copied onto ramfb whole. While it starts, the phone shows the PC's
+      loading screen; then the shell (mobile.c): a lock screen (the
+      aurora, the time, the date, "Swipe up to open"), home (a status
+      bar with the time and the mark, the apps in a grid of four) and
+      the apps on the whole screen - About (the processor, cores, memory,
+      screen and touchscreen as the kernel found them), Clock (to the
+      second) and Draw (the finger draws, Clear wipes) - with a swipe up
+      from the bottom edge to go home. A machine without these devices
+      boots as before; make run-phone starts one with them.
+      t_arm64mobile drives it through QMP as the PC's tests drive the
+      PC (ptest's Phone): the loading screen while it starts; the lock
+      screen the aurora pixel for pixel, the time on it the PL031's (the
+      kernel's reading at start, itself the -rtc base given, plus the
+      seconds since, at the moment of the picture) and the date that day
+      by Python's calendar, read glyph by glyph against FreeType at two
+      to one; every touch the test sends said back at exactly its
+      logical pixel; a swipe up opening home, whose tiles are mobile.c's
+      colours and labels; About saying what QEMU was told to build (-cpu
+      cortex-a72, -smp 4, -m 1024, the screen, the tablet's name); home
+      again from the edge; a stroke in Draw - its middles in the accent,
+      beside it white - and Clear; Clock to the second. arm64boot, core
+      and threads boot as they did. The README's pictures add the
+      phone's five screens.

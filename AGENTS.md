@@ -21,14 +21,20 @@ came with it (`kernel/include/task.h`, for one) are still used by the
 shared code and answered by `kernel64/compat64.c`.
 
 A second kernel for ARM64 (`bootarm64/` + `kernelarm64/`, QEMU's `virt`
-machine, built with clang) is at its third stage: it boots, reads the
+machine, built with clang) is at its fourth stage: it boots, reads the
 device tree, catches exceptions, runs with the MMU on, takes timer
 interrupts through a GICv2, preempts kernel threads and runs them on
-every core it wakes through PSCI. Of `kernel/` it builds `string.c` and
-`heap.c` so far, on `kernel/include/io.h` and `spinlock.h`, which have
-an AArch64 branch next to the x86 one; the rest follows as shared code
-stops assuming x86. Its tests are `arm64boot`, `arm64core` and
-`arm64threads`.
+every core it wakes through PSCI - and, given a phone's devices, is
+ThreadOS mobile: a ramfb screen set up through fw_cfg, the initrd
+through fw_cfg, a PL031 clock, a virtio-input touchscreen over
+virtio-mmio, and the shell in `kernelarm64/mobile.c`. Of `kernel/` it
+builds `string.c`, `heap.c`, `gfx.c`, `ttf.c`, `uitext.c`, `mark.c`,
+`aurora.c`, `fonts.c`, `initrd.c` and `locale.c` (`SHAREDARM` in the
+`Makefile`), on `kernel/include/io.h` and `spinlock.h`, which have an
+AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
+of the PC's video layer; the rest follows as shared code stops assuming
+x86. Its tests are `arm64boot`, `arm64core`, `arm64threads` and
+`arm64mobile`.
 
 ## Commands
 
@@ -37,6 +43,7 @@ make -j8                      # kernel + initrd (build/threados64.bin, build/ini
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
 make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld)
 make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
+make run-phone                # ThreadOS mobile: the ARM64 kernel with a screen and touch
 make iso64 stick              # hybrid disc and USB image
 make run                      # boot the desktop in QEMU
 make test                     # full suite: 100+ QEMU groups, ~20-30 min with -j4

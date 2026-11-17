@@ -134,3 +134,10 @@ void printk(const char *fmt, ...)
     if (print_locking)
         spin_unlock_irq(&print_lock, flags);
 }
+
+/* printk goes to the serial port alone on this kernel: there is no
+   console on the screen for the loading screen to turn off */
+void printk_screen_output(int enabled)
+{
+    (void)enabled;
+}

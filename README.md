@@ -19,6 +19,12 @@ QEMU and on real UEFI PCs; an ARM64 kernel is on its way.
 All of them are what QEMU's screen showed on a 1920x1080 panel
 (`scripts/screenshots.py`).
 
+**ThreadOS mobile** - the ARM64 kernel as a phone, on QEMU's `virt`
+machine (`make run-phone`): the loading screen, the lock screen, home,
+About and Draw, each 720x1280 as QEMU shows it, at half size.
+
+![ThreadOS mobile: the loading screen, the lock screen, home, About and Draw](docs/phone.png)
+
 - [Architecture](#architecture)
 - [Installing on a PC](#installing-on-a-pc)
 - [Building](#building)
@@ -51,9 +57,15 @@ removed; its tests now run on this one.
 The ARM64 kernel (`bootarm64/`, `kernelarm64/`, for QEMU's `virt`
 machine) boots, reads the device tree, catches exceptions, runs with the
 MMU on, takes timer interrupts through a GICv2 and runs preemptive kernel
-threads on every core it wakes through PSCI - on the serial console, so
-far with no screen. Of `kernel/` it builds `string.c` and `heap.c`; the
-rest follows as shared code stops assuming x86.
+threads on every core it wakes through PSCI. Given a phone's devices it
+is ThreadOS mobile: a screen (QEMU's ramfb, which it sets up at 720x1280
+through fw_cfg), a touchscreen (virtio-input over virtio-mmio), the time
+(PL031) and the initrd with the fonts (through fw_cfg), and on them a
+first shell - a lock screen, home, and the About, Clock and Draw apps -
+drawn by the PC's own graphics, fonts and mark. Of `kernel/` it builds
+`string.c`, `heap.c`, the graphics (`gfx.c`, `ttf.c`, `uitext.c`,
+`mark.c`, `aurora.c`), `fonts.c`, `initrd.c` and `locale.c`; the rest
+follows as shared code stops assuming x86.
 
 **Boot paths (64-bit).**
 
@@ -157,7 +169,7 @@ A test that is missing an optional tool prints `SKIPPED` and the reason.
 |---|---|
 | `make` (or `make kernel64`) | `build/threados64.bin`, `build/initrd64.img` |
 | `make efi` | `build/BOOTX64.EFI` (threadboot) |
-| `make kernelarm64` | `build/threados-arm64.elf`, the ARM64 kernel for QEMU's virt machine (first stage; clang + lld). `make run-arm64` boots it |
+| `make kernelarm64` | `build/threados-arm64.elf`, the ARM64 kernel for QEMU's virt machine (clang + lld), and `build/initrd-arm64.img`, its fonts. `make run-arm64` boots it on the serial console, `make run-phone` as a phone with a screen and a touchscreen (the mouse is the finger) |
 | `make iso64` | `build/threados64.iso` (builds the 64-bit kernel and threadboot first) |
 | `make stick` | `build/threados-stick.img` |
 | `make libc64` | musl for ThreadOS (built automatically when needed) |
@@ -185,6 +197,7 @@ make run              # the system from the hybrid disc, to the desktop
 make run KVM=1        # with hardware virtualisation
 make run-iso64-uefi   # the hybrid disc under OVMF
 make run-stick        # the USB image under OVMF, exactly as a PC boots it
+make run-phone        # ThreadOS mobile: the ARM64 kernel with a screen and touch
 ```
 
 The serial console is on stdio. The kernel logs everything there, which
@@ -246,7 +259,8 @@ boot64/          long-mode entry, ISR and syscall stubs, AP startup
 kernel/          kernel code that does not depend on long mode; headers in kernel/include/
 kernel64/        long-mode kernel code, linker script
 bootarm64/       ARM64 entry (EL2 -> EL1, stack, .bss, further cores), exception vectors, thread switch
-kernelarm64/     ARM64-only kernel code: PL011 serial, device tree, MMU, GIC, timer, pages, threads, PSCI
+kernelarm64/     ARM64-only kernel code: PL011 serial, device tree, MMU, GIC, timer, pages, threads, PSCI,
+                 fw_cfg, the ramfb screen, PL031 clock, virtio-mmio, the touchscreen, the mobile shell
 user/            ring 3 programs and the header-only libraries (crypto, TLS, HTTP, GUI kit)
 user64/          programs of their own, the syscall layer
 libc/            musl port: replaced files (overlay/), linker script, tests

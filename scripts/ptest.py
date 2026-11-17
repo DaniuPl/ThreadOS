@@ -2254,6 +2254,10 @@ class Qemu:
             # test that never sees the answer.
             cmd += ["-drive", f"id=sata1,file={disk2},if=none,format=raw",
                     "-device", "ide-hd,drive=sata1,bus=ahci.1"]
+        self._start(cmd)
+
+    def _start(self, cmd):
+        """QEMU started with 'cmd', and its QMP socket connected"""
         self.proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
 
@@ -3825,6 +3829,64 @@ def arm64_boot(machine="virt", cpu="cortex-a72", mib=256, cores=1,
                 text = f.read().decode(errors="replace")
             os.unlink(log)
     return text.replace("\r", "")
+
+
+ARM64_INITRD = os.path.join(os.path.dirname(os.path.abspath(KERNEL)),
+                            "initrd-arm64.img")
+
+
+class Phone(Qemu):
+    """ThreadOS mobile: the ARM64 kernel on QEMU's virt machine as a phone
+    - ramfb for its screen, a virtio tablet for its touchscreen, the
+    phone's initrd through fw_cfg, the clock at RTC_BASE - driven as the
+    PC is, through QMP: screen_raw() and the screen reader work as they
+    do there, and touch() is the finger."""
+
+    LOGICAL = (360, 640)          # kernelarm64/mobile.c's screen
+    RANGE = 32767                 # the tablet's axes
+
+    def __init__(self, cores=4, mib=1024, cpu="cortex-a72"):
+        self.qmp_path = tempfile.mktemp(suffix=".qmp")
+        self.dump_path = tempfile.mktemp(suffix=".ppm")
+        self.serial_path = tempfile.mktemp(suffix=".log")
+        self._own_serial = self.serial_path
+        self.text_on_serial = False
+        self.started = time.time()
+        self._start(["qemu-system-aarch64", "-machine", "virt", "-cpu", cpu,
+                     "-m", str(mib), "-smp", str(cores), "-display", "none",
+                     "-no-reboot", "-monitor", "none",
+                     "-serial", "file:" + self.serial_path,
+                     "-device", "ramfb", "-device", "virtio-tablet-device",
+                     "-global", "virtio-mmio.force-legacy=false",
+                     "-fw_cfg", "name=opt/threados/initrd,file=" + ARM64_INITRD,
+                     "-rtc", "base=" + RTC_BASE,
+                     "-qmp", "unix:%s,server,nowait" % self.qmp_path,
+                     "-kernel", ARM64_IMAGE])
+
+    def _abs(self, x, y):
+        w, h = self.LOGICAL
+        return [{"type": "abs", "data": {"axis": "x",
+                 "value": round(x * self.RANGE / (w - 1))}},
+                {"type": "abs", "data": {"axis": "y",
+                 "value": round(y * self.RANGE / (h - 1))}}]
+
+    def touch(self, points, settle=0.6):
+        """A finger down at the first point, through the others and up at
+        the last - logical pixels of the phone's screen"""
+        self.cmd({"execute": "input-send-event", "arguments": {"events":
+                  self._abs(*points[0]) + [{"type": "btn", "data": {
+                      "down": True, "button": "left"}}]}})
+        time.sleep(0.05)
+        for p in points[1:]:
+            self.cmd({"execute": "input-send-event",
+                      "arguments": {"events": self._abs(*p)}})
+            time.sleep(0.05)
+        self.cmd({"execute": "input-send-event", "arguments": {"events": [
+            {"type": "btn", "data": {"down": False, "button": "left"}}]}})
+        time.sleep(settle)
+
+    def tap(self, x, y):
+        self.touch([(x, y)])
 
 
 def said_line(text, start):

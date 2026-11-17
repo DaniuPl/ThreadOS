@@ -10,6 +10,9 @@
  * firmware (here QEMU) hands the kernel a tree of nodes - memory, cores,
  * the interrupt controller, every device and its addresses - in a
  * compact big-endian blob. What this kernel needs from it so far: */
+/* QEMU's virt machine has 32 virtio-mmio slots */
+#define FDT_MAX_VIRTIO 32
+
 struct fdt_info {
     uint64_t mem_base;       /* where the first memory range starts */
     uint64_t mem_total;      /* every memory range, added up */
@@ -20,6 +23,11 @@ struct fdt_info {
     uint64_t gic_dist;       /* its distributor */
     uint64_t gic_cpu;        /* its CPU interface (v2) */
     const char *bootargs;    /* /chosen/bootargs, inside the tree; or 0 */
+    uint64_t fwcfg;          /* QEMU's fw_cfg (qemu,fw-cfg-mmio), or 0 */
+    uint64_t rtc;            /* a PL031 real-time clock (arm,pl031), or 0 */
+    int virtio_n;            /* virtio-mmio transports (virtio,mmio) */
+    uint64_t virtio_base[FDT_MAX_VIRTIO];
+    uint32_t virtio_irq[FDT_MAX_VIRTIO];  /* the GIC's number for each */
 };
 
 /* Whether a valid tree header is at this address */

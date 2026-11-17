@@ -1,21 +1,16 @@
 /* The initrd - an image of user programs loaded by the bootloader
  *
- * QEMU (-initrd) and GRUB (module) pass the file as a Multiboot
- * module. The TIRD format is deliberately trivial: a header, a file
- * listing, the data. The PMM reserves the module's frames, so nobody
- * overwrites it for us.
+ * The TIRD format is deliberately trivial: a header, a file listing,
+ * the data. How the image arrives differs by machine - on a PC GRUB or
+ * threadboot hands it over as a Multiboot module (kernel64/initrd64.c),
+ * on ARM64 QEMU's fw_cfg does - and this file is what is the same: an
+ * image in memory, taken apart. Its listing is the image's word, so
+ * every entry is checked to lie inside it before anything is read.
  */
 
 #include "include/initrd.h"
 #include "include/string.h"
 #include "include/printk.h"
-
-/* How far the identity-described memory reaches is known to paging -
-   and this is the only file in this module that depends on the
-   processor mode, because in long mode the page tables are built by
-   completely different code. */
-#include "../kernel64/paging64.h"
-#define IDENTITY_TOP() paging64_identity_top()
 
 struct pird_entry {
     char name[16];
@@ -35,32 +30,29 @@ const void *initrd_image(uint32_t *size)
     return base;
 }
 
-void initrd_init(const struct multiboot_info *mbi)
+int initrd_use(const void *image, uint32_t size)
 {
-    if (!(mbi->flags & MULTIBOOT_FLAG_MODS) || mbi->mods_count == 0) {
-        printk("[ !! ] initrd: the boot loader handed over no module\n");
-        return;
+    const uint8_t *p = image;
+    if (!p || size < 8 || p[0] != 'T' || p[1] != 'I' || p[2] != 'R' ||
+        p[3] != 'D')
+        return -1;
+    uint32_t count = *(const uint32_t *)(p + 4);
+    if (count > (size - 8) / sizeof(struct pird_entry))
+        return -1;
+    const struct pird_entry *e = (const struct pird_entry *)(p + 8);
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t n = 0;
+        while (n < sizeof(e[i].name) && e[i].name[n])
+            n++;
+        if (n == sizeof(e[i].name) || e[i].offset > size ||
+            e[i].size > size - e[i].offset)
+            return -1;                 /* a name with no end, or outside */
     }
-
-    const struct multiboot_mod *mod =
-        (const struct multiboot_mod *)(uintptr_t)mbi->mods_addr;
-
-    if (mod->end > IDENTITY_TOP()) {
-        printk("[ !! ] initrd: the module is outside managed memory (%x)\n",
-               mod->start);
-        return;
-    }
-
-    const uint8_t *p = (const uint8_t *)(uintptr_t)mod->start;
-    if (p[0] != 'T' || p[1] != 'I' || p[2] != 'R' || p[3] != 'D') {
-        printk("[ !! ] initrd: the module's magic is wrong\n");
-        return;
-    }
-
     base = p;
-    total_size = mod->end - mod->start;
-    file_count = *(const uint32_t *)(p + 4);
-    entries = (const struct pird_entry *)(p + 8);
+    total_size = size;
+    file_count = count;
+    entries = e;
+    return 0;
 }
 
 uint32_t initrd_file_count(void)

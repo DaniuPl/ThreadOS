@@ -77,6 +77,9 @@ static int list_has(const uint8_t *val, uint32_t len, const char *want)
     return 0;
 }
 
+/* The other devices this kernel looks for in the tree */
+enum { DEV_OTHER, DEV_FWCFG, DEV_PL031, DEV_VIRTIO };
+
 /* Which GIC a 'compatible' names: 2, 3, or 0 for something else */
 static int gic_kind(const uint8_t *val, uint32_t len)
 {
@@ -99,6 +102,9 @@ int fdt_scan(const void *blob, uint32_t room, struct fdt_info *out)
     out->gic_cpu = 0;
     out->bootargs = 0;
     out->psci = 0;
+    out->fwcfg = 0;
+    out->rtc = 0;
+    out->virtio_n = 0;
     for (int i = 0; i < 8; i++)
         out->cpu_id[i] = 0;
     if (room < 40 || !fdt_valid(blob))
@@ -122,6 +128,10 @@ int fdt_scan(const void *blob, uint32_t room, struct fdt_info *out)
     int depth = 0;
     /* The node at depth 2 (a child of the root) now open */
     int in_memory = 0, in_cpus = 0, in_chosen = 0, in_psci = 0, gic = 0;
+    /* ... and what else it is, by its 'compatible', and its interrupt */
+    int kind = DEV_OTHER;
+    const uint8_t *irq = 0;
+    uint32_t irq_len = 0;
     const uint8_t *reg = 0;
     uint32_t reg_len = 0;
     int found_memory = 0;
@@ -149,6 +159,9 @@ int fdt_scan(const void *blob, uint32_t room, struct fdt_info *out)
                 in_chosen = n == 6 && starts_with(name, "chosen");
                 in_psci = n == 4 && starts_with(name, "psci");
                 gic = 0;
+                kind = DEV_OTHER;
+                irq = 0;
+                irq_len = 0;
                 reg = 0;
                 reg_len = 0;
             } else if (depth == 3 && in_cpus && starts_with(name, "cpu@")) {
@@ -183,6 +196,24 @@ int fdt_scan(const void *blob, uint32_t room, struct fdt_info *out)
                         out->gic_cpu = cells_value(reg + pair, addr_cells);
                 }
             }
+            /* The devices this kernel has drivers for, by their first
+               range - and a virtio transport's interrupt: a shared
+               peripheral one (type 0) is the GIC's number plus 32 */
+            if (depth == 2 && kind != DEV_OTHER && reg &&
+                reg_len >= 4 * addr_cells) {
+                uint64_t at = cells_value(reg, addr_cells);
+                if (kind == DEV_FWCFG && !out->fwcfg)
+                    out->fwcfg = at;
+                else if (kind == DEV_PL031 && !out->rtc)
+                    out->rtc = at;
+                else if (kind == DEV_VIRTIO && out->virtio_n < FDT_MAX_VIRTIO &&
+                         irq && irq_len >= 12) {
+                    out->virtio_base[out->virtio_n] = at;
+                    out->virtio_irq[out->virtio_n] =
+                        be32(irq + 4) + (be32(irq) == 0 ? 32 : 16);
+                    out->virtio_n++;
+                }
+            }
             if (depth == 2)
                 in_memory = in_cpus = in_chosen = in_psci = gic = 0;
             if (depth == 3)
@@ -215,8 +246,16 @@ int fdt_scan(const void *blob, uint32_t room, struct fdt_info *out)
             else if (depth == 2 && strcmp(pname, "reg") == 0) {
                 reg = val;
                 reg_len = len;
-            } else if (depth == 2 && strcmp(pname, "compatible") == 0)
+            } else if (depth == 2 && strcmp(pname, "compatible") == 0) {
                 gic = gic_kind(val, len);
+                kind = list_has(val, len, "qemu,fw-cfg-mmio") ? DEV_FWCFG
+                       : list_has(val, len, "arm,pl031")      ? DEV_PL031
+                       : list_has(val, len, "virtio,mmio")    ? DEV_VIRTIO
+                                                              : DEV_OTHER;
+            } else if (depth == 2 && strcmp(pname, "interrupts") == 0) {
+                irq = val;
+                irq_len = len;
+            }
             else if (depth == 2 && in_chosen &&
                      strcmp(pname, "bootargs") == 0 && len > 0 &&
                      val[len - 1] == 0)

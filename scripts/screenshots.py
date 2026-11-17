@@ -19,6 +19,11 @@ own size and at one and a half, as it would a laptop's.
   docs/devices.png    Settings' Device Manager on a machine built as a
                       laptop is: a network card behind a bridge, two
                       sound controllers
+  docs/phone.png      ThreadOS mobile, the ARM64 kernel as a phone: the
+                      loading screen, the lock screen, home, About and
+                      Draw, side by side
+                      (each 720x1280 as QEMU shows it, at half size;
+                      needs make kernelarm64)
 """
 
 import os
@@ -35,7 +40,7 @@ sys.argv = [sys.argv[0], os.path.join(BUILD, "threados64.bin"),
             os.path.join(BUILD, "initrd64.img")]
 sys.path.insert(0, HERE)
 from ptest import *          # noqa: F401,F403,E402
-from ptest import make_iso64, make_gpt_disk, fat_format  # noqa: E402
+from ptest import make_iso64, make_gpt_disk, fat_format, Phone  # noqa: E402
 
 from PIL import Image        # noqa: E402
 
@@ -303,7 +308,75 @@ def devices():
             os.unlink(wav)
 
 
+def phone():
+    """Five of the phone's screens, each as QEMU shows it, side by side:
+    the loading screen, the lock screen, home after a swipe up, About
+    after a tap on it, and Draw with a stroke drawn"""
+    q = Phone(cores=4, mib=1024)
+    pics = []
+
+    def grab():
+        ppm = tempfile.mktemp(suffix=".ppm")
+        q.cmd({"execute": "screendump", "arguments": {"filename": ppm}})
+        im = Image.open(ppm).convert("RGB")
+        im.load()
+        os.unlink(ppm)
+        pics.append(im)
+    try:
+        # The loading screen, while it is up: black, the mark, the bar
+        end = time.time() + 60
+        while time.time() < end and "[mobile] lock screen" not in q.serial():
+            ppm = tempfile.mktemp(suffix=".ppm")
+            try:
+                q.cmd({"execute": "screendump",
+                       "arguments": {"filename": ppm}})
+                im = Image.open(ppm).convert("RGB")
+                im.load()
+            except Exception:
+                time.sleep(0.2)
+                continue
+            finally:
+                if os.path.exists(ppm):
+                    os.unlink(ppm)
+            px = im.load()
+            if im.size == (720, 1280) and px[2, 2] == (0, 0, 0) and any(
+                    px[x, 592] == (255, 255, 255) for x in range(264, 456)):
+                pics.append(im)
+                break
+            time.sleep(0.1)
+        q.wait_serial("[mobile] lock screen", timeout=90)
+        time.sleep(1)
+        grab()
+        q.touch([(180, 560), (180, 450), (180, 320)])
+        q.wait_serial("[mobile] home", timeout=20)
+        time.sleep(0.5)
+        grab()
+        q.tap(54, 90)
+        q.wait_serial("[mobile] About", timeout=20)
+        time.sleep(0.5)
+        grab()
+        q.touch([(180, 630), (180, 560), (180, 470)])
+        q.wait_serial("from the edge", timeout=20)
+        q.tap(222, 90)
+        q.wait_serial("[mobile] Draw", timeout=20)
+        q.touch([(60, 380), (110, 300), (160, 340), (210, 250), (260, 300),
+                 (300, 220)])
+        time.sleep(0.5)
+        grab()
+    finally:
+        q.close()
+    gap = 40
+    w, h = pics[0].width // 2, pics[0].height // 2
+    out = Image.new("RGB", (len(pics) * w + (len(pics) + 1) * gap,
+                            h + 2 * gap), (13, 17, 23))
+    for i, im in enumerate(pics):
+        out.paste(im.resize((w, h), Image.LANCZOS),
+                  (gap + i * (w + gap), gap))
+    out.save(os.path.join(ROOT, "docs", "phone.png"))
+    print("docs/phone.png")
+
+
 SHOTS = {"boot": boot, "desktop": desktop, "installer": installer,
-         "sharp": sharp, "devices": devices}
+         "sharp": sharp, "devices": devices, "phone": phone}
 for name in WANTED or list(SHOTS):
     SHOTS[name]()

@@ -17,6 +17,12 @@
  * them, threads the timer takes turns between, and every core the
  * board has, woken through the firmware.
  *
+ * Stage four is a phone's: a screen (QEMU's ramfb, upright, 720 x 1280),
+ * the initrd with the fonts (through fw_cfg), the time (PL031), a
+ * touchscreen (virtio-input) and on them ThreadOS mobile's first shell
+ * (mobile.c), drawn by the PC's own graphics code - each only when the
+ * machine has it, so a virt machine without them boots as before.
+ *
  * Two self-tests can be asked for on the command line (QEMU's -append,
  * which lands in the device tree's /chosen/bootargs): selftest=brk
  * takes a breakpoint and must come back with the registers intact,
@@ -28,9 +34,19 @@
 #include "uart.h"
 #include "fdt.h"
 #include "thread.h"
+#include "fwcfg.h"
+#include "video64.h"
+#include "rtc.h"
+#include "virtio.h"
+#include "touch.h"
+#include "mobile.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pmm.h"
+#include "../kernel/include/initrd.h"
+#include "../kernel/include/fonts.h"
+#include "../kernel/include/video.h"
+#include "../kernel/include/bootsplash.h"
 
 /* Written by boot.S before it left EL2, if it was there */
 extern uint32_t boot_el;
@@ -297,6 +313,66 @@ void kmain(uint64_t x0)
     printk("Heap: %u KiB\n", heap_total_bytes() / 1024);
     heap_selftest();
 
+    /* --- a phone's devices, where the machine has them ------------- */
+    static struct mobile_info mi;
+    static struct virtio_dev vdevs[FDT_MAX_VIRTIO];
+    int screen = 0;
+    if (fwcfg_init(fi.fwcfg) == 0) {
+        /* The screen first, so that the loading screen - the PC's own,
+           kernel/bootsplash.c - is up for the rest of the start */
+        int r = video_ramfb_init(720, 1280, 32);
+        if (r == 0) {
+            screen = 1;
+            printk("Screen: ramfb, 720x1280, two pixels to one\n");
+            boot_splash_start(1);
+        } else if (r != -1) {
+            printk("Screen: ramfb would not start (%d)\n", r);
+        }
+        uint16_t item;
+        uint32_t size;
+        if (fwcfg_find("opt/threados/initrd", &item, &size) == 0) {
+            void *image = (void *)(uintptr_t)pmm_alloc_contiguous(
+                (size + PAGE_SIZE - 1) / PAGE_SIZE);
+            if (image && fwcfg_read(item, image, size) == 0 &&
+                initrd_use(image, size) == 0) {
+                printk("initrd: %u files, %u bytes, through fw_cfg\n",
+                       initrd_file_count(), size);
+                fonts_init();
+            } else {
+                printk("initrd: fw_cfg has one, but it could not be "
+                       "read or is not an initrd\n");
+            }
+        }
+        boot_splash_update(25, "Loading system files");
+    }
+    if (fi.rtc) {
+        rtc_init(fi.rtc);
+        struct rtc_time t;
+        rtc_split(rtc_seconds(), &t);
+        printk("Clock: %u-%u-%u %u:%u:%u UTC\n", (uint32_t)t.year,
+               (uint32_t)t.month, (uint32_t)t.day, (uint32_t)t.hour,
+               (uint32_t)t.min, (uint32_t)t.sec);
+    }
+    int nv = virtio_probe(fi.virtio_base, fi.virtio_irq, fi.virtio_n, vdevs,
+                          FDT_MAX_VIRTIO);
+    if (screen && touch_init(vdevs, nv, video_w(), video_h()) == 0)
+        mi.touch = touch_name();
+    static char cpu_text[32];
+    if (name) {
+        char *p = cpu_text;
+        const char *a = "Arm ";
+        while (*a)
+            *p++ = *a++;
+        for (const char *n = name; *n && p < cpu_text + sizeof(cpu_text) - 1;)
+            *p++ = *n++;
+        *p = 0;
+    }
+    mi.cpu = name ? cpu_text : "an ARM64 core";
+    mi.cores = fi.cpus;
+    mi.mem_mib = (uint32_t)(fi.mem_total >> 20);
+    mi.screen_w = video_pw();
+    mi.screen_h = video_ph();
+
     if (has_word(fi.bootargs, "selftest=brk"))
         selftest_brk();
     if (has_word(fi.bootargs, "selftest=abort"))
@@ -325,9 +401,14 @@ void kmain(uint64_t x0)
             __asm__ volatile("wfi");
         uint64_t ms = (counter_now() - start) * 1000 / timer_freq();
         printk("Timer: %u ticks took %lu ms by the counter\n", HZ, ms);
+        boot_splash_update(50, "Waking the cores");
 
         smp_start(&fi);
+        boot_splash_update(70, "Checking the threads");
         threads_selftest();
+        boot_splash_update(96, "Starting the phone");
+        if (screen)
+            thread_create("mobile", mobile_main, &mi);
     }
 
     printk("The ARM64 kernel is ready.\n");

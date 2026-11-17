@@ -24,7 +24,7 @@ BUILD   := build
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
 
 .PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
-        kernel64 efi stick run-stick kernelarm64 run-arm64
+        kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone
 
 all: kernel64
 
@@ -124,6 +124,7 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/keyboard64.o $(BUILD)/64/shell64.o \
           $(BUILD)/64/signal64.o $(BUILD)/64/fpu64.o $(BUILD)/64/futex64.o \
           $(BUILD)/64/pipe64.o $(BUILD)/64/ipc64.o $(BUILD)/64/compat64.o \
+          $(BUILD)/64/initrd64.o \
           $(BUILD)/64/efirt.o \
           $(BUILD)/64/syscall64_stub.o \
           $(BUILD)/64/ap64.o \
@@ -1800,6 +1801,9 @@ KERNELARM := $(BUILD)/threados-arm64.elf
 CFLAGSARM := --target=aarch64-none-elf -std=gnu11 -ffreestanding \
              -fno-stack-protector -fno-pic -mgeneral-regs-only \
              -mstrict-align -Wall -Wextra -Wshadow -O2 -g
+# What of kernel/ the phone's screens are drawn with - the PC's own
+# graphics, fonts and mark - and the initrd that brings the fonts
+SHAREDARM := gfx ttf uitext fonts mark aurora initrd locale bootsplash
 OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/uart.o $(BUILD)/arm64/fdt.o \
              $(BUILD)/arm64/string.o $(BUILD)/arm64/vectors.o \
@@ -1807,7 +1811,11 @@ OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/gic.o $(BUILD)/arm64/timer.o \
              $(BUILD)/arm64/pmm.o $(BUILD)/arm64/heap.o \
              $(BUILD)/arm64/thread.o $(BUILD)/arm64/switch.o \
-             $(BUILD)/arm64/smp.o
+             $(BUILD)/arm64/smp.o $(BUILD)/arm64/fwcfg.o \
+             $(BUILD)/arm64/video.o $(BUILD)/arm64/rtc.o \
+             $(BUILD)/arm64/virtio.o $(BUILD)/arm64/touch.o \
+             $(BUILD)/arm64/mobile.o \
+             $(patsubst %,$(BUILD)/arm64/%.o,$(SHAREDARM))
 
 $(BUILD)/arm64:
 	mkdir -p $@
@@ -1821,16 +1829,36 @@ $(BUILD)/arm64/%.o: kernelarm64/%.c $(wildcard kernelarm64/*.h) | $(BUILD)/arm64
 $(BUILD)/arm64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/arm64
 	clang $(CFLAGSARM) -c $< -o $@
 
+$(BUILD)/arm64/mark.o: $(LOGO_HDR)
+$(BUILD)/arm64/mark.o: CFLAGSARM += -I$(BUILD)/gen
+
 $(KERNELARM): $(OBJSARM) kernelarm64/linker.ld
 	ld.lld -nostdlib -static -T kernelarm64/linker.ld $(OBJSARM) -o $@
 
-kernelarm64: $(KERNELARM)
-	@echo "Done: $(KERNELARM) (AArch64, QEMU virt)"
+# The phone's initrd: the fonts, for now. QEMU hands it over through
+# fw_cfg (-fw_cfg name=opt/threados/initrd,file=...).
+INITRDARM := $(BUILD)/initrd-arm64.img
+$(INITRDARM): scripts/mkinitrd.py fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
+	python3 scripts/mkinitrd.py $@ sans.ttf=fonts/sans.ttf \
+	    bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf
 
-# The serial port is the whole console for now; Ctrl-A X leaves QEMU
+kernelarm64: $(KERNELARM) $(INITRDARM)
+	@echo "Done: $(KERNELARM) (AArch64, QEMU virt), $(INITRDARM)"
+
+# The serial port alone; Ctrl-A X leaves QEMU
 run-arm64: $(KERNELARM)
 	qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 512 -smp 2 \
 	    -nographic -kernel $(KERNELARM)
+
+# ThreadOS mobile: the same kernel as a phone - a screen (ramfb), a
+# touchscreen (the mouse is the finger) and the initrd; the serial
+# console stays on the terminal
+PHONE_DEVICES = -device ramfb -device virtio-tablet-device \
+                -global virtio-mmio.force-legacy=false \
+                -fw_cfg name=opt/threados/initrd,file=$(INITRDARM)
+run-phone: $(KERNELARM) $(INITRDARM)
+	qemu-system-aarch64 -machine virt -cpu cortex-a72 -m 1024 -smp 4 \
+	    $(PHONE_DEVICES) -serial stdio -kernel $(KERNELARM)
 
 # UEFI firmware for QEMU. The same files run-iso64-uefi uses.
 OVMF_CODE := /usr/share/OVMF/OVMF_CODE_4M.fd
