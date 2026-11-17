@@ -600,6 +600,22 @@ static void upgrade_legacy_hash(struct account *a, const char *password)
         forget_legacy_password();
 }
 
+/* Three wrong passwords lock the door for five seconds; the next three
+   for ten, then twenty, and so on up to a minute. A person who mistyped
+   loses seconds; a program trying words - and any program may ask
+   (SYS64_AUTH) - gets a few dozen in its first ten minutes instead of
+   a few thousand. A right password starts it again from five. */
+#define LOCK_FIRST_TICKS 500u
+#define LOCK_LONGEST_TICKS 6000u
+static uint32_t lock_ticks = LOCK_FIRST_TICKS;
+
+static void lock_out(void)
+{
+    locked_until = pit_ticks() + lock_ticks;
+    lock_ticks = lock_ticks * 2 > LOCK_LONGEST_TICKS ? LOCK_LONGEST_TICKS
+                                                      : lock_ticks * 2;
+}
+
 static int attempt_allowed(void)
 {
     uint32_t now = pit_ticks();
@@ -630,6 +646,7 @@ static int password_try(const char *name, const char *password, int admin_only)
     }
     if (found >= 0) {
         wrong = 0;
+        lock_ticks = LOCK_FIRST_TICKS;
         struct account *a = &db.account[found];
         if (a->hash_kind == USER_HASH_LEGACY)
             upgrade_legacy_hash(a, password);
@@ -637,7 +654,7 @@ static int password_try(const char *name, const char *password, int admin_only)
     }
     if (++wrong >= 3) {
         wrong = 0;
-        locked_until = pit_ticks() + 500;
+        lock_out();
     }
     return -1;
 }
@@ -673,6 +690,7 @@ int user_password_current_ok(const char *password)
         return user_password_ok(password);
     if (i >= 0 && hash_matches(&db.account[i], password)) {
         wrong = 0;
+        lock_ticks = LOCK_FIRST_TICKS;
         pin_wrong = 0;
         if (db.account[i].hash_kind == USER_HASH_LEGACY)
             upgrade_legacy_hash(&db.account[i], password);
@@ -680,7 +698,7 @@ int user_password_current_ok(const char *password)
     }
     if (++wrong >= 3) {
         wrong = 0;
-        locked_until = pit_ticks() + 500;
+        lock_out();
     }
     return 0;
 }

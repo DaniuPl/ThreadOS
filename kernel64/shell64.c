@@ -1236,13 +1236,15 @@ static void execute(const char *line)
         task64_dump();
     } else if (starts_with(line, "kill ")) {
         /* Ends a program by its number (from 'ps'). As the system call:
-           a plain user only their own */
+           a plain user only their own - the same level and the same
+           account */
         const char *a = line + sizeof("kill ") - 1;
         int pid = 0;
         while (*a >= '0' && *a <= '9')
             pid = pid * 10 + (*a++ - '0');
         if (user_shell_level() != USER_ADMIN &&
-            task64_level_of(pid) != user_shell_level())
+            (task64_level_of(pid) != user_shell_level() ||
+             task64_uid_of(pid) != user_shell_uid()))
             printk("kill: %d is not yours to end\n", pid);
         else if (!task64_signal(pid, 9))
             printk("kill: there is no process %d\n", pid);

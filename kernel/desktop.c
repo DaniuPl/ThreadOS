@@ -3886,7 +3886,8 @@ static void paint_background(uint32_t *buf, int w, int h, int bg)
 
 int desktop_bg_preview(int bg, int dark, int w, int h, uint32_t *out)
 {
-    if (bg < 0 || bg >= BG_N || w <= 0 || h <= 0 || w * h > BG_PREVIEW_MAX)
+    if (bg < 0 || bg >= BG_N || w <= 0 || h <= 0 || w > BG_PREVIEW_SIDE ||
+        h > BG_PREVIEW_SIDE || w * h > BG_PREVIEW_MAX)
         return -1;
     if (bg == 0)
         aurora_draw(out, w, h, w, dark);
@@ -8131,6 +8132,12 @@ static void desktop_thread(void *arg)
         frames++;
         frame_done(began);
     }
+}
+
+/* Is this process the kiosk's one program (SYS64_INSTALL_STEP) */
+int desktop_kiosk_is(int pid)
+{
+    return kiosk && pid >= 0 && pid == kiosk_pid;
 }
 
 int desktop_start_kiosk(const char *program)

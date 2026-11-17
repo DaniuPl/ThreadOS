@@ -943,6 +943,38 @@ int paging64_fb_wc(void)
     return pat_wc;
 }
 
+/* SMEP: the processor refuses to run a user page in ring 0. The kernel
+   never means to - its code and the firmware's runtime code lie in its
+   own pages, without PG_USER - so the one way it could is a bug that
+   sent it to an address a program chose, and SMEP turns that from the
+   program's code running with the kernel's rights into a page fault.
+   On every core: CR4 is the core's own. Processors before Ivy Bridge do
+   not have it, and run without. */
+static int smep_on;
+
+int paging64_smep_init(void)
+{
+    uint32_t a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0));
+    if (a < 7)
+        return 0;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d)
+                     : "a"(7), "c"(0));
+    if (!(b & (1u << 7)))
+        return 0;
+    uint64_t cr4;
+    __asm__ volatile("movq %%cr4, %0" : "=r"(cr4));
+    cr4 |= 1ull << 20;
+    __asm__ volatile("movq %0, %%cr4" : : "r"(cr4) : "memory");
+    smep_on = 1;
+    return 1;
+}
+
+int paging64_smep(void)
+{
+    return smep_on;
+}
+
 /* The same as below, for a framebuffer: write-combining where the
    processor has a PAT */
 int paging64_map_phys_wc(uint64_t phys, uint64_t len)

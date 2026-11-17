@@ -131,11 +131,42 @@ static int elf_sane(const uint8_t *image, uint32_t size, int typ)
         return 0;
     /* The section table has to fit inside the file - without it we will
        find neither symbols nor relocations, and rubbish cannot be
-       trusted */
-    if (!eh->e_shnum || eh->e_shoff + (uint64_t)eh->e_shnum * eh->e_shentsize
-                        > size)
+       trusted. As a subtraction: e_shoff is the file's 64-bit number,
+       and a huge one plus the table's size wraps round to a small sum.
+       Entries of our size only - section() reads a whole one. */
+    if (!eh->e_shnum || eh->e_shentsize != sizeof(struct shdr) ||
+        eh->e_shoff > size ||
+        (uint64_t)eh->e_shnum * eh->e_shentsize > size - eh->e_shoff)
         return 0;
     return 1;
+}
+
+/* A section's contents, if they lie inside the file - a program's
+   section table is the program's own word, and an offset or a size
+   that leaves the file would have the kernel read its own memory as
+   the program's (NULL then). Number i is checked against the table. */
+static const uint8_t *section_data(const uint8_t *image, uint32_t size,
+                                   uint32_t i)
+{
+    const struct ehdr *eh = (const struct ehdr *)image;
+    if (i >= eh->e_shnum)
+        return 0;
+    const struct shdr *sh = section(image, (int)i);
+    if (sh->sh_offset > size || sh->sh_size > size - sh->sh_offset)
+        return 0;
+    return image + sh->sh_offset;
+}
+
+/* A name at offset off of a string table of n bytes, if it ends inside
+   it */
+static const char *name_in(const char *texts, uint64_t n, uint32_t off)
+{
+    if (off >= n)
+        return 0;
+    for (uint64_t i = off; i < n; i++)
+        if (!texts[i])
+            return texts + off;
+    return 0;
 }
 
 /* --- the library ------------------------------------------------------ */
@@ -350,16 +381,29 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
             continue;
 
         /* Every relocation table points at its own symbol table, and
-           that at its own string table - nothing has to be guessed */
+           that at its own string table - nothing has to be guessed. All
+           three have to lie inside the file, in entries of the size
+           read (section_data, name_in). */
+        if (sh->sh_link >= eh->e_shnum)
+            return -1;
         const struct shdr *ss = section(image, (int)sh->sh_link);
         if (ss->sh_type != SHT_DYNSYM || !ss->sh_entsize)
             continue;
-        const struct sym *syms_tab = (const struct sym *)(image + ss->sh_offset);
+        if (sh->sh_entsize != sizeof(struct rel) ||
+            ss->sh_entsize != sizeof(struct sym) ||
+            ss->sh_link >= eh->e_shnum)
+            return -1;
+        const struct sym *syms_tab =
+            (const struct sym *)section_data(image, size, sh->sh_link);
         const struct shdr *st = section(image, (int)ss->sh_link);
-        const char *texts = (const char *)(image + st->sh_offset);
+        const char *texts = (const char *)section_data(image, size,
+                                                       ss->sh_link);
+        const struct rel *r =
+            (const struct rel *)section_data(image, size, (uint32_t)i);
+        if (!syms_tab || !texts || !r)
+            return -1;
 
         uint32_t count = (uint32_t)(sh->sh_size / sh->sh_entsize);
-        const struct rel *r = (const struct rel *)(image + sh->sh_offset);
         for (uint32_t k = 0; k < count; k++) {
             uint32_t typ = REL_TYPE(r[k].r_info);
             uint32_t nr = REL_SYM(r[k].r_info);
@@ -369,9 +413,8 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
                        The library deliberately exports no variables -
                        if one ended up there, every process would have
                        a copy of its own and nobody would know. */
-                    printk("[kernel] a copy relocation for the data '%s' - "
-                           "a library is to expose functions only\n",
-                           texts + syms_tab[nr].st_name);
+                    printk("[kernel] a copy relocation for data - "
+                           "a library is to expose functions only\n");
                     return -1;
                 }
                 continue;               /* none of our business */
@@ -379,7 +422,10 @@ int dyn_relocate(const uint8_t *image, uint32_t size, void *ctx,
             if (nr >= (uint32_t)(ss->sh_size / ss->sh_entsize))
                 return -1;
 
-            const char *name = texts + syms_tab[nr].st_name;
+            const char *name = name_in(texts, st->sh_size,
+                                       syms_tab[nr].st_name);
+            if (!name)
+                return -1;
             dyn_addr dst = find(name);
             if (!dst) {
                 printk("[kernel] no symbol '%s' in %s\n", name, LIB_FILE);

@@ -58,6 +58,7 @@
 #include "../kernel64/fpu64.h"
 #define ENABLE_SSE()  fpu64_enable_core()
 #define SET_PAT()     paging64_pat_init()   /* the same PAT on every core */
+#define SET_SMEP()    paging64_smep_init()  /* and the same protection */
 
 #define AP_BASE       0x8000        /* where we copy the trampoline to */
 #define AP_STACK      8192          /* one stack per woken core */
@@ -365,6 +366,7 @@ void smp_ap_main(uint32_t number)
        it has to mean on this core what it means on the first one - the
        screen is mapped write-combining there (kernel64/paging64.c) */
     SET_PAT();
+    SET_SMEP();
     /* The entry registers for the syscall instruction belong to the
        core - one that does not set them will not accept a call at all */
     SYSCALL_ENTRY();

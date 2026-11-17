@@ -127,6 +127,7 @@ int task64_level(void);
 void task64_set_level(int level);
 int task64_level_of(int pid);
 int task64_uid(void);
+int task64_uid_of(int pid);
 void task64_set_uid(int uid);
 void task64_set_identity_name(const char *name, int uid, int level, int cwd);
 void task64_set_level_name(const char *name, int level);

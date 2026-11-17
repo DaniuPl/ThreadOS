@@ -895,8 +895,17 @@ static void handle(struct regs *r)
     case SYS64_SIGNAL:
         /* The program supplies its own handler and the address to return
            to once it finishes. The latter has to come from it:
-           executable code lives only in its own pages. */
-        task64_set_sighandler(a2, a3);
+           executable code lives only in its own pages - and both are
+           held to that here, as a thread's entry is (SYS64_THREAD), so
+           that what the kernel later jumps to on the program's behalf
+           is never anything but the program's own code. 0 is no
+           handler: the signal kills. */
+        if ((a2 && !paging64_user_code(a2)) ||
+            (a2 && !paging64_user_code(a3))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        task64_set_sighandler(a2, a2 ? a3 : 0);
         r->rax = 0;
         return;
     case SYS64_SIGRETURN:
@@ -906,10 +915,12 @@ static void handle(struct regs *r)
         }
         return;                      /* the frame already describes the interrupted spot */
     case SYS64_KILL:
-        /* A plain user may signal only their own processes: a level of
-           its own is what makes a process somebody else's. */
+        /* A plain user may signal only their own processes: the same
+           level and the same user - two people signed in at the same
+           level are still two people. An admin may signal anyone. */
         if (task64_level() != USER_ADMIN &&
-            task64_level_of((int)a1) != task64_level()) {
+            (task64_level_of((int)a1) != task64_level() ||
+             task64_uid_of((int)a1) != task64_uid())) {
             r->rax = (uint64_t)-2;
             return;
         }
@@ -1247,7 +1258,16 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_INSTALL_STEP:
-        if (install_update_allowed() &&
+        /* Writing a disk is an admin's who has just given the password -
+           on a stick as much as on an installed system: whatever runs
+           there may be somebody else's program. The one exception is
+           the installer the kernel itself put on the whole screen (the
+           kiosk: booted to install, or 'install' at the console) on a
+           system that is not installed - whoever started it is the one
+           at the machine, nothing else runs beside it, and the word
+           YES is its confirmation (t_ginstal). */
+        if (!(desktop_kiosk_is((int)task64_current_id()) &&
+              !install_update_allowed()) &&
             (task64_level() != USER_ADMIN || !auth_recent())) {
             r->rax = (uint64_t)(int64_t)-2;
             return;
@@ -1750,8 +1770,12 @@ static void handle(struct regs *r)
             return;
         }
         c = *(const __typeof__(c) *)(uintptr_t)a1;
-        if (c.w <= 0 || c.h <= 0 || c.w * c.h > BG_PREVIEW_MAX ||
-            !paging64_user_writable(c.out, (uint64_t)(c.w * c.h) * 4)) {
+        /* Each side bounded before they are multiplied: two large ones
+           make a product that wraps in 32 bits to something small, and
+           the buffer checked would be smaller than the one painted */
+        if (c.w <= 0 || c.h <= 0 || c.w > BG_PREVIEW_SIDE ||
+            c.h > BG_PREVIEW_SIDE || c.w * c.h > BG_PREVIEW_MAX ||
+            !paging64_user_writable(c.out, (uint64_t)c.w * c.h * 4)) {
             r->rax = (uint64_t)-1;
             return;
         }

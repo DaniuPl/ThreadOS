@@ -1437,6 +1437,27 @@ int task64_level_of(int pid)
     return level;
 }
 
+/* Whose a process is - the current task's own uid for a pid that is
+   not there, as task64_level_of answers, so that the caller's own
+   check is what decides */
+int task64_uid_of(int pid)
+{
+    if (!current)
+        return 0;
+    irqflags_t flags = irq_save();
+    struct task64 *t = current;
+    int uid = current->uid;
+    do {
+        if (t->id == pid) {
+            uid = t->uid;
+            break;
+        }
+        t = t->next;
+    } while (t != current);
+    irq_restore(flags);
+    return uid;
+}
+
 int task64_vc(void)          { return current ? current->vc : 0; }
 void task64_set_vc(int vc)   { if (current) current->vc = vc; }
 

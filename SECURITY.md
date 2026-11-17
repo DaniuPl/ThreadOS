@@ -1,7 +1,8 @@
 # Security
 
-ThreadOS is a hobby operating system. It has not been audited, and it
-should not hold anything you could not afford to lose. Still, some of it
+ThreadOS is a hobby operating system. It has had one outside review of
+its kernel (November 2026, below) and no formal audit, and it should not
+hold anything you could not afford to lose. Still, some of it
 exists precisely to keep things out - privilege levels, page
 protections, certificate checking, signed updates - and a hole in any of
 that is a bug worth reporting.
@@ -30,6 +31,41 @@ the fix if you want it.
   one there.
 - **Users.** Changing the system - its settings, its system files,
   installing, updating - needs the admin password (`thread` until it is
-  changed with `passwd`). Change it on any machine that matters.
+  changed with `passwd`, or until the first-run setup replaces the
+  account). Change it on any machine that matters. Three wrong
+  passwords lock the door for five seconds, and every three after that
+  for twice as long, up to a minute. A plain user's programs may
+  signal only that user's own processes.
+- **Installing.** Writing a disk takes the admin password given
+  moments before, on a stick as much as on an installed system. The one
+  exception is the installer the kernel itself starts on the whole
+  screen of a system that is not installed (booted to install), which
+  asks for the word YES instead.
+- **Programs.** A program's memory is never both writable and
+  executable: the ELF loader refuses such a segment (W^X), and mmap
+  never makes one. On processors that have SMEP the kernel turns it on,
+  so it cannot be made to run a program's pages.
 - **Boot.** The UEFI loader is not signed for Secure Boot; it has to be
   turned off to start ThreadOS.
+
+## The November 2026 review
+
+A static review of the x86-64 kernel at `c7e5d53` listed fifteen
+findings. Fixed, each with an attempt in `user64/hostile64.c` that
+`scripts/tests/t_hostile.py` holds the kernel to: a size check in
+`SYS64_BG_PREVIEW` that multiplied in 32 bits; ELF offsets that could
+wrap round 2^64 (program headers, segments, and the dynamic linker's
+section tables); segments both writable and executable; signal handlers
+not checked to be the program's code; `kill` comparing privilege levels
+but not accounts; installing from a stick by any program; a password
+lock that never grew; and SMEP, now on where the processor has it.
+
+Known and not changed, as design rather than slips: the desktop, the
+network stack and the drivers run in the kernel; SMAP, KPTI and KASLR
+are not used, and the kernel reads programs' memory directly, under its
+big lock; shared memory and semaphores are found by key, without an
+owner; the camera, the microphone, the clipboard and the network are
+any program's to open (the bar shows when the camera or the microphone
+is on); passwords are PBKDF2-SHA1 with 4096 rounds; and an update's
+signature is checked by the update program, which only an admin can
+start, not by the kernel.

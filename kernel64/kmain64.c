@@ -297,6 +297,9 @@ void kmain64(uint32_t magic, uint32_t info_addr)
            (uint32_t)(paging64_identity_top() / (1024 * 1024)),
            paging64_nx_enabled() ? "on" : "off",
            paging64_fb_wc() ? "write-combining" : "uncached");
+    printk(paging64_smep_init()
+               ? "[ OK ] SMEP: the kernel will not run a program's pages\n"
+               : "[ -- ] SMEP: this processor does not have it\n");
     boot_splash_update(18, "Preparing memory");
 
     /* Fine-grained mapping: a frame placed high up, far beyond the area

@@ -156,6 +156,10 @@ int paging64_nx_enabled(void);
    every core); whether the processor had one; a framebuffer mapped so */
 void paging64_pat_init(void);
 int paging64_fb_wc(void);
+/* SMEP on this core, if the processor has it (1 when it was turned on);
+   whether it is on */
+int paging64_smep_init(void);
+int paging64_smep(void);
 int paging64_map_phys_wc(uint64_t phys, uint64_t len);
 /* Firmware memory, identity-mapped into the kernel's own space (for
    UEFI runtime services) */

@@ -8711,3 +8711,53 @@ works and is checked by `make test`.
       line); t_threadboot wants the installer from \EFI\BOOT; t_install
       checks threadboot's line from cmdline.txt. The rest of the groups
       that boot a stick to type at its shell write that file.
+
+- [x] **What an outside review of the kernel found, fixed**
+      (kernel64/syscall64.c, elf64.c, task64.c, task64.h, paging64.c,
+      paging64.h, kmain64.c, shell64.c, kernel/dynlink.c, desktop.c,
+      include/desktop.h, user.c, smp.c, user64/hostile64.c,
+      scripts/tests/t_hostile.py, SECURITY.md)
+      A static review of the x86-64 kernel at c7e5d53 listed fifteen
+      findings. Each was read against the code; these were real:
+      - SYS64_BG_PREVIEW checked w * h in 32 bits: 65536 x 65536 is 0
+        there, the buffer checked was empty, and desktop_bg_preview
+        would have painted 16 GiB into the program's memory. Each side
+        is bounded first (BG_PREVIEW_SIDE), in both places.
+      - The ELF loader added the file's own 64-bit numbers: an offset
+        near 2^64 plus a size wrapped round to a small sum and passed,
+        and the copy read the kernel's memory before the file into the
+        program. Program headers, segments (and no more file than
+        memory) and - found on the way - the dynamic linker's section
+        table, relocation, symbol and string tables are all checked as
+        subtractions now, every name ending inside its table.
+      - A segment both writable and executable was mapped so; it is
+        refused (W^X). No program in the initrd has one.
+      - SYS64_SIGNAL took any handler and return address; both have to
+        be the program's code now, as a thread's entry is.
+      - SYS64_KILL, and the shell's kill, let a plain user signal any
+        process at the same level - another account's included. The
+        account has to match too.
+      - SYS64_INSTALL_STEP asked for the admin only on an installed
+        system: on a stick any program could write the disk. Now always,
+        except the installer the kernel itself put on the whole screen
+        of a system that is not installed - which keeps the stick's
+        installation needing only the word YES (t_ginstal).
+      - Three wrong passwords locked for five seconds, every time: a
+        program asking SYS64_AUTH could try a few thousand words an
+        hour. The lock doubles with every three, up to a minute.
+      - SMEP is turned on, on every core, where the processor has it.
+      And not changed, as design rather than slips (SECURITY.md says
+      so): the desktop, network and drivers in the kernel; no SMAP,
+      KPTI or KASLR, with the kernel reading programs' memory directly
+      under its big lock; shared memory by key; devices any program's
+      to open; PBKDF2-SHA1 with 4096 rounds; the update signature
+      checked by the admin-only update program rather than the kernel.
+      user64/hostile64.c tries each fixed hole beside the same call made
+      honestly, and t_hostile holds the kernel to it: every attempt
+      refused with its twin through, an honest program off the disk
+      running while the W^X and wrap-round ones are refused, alice's
+      program unkillable by another account and the shell but killable
+      by alice, the right password refused six seconds into the second
+      lock and taken after it, SMEP on both cores of a 'max' processor
+      as QEMU reads CR4, programs still running there, and the kernel
+      saying it has no SMEP on QEMU's default processor.

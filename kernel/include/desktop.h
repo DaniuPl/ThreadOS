@@ -17,6 +17,8 @@ void desktop_start(void);
    Has to be called BEFORE the compositor starts; a desktop already on
    the screen cannot become a kiosk. */
 int desktop_start_kiosk(const char *program);
+/* Is pid the kiosk's one program - the installer the kernel started */
+int desktop_kiosk_is(int pid);
 
 /* API for ring 3 applications (called from syscalls). owner = process pid. */
 int desktop_win_create(int owner, int cw, int ch, const char *title);
@@ -102,6 +104,7 @@ void desktop_ui_look(int which, uint32_t *out);
    in the dark theme or the light one. 0, or -1 for no such
    background. At most BG_PREVIEW_MAX pixels. */
 #define BG_PREVIEW_MAX (200 * 150)
+#define BG_PREVIEW_SIDE 1024      /* each side, checked before w * h */
 int desktop_bg_preview(int bg, int dark, int w, int h, uint32_t *out);
 
 /* The compositor's last second: its frames, the share of the second

@@ -66,7 +66,10 @@ static int elf_valid(const struct elf64_ehdr *eh, uint32_t size)
         return 0;
     if (eh->e_phentsize != sizeof(struct elf64_phdr))
         return 0;
-    if (eh->e_phoff + (uint64_t)eh->e_phnum * sizeof(struct elf64_phdr) > size)
+    /* As a subtraction: e_phoff is the file's own 64-bit number, and a
+       huge one plus the table's size wraps round to a small sum */
+    if (eh->e_phoff > size ||
+        (uint64_t)eh->e_phnum * sizeof(struct elf64_phdr) > size - eh->e_phoff)
         return 0;
     return eh->e_type == ET_EXEC && eh->e_machine == EM_X86_64 && eh->e_phnum;
 }
@@ -173,7 +176,14 @@ static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
 
     /* The permissions are supplied by the file itself. A missing
        "executable" bit means execution is forbidden - and it is the
-       processor that enforces that, not us. */
+       processor that enforces that, not us. Both bits at once is
+       refused: a page a program can write and then run is where code
+       that arrived as data runs (W^X). No program of ours has such a
+       segment; mmap never makes such a page either. */
+    if ((ph->p_flags & PF_W) && (ph->p_flags & PF_X)) {
+        printk("[kernel] elf64: a segment both writable and executable\n");
+        return -1;
+    }
     uint64_t flags = PG_USER;
     if (ph->p_flags & PF_W)
         flags |= PG_WRITE;
@@ -217,7 +227,13 @@ int elf64_load(const void *image, uint32_t size, uint64_t *entry,
     for (uint16_t i = 0; i < eh->e_phnum; i++) {
         if (ph[i].p_type != PT_LOAD || ph[i].p_memsz == 0)
             continue;
-        if (ph[i].p_offset + ph[i].p_filesz > size) {
+        /* As subtractions, so that nothing wraps: an offset near 2^64
+           plus a size would come out small and pass, and the copy would
+           read the kernel's memory behind the file into the program.
+           And no more file than memory: the copy stops at p_memsz. */
+        if (ph[i].p_offset > size ||
+            ph[i].p_filesz > size - ph[i].p_offset ||
+            ph[i].p_filesz > ph[i].p_memsz) {
             printk("[kernel] elf64: a segment sticks out past the file\n");
             return -1;
         }
