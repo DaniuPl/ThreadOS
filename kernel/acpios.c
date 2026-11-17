@@ -86,13 +86,12 @@ ACPI_STATUS AcpiOsPhysicalTableOverride(ACPI_TABLE_HEADER *existing,
 /* --- memory ------------------------------------------------------------ */
 
 /* Physical memory is mapped one to one; what lies above the part the
-   kernel maps at start (tables, device registers) is added to it */
+   kernel maps at start (tables, device registers) is added to it, or
+   seen through the direct map where it would be a program's address
+   (paging64_phys_view) */
 void *AcpiOsMapMemory(ACPI_PHYSICAL_ADDRESS where, ACPI_SIZE length)
 {
-    if (where + length > paging64_identity_top() &&
-        paging64_map_phys(where, length) < 0)
-        return NULL;
-    return (void *)(uintptr_t)where;
+    return paging64_phys_view(where, length);
 }
 
 void AcpiOsUnmapMemory(void *where, ACPI_SIZE length)
@@ -104,7 +103,9 @@ void AcpiOsUnmapMemory(void *where, ACPI_SIZE length)
 ACPI_STATUS AcpiOsGetPhysicalAddress(void *logical,
                                      ACPI_PHYSICAL_ADDRESS *physical)
 {
-    *physical = (ACPI_PHYSICAL_ADDRESS)(uintptr_t)logical;
+    uint64_t at = (uint64_t)(uintptr_t)logical;
+    *physical = (ACPI_PHYSICAL_ADDRESS)(at >= PHYS_MAP_BASE
+                                        ? at - PHYS_MAP_BASE : at);
     return AE_OK;
 }
 

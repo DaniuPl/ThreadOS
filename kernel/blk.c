@@ -24,6 +24,8 @@
 #include "include/ata.h"
 #include "include/usbmass.h"
 #include "include/fat.h"
+#include "include/string.h"
+#include "../kernel64/paging64.h"
 
 enum backend { BLK_NONE, BLK_NVME, BLK_AHCI, BLK_ATA, BLK_USB };
 
@@ -214,7 +216,59 @@ int blk_use(int i)
     return 0;
 }
 
+/* A buffer a device cannot be given: memory the kernel reaches through
+   the direct map rather than at its own address (kernel64/paging64.h) -
+   a program's page on its way to or from the swap file. A controller
+   that moves data itself (AHCI, USB) is told an address, and that
+   address would be wrong; so such a buffer goes through one of ours,
+   a page at a time. Disk calls come one at a time already (a
+   controller has one command in flight), so one buffer is enough. */
+static uint8_t bounce[4096] __attribute__((aligned(4096)));
+
+static int far(const void *buf, uint32_t count)
+{
+    return (uint64_t)(uintptr_t)buf + (uint64_t)count * ATA_SECTOR_SIZE >
+           paging64_identity_top();
+}
+
+#define BOUNCE_SECTORS (sizeof(bounce) / ATA_SECTOR_SIZE)
+
+static int read_near(uint32_t lba, uint32_t count, void *buf);
+static int write_near(uint32_t lba, uint32_t count, const void *buf);
+
 int blk_read(uint32_t lba, uint32_t count, void *buf)
+{
+    if (!far(buf, count))
+        return read_near(lba, count, buf);
+    uint8_t *p = buf;
+    for (uint32_t done = 0; done < count; ) {
+        uint32_t n = count - done < BOUNCE_SECTORS ? count - done
+                                                   : (uint32_t)BOUNCE_SECTORS;
+        if (read_near(lba + done, n, bounce) < 0)
+            return -1;
+        memcpy(p + done * ATA_SECTOR_SIZE, bounce, n * ATA_SECTOR_SIZE);
+        done += n;
+    }
+    return 0;
+}
+
+int blk_write(uint32_t lba, uint32_t count, const void *buf)
+{
+    if (!far(buf, count))
+        return write_near(lba, count, buf);
+    const uint8_t *p = buf;
+    for (uint32_t done = 0; done < count; ) {
+        uint32_t n = count - done < BOUNCE_SECTORS ? count - done
+                                                   : (uint32_t)BOUNCE_SECTORS;
+        memcpy(bounce, p + done * ATA_SECTOR_SIZE, n * ATA_SECTOR_SIZE);
+        if (write_near(lba + done, n, bounce) < 0)
+            return -1;
+        done += n;
+    }
+    return 0;
+}
+
+static int read_near(uint32_t lba, uint32_t count, void *buf)
 {
     if (cur < 0 || devs[cur].gone)
         return -1;
@@ -232,7 +286,7 @@ int blk_read(uint32_t lba, uint32_t count, void *buf)
     return 0;
 }
 
-int blk_write(uint32_t lba, uint32_t count, const void *buf)
+static int write_near(uint32_t lba, uint32_t count, const void *buf)
 {
     if (cur < 0 || devs[cur].gone)
         return -1;

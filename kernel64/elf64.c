@@ -80,10 +80,10 @@ static uint64_t page_frame_for(uint64_t va, uint64_t flags)
     uint64_t frame = paging64_lookup(va);
     if (frame)
         return frame;
-    frame = pmm_alloc_frame();
+    frame = pmm_alloc_user_frame();
     if (!frame)
         return 0;
-    memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
+    memset(phys_ptr(frame), 0, PAGE_SIZE);
     if (paging64_map(va, frame, flags) < 0) {
         pmm_free_frame((uint32_t)frame);
         return 0;
@@ -139,7 +139,7 @@ static int map_library(void)
             if (from < file_to) {
                 uint64_t upto = va + PAGE_SIZE < file_to ? va + PAGE_SIZE
                                                         : file_to;
-                memcpy((void *)(uintptr_t)(frame + (from - va)),
+                memcpy(phys_ptr(frame + (from - va)),
                        data + (from - vaddr), (uint32_t)(upto - from));
             }
         }
@@ -191,7 +191,7 @@ static int load_segment(const uint8_t *file, const struct elf64_phdr *ph)
         uint64_t from = va > ph->p_vaddr ? va : ph->p_vaddr;
         if (from < file_end) {
             uint64_t to = va + PAGE_SIZE < file_end ? va + PAGE_SIZE : file_end;
-            memcpy((void *)(uintptr_t)(frame + (from - va)),
+            memcpy(phys_ptr(frame + (from - va)),
                    file + ph->p_offset + (from - ph->p_vaddr),
                    (uint32_t)(to - from));
         }

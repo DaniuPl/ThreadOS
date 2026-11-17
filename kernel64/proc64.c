@@ -623,7 +623,7 @@ uint64_t proc64_msync(void)
             if (!frame)
                 continue;
             uint64_t offset = va - start;
-            const uint8_t *src = (const uint8_t *)(uintptr_t)frame;
+            const uint8_t *src = phys_ptr(frame);
             int valid = 1;
             for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
                 /* Past the end of the file there is nothing to flush - the block

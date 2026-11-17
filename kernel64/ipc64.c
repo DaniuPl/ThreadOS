@@ -438,7 +438,7 @@ static void set_size(int m, uint64_t size)
     }
     spin_unlock_irq(&lock, flags);
     if (frame) {
-        memset((uint8_t *)(uintptr_t)frame + (size & 4095), 0,
+        memset((uint8_t *)phys_ptr(frame) + (size & 4095), 0,
                4096 - (size & 4095));
         pmm_free_frame(frame);
     }
@@ -464,14 +464,14 @@ int memfd64_resize(int m, uint64_t size)
     if (want && !fresh)
         return -IPC_ENOMEM;
     for (uint32_t i = have; i < want; i++) {
-        uint32_t frame = pmm_alloc_frame();
+        uint32_t frame = pmm_alloc_user_frame();
         if (!frame) {
             for (uint32_t k = have; k < i; k++)
                 pmm_free_frame(fresh[k]);
             kfree(fresh);
             return -IPC_ENOMEM;
         }
-        memset((void *)(uintptr_t)frame, 0, 4096);
+        memset(phys_ptr(frame), 0, 4096);
         fresh[i] = frame;
     }
     irqflags_t flags = spin_lock_irq(&lock);
@@ -537,7 +537,7 @@ long memfd64_rw(int m, uint32_t pos, void *buf, uint32_t len, int write)
         spin_unlock_irq(&lock, flags);
         if (!frame)
             break;                       /* the end of it */
-        uint8_t *mem = (uint8_t *)(uintptr_t)frame + in;
+        uint8_t *mem = (uint8_t *)phys_ptr(frame) + in;
         if (write)
             memcpy(mem, (const uint8_t *)buf + done, part);
         else

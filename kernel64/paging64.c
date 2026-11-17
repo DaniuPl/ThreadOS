@@ -665,12 +665,12 @@ int paging64_handle_cow(uint64_t virt)
     }
     cow_splits++;
 
-    uint32_t fresh = pmm_alloc_frame();
+    uint32_t fresh = pmm_alloc_user_frame();
     if (!fresh) {
         tables_unlock();
         return 0;
     }
-    memcpy((void *)(uintptr_t)fresh, (const void *)(uintptr_t)old, PAGE_SIZE);
+    memcpy(phys_ptr(fresh), phys_ptr(old), PAGE_SIZE);
     pmm_free_frame((uint32_t)old);              /* one owner fewer */
 
     pt[i] = (uint64_t)fresh | PTE_PRESENT | flags;
@@ -827,7 +827,7 @@ int paging64_reclaim_pages(uint64_t space, int want)
                 int slot = swap_alloc_slot();
                 if (slot < 0)
                     goto end;              /* the swap file is full */
-                if (swap_write(slot, (const void *)(uintptr_t)frame) < 0) {
+                if (swap_write(slot, phys_ptr(frame)) < 0) {
                     swap_free_slot(slot);
                     goto end;
                 }
@@ -878,10 +878,10 @@ int paging64_swap_in(uint64_t space, uint64_t virt)
     /* We cut the address out with a mask: the upper bits of the entry
    carry the access rights */
     int slot = (int)((w & ADDR_MASK) >> 12);
-    uint32_t frame = pmm_alloc_frame();
+    uint32_t frame = pmm_alloc_user_frame();
     if (!frame)
         return 0;                       /* not even enough memory to bring it back */
-    if (swap_read(slot, (void *)(uintptr_t)frame) < 0) {
+    if (swap_read(slot, phys_ptr(frame)) < 0) {
         pmm_free_frame(frame);
         return 0;
     }
@@ -977,6 +977,25 @@ int paging64_map_phys(uint64_t phys, uint64_t len)
     return 0;
 }
 
+/* Where the kernel can read physical memory above the low gigabyte:
+ * at its own address, mapped there now - unless that address is a
+ * program's (the gigabyte at 1 GiB, PAGING64_USER_PDPT), where the
+ * kernel would read the program instead. That gigabyte is RAM on a
+ * machine with more than one, and the firmware puts its ACPI tables at
+ * the top of RAM; those are read through the direct map. NULL when it
+ * cannot be reached. */
+void *paging64_phys_view(uint64_t phys, uint64_t len)
+{
+    uint64_t lo = (uint64_t)PAGING64_USER_PDPT << 30, hi = lo + (1ULL << 30);
+    if (phys + len <= identity_top)
+        return (void *)(uintptr_t)phys;
+    if (phys < hi && phys + len > lo)
+        return phys + len <= PHYS_MAP_SIZE ? phys_ptr(phys) : (void *)0;
+    if (paging64_map_phys(phys, len) < 0)
+        return (void *)0;
+    return (void *)(uintptr_t)phys;
+}
+
 /* Identity-mapping firmware memory into the KERNEL's own space - for
  * calling UEFI runtime services (kernel64/efirt.c), which run where the
  * firmware put them, at their physical addresses. 'exec' for the
@@ -1043,14 +1062,25 @@ int paging64_init(void)
     memset((void *)(uintptr_t)root, 0, PAGE_SIZE);
     pml4 = (uint64_t *)(uintptr_t)root;
 
-    /* All the memory the PMM manages - identity-mapped. The kernel,
-       its stack and all the page tables lie in that area, so nothing
-       vanishes from under our feet after a CR3 switch. */
-    uint64_t top = (pmm_managed_top() + HUGE_SIZE - 1) & ~(uint64_t)(HUGE_SIZE - 1);
+    /* The low part of memory - identity-mapped. The kernel, its stack
+       and all the page tables lie in that area, so nothing vanishes
+       from under our feet after a CR3 switch. */
+    uint64_t top = (pmm_low_top() + HUGE_SIZE - 1) & ~(uint64_t)(HUGE_SIZE - 1);
     for (uint64_t a = 0; a < top; a += HUGE_SIZE)
         if (map_huge(a, a, PTE_WRITE | PG_NX) < 0)
             return -1;
     identity_top = top;
+
+    /* And everything below 4 GiB once more, in the top half (phys_ptr).
+       Made now, before the first process: a process's space copies the
+       kernel's top-level entries when it is made. Past the end of RAM
+       uncached (PCD | PWT), so this view of a device's registers is
+       never cached even where nothing else says so. */
+    uint64_t ram = (pmm_managed_top() + HUGE_SIZE - 1) & ~(uint64_t)(HUGE_SIZE - 1);
+    for (uint64_t a = 0; a < PHYS_MAP_SIZE; a += HUGE_SIZE)
+        if (map_huge(PHYS_MAP_BASE + a, a,
+                     PTE_WRITE | PG_NX | (a < ram ? 0 : 0x018)) < 0)
+            return -1;
 
     /* The kernel code has to stay executable - the first two
        megabytes above one megabyte are the kernel image, so we lift

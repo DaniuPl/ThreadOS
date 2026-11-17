@@ -29,8 +29,7 @@
    the power off itself - RSDP, RSDT, FADT, _S5_ in bytecode - is the
    same. */
 #include "../kernel64/paging64.h"
-#define IDENTITY_TOP()   paging64_identity_top()
-#define MAP_PHYS(a, n)   paging64_map_phys((a), (n))
+#define PHYS_VIEW(a, n)  paging64_phys_view((a), (n))
 
 struct rsdp {
     char signature[8];          /* "RSD PTR " */
@@ -98,15 +97,12 @@ static int ready;
 static const struct sdt_header *rsdt_spis;
 
 /* ACPI tables usually lie outside the memory the kernel manages -
-   they have to be let into the identity mapping first */
+   they have to be mapped first (paging64_phys_view) */
 static const void *map(uint32_t phys, uint32_t len)
 {
     if (!phys)
         return (void *)0;
-    if ((uint64_t)phys + len > IDENTITY_TOP() &&
-        MAP_PHYS(phys, len) < 0)
-        return (void *)0;
-    return (const void *)(uintptr_t)phys;
+    return PHYS_VIEW(phys, len);
 }
 
 /* Reading a single byte from a fixed address in low memory */

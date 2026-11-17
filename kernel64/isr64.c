@@ -103,10 +103,10 @@ static int demand_page_nolock(uint64_t addr)
     if (!paging64_entry_empty(page))
         return 0;                   /* present, or on the disk - not ours */
 
-    uint32_t frame = pmm_alloc_frame();
+    uint32_t frame = pmm_alloc_user_frame();
     if (!frame)
         return 0;                   /* out of memory - let the locked path try */
-    memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
+    memset(phys_ptr(frame), 0, PAGE_SIZE);
     if (paging64_map_if_absent(page, frame, PG_USER | PG_WRITE | PG_NX)) {
         if (in_stack)
             stack_pages++;
@@ -129,10 +129,10 @@ static int demand_page_nolock(uint64_t addr)
    above. 1 = the page is there now, whoever brought it. */
 static int fresh_page(uint64_t page, uint32_t *count)
 {
-    uint32_t frame = pmm_alloc_frame();
+    uint32_t frame = pmm_alloc_user_frame();
     if (!frame)
         return 0;
-    memset((void *)(uintptr_t)frame, 0, PAGE_SIZE);
+    memset(phys_ptr(frame), 0, PAGE_SIZE);
     if (paging64_map_if_absent(page, frame, PG_USER | PG_WRITE | PG_NX)) {
         (*count)++;
         return 1;

@@ -9,8 +9,15 @@
 /* Builds the frame bitmap from the Multiboot memory map */
 void pmm_init(const struct multiboot_info *mbi);
 
-/* Returns the physical address of a free 4 KiB frame (0 = out of memory) */
+/* Returns the physical address of a free 4 KiB frame (0 = out of memory).
+   It lies in the low, identity-mapped gigabyte: the kernel may use it
+   at its own address, and a device may be given that address. */
 uint32_t pmm_alloc_frame(void);
+
+/* A frame for a page of a program, preferably from above the low
+   gigabyte. Its contents are reached at phys_ptr() (kernel64/paging64.h),
+   not at its address, and it is no buffer for a device. */
+uint32_t pmm_alloc_user_frame(void);
 
 /* Whom to ask for memory when there are no free frames. The function
    must free at least one frame and return 1; 0 means "there is nothing
@@ -34,8 +41,11 @@ uint32_t pmm_total_frames(void);
 uint32_t pmm_used_frames(void);
 uint32_t pmm_ram_kib(void);    /* all detected RAM in KiB */
 
-/* The address just past the last managed frame - from this paging
-   knows how far to stretch the identity mapping */
-uint32_t pmm_managed_top(void);
+/* The address just past the last managed frame - how far the direct
+   map of all memory has to reach */
+uint64_t pmm_managed_top(void);
+
+/* The end of the low, identity-mapped part (at most 1 GiB) */
+uint64_t pmm_low_top(void);
 
 #endif

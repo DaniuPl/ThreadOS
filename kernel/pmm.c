@@ -4,11 +4,21 @@
  * Multiboot memory map we mark the available areas as free, and then
  * reserve the first 1 MiB (BIOS, VGA) and the kernel image.
  *
- * We manage memory up to MANAGED_LIMIT, which stays below user space:
- * the kernel identity-maps everything it manages, and programs start
- * at 1 GiB (USER64_BASE in kernel64/elf64.h). The bitmap and the owner
- * counters are static for that upper bound; how many frames really
- * exist is stated only by the memory map from the bootloader.
+ * Memory comes in two parts. The low gigabyte is identity-mapped -
+ * a frame's address is where the kernel finds it - and everything the
+ * kernel itself keeps comes from there: page tables, the heap, buffers
+ * devices read and write by physical address. It cannot reach higher:
+ * programs lie from 1 GiB (USER64_BASE in kernel64/elf64.h), where the
+ * identity map would be. Above it, up to MANAGED_LIMIT, are frames for
+ * programs' own pages only (pmm_alloc_user_frame), which a program
+ * sees through its page tables and the kernel, when it must, through
+ * the direct map of all memory (phys_ptr, kernel64/paging64.h). That is
+ * where a web engine's hundreds of megabytes go.
+ *
+ * Frames are 32-bit addresses, so MANAGED_LIMIT is 4 GiB; memory above
+ * it is counted but not used. The bitmap and the owner counters are
+ * static for that bound; how many frames really exist is stated only
+ * by the memory map from the bootloader.
  */
 
 #include "include/pmm.h"
@@ -17,8 +27,10 @@
 #include "include/io.h"
 #include "include/spinlock.h"
 
-#define MANAGED_LIMIT (512u * 1024 * 1024)
-#define MAX_FRAMES    (MANAGED_LIMIT / PAGE_SIZE)
+#define MANAGED_LIMIT (4ULL << 30)
+#define MAX_FRAMES    ((uint32_t)(MANAGED_LIMIT / PAGE_SIZE))
+#define LOW_LIMIT     (1u << 30)          /* the identity-mapped part */
+#define LOW_FRAMES    (LOW_LIMIT / PAGE_SIZE)
 
 /* Symbols from kernel64/linker64.ld marking out the kernel image in memory */
 extern char _kernel_start[], _kernel_end[];
@@ -30,8 +42,9 @@ static uint32_t bitmap[MAX_FRAMES / 32];
 static uint16_t refs[MAX_FRAMES];
 static uint32_t total_frames;   /* frames available to the PMM */
 static uint32_t used_frames;
+static uint32_t low_total, low_used;   /* the same, of the low gigabyte */
 static uint32_t ram_kib;        /* all detected memory */
-static uint32_t managed_top;    /* the address just past the last managed frame */
+static uint64_t managed_top;    /* the address just past the last managed frame */
 
 static void frame_set(uint32_t frame)   { bitmap[frame / 32] |=  (1u << (frame % 32)); }
 static void frame_clear(uint32_t frame) { bitmap[frame / 32] &= ~(1u << (frame % 32)); }
@@ -46,6 +59,7 @@ static void reserve_range(uint32_t start, uint32_t end)
             frame_set(f);
             refs[f] = 1;
             used_frames++;
+            low_used += f < LOW_FRAMES;
         }
     }
 }
@@ -77,20 +91,22 @@ void pmm_init(const struct multiboot_info *mbi)
                 if (end > MANAGED_LIMIT)
                     end = MANAGED_LIMIT;
                 /* whole frames within the area only */
-                uint32_t f_start = ((uint32_t)start + PAGE_SIZE - 1) / PAGE_SIZE;
+                uint32_t f_start = (uint32_t)((start + PAGE_SIZE - 1) / PAGE_SIZE);
                 uint32_t f_end = (uint32_t)(end / PAGE_SIZE);
                 for (uint32_t f = f_start; f < f_end; f++) {
                     frame_clear(f);
                     total_frames++;
+                    low_total += f < LOW_FRAMES;
                 }
-                if (f_end * PAGE_SIZE > managed_top)
-                    managed_top = f_end * PAGE_SIZE;
+                if ((uint64_t)f_end * PAGE_SIZE > managed_top)
+                    managed_top = (uint64_t)f_end * PAGE_SIZE;
             }
         }
         entry_addr += e->size + 4;
     }
 
     used_frames = 0;
+    low_used = 0;
 
     /* The first 1 MiB: BIOS vectors, the VGA buffer, bootloader structures */
     reserve_range(0, 1024 * 1024);
@@ -142,7 +158,37 @@ void pmm_set_reclaim(int (*fn)(void))
  *
  * A hint, not a promise: freeing does not move it back, so a search
  * that finds nothing ahead starts over from the beginning. */
-static uint32_t cursor;
+static uint32_t cursor, high_cursor = LOW_FRAMES;
+
+/* One free frame in [from, to), the search starting at '*at' and going
+   round once. A word of the bitmap with all 32 taken is passed over
+   whole: a full gigabyte is 8192 words, not 262144 bits. Called with
+   the lock held. */
+static uint32_t take_one(uint32_t from, uint32_t to, uint32_t *at)
+{
+    uint32_t span = to - from;
+    uint32_t f = *at < from || *at >= to ? from : *at;
+    for (uint32_t seen = 0; seen < span; ) {
+        if ((f & 31) == 0 && bitmap[f / 32] == 0xFFFFFFFFu && f + 32 <= to) {
+            f += 32;
+            seen += 32;
+        } else {
+            if (!frame_test(f)) {
+                frame_set(f);
+                refs[f] = 1;
+                used_frames++;
+                low_used += f < LOW_FRAMES;
+                *at = f + 1 < to ? f + 1 : from;
+                return f * PAGE_SIZE;
+            }
+            f++;
+            seen++;
+        }
+        if (f >= to)
+            f = from;
+    }
+    return 0;
+}
 
 static uint32_t alloc_contiguous_raw(uint32_t n)
 {
@@ -152,27 +198,15 @@ static uint32_t alloc_contiguous_raw(uint32_t n)
        run of consecutive frames is not needed - so start where the
        last one was found and go round once. */
     if (n == 1) {
-        for (uint32_t i = 0; i < MAX_FRAMES; i++) {
-            uint32_t f = cursor + i;
-            if (f >= MAX_FRAMES)
-                f -= MAX_FRAMES;
-            if (frame_test(f))
-                continue;
-            frame_set(f);
-            refs[f] = 1;
-            used_frames++;
-            cursor = (f + 1 < MAX_FRAMES) ? f + 1 : 0;
-            spin_unlock_irq(&lock, flags);
-            return f * PAGE_SIZE;
-        }
+        uint32_t addr = take_one(0, LOW_FRAMES, &cursor);
         spin_unlock_irq(&lock, flags);
-        return 0;
+        return addr;
     }
 
     /* A run of several frames in a row - a device buffer, and rare
        enough that walking the whole map is not worth avoiding */
     uint32_t run = 0;
-    for (uint32_t f = 0; f < MAX_FRAMES; f++) {
+    for (uint32_t f = 0; f < LOW_FRAMES; f++) {
         if (frame_test(f)) {
             run = 0;
             continue;
@@ -184,6 +218,7 @@ static uint32_t alloc_contiguous_raw(uint32_t n)
                 refs[i] = 1;
             }
             used_frames += n;
+            low_used += n;                  /* (runs are all low) */
             spin_unlock_irq(&lock, flags);
             return first * PAGE_SIZE;
         }
@@ -211,6 +246,41 @@ uint32_t pmm_alloc_contiguous(uint32_t n)
     return 0;
 }
 
+/* What of the low gigabyte programs leave to the kernel on a machine
+   with memory above it. There, evicting a program's page to disk may
+   well free a high frame, which is no use to a page table - so the
+   kernel's own allocations keep this much that programs never take.
+   (With all memory low, a program's evicted page frees a low frame,
+   and no reserve is needed: the machine behaves as it always did.) */
+#define LOW_RESERVE ((16u * 1024 * 1024) / PAGE_SIZE)
+
+static uint32_t user_raw(void)
+{
+    uint32_t top = (uint32_t)(managed_top / PAGE_SIZE);
+    uint32_t addr = 0;
+    irqflags_t flags = spin_lock_irq(&lock);
+    if (top > LOW_FRAMES)
+        addr = take_one(LOW_FRAMES, top, &high_cursor);
+    if (!addr && (top <= LOW_FRAMES || low_total - low_used > LOW_RESERVE))
+        addr = take_one(0, LOW_FRAMES, &cursor);
+    spin_unlock_irq(&lock, flags);
+    return addr;
+}
+
+/* A frame for a page of a program: from above the low gigabyte while
+   there is any, so the low one stays for what only it can hold. When
+   there is none, pages go to the swap file as for any frame. */
+uint32_t pmm_alloc_user_frame(void)
+{
+    uint32_t addr = user_raw();
+    for (uint32_t tries = 0; !addr && reclaim && tries < 4; tries++) {
+        if (!reclaim())
+            break;
+        addr = user_raw();
+    }
+    return addr;
+}
+
 void pmm_free_frame(uint32_t addr)
 {
     irqflags_t flags = spin_lock_irq(&lock);
@@ -234,6 +304,7 @@ void pmm_free_frame(uint32_t addr)
             refs[frame] = 0;
             frame_clear(frame);
             used_frames--;
+            low_used -= frame < LOW_FRAMES;
         }
     }
     spin_unlock_irq(&lock, flags);
@@ -259,4 +330,8 @@ uint32_t pmm_frame_refs(uint32_t addr)
 uint32_t pmm_total_frames(void) { return total_frames; }
 uint32_t pmm_used_frames(void)  { return used_frames; }
 uint32_t pmm_ram_kib(void)      { return ram_kib; }
-uint32_t pmm_managed_top(void)  { return managed_top; }
+uint64_t pmm_managed_top(void)  { return managed_top; }
+uint64_t pmm_low_top(void)
+{
+    return managed_top < LOW_LIMIT ? managed_top : LOW_LIMIT;
+}

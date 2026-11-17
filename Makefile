@@ -422,6 +422,12 @@ $(BUILD)/user64/bigmap.elf: libc/tests/bigmap.c $(LIBC64) libc/libc64.ld \
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/bigmap.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/bigmap.o) -o $@
 
+# A program's memory above the low gigabyte
+$(BUILD)/user64/bigram.elf: libc/tests/bigram.c $(LIBC64) libc/libc64.ld \
+                            | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/bigram.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/bigram.o) -o $@
+
 # Processes talking: socket pairs, descriptors sent over them, memfds
 $(BUILD)/user64/ipctest.elf: libc/tests/ipctest.c $(LIBC64) libc/libc64.ld \
                              | $(BUILD)/user64 $(BUILD)/libc64
@@ -666,6 +672,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
                $(BUILD)/user64/bigmap.elf \
                $(BUILD)/user64/ipctest.elf \
+               $(BUILD)/user64/bigram.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
@@ -1006,6 +1013,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
 	    bigmap=$(BUILD)/user64/bigmap.elf \
 	    ipctest=$(BUILD)/user64/ipctest.elf \
+	    bigram=$(BUILD)/user64/bigram.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
 	    randtest=$(BUILD)/user64/randtest.elf \

@@ -46,6 +46,21 @@
 #define PAGING64_MMAP_PML4 1
 #define PAGING64_MMAP_GIGS 64
 
+/* All physical memory below 4 GiB, mapped once more where only the
+   kernel looks: the top half of the address space (PML4 entry 256).
+   The identity map reaches only the low gigabyte - programs lie at
+   1 GiB - so a program's page from higher up (pmm_alloc_user_frame),
+   or a table of the firmware's in that gigabyte, is reached here.
+   RAM is cached; what lies above it - device registers, the
+   firmware's tables - is not. */
+#define PHYS_MAP_BASE 0xFFFF800000000000ULL
+#define PHYS_MAP_SIZE (4ULL << 30)
+
+static inline void *phys_ptr(uint64_t phys)
+{
+    return (void *)(uintptr_t)(PHYS_MAP_BASE + phys);
+}
+
 /* Builds our own tables and switches the processor over to them.
    0 = done. */
 int paging64_init(void);
@@ -117,6 +132,11 @@ void paging64_free_space(uint64_t space);
 /* Adds to the mapping an area lying outside memory (device
    registers). 0 = done. */
 int paging64_map_phys(uint64_t phys, uint64_t len);
+
+/* A pointer to physical memory outside the low gigabyte (ACPI tables):
+   the address itself once mapped, or the direct map's view where the
+   address is a program's. NULL when it cannot be reached. */
+void *paging64_phys_view(uint64_t phys, uint64_t len);
 
 /* --- Swapping pages out to disk -----------------------------------
  *

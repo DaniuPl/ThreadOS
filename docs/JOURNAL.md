@@ -8398,3 +8398,38 @@ works and is checked by `make test`.
       four, where a 10 ms nap per side would have made it 20 ms - and
       the machine's memory back once it is over, which it is to the
       kilobyte.
+
+- [x] **Memory above the low gigabyte: up to 4 GiB of RAM, not 512 MiB**
+      (kernel/pmm.c, kernel/include/pmm.h, kernel64/paging64.c,
+      kernel64/paging64.h, kernel64/isr64.c, kernel64/elf64.c,
+      kernel64/ipc64.c, kernel64/proc64.c, kernel/blk.c, kernel/acpi.c,
+      kernel/acpios.c, libc/tests/bigram.c, scripts/tests/t_bigram.py)
+      The third thing WebKit needs of the kernel. The kernel managed
+      512 MiB at most, whatever the machine had: it reached every frame
+      at its own address through the identity map, and programs lie at
+      1 GiB, so the map could not grow past that. Programs are built to
+      lie in the low 2 GiB of addresses (static, not position-
+      independent), so it is the kernel's view that changed, not where
+      programs are. The low gigabyte stays identity-mapped and holds
+      what only it can - page tables, the heap, buffers a device is
+      given by address. The frames above it, up to 4 GiB (frames are
+      32-bit addresses), go to programs' pages only
+      (pmm_alloc_user_frame): anonymous memory, copies on write, the
+      loader's pages, memfds, pages back from the swap file. The kernel
+      reaches those through a second map of everything below 4 GiB in
+      the top half of the address space (phys_ptr, PML4 entry 256), RAM
+      cached and the rest not. The block layer copies a buffer it
+      cannot give a controller by address through one of its own (a
+      page to or from the swap file), ACPI reads tables lying in the
+      programs' gigabyte through the second map rather than at an
+      address that is a program's, and on a machine with memory above
+      the low gigabyte programs leave the kernel 16 MiB of it, since
+      evicting their pages may free only high frames.
+      t_bigram boots 3 GiB: 'mem' has 3,096,468 KiB free where it had
+      512 MiB; bigram writes 2 GiB with words of each page's own and
+      reads it all back (4.8 s), forks a child that reads it and writes
+      into every 32nd page (16,384 copies, high frame to high frame)
+      while the parent's stays as it was, and reads a 256 MiB memfd
+      back through read(); the machine has every kilobyte back after.
+      On 1.5 GiB the ACPI tables lie at 0x5FFE1C52, in the programs'
+      gigabyte, and ACPI still runs the firmware's AML.
