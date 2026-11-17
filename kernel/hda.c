@@ -133,18 +133,6 @@ static char name[48];
    six different things and each has a different answer. */
 static const char *why = "never looked for";
 
-/* The controller this driver claimed: a reason to give up after that
-   is the Device Manager's to show as well */
-static struct pci_dev claimed_dev;
-static int claimed;
-
-static int give_up(const char *reason)
-{
-    why = reason;
-    if (claimed)
-        device_trouble(&claimed_dev, DEV_FAILED, reason);
-    return 0;
-}
 
 static volatile uint32_t *corb;
 static volatile uint64_t *rirb;
@@ -467,11 +455,17 @@ static void find_input(uint16_t gcap)
 
 /* --- the rings and the buffers --------------------------------------- */
 
+/* The memory is taken once: a controller passed over gives its rings
+   to the next one it tries (hda_init), held in reset first so that it
+   no longer reads or writes them */
 static int rings_setup(void)
 {
-    corb_phys = pmm_alloc_frame();
-    rirb_phys = pmm_alloc_frame();
-    bdl_phys = pmm_alloc_frame();
+    if (!corb_phys)
+        corb_phys = pmm_alloc_frame();
+    if (!rirb_phys)
+        rirb_phys = pmm_alloc_frame();
+    if (!bdl_phys)
+        bdl_phys = pmm_alloc_frame();
     if (!corb_phys || !rirb_phys || !bdl_phys)
         return 0;
     corb = (volatile uint32_t *)(uintptr_t)corb_phys;
@@ -487,17 +481,19 @@ static int rings_setup(void)
        asking for two in a row either works at once or not at all -
        and saying so is better than quietly playing somebody else's
        memory. */
-    uint32_t first = pmm_alloc_frame();
-    if (!first)
-        return 0;
-    uint32_t prev = first;
-    for (int i = 1; i < BUF_PAGES; i++) {
-        uint32_t f = pmm_alloc_frame();
-        if (!f || f != prev + PAGE_SIZE)
+    if (!buf_phys) {
+        uint32_t first = pmm_alloc_frame();
+        if (!first)
             return 0;
-        prev = f;
+        uint32_t prev = first;
+        for (int i = 1; i < BUF_PAGES; i++) {
+            uint32_t f = pmm_alloc_frame();
+            if (!f || f != prev + PAGE_SIZE)
+                return 0;
+            prev = f;
+        }
+        buf_phys = first;
     }
-    buf_phys = first;
     buf = (volatile int16_t *)(uintptr_t)buf_phys;
     memset((void *)buf, 0, BUF_BYTES);
 
@@ -599,26 +595,18 @@ static void stream_setup(void)
 
 /* --- coming up --------------------------------------------------------- */
 
-int hda_init(void)
+/* One controller: out of reset, and its codecs asked one by one for an
+   output to play through. NULL when it is the one; otherwise why not. */
+static const char *try_controller(const struct pci_dev *dev,
+                                  uint32_t *vendor, uint16_t *gcap)
 {
-    struct pci_dev dev;
-
-    if (ready)
-        return 1;
-    /* Class 0x04 (multimedia), subclass 0x03 (HD Audio). The
-       programming interface is zero on every one of them. */
-    if (!pci_find_class(0x04, 0x03, 0x00, &dev))
-        return give_up("there is no HDA controller on the PCI bus");
-    device_claim(&dev, "hda");
-    claimed_dev = dev;
-    claimed = 1;
-
-    uint32_t bar = dev.bar[0] & 0xFFFFFFF0u;
-    if (!bar || (dev.bar[0] & 0x01))
-        return give_up("a controller with no registers in memory");
-    pci_enable_bus_master(&dev);
+    reg = (volatile uint8_t *)0;
+    uint32_t bar = dev->bar[0] & 0xFFFFFFF0u;
+    if (!bar || (dev->bar[0] & 0x01))
+        return "a controller with no registers in memory";
+    pci_enable_bus_master(dev);
     if (MAP_PHYS(bar, 0x4000) < 0)
-        return give_up("I cannot map the registers");
+        return "I cannot map the registers";
     reg = (volatile uint8_t *)(uintptr_t)bar;
 
     /* Out of reset. The controller says when it is ready by reading
@@ -629,31 +617,91 @@ int hda_init(void)
     for (int i = 0; i < 100 && !(rd32(REG_GCTL) & 1); i++)
         wait_ms(1);
     if (!(rd32(REG_GCTL) & 1))
-        return give_up("the controller will not come out of reset");
+        return "the controller will not come out of reset";
     wait_ms(10);                       /* the codecs need a moment to answer */
 
     uint16_t states = rd16(REG_STATESTS);
     if (!states)
-        return give_up("no codec answered");
-    codec = 0;
-    while (codec < 15 && !(states & (1u << codec)))
-        codec++;
+        return "no codec answered";
 
     /* Where the output streams begin: after the input ones, and how
        many of those there are is in GCAP. */
-    uint16_t gcap = rd16(REG_GCAP);
-    int in_streams = (gcap >> 8) & 0x0F;
+    *gcap = rd16(REG_GCAP);
+    int in_streams = (*gcap >> 8) & 0x0F;
     out_base = 0x80 + (uint32_t)in_streams * 0x20;
 
     if (!rings_setup())
-        return give_up("no memory for the rings and the buffer");
+        return "no memory for the rings and the buffer";
 
-    uint32_t vendor = param(0, PARAM_VENDOR);
-    if (vendor == 0xFFFFFFFFu)
-        return give_up("the codec does not answer questions");
+    /* Every codec that answered, not only the first: a controller can
+       carry the speakers' codec and a display's side by side */
+    const char *reason = "the codec does not answer questions";
+    for (codec = 0; codec < 15; codec++) {
+        if (!(states & (1u << codec)))
+            continue;
+        *vendor = param(0, PARAM_VENDOR);
+        if (*vendor == 0xFFFFFFFFu)
+            continue;
+        if (find_output())
+            return (const char *)0;
+        reason = "the codec has no output I know how to find";
+    }
+    return reason;
+}
 
-    if (!find_output())
-        return give_up("the codec has no output I know how to find");
+/* A controller passed over: its rings stopped and the controller held
+   in reset, so that it touches none of the memory the next one is given */
+static void let_go(void)
+{
+    if (!reg)
+        return;
+    wr8(REG_CORBCTL, 0);
+    wr8(REG_RIRBCTL, 0);
+    wr32(REG_GCTL, 0);
+    reg = (volatile uint8_t *)0;
+}
+
+/* Every HD Audio controller in turn, until one has a codec with an
+   output. The first is not always the one: a laptop of 2014 has two,
+   and the first (00:03.0) is the graphics chip's, whose codec has
+   nothing but the HDMI and DisplayPort sockets - taking it alone, the
+   driver failed there and never looked at the second, the one with the
+   speakers and the headphone socket. */
+#define HDA_TRIES 8
+
+int hda_init(void)
+{
+    struct pci_dev dev, passed[HDA_TRIES];
+    const char *passed_why[HDA_TRIES];
+    int n_passed = 0, found = 0;
+    uint32_t vendor = 0;
+    uint16_t gcap = 0;
+
+    if (ready)
+        return 1;
+    /* Class 0x04 (multimedia), subclass 0x03 (HD Audio). The
+       programming interface is zero on every one of them. */
+    why = "there is no HDA controller on the PCI bus";
+    for (int n = 0; n < HDA_TRIES && pci_find_class_nth(0x04, 0x03, 0x00, n, &dev);
+         n++) {
+        device_claim(&dev, "hda");
+        const char *reason = try_controller(&dev, &vendor, &gcap);
+        if (!reason) {
+            found = 1;
+            break;
+        }
+        let_go();
+        why = reason;
+        device_trouble(&dev, DEV_FAILED, reason);
+        passed[n_passed] = dev;
+        passed_why[n_passed++] = reason;
+    }
+    if (!found)
+        return 0;
+    /* The ones passed over are not broken - only not the one that plays:
+       the Device Manager says so, and why */
+    for (int i = 0; i < n_passed; i++)
+        device_trouble(&passed[i], DEV_SPARE, passed_why[i]);
 
     bdl_setup();
     stream_setup();

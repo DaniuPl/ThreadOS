@@ -48,6 +48,7 @@
 #include "include/net.h"
 #include "include/netdev.h"
 #include "include/uvc.h"
+#include "include/mark.h"
 #include "../kernel64/task64.h"
 #define desktop_uid task64_uid
 #define desktop_kill_uid task64_kill_uid
@@ -4177,14 +4178,10 @@ static void draw_hint(void)
 
 /* --- The menu bar ----------------------------------------------------------- */
 
-/* The mark: a ring with a thread through it */
-static void draw_logo(int x, int y, uint32_t c)
+/* The system's mark (kernel/mark.c), in a d x d box at (x, y) */
+static void draw_logo(int x, int y, int d, uint32_t c)
 {
-    int r = BAR_LOGO_D * 8;
-    int cx = x * 16 + r, cy = y * 16 + r;
-    gfx_circle16(cx, cy, r, 26, c, 255);
-    gfx_disc16(cx, cy, 34, c, 255);
-    gfx_line16(cx - r + 10, cy + r - 10, cx + r - 10, cy - r + 10, 18, c, 200);
+    mark_draw(gfx_current(), x, y, d, c, 255);
 }
 
 
@@ -4440,7 +4437,7 @@ static void draw_bar(void)
        open, like a button held down */
     if (menu_on_bar())
         gfx_rrect(4, 3, logo_w() - 4, BAR_H - 6, 6, L.bar_text, 40);
-    draw_logo(BAR_LOGO_X, (BAR_H - BAR_LOGO_D) / 2, L.bar_text);
+    draw_logo(BAR_LOGO_X, (BAR_H - BAR_LOGO_D) / 2, BAR_LOGO_D, L.bar_text);
     /* ... and after it, in bold, the name of the program in front -
        what the keyboard will reach - as a Mac's menu bar names it, and
        not the system's own name, which nobody needs read to them all
@@ -4874,8 +4871,8 @@ static void draw_taskbar(void)
     if (hover == TB_START || menu_on_bar())
         gfx_rrect(tb_start_x + 3, y + 3, TB_SLOT - 6, TB_H - 6, 6,
                   L.bar_text, 36);
-    draw_logo(tb_start_x + (TB_SLOT - BAR_LOGO_D) / 2,
-              y + (TB_H - BAR_LOGO_D) / 2, L.accent);
+    draw_logo(tb_start_x + (TB_SLOT - TB_LOGO_D) / 2,
+              y + (TB_H - TB_LOGO_D) / 2, TB_LOGO_D, L.accent);
     if (hover == TB_START && !menu_open)
         hint_above(tb_start_x + TB_SLOT / 2, y - 6, "Start");
 
@@ -6408,8 +6405,9 @@ static void draw_about(void)
     int d = 40;
     gfx_disc16((x + ASK_PAD) * 16 + d * 8, (y + ASK_PAD) * 16 + d * 8, d * 8,
                L.accent, 255);
-    draw_logo(x + ASK_PAD + (d - BAR_LOGO_D) / 2,
-              y + ASK_PAD + (d - BAR_LOGO_D) / 2, L.accent_text);
+    draw_logo(x + ASK_PAD + (d - ABOUT_LOGO_D) / 2,
+              y + ASK_PAD + (d - ABOUT_LOGO_D) / 2, ABOUT_LOGO_D,
+              L.accent_text);
     int tx = x + ASK_PAD + d + 14;
     ui_font_text(UI_BOLD, 15, tx, y + ASK_TITLE_Y, "ThreadOS", text);
 

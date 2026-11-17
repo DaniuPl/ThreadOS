@@ -1,4 +1,8 @@
-# A ThreadOS release after every push to main - what 'update' installs.
+# A ThreadOS release - what 'update' installs - when one is asked for:
+# Actions -> release -> Run workflow. Not after every push: a release is
+# a whole build of the system, its disc and stick image, on GitHub's
+# machines, and most pushes are not something to hand to installed
+# systems. The run number still only grows, so updates stay in order.
 #
 # Releases remain 0.x pre-releases until ThreadOS is ready for daily use.
 # The SemVer label is shown in Settings; the monotonically increasing run
@@ -15,8 +19,6 @@
 name: release
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -43,7 +45,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential grub-pc-bin grub-efi-amd64-bin xorriso mtools \
             clang lld python3 openssl xz-utils cmake ninja-build ruby \
-            pkg-config gperf libglib2.0-dev-bin
+            pkg-config gperf libglib2.0-dev-bin bison
           python3 -m pip install --user meson
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 

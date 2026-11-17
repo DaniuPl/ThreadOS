@@ -36,6 +36,7 @@ from ptest import check, summary, _kernel_define
 
 TB_H = _kernel_define("kernel/include/look.h", "TB_H")
 TB_SLOT = _kernel_define("kernel/include/look.h", "TB_SLOT")
+TB_LOGO_D = _kernel_define("kernel/include/look.h", "TB_LOGO_D")
 TB_SHOW_W = _kernel_define("kernel/include/look.h", "TB_SHOW_W")
 TB_CLOCK_W = _kernel_define("kernel/include/look.h", "TB_CLOCK_W")
 WB_W = _kernel_define("kernel/include/look.h", "WB_W")
@@ -137,11 +138,18 @@ def main():
                 _, _, at = q.screen_raw()
                 ax, ay = W // 2, H - TB_H - 2
                 tx, ty = slot_x(W, n + 1, 0) + TB_SLOT // 2, H - TB_H // 2
+                # The mark - a cog, open in its middle - in the accent:
+                # a good part of its box in that colour
+                r = TB_LOGO_D // 2
+                inked = sum(max(abs(a - b) for a, b in
+                                zip(at(x, y), DARK["accent"])) < 40
+                            for y in range(ty - r, ty + r)
+                            for x in range(tx - r, tx + r))
                 check("down to the taskbar, which stays over it: the window "
-                      "just above it, Start's mark on it",
+                      "just above it, Start's mark on it (%d of its box's "
+                      "%d pixels in the accent)" % (inked, 4 * r * r),
                       at(ax, ay) != aurora_px(ax, ay, W, H) and
-                      max(abs(a - b) for a, b in
-                          zip(at(tx, ty), DARK["accent"])) < 40)
+                      inked >= r * r // 2)
                 # close: the last button
                 q.click(W - WB_W // 2, TITLE_H // 2)
                 q.mouse_goto(W // 2, H // 2)

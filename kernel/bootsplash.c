@@ -1,87 +1,74 @@
+/* The loading screen of a boot to the desktop or the installer
+ *
+ * The mark and a bar, as a Mac starts: black over the whole framebuffer
+ * the loader set, ThreadOS's mark (art/threados-mark.svg - a cog with
+ * threads running out of it) large and white in the middle, and under
+ * it a thin bar with round ends that fills as the boot goes on. No
+ * words: what the kernel is doing goes to the serial port, where it
+ * always has. It used to be the 8x8 bitmap font blown up three times on
+ * flat navy, the one screen that looked like none of the system.
+ *
+ * The mark is kernel/mark.c's, made from the SVG at build time.
+ * Nothing needs the initrd, so all of it is there from the first
+ * moment. It is drawn
+ * straight onto the loader's framebuffer, whatever its format; logical
+ * pixels (video_w(), video_h()) place things, and on a panel of more
+ * pixels than that the mark and the bar are drawn at its size, as the
+ * desktop draws them.
+ */
+
 #include <stdint.h>
 #include "include/bootsplash.h"
-#include "include/font8x8.h"
+#include "include/gfx.h"
 #include "include/printk.h"
 #include "include/video.h"
+#include "include/mark.h"
 
-#define SPLASH_BG       0x08111F
-#define SPLASH_TEXT     0xE8F0FA
-#define SPLASH_MUTED    0x8EA2BA
-#define SPLASH_ACCENT   0x57B8FF
-#define SPLASH_BAR_BG   0x24344A
+/* Logical pixels, from the middle of the screen; t_bootsplash reads them */
+#define SPLASH_LOGO_D     96       /* the mark's box (its longer side) */
+#define SPLASH_LOGO_DY    24       /* its middle above the screen's */
+#define SPLASH_BAR_W      200
+#define SPLASH_BAR_H      6
+#define SPLASH_BAR_DY     64       /* the bar's top below the middle */
+
+#define SPLASH_BG         0x000000
+#define SPLASH_MARK       0xFFFFFF
+#define SPLASH_FILL       0xFFFFFF
+#define SPLASH_TRACK_A    56       /* the bar's empty part: white this strong */
 
 static int active;
-static int scale;
-static int screen_w;
-static int screen_h;
-static int center_y;
-static int bar_x;
-static int bar_w;
-static int bar_y;
-
-static void draw_text(int x, int y, int size, const char *text, uint32_t color)
-{
-    for (int i = 0; text[i]; i++) {
-        unsigned char c = (unsigned char)text[i];
-        if (c < 0x20 || c > 0x7E)
-            continue;
-        const uint8_t *glyph = font8x8[c - 0x20];
-        for (int row = 0; row < 8; row++) {
-            for (int col = 0; col < 8; col++) {
-                if (glyph[row] & (1u << col))
-                    video_fill_rect_rgb(x + (i * 8 + col) * size,
-                                        y + row * size, size, size, color);
-            }
-        }
-    }
-}
-
-static int text_width(const char *text, int size)
-{
-    int n = 0;
-    while (text[n])
-        n++;
-    return n * 8 * size;
-}
-
-static void draw_title(void)
-{
-    const char *title = "ThreadOS";
-    int title_size = scale;
-    int x = (screen_w - text_width(title, title_size)) / 2;
-    int y = center_y - 58 * scale / 2;
-    draw_text(x, y, title_size, title, SPLASH_TEXT);
-}
+static int lw, lh, cy;
+static int bar_x, bar_w, bar_y;
 
 void boot_splash_start(int requested)
 {
     if (!requested || !video_have_loader_lfb())
         return;
-
-    screen_w = video_w();
-    screen_h = video_h();
-    if (screen_w < 1 || screen_h < 1)
+    lw = video_w();
+    lh = video_h();
+    if (lw < 1 || lh < 1)
         return;
 
     active = 1;
-    scale = screen_w >= 640 ? 3 : 2;
-    center_y = screen_h / 2;
-    bar_w = screen_w - 64;
-    if (bar_w > 480)
-        bar_w = 480;
+    cy = lh / 2;
+    bar_w = lw - 64 < SPLASH_BAR_W ? lw - 64 : SPLASH_BAR_W;
     if (bar_w < 80)
-        bar_w = screen_w - 16;
-    bar_x = (screen_w - bar_w) / 2;
-    bar_y = center_y + 38;
+        bar_w = lw - 16;
+    bar_x = (lw - bar_w) / 2;
+    bar_y = cy + SPLASH_BAR_DY;
+    int d = lh >= 400 ? SPLASH_LOGO_D : SPLASH_LOGO_D * 2 / 3;
 
     printk_screen_output(0);
-    video_fill_rect_rgb(0, 0, screen_w, screen_h, SPLASH_BG);
-    draw_title();
+    video_fill_rect_rgb(0, 0, lw, lh, SPLASH_BG);
+    mark_draw((const struct gfx_surface *)0, (lw - d) / 2,
+              cy - SPLASH_LOGO_DY - d / 2, d, SPLASH_MARK, 255);
     video_present();
     printk("[boot] visual loading screen active\n");
     boot_splash_update(3, "Starting the kernel");
 }
 
+/* 'status' is the step's name; the screen shows only how far along it
+   is, and the serial port has the words */
 void boot_splash_update(int progress, const char *status)
 {
     if (!active || !status)
@@ -91,21 +78,17 @@ void boot_splash_update(int progress, const char *status)
     if (progress > 100)
         progress = 100;
 
-    int status_size = scale > 2 ? 2 : 1;
-    int width = text_width(status, status_size);
-    if (width > screen_w - 16) {
-        status_size = 1;
-        width = text_width(status, status_size);
-    }
-    int status_x = (screen_w - width) / 2;
-    int status_y = bar_y - 25;
-    video_fill_rect_rgb(0, status_y - 2, screen_w, 18,
+    /* The bar from the background up: the track, then the filled part */
+    video_fill_rect_rgb(bar_x - 2, bar_y - 2, bar_w + 4, SPLASH_BAR_H + 4,
                         SPLASH_BG);
-    draw_text(status_x, status_y, status_size, status, SPLASH_MUTED);
-
-    video_fill_rect_rgb(bar_x, bar_y, bar_w, 6, SPLASH_BAR_BG);
+    gfx_rrect(bar_x, bar_y, bar_w, SPLASH_BAR_H, SPLASH_BAR_H / 2, 0xFFFFFF,
+              SPLASH_TRACK_A);
     int filled = bar_w * progress / 100;
-    if (filled > 0)
-        video_fill_rect_rgb(bar_x, bar_y, filled, 6, SPLASH_ACCENT);
+    if (filled > 0) {
+        if (filled < SPLASH_BAR_H)
+            filled = SPLASH_BAR_H;         /* a dot, not a sliver */
+        gfx_rrect(bar_x, bar_y, filled, SPLASH_BAR_H, SPLASH_BAR_H / 2,
+                  SPLASH_FILL, 255);
+    }
     video_present();
 }

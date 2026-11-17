@@ -17,7 +17,9 @@ struct pci_dev {
     uint8_t irq;          /* the IRQ line from the Interrupt Line field */
 };
 
-/* Looks for a device with the given vendor/device. 1 = found. */
+/* Looks for a device with the given vendor/device. 1 = found. Every
+   bus is searched, through the bridges, bus 0 first: the finders below
+   do the same. */
 int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out);
 
 /* Looks for a device by class (class/subclass/programming interface) -
@@ -25,6 +27,13 @@ int pci_find_device(uint16_t vendor, uint16_t device, struct pci_dev *out);
    up front, e.g. any AHCI controller (0x01/0x06/0x01). 1 = found. */
 int pci_find_class(uint8_t base, uint8_t sub, uint8_t progif,
                    struct pci_dev *out);
+
+/* The n-th such device (0 is the one pci_find_class finds), for a
+   machine with several of a kind where the first may not be the one -
+   a laptop's HD Audio controller for the HDMI port before the one with
+   the speakers on it */
+int pci_find_class_nth(uint8_t base, uint8_t sub, uint8_t progif, int n,
+                       struct pci_dev *out);
 
 /* Walks devices across all PCI buses: index 0, 1, 2... until it returns 0.
    'class_out' takes the raw class register (class, subclass, prog-if

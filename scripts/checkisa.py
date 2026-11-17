@@ -65,6 +65,8 @@ ASKS_FIRST = {
     "mbedtest": ("Mbed TLS: AES-NI behind mbedtls_aesni_has_support", None),
     "jsc": ("simdutf in WebKit: SSE4.2, AVX2 and AVX-512 kernels picked "
             "by CPUID and XGETBV at run time", None),
+    "wpedeps": ("libgcrypt's src/hwf-x86.c: XGETBV only once CPUID's "
+                "OSXSAVE bit says the system has it", {"xgetbv"}),
 }
 
 

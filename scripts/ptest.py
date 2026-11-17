@@ -3573,7 +3573,7 @@ def stick_starts_live(esp):
 
 
 def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
-               kernel=None, initrd=None):
+               kernel=None, initrd=None, gfxmode=None):
     """Assembles a disc with the 64-bit kernel and its initrd.
 
     The kernel cannot be started through -kernel: QEMU loads only
@@ -3583,6 +3583,8 @@ def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
     text mode: GRUB gives a framebuffer of its own accord and the console
     then draws in it instead of in the VGA character memory the tests
     look for at 0xB8000. 'cmdline' is what the kernel is started with.
+    'gfxmode' ("1920x1080") is the mode GRUB sets with graphics, which
+    is the one the loading screen is drawn in; GRUB picks otherwise.
 
     Returns True when the disc was created.
     """
@@ -3594,8 +3596,10 @@ def make_iso64(workdir, iso, graphics=False, text=False, cmdline="",
     if initrd and os.path.exists(initrd):
         shutil.copy(initrd, workdir + "/boot/initrd64.img")
         mod = "    module2 /boot/initrd64.img initrd64\n"
-    header = ("insmod all_video\nset gfxpayload=keep\n" if graphics
-                else "set gfxpayload=text\n" if text else "")
+    header = ("insmod all_video\n" +
+              ("set gfxmode=%s\n" % gfxmode if gfxmode else "") +
+              "set gfxpayload=keep\n" if graphics
+              else "set gfxpayload=text\n" if text else "")
     with open(workdir + "/boot/grub/grub.cfg", "w") as fh:
         fh.write(header + "set timeout=0\nset default=0\n"
                  'menuentry "ThreadOS 64" {\n'

@@ -4,12 +4,20 @@
 [![release](https://img.shields.io/github/v/release/DaniuPl/ThreadOS)](https://github.com/DaniuPl/ThreadOS/releases/latest)
 [![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/AyaEyTSG6)
 
-ThreadOS is an x86 operating system written from scratch in C and
-assembly. It has its own kernel, drivers, filesystem, TCP/IP stack, TLS
-1.3, UEFI boot loader, installer and compositing desktop. It runs in QEMU
-and on real UEFI PCs.
+ThreadOS is an operating system for x86-64 PCs, written from scratch in C
+and assembly. It has its own kernel, drivers, filesystem, TCP/IP stack,
+TLS 1.3, UEFI boot loader, installer and compositing desktop. It runs in
+QEMU and on real UEFI PCs; an ARM64 kernel is on its way.
 
 ![The desktop: a file manager, a clock and a memory monitor](docs/desktop.png)
+
+| | |
+|---|---|
+| ![The loading screen: the ThreadOS mark and the bar](docs/boot.png) | ![The installer, alone on the screen](docs/installer.png) |
+| ![The calendar, the calculator and the menu](docs/sharp.png) | ![Settings: the Device Manager](docs/devices.png) |
+
+All of them are what QEMU's screen showed on a 1920x1080 panel
+(`scripts/screenshots.py`).
 
 - [Architecture](#architecture)
 - [Installing on a PC](#installing-on-a-pc)
@@ -38,8 +46,14 @@ most of the kernel live in `kernel/` (the list is `SHARED64` in the
 `Makefile`); what depends on long mode - paging, interrupts, context
 switching, the syscall entry and process setup - is in `kernel64/`. A
 32-bit protected-mode kernel was built from the same files until it was
-removed; its tests now run on this one. The ARM64 kernel (`bootarm64/`,
-`kernelarm64/`) builds `string.c` and `heap.c` from `kernel/` so far.
+removed; its tests now run on this one.
+
+The ARM64 kernel (`bootarm64/`, `kernelarm64/`, for QEMU's `virt`
+machine) boots, reads the device tree, catches exceptions, runs with the
+MMU on, takes timer interrupts through a GICv2 and runs preemptive kernel
+threads on every core it wakes through PSCI - on the serial console, so
+far with no screen. Of `kernel/` it builds `string.c` and `heap.c`; the
+rest follows as shared code stops assuming x86.
 
 **Boot paths (64-bit).**
 
@@ -68,7 +82,11 @@ unchanged. They have BSD sockets too (TCP and UDP over the
 kernel's stack, poll and select, getaddrinfo through the system's name
 server). zlib and curl are built from their release archives;
 `curl` runs in the terminal. The browser draws a page's own fonts with
-FreeType and shapes them with HarfBuzz.
+FreeType and shapes them with HarfBuzz. For WebKit, JavaScriptCore runs
+(`jsc`), and the libraries WPE's port of WebKit is built on - GLib,
+libsoup, OpenSSL, ICU, fontconfig, HarfBuzz, libxml2, libwebp, libgcrypt
+and more - are built from their releases into `BUILD/libs64`, each tested
+on ThreadOS.
 C++ programs use the host compiler's libstdc++ on top of musl, without
 exceptions (`libc/cxx/`). The first is litehtml (`third_party/litehtml`),
 an HTML/CSS layout engine, which lays pages out on ThreadOS exactly as
@@ -84,8 +102,9 @@ the same primitives (`user/udraw.h`) and a small widget kit
 
 ## Installing on a PC
 
-Every push to `main` produces a
-[release](https://github.com/DaniuPl/ThreadOS/releases/latest):
+Each [release](https://github.com/DaniuPl/ThreadOS/releases/latest) (built
+when one is started by hand, see [Releases and updates](#releases-and-updates))
+carries:
 
 | Asset | Contents |
 |---|---|
@@ -117,18 +136,18 @@ Debian/Ubuntu:
 ```sh
 sudo apt-get install build-essential make python3 \
     qemu-system-x86 grub-pc-bin grub-efi-amd64-bin xorriso mtools \
-    ovmf clang lld openssl cmake ninja-build ruby pkg-config gperf
+    ovmf clang lld openssl cmake ninja-build ruby pkg-config gperf bison
 python3 -m pip install --user meson     # 1.4 or newer, for GLib
 ```
 
 | Needed for | Packages |
 |---|---|
 | the kernel and initrd | `gcc`, `make`, `python3` |
-| the libraries in the initrd (JavaScriptCore, GLib, fontconfig) | `cmake`, `ninja-build`, `ruby`, `pkg-config`, `gperf`, meson 1.4 or newer |
+| the libraries in the initrd (JavaScriptCore, GLib, fontconfig, libxkbcommon) | `cmake`, `ninja-build`, `ruby`, `pkg-config`, `gperf`, `bison`, meson 1.4 or newer |
 | discs (`iso`, `iso64`) | `grub-pc-bin`, `grub-efi-amd64-bin`, `xorriso`, `mtools` |
 | threadboot (`efi`, `stick`) | `clang`, `lld`, `mtools` |
 | running and testing | `qemu-system-x86`, `ovmf`, `openssl` |
-| optional tests and tools | Python `freetype-py` and `fonttools` (font tests), `Pillow` (screenshots), Node.js (JavaScript comparison tests), `libglib2.0-dev` and `libfontconfig-dev` (the GLib and fontconfig comparison tests), Python `h2` (the HTTP/2 server of the libsoup test) |
+| optional tests and tools | Python `freetype-py` and `fonttools` (font tests), `Pillow` (screenshots), Node.js (JavaScript comparison tests), `libglib2.0-dev` and `libfontconfig-dev` (the GLib and fontconfig comparison tests), Python `h2` (the HTTP/2 server of the libsoup test), Python `cryptography` (the WPE libraries' test) |
 
 A test that is missing an optional tool prints `SKIPPED` and the reason.
 
@@ -155,8 +174,9 @@ Variables:
 | `AUDIO=pa\|pipewire\|alsa` | attach an Intel HDA card to the `run` targets |
 | `T=a,b` / `J=n` | test groups to run / how many at once (`make test`) |
 
-`-j` works for all targets. Most of a clean build's time goes to musl
-and QuickJS.
+`-j` works for all targets. Most of a clean build's time - about twenty
+minutes on four cores - goes to the libraries for WebKit: JavaScriptCore,
+ICU, GLib, OpenSSL.
 
 ## Running in QEMU
 
@@ -169,7 +189,9 @@ make run-stick        # the USB image under OVMF, exactly as a PC boots it
 
 The serial console is on stdio. The kernel logs everything there, which
 makes it the first place to look when something goes wrong. Inside the
-system, `hardware` lists PCI devices and `disks` lists block devices.
+system, `devices` lists every device and what became of it (the Device
+Manager in Settings shows the same), `hardware` the PCI bus in detail and
+`disks` the block devices.
 
 ## Testing
 
@@ -181,7 +203,7 @@ make fuzz                   # parsers under ASan/UBSan on the host (GLib's
                             # need meson, libffi-dev and libpcre2-dev)
 ```
 
-The suite (`scripts/run_tests.py`) has more than 100 groups and over 1800
+The suite (`scripts/run_tests.py`) has 166 groups and thousands of
 assertions. Each group is one file, `scripts/tests/t_<group>.py`. It
 boots a real kernel in QEMU and checks the system from outside:
 
@@ -191,8 +213,10 @@ boots a real kernel in QEMU and checks the system from outside:
 - disk images read back with `mtools` and a GPT parser.
 - OVMF, which boots an installed disk or fails to.
 - independent implementations used for comparison: OpenSSL (ciphers,
-  TLS, signatures), FreeType (fonts), Node.js (JavaScript), glibc (libc
-  output).
+  TLS, signatures, through the openssl tool and Python's cryptography),
+  FreeType (fonts, and the ThreadOS mark), Pillow (pictures), the host's
+  GLib and fontconfig, Python's ElementTree and unicodedata, Node.js
+  (JavaScript), glibc (libc output).
 
 A full run takes 20–30 minutes on four cores with KVM.
 
@@ -233,6 +257,7 @@ fonts/           DejaVu subsets used by the kernel and programs
 scripts/         build helpers, release signing, test runner and tests
 tests/fuzz/      host-side fuzzing harnesses
 docs/            screenshots and the development journal
+art/             the ThreadOS mark (SVG), which the loading screen draws
 ```
 
 ## Maintenance
@@ -252,7 +277,8 @@ layout, keep its `#define`s as plain integers and update the helpers.
 
 ### Releases and updates
 
-`.github/workflows/release.yml` runs on every push to `main`:
+`.github/workflows/release.yml` runs when started by hand (Actions ->
+release -> Run workflow), not on every push:
 
 1. Builds with `VERSION=<workflow run number>`. The version is stored in
    the initrd as the file `version`.
@@ -311,7 +337,8 @@ what bringing one in involves.
   windows with shadows, dark and light themes, wallpapers, animations,
   notifications, search (Ctrl+Space), four virtual desktops, snapping
   and Alt+Tab. It runs at the panel's native resolution, with HiDPI
-  scaling.
+  scaling. It starts behind a loading screen of the ThreadOS mark and a
+  bar.
 - **Programs:**
   - file manager (folder tree, cut/copy/paste)
   - terminal (Tab completion, pipes)
@@ -327,8 +354,10 @@ what bringing one in involves.
   - storage: AHCI, NVMe and ATA
   - USB: xHCI, EHCI and UHCI host controllers; HID keyboard and mouse,
     mass storage, RNDIS Ethernet and Bluetooth HCI
-  - network cards: RTL8139 and e1000
-  - Intel HD Audio
+  - network cards: RTL8139, RTL8111/8168 and e1000, wherever they sit -
+    on the chipset's bus or behind a PCI Express port, as in a laptop
+  - Intel HD Audio: of a machine's controllers, the one with the speakers
+  - Wi-Fi: the Intel Wireless 3160 starts and scans
   - PS/2 keyboard and touchpad with wheel
   - ACPI, SMP
 - **Kernel:**
@@ -344,12 +373,20 @@ what bringing one in involves.
   - TLS 1.3 with X.509 validation
   - AES-GCM/CCM, ChaCha20-Poly1305, X25519, ECDSA, RSA, SHA-1/2
   - WPA2 key derivation
+- **WebKit, on its way:** JavaScriptCore runs, and what WPE's port of
+  WebKit is built on is built from source and tested on ThreadOS against
+  other implementations: GLib, libsoup, OpenSSL, ICU, FreeType,
+  fontconfig, HarfBuzz, libxml2, libpng, libjpeg-turbo, libwebp,
+  libgcrypt, libtasn1, libepoxy and libxkbcommon.
 
 ## Roadmap
 
-- Wi-Fi: a driver for a common laptop chip and an 802.11 layer. The WPA2
-  cryptography is already done.
-- Ethernet chips found in laptops (Realtek RTL8111/8168).
+- Wi-Fi: joining a network with the Intel 3160 (it scans already) and
+  an 802.11 layer. The WPA2 cryptography is already done.
+- WebKit itself (WebCore and WebKit2 through the WPE port), drawn by
+  Skia on the processor into a ThreadOS window.
+- Drivers for what laptops still list without one: the SD card reader,
+  the SMBus.
 - Images and external style sheets in the browser.
 - Removing the big kernel lock from drivers, the filesystem and swap.
 

@@ -29,7 +29,7 @@
 /* --- the menu bar ------------------------------------------------------ */
 #define BAR_H        24      /* its height */
 #define BAR_LOGO_X   10      /* the mark at its left end */
-#define BAR_LOGO_D   12      /* ... and how large it is */
+#define BAR_LOGO_D   14      /* ... and how large it is */
 #define BAR_NAME_X   30      /* the program in front, in bold */
 #define BAR_RIGHT    10      /* air at the right-hand end */
 #define BAR_ITEM_GAP 14      /* between the things on the right */
@@ -77,6 +77,7 @@
    a window's buttons at the right end of its title bar */
 #define TB_H         40      /* the taskbar's height */
 #define TB_SLOT      40      /* one button on it: Start, a program, a window */
+#define TB_LOGO_D    20      /* the mark on Start */
 #define TB_ICON      24      /* the picture in it */
 #define TB_SHOW_W    6       /* "show the desktop", the sliver at the right */
 #define TB_CLOCK_W   76      /* the time over the date */
@@ -140,6 +141,7 @@
 #define ASK_H        150
 #define ASK_R        14
 #define ASK_PAD      20
+#define ABOUT_LOGO_D 24      /* the mark on the About box's disc */
 #define ASK_TITLE_Y  40      /* the question's baseline, from the top */
 #define ASK_BODY_Y   66      /* what it will do */
 #define ASK_BTN_W    112

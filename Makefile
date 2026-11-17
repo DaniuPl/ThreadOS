@@ -109,7 +109,7 @@ CFLAGS64 := -m64 $(ARCH64) -std=gnu11 -ffreestanding -fno-stack-protector -fno-p
 LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.ld \
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
-SHARED64 := string serial printk locale bootsplash mb2 fbcon vga pic pit pmm heap initrd \
+SHARED64 := string serial printk locale bootsplash mark mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
@@ -690,7 +690,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
-               $(BUILD)/user64/update.elf
+               $(BUILD)/user64/update.elf $(BUILD)/user64/wpedeps.elf
 
 # --- C++, and litehtml ------------------------------------------------
 #
@@ -1200,6 +1200,190 @@ $(BUILD)/user64/souptest.elf: libc/tests/souptest.c $(LIBSOUP_A) $(GIONET_A) \
 	    $$($(LIBS64_PC):$(abspath $(LIBS64))/lib/gio/modules/pkgconfig \
 	       pkg-config --cflags --static --libs libsoup-3.0 gioopenssl openssl)
 
+# --- What WPE's port of WebKit needs besides ----------------------------
+# OptionsWPE.cmake asks for these whatever is switched off; each is built
+# from its release into BUILD/libs64 like the libraries above.
+
+# libwebp: WebP pictures, and the demuxer that takes animations apart.
+# Its SSE4.1 and AVX2 code is left out: ThreadOS is built for the first
+# x86-64 (ARCH64, scripts/checkisa.py), and SSE2's is there.
+WEBP_TAR := third_party/libwebp-1.6.0.tar.gz
+WEBP_A   := $(LIBS64)/lib/libwebp.a
+$(WEBP_A): $(WEBP_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/libwebp && mkdir -p $(BUILD)/libwebp
+	tar -xf $< -C $(BUILD)/libwebp --strip-components=1
+	cd $(BUILD)/libwebp && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    --disable-sse4.1 --disable-avx2 --disable-gl --disable-sdl \
+	    --disable-png --disable-jpeg --disable-tiff --disable-gif \
+	    --disable-wic --enable-libwebpmux --enable-libwebpdemux \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libwebp/sharpyuv install \
+	    > $(BUILD)/libwebp/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/libwebp/make.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libwebp/src install \
+	    >> $(BUILD)/libwebp/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/libwebp/make.log; exit 1; }
+
+# libtasn1: DER, for the keys Web Crypto imports
+TASN1_TAR := third_party/libtasn1-4.21.0.tar.gz
+TASN1_A   := $(LIBS64)/lib/libtasn1.a
+$(TASN1_A): $(TASN1_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/libtasn1 && mkdir -p $(BUILD)/libtasn1
+	tar -xf $< -C $(BUILD)/libtasn1 --strip-components=1
+	cd $(BUILD)/libtasn1 && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    --disable-doc --disable-valgrind-tests \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libtasn1/lib install \
+	    > $(BUILD)/libtasn1/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/libtasn1/make.log; exit 1; }
+
+# libgcrypt, and libgpg-error under it: Web Crypto's algorithms and the
+# digests WebCore takes. With threads - WebKit calls it from several -
+# and without its assembly and the AES-NI, SHA, PCLMUL and AVX paths:
+# the first x86-64 again (the C of each is there).
+GPGERR_TAR := third_party/libgpg-error-1.61.tar.bz2
+GPGERR_A   := $(LIBS64)/lib/libgpg-error.a
+$(GPGERR_A): $(GPGERR_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/libgpg-error && mkdir -p $(BUILD)/libgpg-error
+	tar -xf $< -C $(BUILD)/libgpg-error --strip-components=1
+	cd $(BUILD)/libgpg-error && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    --disable-doc --disable-tests --disable-languages --disable-nls \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libgpg-error/src install \
+	    > $(BUILD)/libgpg-error/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/libgpg-error/make.log; exit 1; }
+
+GCRYPT_TAR := third_party/libgcrypt-1.12.4.tar.bz2
+GCRYPT_A   := $(LIBS64)/lib/libgcrypt.a
+$(GCRYPT_A): $(GCRYPT_TAR) $(TOS_CC) $(GPGERR_A)
+	rm -rf $(BUILD)/libgcrypt && mkdir -p $(BUILD)/libgcrypt
+	tar -xf $< -C $(BUILD)/libgcrypt --strip-components=1
+	cd $(BUILD)/libgcrypt && ./configure --host=x86_64-pc-linux-musl \
+	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
+	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
+	    --disable-doc --disable-asm --disable-jent-support \
+	    --disable-aesni-support --disable-shaext-support \
+	    --disable-pclmul-support --disable-sse41-support \
+	    --disable-drng-support --disable-avx-support \
+	    --disable-avx2-support --disable-avx512-support \
+	    --disable-gfni-support --disable-padlock-support \
+	    --with-libgpg-error-prefix=$(abspath $(LIBS64)) \
+	    GPGRT_CONFIG=$(abspath $(LIBS64))/bin/gpgrt-config \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libgcrypt > $(BUILD)/libgcrypt/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/libgcrypt/make.log; exit 1; }
+	$(MAKE) -C $(BUILD)/libgcrypt/src install \
+	    > $(BUILD)/libgcrypt/install.log 2>&1 \
+	    || { tail -20 $(BUILD)/libgcrypt/install.log; exit 1; }
+
+# libepoxy: OpenGL and EGL entry points, looked up at run time. ThreadOS
+# has no GPU and WebKit draws with Skia on the processor, but WebKit's
+# code is written against these names; with no libEGL to find, epoxy
+# finds nothing, and the code that would use it is not reached. It
+# builds against the Khronos headers (third_party/khronos), put beside
+# the libraries.
+EPOXY_TAR := third_party/libepoxy-1.5.10.tar.xz
+EPOXY_A   := $(LIBS64)/lib/libepoxy.a
+KHRONOS_H := $(wildcard third_party/khronos/*/*.h)
+$(EPOXY_A): $(EPOXY_TAR) $(MESON_CROSS) $(TOS_CC) $(KHRONOS_H)
+	mkdir -p $(LIBS64)/include
+	cp -r third_party/khronos/EGL third_party/khronos/KHR $(LIBS64)/include/
+	rm -rf $(BUILD)/libepoxy && mkdir -p $(BUILD)/libepoxy
+	tar -xf $< -C $(BUILD)/libepoxy --strip-components=1
+	cd $(BUILD)/libepoxy && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Degl=yes -Dglx=no -Dx11=false \
+	    -Dtests=false -Ddocs=false \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(BUILD)/libepoxy/build install \
+	    > $(BUILD)/libepoxy/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(BUILD)/libepoxy/ninja.log | head -60; exit 1; }
+
+# libxkbcommon: keymaps, which WPE's platform layer speaks in. Its
+# parser is made by the host's bison; no X11, Wayland or registry, and
+# no keymap data on ThreadOS - the platform gives its own keymap. The
+# library alone is built: its tests link ICU when they find it, which is
+# C++ and needs a runtime they are not given.
+XKB_TAR := third_party/libxkbcommon-1.13.1.tar.gz
+XKB_A   := $(LIBS64)/lib/libxkbcommon.a
+$(XKB_A): $(XKB_TAR) $(MESON_CROSS) $(TOS_CC)
+	rm -rf $(BUILD)/libxkbcommon && mkdir -p $(BUILD)/libxkbcommon
+	tar -xf $< -C $(BUILD)/libxkbcommon --strip-components=1
+	cd $(BUILD)/libxkbcommon && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Denable-x11=false -Denable-wayland=false \
+	    -Denable-xkbregistry=false -Denable-docs=false -Denable-tools=false \
+	    -Denable-bash-completion=false -Dxkb-config-root=/usr/share/X11/xkb \
+	    > setup.log 2>&1 || { tail -40 setup.log; exit 1; }
+	ninja -C $(BUILD)/libxkbcommon/build libxkbcommon.a \
+	    > $(BUILD)/libxkbcommon/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(BUILD)/libxkbcommon/ninja.log | head -60; exit 1; }
+	meson install -C $(BUILD)/libxkbcommon/build --no-rebuild --tags devel \
+	    > $(BUILD)/libxkbcommon/install.log 2>&1 \
+	    || { tail -20 $(BUILD)/libxkbcommon/install.log; exit 1; }
+
+# ICU itself (built for WebKit above) as pkg-config knows it: icu-uc and
+# icu-i18n, pointing at BUILD/icu/root, as ICU's own build would write
+ICU_VER := $(patsubst third_party/icu/icu4c-%-sources.tgz,%,$(ICU_TGZ))
+ICU_PC  := $(LIBS64)/lib/pkgconfig/icu-uc.pc
+$(ICU_PC): $(ICU_STAMP)
+	mkdir -p $(dir $@)
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: icu-uc\nDescription: International Components for Unicode: Common and Data libraries\nVersion: %s\nLibs: -L$${libdir} -licuuc -licudata\nCflags: -I$${includedir}\n' \
+	    $(abspath $(ICU_ROOT)) $(ICU_VER) > $@
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: icu-i18n\nDescription: International Components for Unicode: Stream and I18N support\nVersion: %s\nRequires: icu-uc\nLibs: -L$${libdir} -licui18n\nCflags: -I$${includedir}\n' \
+	    $(abspath $(ICU_ROOT)) $(ICU_VER) > $(dir $@)icu-i18n.pc
+
+# HarfBuzz as a library (third_party/harfbuzz, the copy the browser's
+# shaping is compiled from): built with the libraries' FreeType, and its
+# ICU part on its own, as harfbuzz and harfbuzz-icu, with the
+# hb-features.h meson would write and pkg-config files for both
+HB64_A     := $(LIBS64)/lib/libharfbuzz.a
+HB64_ICU_A := $(LIBS64)/lib/libharfbuzz-icu.a
+HB64_VER   := $(shell sed -n 's/^\#define HB_VERSION_STRING "\(.*\)"/\1/p' $(HB_DIR)/src/hb-version.h)
+$(HB64_A): $(wildcard $(HB_DIR)/src/*.cc $(HB_DIR)/src/*.hh $(HB_DIR)/src/*.h) \
+           $(HB_DIR)/src/hb-features.h.in $(LIBS64_FT_A) $(ICU_PC) $(LIBC64)
+	mkdir -p $(BUILD)/hb64 $(LIBS64)/include/harfbuzz $(LIBS64)/lib/pkgconfig
+	$(CXX) $(CXX64_FLAGS) -w -fno-rtti -DHAVE_FREETYPE=1 \
+	    -I$(LIBS64)/include/freetype2 -c $(HB_DIR)/src/harfbuzz.cc \
+	    -o $(BUILD)/hb64/harfbuzz.o
+	$(CXX) $(CXX64_FLAGS) -w -fno-rtti -DHAVE_ICU=1 -I$(ICU_ROOT)/include \
+	    -c $(HB_DIR)/src/hb-icu.cc -o $(BUILD)/hb64/hb-icu.o
+	rm -f $(HB64_A) $(HB64_ICU_A)
+	ar rcs $(HB64_A) $(BUILD)/hb64/harfbuzz.o
+	ar rcs $(HB64_ICU_A) $(BUILD)/hb64/hb-icu.o
+	cp $(HB_DIR)/src/hb*.h $(LIBS64)/include/harfbuzz/
+	sed -e 's/^#mesondefine \(HB_HAS_FREETYPE\|HB_HAS_ICU\)$$/#define \1 1/' \
+	    -e 's/^#mesondefine \(.*\)$$/\/* #undef \1 *\//' \
+	    $(HB_DIR)/src/hb-features.h.in > $(LIBS64)/include/harfbuzz/hb-features.h
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: harfbuzz\nDescription: HarfBuzz text shaping library\nVersion: %s\nRequires.private: freetype2\nLibs: -L$${libdir} -lharfbuzz\nCflags: -I$${includedir}/harfbuzz\n' \
+	    $(abspath $(LIBS64)) $(HB64_VER) > $(LIBS64)/lib/pkgconfig/harfbuzz.pc
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nincludedir=$${prefix}/include\n\nName: harfbuzz-icu\nDescription: HarfBuzz text shaping library ICU integration\nVersion: %s\nRequires: harfbuzz icu-uc\nLibs: -L$${libdir} -lharfbuzz-icu\nCflags: -I$${includedir}/harfbuzz\n' \
+	    $(abspath $(LIBS64)) $(HB64_VER) > $(LIBS64)/lib/pkgconfig/harfbuzz-icu.pc
+
+libs64: $(WEBP_A) $(TASN1_A) $(GCRYPT_A) $(EPOXY_A) $(XKB_A) $(HB64_A)
+
+# wpedeps: each of them on ThreadOS, held by t_wpedeps to other
+# implementations of the same - hashlib and OpenSSL, Pillow's libwebp,
+# the definitions of a keymap and of a font, Python's unicodedata.
+# HarfBuzz and ICU are C++: the C++ runtime is linked in after them.
+WPEDEPS_PC := libgcrypt libtasn1 libwebp libwebpdemux xkbcommon harfbuzz-icu epoxy
+$(BUILD)/user64/wpedeps.elf: libc/tests/wpedeps.c $(WEBP_A) $(TASN1_A) \
+                             $(GCRYPT_A) $(EPOXY_A) $(XKB_A) $(HB64_A) \
+                             $(BUILD)/libc64/cxxrt.o $(TOS_CC) | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -c -o $(BUILD)/libc64/wpedeps.o $< \
+	    $$($(LIBS64_PC) pkg-config --cflags $(WPEDEPS_PC))
+	$(TOS_CC) -s -Wl,--gc-sections -o $@ $(BUILD)/libc64/wpedeps.o \
+	    $(BUILD)/libc64/cxxrt.o \
+	    $$($(LIBS64_PC) pkg-config --static --libs $(WPEDEPS_PC)) $(LIBSTDCXX)
+
 # --- WebKit: JavaScriptCore -------------------------------------------
 # WPE WebKit's release (third_party/README.md), built by its own CMake
 # through apps/webkit/threados.cmake: the JSCOnly port, the C loop
@@ -1399,6 +1583,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    xmltest=$(BUILD)/user64/xmltest.elf \
 	    fctest=$(BUILD)/user64/fctest.elf \
 	    souptest=$(BUILD)/user64/souptest.elf \
+	    wpedeps=$(BUILD)/user64/wpedeps.elf \
 	    sqlite3=$(BUILD)/user64/sqlite3.elf \
 	    nettest=$(BUILD)/user64/nettest.elf \
 	    randtest=$(BUILD)/user64/randtest.elf \
@@ -1423,6 +1608,16 @@ $(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) $(USERCTL_HE
 
 $(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) $(USERCTL_HEADER) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
+
+# The system's mark (kernel/mark.c): art/threados-mark.svg as coverage,
+# cut to the mark and 256 pixels on its longer side, which the kernel
+# scales to whatever size it is shown at
+LOGO_HDR := $(BUILD)/gen/logo.h
+$(LOGO_HDR): art/threados-mark.svg scripts/mklogo.py
+	@mkdir -p $(BUILD)/gen
+	python3 scripts/mklogo.py $< $@ 256
+$(BUILD)/64/mark.o: $(LOGO_HDR)
+$(BUILD)/64/mark.o: CFLAGS64 += -I$(BUILD)/gen
 
 # --- ACPICA -------------------------------------------------------------
 # The interpreter of the firmware's AML (Linux's and the BSDs'): the

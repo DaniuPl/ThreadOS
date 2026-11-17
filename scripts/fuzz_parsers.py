@@ -13,9 +13,11 @@ WebKit's processes, with its own fuzzers: key files, GVariant in text
 and binary, URIs, dates, bookmark files (its XML), UTF-8, D-Bus
 messages, DNS replies and network addresses; and what a web page's
 pictures, documents and fonts go through: libpng, libjpeg-turbo and
-libxml2 with their own fuzzers, FreeType with ours; and what the web
-engine's network process reads from servers: OpenSSL's certificates,
-ASN.1, PEM and both ends of a TLS handshake with its own fuzzers,
+libxml2 with their own fuzzers, FreeType with ours, and what WPE's
+WebKit adds - libwebp and HarfBuzz with ours, libtasn1's DER with its
+own; and what the web engine's network process reads from servers:
+OpenSSL's certificates, ASN.1, PEM and both ends of a TLS handshake
+with its own fuzzers,
 HTTP/2 frames through nghttp2 with ours, the public suffix list
 (libpsl) and libsoup's HTTP headers, cookies, dates, data: URIs and
 content sniffing with theirs. In the kernel an error does
@@ -474,6 +476,85 @@ def media_seeds(corpus):
                           for n, t in docs],
         "libxml2-xpath": xpath, "libxml2-uri": uri,
         "freetype": fonts,
+    }
+
+
+# What WPE's port of WebKit adds that reads what a page sends (Makefile,
+# 'What WPE's port of WebKit needs'): libwebp with ours - its own are
+# written for FuzzTest - libtasn1's own two for DER, and ours for
+# HarfBuzz, whose kept src/ has none
+
+def build_wpe(workdir):
+    """libwebp (its SIMD as ThreadOS has it: SSE2, no SSE4.1 or AVX2),
+    libtasn1 and HarfBuzz built for the host under the sanitizers from
+    the sources the Makefile names, each fuzzer linked with
+    tests/fuzz/onefile.c"""
+    cflags = "CFLAGS=" + " ".join(SAN)
+    driver = os.path.join(FUZZ, "onefile.c")
+    binaries = {}
+
+    webp = unpack("WEBP_TAR", workdir, "libwebp")
+    must(["./configure", "--disable-shared", "--enable-static",
+          "--disable-sse4.1", "--disable-avx2", "--disable-gl", "--disable-sdl",
+          "--disable-png", "--disable-jpeg", "--disable-tiff", "--disable-gif",
+          "--disable-wic", "--enable-libwebpdemux", cflags], "libwebp", cwd=webp)
+    must(["make", "-j8", "-C", "sharpyuv"], "libwebp", cwd=webp)
+    must(["make", "-j8", "-C", "src"], "libwebp", cwd=webp)
+    b = os.path.join(workdir, "fz-wpe-webp")
+    must(["gcc", *SAN, "-w", "-I", os.path.join(webp, "src"), "-o", b,
+          os.path.join(FUZZ, "webp_harness.c"), driver,
+          os.path.join(webp, "src", "demux", ".libs", "libwebpdemux.a"),
+          os.path.join(webp, "src", ".libs", "libwebp.a"),
+          os.path.join(webp, "sharpyuv", ".libs", "libsharpyuv.a"),
+          "-lm", "-lpthread"], "the libwebp harness")
+    binaries["wpe-webp"] = b
+
+    asn = unpack("TASN1_TAR", workdir, "libtasn1")
+    must(["./configure", "--disable-shared", "--enable-static", "--disable-doc",
+          cflags], "libtasn1", cwd=asn)
+    must(["make", "-j8", "-C", "lib"], "libtasn1", cwd=asn)
+    for name, src in (("wpe-tasn1-pkix", "libtasn1_pkix_der_fuzzer.c"),
+                      ("wpe-tasn1-der", "asn1_decode_simple_der_fuzzer.c")):
+        b = os.path.join(workdir, "fz-" + name)
+        must(["gcc", *SAN, "-w", "-I", asn,
+              "-I", os.path.join(asn, "lib", "includes"),
+              "-I", os.path.join(asn, "fuzz"), "-o", b,
+              os.path.join(asn, "fuzz", src), driver,
+              os.path.join(asn, "lib", ".libs", "libtasn1.a")],
+             "libtasn1's " + src)
+        binaries[name] = b
+
+    hb = os.path.join(ROOT, "third_party", "harfbuzz", "src")
+    obj = os.path.join(workdir, "harfbuzz.o")
+    must(["g++", *SAN, "-w", "-fno-exceptions", "-fno-rtti", "-c",
+          os.path.join(hb, "harfbuzz.cc"), "-o", obj], "HarfBuzz")
+    b = os.path.join(workdir, "fz-wpe-harfbuzz")
+    objs = []
+    for src in (os.path.join(FUZZ, "harfbuzz_harness.c"), driver):
+        objs.append(os.path.join(workdir, os.path.basename(src) + ".hb.o"))
+        must(["gcc", *SAN, "-w", "-I", hb, "-c", src, "-o", objs[-1]],
+             "the HarfBuzz harness")
+    must(["g++", *SAN, "-o", b, *objs, obj], "the HarfBuzz harness")
+    binaries["wpe-harfbuzz"] = b
+    return binaries
+
+
+def wpe_seeds(corpus):
+    """The WebP pictures above; certificates in DER, the form the
+    PKIX fuzzer takes them in; and fonts: the system's, and t_wpedeps's
+    own with its ligatures, kerning, small capitals and marks"""
+    sys.path.insert(0, os.path.join(ROOT, "scripts", "tests"))
+    import t_wpedeps                       # noqa: E402
+    fonts = [open(os.path.join(ROOT, "fonts", f), "rb").read()
+             for f in sorted(os.listdir(os.path.join(ROOT, "fonts")))
+             if f.endswith(".ttf")]
+    fonts.append(t_wpedeps.make_font())
+    return {
+        "wpe-webp": list(corpus.get("webp", [])),
+        "wpe-tasn1-pkix": list(corpus["x509"]),
+        "wpe-tasn1-der": [b"\x03\x05\x00" + b"wpe!", b"\x04\x03abc",
+                          b"\x04\x81\x80" + bytes(128)] + list(corpus["x509"])[:4],
+        "wpe-harfbuzz": fonts,
     }
 
 
@@ -1254,6 +1335,7 @@ def main():
         gbinaries, gfuzz = build_glib(workdir)
         mbinaries.update(gbinaries)
         mbinaries.update(build_media(workdir))
+        mbinaries.update(build_wpe(workdir))
         nbinaries, ndirs = build_net(workdir)
         mbinaries.update(nbinaries)
         hbinary = build_hid(workdir)
@@ -1269,6 +1351,7 @@ def main():
             mbedtls_seeds(workdir)
         corpus.update(glib_seeds(gfuzz))
         corpus.update(media_seeds(corpus))
+        corpus.update(wpe_seeds(corpus))
         corpus.update(net_seeds(workdir, corpus, ndirs))
         print("the harness is built, cases per parser: %d" % CASES)
         wrong = fdt_layouts(fbinary, workdir)

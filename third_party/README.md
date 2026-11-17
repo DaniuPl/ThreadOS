@@ -33,6 +33,13 @@ as code of our own around it (`apps/js`).
 | `libpsl-0.23.1.tar.gz` | libpsl, the public suffix list: which domains a cookie may be set for | 0.23.1 | MIT (`COPYING` in the archive); the list itself MPL-2.0 (the header of `list/public_suffix_list.dat`) | https://github.com/rockdaboot/libpsl/releases/download/0.23.1/libpsl-0.23.1.tar.gz (SHA-256 `8fbb03054556498ba9c4cc48fcaa36a4483748c6504a65bdb9ba348f555b0e56`, computed on download; the release signs it instead) |
 | `libsoup-3.8.1.tar.xz` | libsoup, an HTTP client library: HTTP/1.1 and HTTP/2, cookies, redirects, content decoding - the web engine's network process | 3.8.1 | LGPL-2.0-or-later (`COPYING` in the archive) | https://download.gnome.org/sources/libsoup/3.8/libsoup-3.8.1.tar.xz (SHA-256 `5013dcef9136f6f861e6529fca578af50c1f52a39219027fb5aff652d1371a04`, as GNOME's libsoup-3.8.1.sha256sum lists it) |
 | `glib-networking-2.90.1.tar.xz` | glib-networking, TLS for GIO (through OpenSSL) and proxies from the environment | 2.90.1 | LGPL-2.1-or-later with an exception for linking OpenSSL (`COPYING` and `LICENSE_EXCEPTION` in the archive) | https://download.gnome.org/sources/glib-networking/2.90/glib-networking-2.90.1.tar.xz (SHA-256 `ea95636590098355a05e3027579dba1a9a950b05e456b2488ea03d82e4b6c18a`, as GNOME's glib-networking-2.90.1.sha256sum lists it) |
+| `libwebp-1.6.0.tar.gz` | libwebp, WebP pictures: the decoder, the demuxer and animation, and the encoder WebKit does not use but the library carries | 1.6.0 | BSD-3-Clause (`COPYING`, with Google's patent grant in `PATENTS`) | https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz (SHA-256 `e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564`, computed on download) |
+| `libtasn1-4.21.0.tar.gz` | libtasn1, ASN.1 and DER: the keys Web Crypto imports and exports | 4.21.0 | LGPL-2.1-or-later for the library (`COPYING.LESSERv2`; its tools, GPL-3.0, are not built) | https://ftp.gnu.org/gnu/libtasn1/libtasn1-4.21.0.tar.gz (SHA-256 `1d8a444a223cc5464240777346e125de51d8e6abf0b8bac742ac84609167dc87`, computed on download) |
+| `libgpg-error-1.61.tar.bz2` | libgpg-error, the error codes and the small runtime under libgcrypt | 1.61 | LGPL-2.1-or-later (`COPYING.LIB`) | https://gnupg.org/ftp/gcrypt/libgpg-error/libgpg-error-1.61.tar.bz2 (SHA-256 `7a85413f2bc354f4f8aa832b718af122e48965e9e0eb9012ee659c13c6385c93`, computed on download) |
+| `libgcrypt-1.12.4.tar.bz2` | libgcrypt, the algorithms of Web Crypto: digests, HMAC, AES, PBKDF2 and HKDF, RSA, ECDSA, ECDH, X25519, Ed25519 | 1.12.4 | LGPL-2.1-or-later (`COPYING.LIB`; `LICENSES` lists what parts came under) | https://gnupg.org/ftp/gcrypt/libgcrypt/libgcrypt-1.12.4.tar.bz2 (SHA-256 `d77f68f48879510e79a2f65977ccc68981781ea0923e5bdffac2a193ea3d660e`, computed on download) |
+| `libepoxy-1.5.10.tar.xz` | libepoxy, OpenGL and EGL entry points looked up at run time | 1.5.10 | MIT (`COPYING`) | https://download.gnome.org/sources/libepoxy/1.5/libepoxy-1.5.10.tar.xz (SHA-256 `072cda4b59dd098bba8c2363a6247299db1fa89411dc221c8b81b8ee8192e623`, as GNOME's libepoxy-1.5.10.sha256sum lists it) |
+| `libxkbcommon-1.13.1.tar.gz` | libxkbcommon, keymaps: keys to keysyms and text, the way WPE's platform layer speaks of a keyboard | 1.13.1 | MIT-style (`LICENSE`) | http://deb.debian.org/debian/pool/main/libx/libxkbcommon/libxkbcommon_1.13.1.orig.tar.gz - Debian's copy of the archive of upstream's tag xkbcommon-1.13.1 (commit 920ea79); upstream publishes no tarball of its own (SHA-256 `6802621c81b674e468d2346a8f6d9a48ba5c154b72434a1c9e1a3eaa29f36fb5`, as Debian's libxkbcommon_1.13.1-1.dsc lists it) |
+| `khronos/` | The Khronos Group's EGL headers (`EGL/egl.h`, `eglext.h`, `eglplatform.h`, `KHR/khrplatform.h`), which libepoxy builds against | EGL-Registry commit 00de6df1cc738a7a9e138680273363cde5345123 | Apache-2.0 for the EGL headers (their SPDX lines); `khrplatform.h` under its own MIT-style terms (in the file) | https://github.com/KhronosGroup/EGL-Registry, `api/` at that commit (SHA-256 `a7c24c828bf2e1a4dfe6511b4f4812b948a285eb54787074015896976d4da076` egl.h, `210064270c19924a15452287a005d59a8af8b4414d22957c04b80649c1466d33` eglext.h, `25b5391655effcf363a38fa00c3154f356a3eab3d35dc067847875513cf1e441` eglplatform.h, `7b1e01aaa7ad8f6fc34b5c7bdf79ebf5189bb09e2c4d2e79fc5d350623d11e83` khrplatform.h) |
 | `iwlwifi/` | Firmware for the Intel Wireless 3160 Wi-Fi card (`iwlwifi-3160-17.ucode`), a binary the card runs itself | 17.bfb58538.0 | Intel's firmware licence: redistribution in binary form only, unmodified (`LICENCE.iwlwifi_firmware`) | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git (`intel/iwlwifi/`) |
 
 Trimmed, not modified:
@@ -173,3 +180,29 @@ Trimmed, not modified:
   it makes first is the empty file `libc/threados-cc` writes for any
   `-shared` link, and its objects are position-independent
   (`b_staticpic`), as meson insists for what goes into a module.
+- **libwebp**: the archive is kept intact and built static by its
+  configure: the decoder, libwebpmux and libwebpdemux, sharpyuv; without
+  the SSE4.1 and AVX2 code (ThreadOS is built for the first x86-64, and
+  SSE2's is there), the OpenGL, SDL and other picture formats' tools,
+  and the example programs.
+- **libtasn1**: the archive is kept intact and only its library is
+  built (`lib/`), static, without the documentation and the tools.
+- **libgpg-error** and **libgcrypt**: the archives are kept intact and
+  built static, libgcrypt against libgpg-error with threads; without
+  assembly and without the code for AES-NI, SHA, PCLMUL, SSE4.1, AVX,
+  AVX2, AVX-512, GFNI, PadLock and RDRAND (the first x86-64 again: the C
+  of each is there), the jitter entropy source, the documentation, the
+  tests and the languages.
+- **libepoxy**: the archive is kept intact and built static by its meson
+  with EGL and without GLX, X11, the tests and the documentation,
+  against the Khronos headers in `khronos/`. ThreadOS has no libEGL for
+  it to find: it says so (`epoxy_has_egl()`), and WebKit draws with
+  Skia on the processor.
+- **libxkbcommon**: the archive is kept intact and built static by its
+  meson without X11, Wayland, the registry, the tools and the
+  documentation; its keymap parser is made by the host's bison.
+- **HarfBuzz** (above) is built a second time as libraries for WebKit
+  (`BUILD/libs64`): `harfbuzz` with the libraries' FreeType and
+  `harfbuzz-icu` with ICU, with the `hb-features.h` and pkg-config
+  files meson would write; ICU gets `icu-uc.pc` and `icu-i18n.pc` the
+  same way.

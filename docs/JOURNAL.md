@@ -8848,3 +8848,129 @@ works and is checked by `make test`.
       that slow is a task of its own. And t_swap64's machine grows to
       128 MiB: with the 54 MB initrd its 64 MiB no longer held the
       programs, and 'run swaptest64' found nothing to run.)
+
+- [x] **Devices where a laptop has them: behind bridges, and the second
+      sound controller** (kernel/pci.c, kernel/include/pci.h, kernel/hda.c,
+      scripts/tests/t_pcitree.py)
+      The Device Manager on a 2014 Lenovo showed the RTL8168 Ethernet and
+      the Intel 3160 as "not in use" and the sound as "failed". The
+      finders the drivers look their devices up with walked bus 0 alone,
+      and on a laptop everything on a PCI Express lane - Ethernet, Wi-Fi,
+      an NVMe disk - sits on a bus of its own behind a root port; QEMU
+      puts every device on bus 0, so nothing had ever failed. They now
+      walk the buses through the bridges, bus 0 whole first and then the
+      buses behind its bridges in their order (breadth first: where a
+      board has two of a kind, the chipset's own is still found first),
+      each bus once. And the HD Audio driver took the first controller
+      it found - on that laptop the graphics chip's, 00:03.0, with
+      nothing on it but HDMI - failed there and never tried the one with
+      the speakers. It now tries every controller, and every codec on
+      one, until a codec has an output; one passed over is held in reset
+      with its rings stopped before the next is given the same memory,
+      and the Device Manager shows it "not in use", with why.
+      t_pcitree builds that machine: an e1000 on bus 1 behind a
+      PCI-to-PCI bridge, two HD Audio controllers on bus 0, the first
+      with no codec. The card is found, DHCP gives it its address and
+      the host answers a ping through it; a 440 Hz tone of 200 ms comes
+      out of the second controller into QEMU's file; 'devices' lists
+      every device query-pci reports, bus 1 included, the e1000 working,
+      the second controller working and the first not in use because no
+      codec answered. The old kernel shows that machine exactly as the
+      laptop's Device Manager did: the e1000 "not in use", the first
+      controller failed, the second not in use, no network, no sound.
+
+- [x] **The loading screen: the mark and a bar; the mark on the bar**
+      (kernel/bootsplash.c, kernel/mark.c, kernel/desktop.c,
+      kernel/include/look.h, art/threados-mark.svg, scripts/mklogo.py,
+      Makefile, scripts/tests/t_bootsplash.py, t_winstyle.py)
+      The screen between the loader and the desktop or the installer was
+      the 8x8 bitmap font blown up three times on flat navy - the one
+      screen that looked like none of the system. It is now drawn the
+      way a Mac starts: black, ThreadOS's mark (a cog with threads
+      running out of it, the SVG in art/) large and white in the middle,
+      and under it a thin bar with round ends that fills step by step.
+      No words; the steps' names stay on the serial port. The kernel
+      reads no SVG: scripts/mklogo.py parses the paths and polygons
+      (M L H V C S Z), flattens the curves and fills them by the
+      non-zero rule into coverage 256 pixels across, cut to the mark, 16
+      rows of exact spans to a pixel; kernel/mark.c scales it to any size
+      by the area each pixel covers, edge pixels of the mask weighed by
+      how much of them lies inside. The same mark is now the menu bar's
+      (14 pixels, was a ring with a thread through it), the Windows-style
+      taskbar's Start (20) and the About box's (24). It needs nothing from the initrd, so it is all there
+      from the first moment, and it is drawn whatever the loader's
+      framebuffer is - QEMU's BIOS mode is three bytes a pixel.
+      t_bootsplash watches it from QEMU's start, cheaply while the boot
+      runs, and then holds the mark's whole box, pixel by pixel, to the
+      same SVG read by fontTools' own parser and drawn by FreeType (a
+      glyph of a font whose pixel is 64 units, so the box's edges fall
+      on pixels): worst 27 of 255, mean 0.49, at 96 pixels. The top of the screen is
+      black in every picture - no log line, no clock in the corner; the
+      bar is seen at more than one length, each one of the steps
+      kmain64.c names, each later one longer, and its empty part is
+      white at 56 over black. The old screen fails from the first check.
+      t_winstyle looks for the mark on Start as a good part of its box
+      in the accent colour: the new mark is open in its middle, where the
+      old one had a dot the test read.
+
+- [x] **What WPE's port of WebKit needs, in libs64** (Makefile,
+      third_party/libwebp-1.6.0.tar.gz, libtasn1-4.21.0.tar.gz,
+      libgpg-error-1.61.tar.bz2, libgcrypt-1.12.4.tar.bz2,
+      libepoxy-1.5.10.tar.xz, libxkbcommon-1.13.1.tar.gz, khronos/,
+      third_party/README.md, libc/tests/wpedeps.c,
+      scripts/tests/t_wpedeps.py, tests/fuzz/webp_harness.c,
+      tests/fuzz/harfbuzz_harness.c, scripts/fuzz_parsers.py, CI)
+      OptionsWPE.cmake asks for these whatever is switched off: libwebp,
+      libtasn1, libgcrypt with libgpg-error, libepoxy, libxkbcommon, and
+      HarfBuzz as libraries with its ICU part. Each is built from its
+      release into BUILD/libs64 by its own configure or meson, without
+      the code for instructions past the first x86-64 (SSE4.1, AVX, AES-
+      NI and the rest: ThreadOS is built for the first one, and each has
+      its C); libepoxy against the Khronos EGL headers, with no libEGL to
+      find on ThreadOS; HarfBuzz from the tree's copy as harfbuzz and
+      harfbuzz-icu, and ICU gets pkg-config files.
+      wpedeps asks each of them 208 questions on ThreadOS, and t_wpedeps
+      works every answer out with something else: libgcrypt's digests
+      (block edges, a megabyte, eight threads at once), HMAC, AES-CBC,
+      -CTR across a carry, -GCM with a wrong tag refused, key wrap,
+      PBKDF2 and HKDF (RFC 6070's and 5869's vectors), ECDSA on three
+      curves both ways and a key made on ThreadOS, ECDH, X25519 and
+      Ed25519 (RFC 7748's and 8032's vectors), RSA PKCS#1 v1.5 and PSS -
+      against hashlib and the cryptography package (OpenSSL); libtasn1
+      taking apart RSA, EC and Ed25519 public keys OpenSSL wrote, and
+      writing one byte for byte as OpenSSL does; libwebp's pixels and an
+      animation's frames and times against Pillow's libwebp; a keymap's
+      every key - Shift, Caps Lock where the type takes it and where the
+      Lock transformation applies, AltGr's levels, Control - against the
+      keymap's own definitions and the X11 tables; HarfBuzz shaping a
+      font fontTools makes here, with its own ligatures, kerning, small
+      capitals, a mark on its base and Hebrew, glyph for glyph against
+      what the features say, with HarfBuzz's Unicode tables and with
+      ICU's; Unicode properties through ICU and HarfBuzz against
+      unicodedata; epoxy's extension lookup, and no EGL said, not a
+      crash. The questions were first run against the host's own builds
+      of the same libraries: they agree everywhere but the versions.
+      make fuzz builds libwebp and HarfBuzz under the sanitizers with
+      harnesses of ours (libwebp's own are written for FuzzTest; the
+      HarfBuzz kept here has none) and libtasn1 with its own two DER
+      fuzzers. The build needs bison now (libxkbcommon's parser), the
+      test the cryptography package.
+
+- [x] **A release when one is asked for** (.github/workflows/release.yml,
+      README.md)
+      Every push to main built a whole release on GitHub's machines -
+      the system, its disc and stick image - and published it to every
+      installed system's 'update'. Most pushes are not something to hand
+      out, and the minutes add up: the workflow now runs only when
+      started (Actions, release, Run workflow). The run number still
+      only grows, so signed updates stay in order. The README's pictures
+      are all taken on a 1920x1080 panel now (scripts/screenshots.py,
+      BUILD as its argument), with the loading screen and the Device
+      Manager among them; ptest's make_iso64 can ask GRUB for a mode.
+      The loading screen's picture is taken as a stick starts on a UEFI
+      machine, threadboot setting the panel's own mode: GRUB under
+      QEMU's BIOS cannot set 1920x1080. libxkbcommon builds its library
+      alone now: with ICU's pkg-config file beside it, its tests linked
+      ICU, which is C++, without a C++ runtime. And scripts/checkisa.py
+      lets wpedeps' one XGETBV through: libgcrypt asks CPUID for OSXSAVE
+      before it.
