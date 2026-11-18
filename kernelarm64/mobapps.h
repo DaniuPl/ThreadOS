@@ -59,7 +59,7 @@ void mob_status_bar(uint32_t colour);
 void mob_title(const char *s, uint32_t colour);
 void mob_pill(uint32_t colour);
 int mob_glass_backdrop(void);
-void mob_glass_card(int x, int y, int w, int h, int r);
+int mob_glass_card(int x, int y, int w, int h, int r);
 void mob_centred(int font, int px, int cx, int baseline, const char *s,
                  uint32_t colour);
 void mob_set_airplane(int on);

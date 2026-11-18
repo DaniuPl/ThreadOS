@@ -42,6 +42,7 @@ against FreeType, colours pixel by pixel - and the serial port:
 """
 
 import decimal
+import math
 import os
 import re
 import subprocess
@@ -551,12 +552,36 @@ def matte(c):
     return tuple((255 * 60 + v * (255 - 60) + 127) // 255 for v in c)
 
 
-def glass_rim(under, j):
+DARK_SURFACE = (0x1C, 0x1C, 0x1E)           # the dark look's, which glass
+                                            # is tinted towards
+
+
+def frosted(col):
+    """mobile.c's frost over a panel's patch whose rows are each one
+    colour (the Ocean's slope, x alone does not change it), 'col' its
+    rows top to bottom: across, a row stays as it is; down, the average
+    of FROST_R rows each way - fewer at the patch's ends - twice"""
+    R = m("FROST_R")
+    for _ in range(2):
+        n = len(col)
+        col = [tuple(sum(c[ch] for c in col[max(0, j - R):min(n, j + R + 1)])
+                     // (min(n, j + R + 1) - max(0, j - R)) for ch in range(3))
+               for j in range(n)]
+    return col
+
+
+def tint(c, surface=DARK_SURFACE):
+    """mobile.c's tint: FROST_TINT/256 of the way to the surface"""
+    t = m("FROST_TINT")
+    return tuple((a * (256 - t) + b * t) >> 8 for a, b in zip(c, surface))
+
+
+def glass_rim(col, j):
     """mobile.c's glass_on, j panel rows below the top edge of a panel
-    and away from its corners: 'under(row)' is what lies under it, row
-    j + the lens's shift of the red, green or blue - each its own -
-    lifted, and lightened by the edge's bevel, which faces up towards
-    the light"""
+    and away from its corners: 'col' is what lies under it, row by row,
+    frosted; row j + the lens's shift of the red, green or blue - each
+    its own - lifted, tinted, and lightened by the edge's bevel, which
+    faces up towards the light"""
     lens = m("GLASS_LENS") * K
     depth = lens - j
     shift = m("GLASS_BEND") * depth * depth // lens
@@ -565,9 +590,14 @@ def glass_rim(under, j):
     bevel = face * m("GLASS_BEVEL") * depth * depth // (256 * lens * lens)
     out = []
     for ch in range(3):
-        v = lift(under(j + shift * (16 + (ch - 1) * spread) // 16))[ch]
-        out.append(min(255, v + bevel))
+        row = min(j + shift * (16 + (ch - 1) * spread) // 16, len(col) - 1)
+        out.append(min(255, tint(lift(col[row]))[ch] + bevel))
     return tuple(out)
+
+
+def dimmed_by_glass(c):
+    """mobile.c's backdrop_dim: GLASS_DIM/256 of each colour"""
+    return tuple(v * m("GLASS_DIM") >> 8 for v in c)
 
 
 def glass(app):
@@ -599,19 +629,23 @@ def glass(app):
     page(app, "look")
     q.tap(180, row_y(LOOK["glass"]))
     app.said("[settings] theme Liquid Glass")
-    # Settings itself turns to glass: its page the wallpaper blurred as
-    # under the shade, its card glass over that - here, by a row with
-    # nothing on its right, the backdrop lifted
+    # Settings itself turns to glass: its page the wallpaper, dimmed and
+    # sharp, its card frosted glass over that, as Weft's toolbar is over
+    # a page - here, by a row with nothing on its right, the wallpaper
+    # under the card blurred, lifted and tinted
     time.sleep(1)
     w, h, at = app.screen()
-    wall = (w, h, lambda px, py: wallpaper_px(1, py, h))
     below = (180 * K, 560 * K)
     card = ((LW - 60) * K, row_y(LOOK["matte"]) * K)
     got_below, got_card = at(*below), at(*card)
-    want_below = backdrop(wall, *below)
-    want_card = lift(backdrop(wall, *card))
-    check(f"with Liquid Glass Settings' page is the wallpaper blurred and "
-          f"darkened ({got_below}, {want_below} worked out), its card glass "
+    want_below = dimmed_by_glass(wallpaper_px(1, below[1], h))
+    rows = len(LOOK)                        # the card's rows
+    top = a("SET_CARD_Y") * K
+    col = frosted([dimmed_by_glass(wallpaper_px(1, top + j, h))
+                   for j in range(rows * a("SET_ROW_H") * K)])
+    want_card = tint(lift(col[card[1] - top]))
+    check(f"with Liquid Glass Settings' page is the wallpaper dimmed "
+          f"({got_below}, {want_below} worked out), its card frosted glass "
           f"over it ({got_card}, {want_card} worked out)",
           got_below == want_below and got_card == want_card)
     app.home()
@@ -619,26 +653,26 @@ def glass(app):
     w, h, at = home
     bent = at(x, dy * K + j)
     want_flat = matte(wallpaper_px(1, dy * K + j, h))
-    want_bent = glass_rim(lambda row: wallpaper_px(1, dy * K + row, h), j)
+    want_bent = glass_rim(frosted([wallpaper_px(1, dy * K + row, h)
+                                   for row in range(dh * K)]), j)
     check(f"matte: the dock is white over the wallpaper ({flat}, "
-          f"{want_flat} worked out); Liquid Glass: the wallpaper bent from "
-          f"further in, each colour by its own amount, brighter and lit "
-          f"by the bevel ({bent}, {want_bent} worked out)",
+          f"{want_flat} worked out); Liquid Glass: the wallpaper frosted, "
+          f"bent from further in, each colour by its own amount, brighter, "
+          f"tinted and lit by the bevel ({bent}, {want_bent} worked out)",
           flat == want_flat and bent == want_bent)
     # The rim's glint: a panel pixel inside the rim where the top-left
     # corner faces the light square on, and the same at the top-right
     # corner, which faces across it, and on the straight top edge. The
     # Ocean's red is near 0 there: only the glint makes it light.
     pr = m("MOB_DOCK_R") * K
-    c = 42                                  # isqrt(2 * 42 * 42) = pr - 1
-    assert pr == 60
+    c = next(c for c in range(pr) if math.isqrt(2 * c * c) == pr - 1)
     tl = at(dx * K + pr - c, dy * K + pr - c)
     tr = at((dx + dw) * K - 1 - pr + c, dy * K + pr - c)
     top = at((dx + dw // 2) * K, dy * K + 1)
     check(f"the rim glints where the corner facing the light turns "
           f"({tl}), not at the corner across from it ({tr}) nor along "
           f"the top edge ({top})",
-          tl[0] >= 200 and tr[0] < 150 and top[0] < 150)
+          tl[0] >= tr[0] + 40 and tl[0] >= top[0] + 40)
     # The shade over glass: what is under it blurred
     q.touch([(180, 8), (180, 150), (180, 300)])
     app.said("[mobile] shade (opened)")

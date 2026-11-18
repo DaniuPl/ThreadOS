@@ -767,6 +767,7 @@ int calc_tap(int x, int y)
 
 #define SET_CARD_Y     96       /* the rows' card */
 #define SET_ROW_H      52
+#define SET_GLASS_R    24       /* the card's corners, in Liquid Glass */
 #define SET_PX         16
 #define SET_SWITCH_W   50
 #define SET_SWITCH_H   30
@@ -987,17 +988,26 @@ void settings_draw(void)
     int rows = 0, notes_seen = 0;
     for (int i = 0; i < pg->count; i++)
         rows += pg->rows[i].kind != R_NOTE;
-    if (glass)
-        mob_glass_card(12, SET_CARD_Y, lw - 24, rows * SET_ROW_H, 14);
-    else
+    uint32_t below = t.muted;        /* under the card, on the page */
+    if (glass) {
+        /* what is written on the glass is dark where it came out light,
+           as on Weft's toolbar */
+        if (mob_glass_card(12, SET_CARD_Y, lw - 24, rows * SET_ROW_H,
+                           SET_GLASS_R) > 150) {
+            t.fg = 0x1C1C1E;
+            t.muted = 0x48484E;
+            t.line = 0x9A9AA2;
+        }
+    } else {
         gfx_rrect(12, SET_CARD_Y, lw - 24, rows * SET_ROW_H, 14, t.card,
                   255);
+    }
     for (int i = 0, k = 0; i < pg->count; i++) {
         const struct srow *r = &pg->rows[i];
         if (r->kind == R_NOTE) {
             /* explanations below the card */
             int y = SET_CARD_Y + rows * SET_ROW_H + 26 + notes_seen++ * 22;
-            ui_font_text(UI_SANS, 13, 22, y, r->label, t.muted);
+            ui_font_text(UI_SANS, 13, 22, y, r->label, below);
             continue;
         }
         int top = SET_CARD_Y + k * SET_ROW_H;

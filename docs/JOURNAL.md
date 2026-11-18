@@ -10277,3 +10277,23 @@ works and is checked by `make test`.
       the glass tinted the new look's way - and the star, the list and
       the star again; t_arm64tablet measures its band left of the
       toolbar, which can cover its foot however far a finger scrolls.
+- [x] **The phone's own glass the same as Weft's toolbar**
+      (kernelarm64/mobile.c, mobapps.c, scripts/tests/t_arm64apps.py)
+      The dock, the shade's tiles, banners, the lock screen's
+      notifications and Settings' cards were clear glass, a lens only;
+      next to Weft's toolbar they looked like outlines. They are now
+      the same frosted glass - what is under them blurred, lifted and
+      tinted towards the look's surface - with room to copy a panel the
+      size of the screen, so that a card the height of a page is
+      frosted too. The dock and the shade's tiles are pills, as the
+      toolbar is; Settings' cards lie on the wallpaper dimmed and sharp
+      (GLASS_DIM), the shade's backdrop is blurred more lightly
+      (BLUR_BLOCK 6), so that the glass is seen against what is around
+      it, and what is written on a Settings card is dark where the card
+      came out light. The rim is a hairline (GLASS_RING), its glint and
+      the bevel softer. t_arm64apps works out the dock's rim and
+      Settings' card with the frost - two passes of FROST_R rows each
+      way, fewer at the patch's ends - the lift and the tint, the page
+      around the card as the wallpaper dimmed, and the glint brighter
+      at the corner facing the light than across from it or along the
+      top edge.

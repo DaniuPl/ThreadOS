@@ -106,7 +106,7 @@
                                    width, centred */
 #define MOB_DOCK_UP    112      /* the dock's top, from the bottom */
 #define MOB_DOCK_H     80
-#define MOB_DOCK_R     30
+#define MOB_DOCK_R     40       /* a pill, as Weft's toolbar */
 #define MOB_DOCK_TILE  56
 #define MOB_SHADE_TIME_Y 70     /* the shade: the time's baseline */
 #define MOB_SHADE_TILE_Y 116    /* its quick settings: two rows of two */
@@ -657,14 +657,15 @@ static void icon(int k, int x, int y)
 #define GLASS_BEND     2        /* ... showing what is up to twice that
                                    further in, at the very rim */
 #define GLASS_SPREAD   3        /* red bends 3/16 less, blue 3/16 more */
-#define GLASS_BEVEL    40       /* the edge lit or shaded by this much */
-#define GLASS_GLINT    230      /* the rim's light where it faces the light */
-#define GLASS_BACK     140      /* ... and where it faces away */
+#define GLASS_BEVEL    24       /* the edge lit or shaded by this much */
+#define GLASS_GLINT    150      /* the rim's light where it faces the light */
+#define GLASS_BACK     80       /* ... and where it faces away */
+#define GLASS_RING     36       /* the rim all round, of 255: a hairline, not
+                                   a frame drawn round the glass */
 #define MOB_MATTE_DARK  0x1C1C1E    /* a program's matte panel: this tint */
 #define MOB_MATTE_LIGHT 0xF8F8FA
 #define MOB_MATTE_A     200         /* ... this much of it */
 #define GLASS_LIFT     16       /* brighter by 16/256 of what is left */
-#define GLASS_MAX      (720 * 260)      /* panel pixels copied at most */
 
 static uint32_t *glass_px;
 
@@ -721,7 +722,7 @@ static uint32_t lift(uint32_t c)
    and the rim lit. 'shadow' (the screen only) lays the panel's shadow
    under it once what it covers has been taken. */
 static struct spinlock glass_lock = SPINLOCK_FREE;
-static uint32_t *glass_tmp;
+static uint32_t *glass_tmp, glass_cap;
 
 /* A program's glass is lightly frosted, over an app's content: what
    is under it blurred - a box blur each way, twice, which is close to a
@@ -796,17 +797,20 @@ static void glass_on(const struct gfx_surface *t, int x, int y, int w, int h,
 {
     int k = t->k ? t->k : 16;
     int px = x * k / 16, py = y * k / 16, pw = w * k / 16, ph = h * k / 16;
-    int pr = r * k / 16, lens = GLASS_LENS * k / 16, rim = 2 * k / 16;
-    if (!glass_px)
-        glass_px = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
-            (GLASS_MAX * 4 + PAGE_SIZE - 1) / PAGE_SIZE);
-    /* A panel too big to copy - a card the height of a page - is lit,
-       shaded and glinting all the same, only not bent: what is under it
-       is read in place. (Under those, an app's blurred backdrop, a bend
-       would not show anyway.) A program's frosted glass needs the copy. */
-    int whole = glass_px && pw * ph <= GLASS_MAX;
-    if (px < 0 || py < 0 || px + pw > t->w || py + ph > t->h ||
-        (!whole && frosted)) {
+    int pr = r * k / 16, lens = GLASS_LENS * k / 16, rim = 3 * k / 32;
+    /* Room for what is under a panel the size of the screen - a card
+       the height of a page - and as much again to blur it in */
+    if (!glass_px) {
+        glass_cap = (uint32_t)video_pw() * (uint32_t)video_ph();
+        uint32_t pages = (glass_cap * 4 + PAGE_SIZE - 1) / PAGE_SIZE;
+        glass_px = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(pages);
+        glass_tmp = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(pages);
+    }
+    /* Without that room the panel is lit, shaded and glinting all the
+       same, only neither bent nor blurred: what is under it is read in
+       place */
+    int whole = glass_px && (uint32_t)(pw * ph) <= glass_cap;
+    if (px < 0 || py < 0 || px + pw > t->w || py + ph > t->h) {
         gfx_rrect16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, WHITE, 60);
         return;
     }
@@ -817,10 +821,7 @@ static void glass_on(const struct gfx_surface *t, int x, int y, int w, int h,
                (size_t)pw * 4);
     if (shadow && whole)
         gfx_shadow(x, y, w, h, r, 10, 60, 3);
-    if (frosted && !glass_tmp)
-        glass_tmp = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
-            (GLASS_MAX * 4 + PAGE_SIZE - 1) / PAGE_SIZE);
-    if (frosted && glass_tmp)
+    if (frosted && whole && glass_tmp)
         frost(pw, ph);
     uint32_t surface = mob_prefs.dark ? 0x1C1C1E : 0xFFFFFF;
     for (int j = 0; j < ph; j++) {
@@ -885,15 +886,19 @@ static void glass_on(const struct gfx_surface *t, int x, int y, int w, int h,
     /* the rim itself, lit all round alike and smooth - the glint above
        follows its curve; a streak of light drawn along one edge read as
        a line across the glass rather than as its edge */
-    gfx_rring16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, 20, WHITE, 70);
+    gfx_rring16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, 16, WHITE,
+                  GLASS_RING);
 }
 
+/* The shell's panels are the same glass as programs' (Weft's toolbar):
+   what is under them blurred a little, as a frosted pane over the
+   wallpaper or the home screen, which shows through sharp around it */
 static void liquid_glass(int x, int y, int w, int h, int r)
 {
     struct gfx_surface scr = { video_prow32(0), video_pw(), video_ph(),
                                video_pw(), video_k() };
     irqflags_t f = spin_lock_irq(&glass_lock);
-    glass_on(&scr, x, y, w, h, r, 1, 0);
+    glass_on(&scr, x, y, w, h, r, 1, 1);
     spin_unlock_irq(&glass_lock, f);
 }
 
@@ -950,8 +955,10 @@ static void panel(int x, int y, int w, int h, int r, uint32_t c, int a)
 /* What lies under the pulled-down shade, blurred - Liquid Glass's
    backdrop: the screen averaged in blocks of BLUR_BLOCK panel pixels,
    those smoothed, and drawn back between them; darkened a little so
-   that white reads on it */
-#define BLUR_BLOCK 8
+   that white reads on it. Blurred enough that what was written there
+   does not fight the shade's own words, and no more: its shapes and
+   colours still show, for the glass over them to bend */
+#define BLUR_BLOCK 6
 static uint32_t *blur_small, *blur_tmp;
 
 static void backdrop_blur(void)
@@ -1028,6 +1035,26 @@ static void backdrop_blur(void)
                 out |= (uint32_t)(v * 3 / 4) << sh8;   /* darkened */
             }
             row[x] = out;
+        }
+    }
+}
+
+/* What lies under Settings' cards with Liquid Glass: the wallpaper,
+   dimmed so that white reads on it - not blurred, so that the glass
+   over it is seen as glass, its own blur and the bend at its rim
+   against the sharp picture around it, as Weft's toolbar is over the
+   page */
+#define GLASS_DIM 140           /* of 256 */
+static void backdrop_dim(void)
+{
+    int w = video_pw(), h = video_ph();
+    for (int y = 0; y < h; y++) {
+        uint32_t *row = video_prow32(y);
+        for (int x = 0; x < w; x++) {
+            uint32_t c = row[x];
+            row[x] = (((c >> 16 & 0xFF) * GLASS_DIM >> 8) << 16) |
+                     (((c >> 8 & 0xFF) * GLASS_DIM >> 8) << 8) |
+                     ((c & 0xFF) * GLASS_DIM >> 8);
         }
     }
 }
@@ -1113,13 +1140,17 @@ int mob_glass_backdrop(void)
     if (!glassy())
         return 0;
     with_background();
-    backdrop_blur();
+    backdrop_dim();
     return 1;
 }
 
-void mob_glass_card(int x, int y, int w, int h, int r)
+/* ... and how light the card came out, for what is written on it */
+int mob_glass_card(int x, int y, int w, int h, int r)
 {
     liquid_glass(x, y, w, h, r);
+    struct gfx_surface scr = { video_prow32(0), video_pw(), video_ph(),
+                               video_pw(), video_k() };
+    return lightness(&scr, x + r / 2, y + 4, w - r, h - 8);
 }
 
 static void draw_lock(void)
@@ -1380,14 +1411,16 @@ static void draw_shade(void)
         }
         if (!state)
             state = on ? "On" : "Off";
+        /* pills, as the dock and Weft's toolbar */
+        int tr = MOB_SHADE_TILE_H / 2;
         if (on)
-            gfx_rrect(x, y, MOB_SHADE_TILE_W, MOB_SHADE_TILE_H, 18,
+            gfx_rrect(x, y, MOB_SHADE_TILE_W, MOB_SHADE_TILE_H, tr,
                       mob_accent(), 240);
         else
-            panel(x, y, MOB_SHADE_TILE_W, MOB_SHADE_TILE_H, 18, 0x2C2C2E,
+            panel(x, y, MOB_SHADE_TILE_W, MOB_SHADE_TILE_H, tr, 0x2C2C2E,
                   240);
-        ui_font_text(UI_BOLD, 15, x + 16, y + 28, shade_tiles[i], WHITE);
-        ui_font_text(UI_SANS, 13, x + 16, y + 48, state,
+        ui_font_text(UI_BOLD, 15, x + 24, y + 28, shade_tiles[i], WHITE);
+        ui_font_text(UI_SANS, 13, x + 24, y + 48, state,
                      on ? WHITE : MUTED);
     }
 
