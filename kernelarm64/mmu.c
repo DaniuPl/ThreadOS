@@ -122,7 +122,13 @@ void mmu_switch_on(void)
 #define AP_EL0_RW   (1UL << 6)
 #define AP_EL0_RO   (3UL << 6)
 #define NG          (1UL << 11)
+#define AP_MASK     (3UL << 6)
 #define ADDR_MASK   0x0000FFFFFFFFF000UL
+/* Bits the hardware leaves to software (55-58): a page of shared memory,
+   which fork shares rather than copies, and a page shared after fork
+   until the first write, read-only until then */
+#define SW_SHARED   (1UL << 55)
+#define SW_COW      (1UL << 56)
 
 uint64_t mmu_kernel_ttbr0(void)
 {
@@ -186,13 +192,28 @@ int uspace_map(uint64_t *t, uint64_t va, uint64_t pa, int flags)
     uint64_t d = (pa & ADDR_MASK) | DESC_PAGE | ATTRIDX(ATTR_NORMAL) |
                  SH_INNER | AF | NG | PXN |
                  ((flags & UMAP_WRITE) ? AP_EL0_RW : AP_EL0_RO) |
-                 ((flags & UMAP_EXEC) && !(flags & UMAP_WRITE) ? 0 : UXN);
+                 ((flags & UMAP_EXEC) && !(flags & UMAP_WRITE) ? 0 : UXN) |
+                 ((flags & UMAP_SHARED) ? SW_SHARED : 0);
     *pte = d;
     /* Out to where the table walk reads it - on every core: a page made
        for one thread of a program is there for all of them. A missing
        entry is never kept in a TLB, so nothing has to be forgotten. */
     __asm__ volatile("dsb ishst; isb" ::: "memory");
     return 0;
+}
+
+/* Every core forgets every program's pages: a fork turned thousands of
+   one program's pages read-only, and its other threads may hold them
+   writable in any core's TLB */
+static void tlb_forget_all(void)
+{
+    __asm__ volatile("dsb ishst; tlbi vmalle1is; dsb ish; isb" ::: "memory");
+}
+
+static void tlb_forget(uint64_t va)
+{
+    __asm__ volatile("dsb ishst; tlbi vaae1is, %0; dsb ish; isb"
+                     :: "r"((va >> 12) & 0xFFFFFFFFFFFUL) : "memory");
 }
 
 uint64_t uspace_unmap(uint64_t *t, uint64_t va)
@@ -206,8 +227,7 @@ uint64_t uspace_unmap(uint64_t *t, uint64_t va)
        of them - before the frame can be anybody else's. No address-space
        numbers yet, so by address alone, for every program: another one's
        entry for the same address is only fetched again. */
-    __asm__ volatile("dsb ishst; tlbi vaae1is, %0; dsb ish; isb"
-                     :: "r"((va >> 12) & 0xFFFFFFFFFFFUL) : "memory");
+    tlb_forget(va);
     return pa;
 }
 
@@ -217,9 +237,74 @@ uint64_t uspace_lookup(uint64_t *t, uint64_t va, int *flags)
     if (!pte || !(*pte & 1))
         return 0;
     if (flags)
-        *flags = ((*pte & (3UL << 6)) == AP_EL0_RW ? UMAP_WRITE : 0) |
-                 (*pte & UXN ? 0 : UMAP_EXEC);
+        *flags = ((*pte & AP_MASK) == AP_EL0_RW ? UMAP_WRITE : 0) |
+                 (*pte & UXN ? 0 : UMAP_EXEC) |
+                 (*pte & SW_SHARED ? UMAP_SHARED : 0) |
+                 (*pte & SW_COW ? UMAP_COW : 0);
     return (*pte & ADDR_MASK) | (va & 0xFFF);
+}
+
+int uspace_fork(uint64_t *from, uint64_t *to)
+{
+    int rc = 0;
+    for (unsigned i1 = USER_L1_FIRST; i1 < ENTRIES && !rc; i1++) {
+        if (!(from[i1] & 1))
+            continue;
+        uint64_t *l2 = (uint64_t *)(uintptr_t)(from[i1] & ADDR_MASK);
+        for (unsigned i2 = 0; i2 < ENTRIES && !rc; i2++) {
+            if (!(l2[i2] & 1))
+                continue;
+            uint64_t *l3 = (uint64_t *)(uintptr_t)(l2[i2] & ADDR_MASK);
+            for (unsigned i3 = 0; i3 < ENTRIES; i3++) {
+                uint64_t e = l3[i3];
+                if (!(e & 1))
+                    continue;
+                uint64_t va = ((uint64_t)i1 << 30) | ((uint64_t)i2 << 21) |
+                              ((uint64_t)i3 << 12);
+                uint64_t *pte = pte_of(to, va, 1);
+                if (!pte) {
+                    rc = -1;
+                    break;
+                }
+                /* Writable and not shared: from now on neither may
+                   write it until it has a copy of its own */
+                if (!(e & SW_SHARED) &&
+                    ((e & AP_MASK) == AP_EL0_RW || (e & SW_COW))) {
+                    e = (e & ~AP_MASK) | AP_EL0_RO | SW_COW;
+                    l3[i3] = e;
+                }
+                pmm_frame_ref((uint32_t)(e & ADDR_MASK));
+                *pte = e;
+            }
+        }
+    }
+    tlb_forget_all();
+    return rc;
+}
+
+int uspace_cow(uint64_t *t, uint64_t va)
+{
+    uint64_t *pte = pte_of(t, va, 0);
+    if (!pte || !(*pte & 1) || !(*pte & SW_COW))
+        return 0;
+    uint64_t e = *pte;
+    uint32_t old = (uint32_t)(e & ADDR_MASK);
+    if (pmm_frame_refs(old) == 1) {
+        /* The other side has let go of it already: it is ours */
+        *pte = (e & ~(AP_MASK | SW_COW)) | AP_EL0_RW;
+    } else {
+        uint32_t fresh = pmm_alloc_frame();
+        if (!fresh)
+            return -1;
+        uint64_t *src = (uint64_t *)(uintptr_t)old;
+        uint64_t *dst = (uint64_t *)(uintptr_t)fresh;
+        for (int i = 0; i < 512; i++)
+            dst[i] = src[i];
+        *pte = (e & ~(AP_MASK | SW_COW | ADDR_MASK)) | fresh | AP_EL0_RW;
+        pmm_free_frame(old);
+    }
+    tlb_forget(va);
+    return 1;
 }
 
 /* Every page of the program, every table, then the table itself. Only

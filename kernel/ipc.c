@@ -1,8 +1,8 @@
-/* Unix socket pairs and shared memory with descriptors (ipc64.h)
+/* Unix socket pairs and shared memory with descriptors (include/ipc.h)
  *
  * A socket pair is two ends, each with a queue of messages waiting to
  * be read there. A message is bytes and, with them, copies of
- * descriptors: each holds what it stands for (task64.c's hold) from
+ * descriptors: each holds what it stands for (a descriptor's hold) from
  * the moment it is sent until it is put into the reader's table, so a
  * pipe or a memfd travelling through a socket stays alive on the way
  * even when the sender closes its own number at once. SOCK_SEQPACKET
@@ -13,7 +13,7 @@
  * Waiting is sleeping, not polling: a reader with nothing to read, a
  * writer whose peer's queue is full and a poll with nothing ready file
  * themselves on the ends they wait for and sleep until a change there
- * wakes them (task64_block and task64_wake, as the futexes do). The
+ * wakes them (ipc_block and ipc_wake, as the futexes do). The
  * pipes' ten-millisecond naps would have cost a page of WebKit a few
  * seconds in messages alone.
  *
@@ -21,29 +21,30 @@
  * for a picture is megabytes, and contiguous megabytes are what a
  * machine that has been running a while does not have. Mapping one
  * puts its frames into the mapping area, each with one more owner, as
- * pages that fork shares rather than copies (PG_FILE); unmapping takes
+ * pages that fork shares rather than copies; unmapping takes
  * the owner back. The memfd itself holds one more, so the memory lives
  * while either a descriptor or a mapping does.
  *
  * A pipe is a pair too, a stream used one way: its read end only
- * reads and its write end only writes (pipe64.c), and so it sleeps,
+ * reads and its write end only writes, and so it sleeps,
  * polls and holds a quarter of a megabyte like a socket.
  *
  * Everything here is under one lock. User memory is never touched
  * while holding it - a page fault there would need the disk - so the
  * bytes cross into a kernel buffer first, and out of one after.
+ *
+ * Both kernels build this file - the PC's and the ARM64 one - and each
+ * gives it what it needs of a kernel, by the same names: descriptors,
+ * sleeping and waking, the program's memory (include/ipchost.h).
  */
 
 #include <stddef.h>
-#include "ipc64.h"
-#include "elf64.h"
-#include "task64.h"
-#include "paging64.h"
-#include "proc64.h"
-#include "../kernel/include/heap.h"
-#include "../kernel/include/pmm.h"
-#include "../kernel/include/spinlock.h"
-#include "../kernel/include/string.h"
+#include "include/ipc.h"
+#include "include/ipchost.h"
+#include "include/heap.h"
+#include "include/pmm.h"
+#include "include/spinlock.h"
+#include "include/string.h"
 
 #define ENDS       1024              /* 512 pairs: sockets and pipes */
 #define QUEUE_MAX  (256 * 1024)      /* bytes waiting at one end */
@@ -68,7 +69,7 @@ struct end {
     int shut_rd, shut_wr;
     struct umsg *head, *tail;
     uint32_t queued;                 /* bytes waiting here */
-    struct task64 *waiting[WAITERS];
+    struct ipc_task *waiting[WAITERS];
 };
 
 struct mfd {
@@ -84,7 +85,7 @@ static struct spinlock lock = SPINLOCK_FREE;
 
 /* --- waiting ----------------------------------------------------------- */
 
-static int add_waiter(struct end *e, struct task64 *t)
+static int add_waiter(struct end *e, struct ipc_task *t)
 {
     for (int i = 0; i < WAITERS; i++)
         if (e->waiting[i] == t)
@@ -97,7 +98,7 @@ static int add_waiter(struct end *e, struct task64 *t)
     return 0;
 }
 
-static void del_waiter(struct end *e, struct task64 *t)
+static void del_waiter(struct end *e, struct ipc_task *t)
 {
     for (int i = 0; i < WAITERS; i++)
         if (e->waiting[i] == t)
@@ -108,7 +109,7 @@ static void wake_all(struct end *e)
 {
     for (int i = 0; i < WAITERS; i++)
         if (e->waiting[i])
-            task64_wake(e->waiting[i]);
+            ipc_wake(e->waiting[i]);
 }
 
 /* Entered with the lock held (and 'flags' from taking it); sleeps until
@@ -118,13 +119,13 @@ static void wake_all(struct end *e)
 static void sleep_on(struct end **es, int n, irqflags_t flags,
                      uint32_t ticks)
 {
-    struct task64 *me = task64_self();
+    struct ipc_task *me = ipc_self();
     int filed = 1;
     for (int i = 0; i < n; i++)
         filed &= add_waiter(es[i], me);
-    task64_block_prepare();
+    ipc_block_prepare();
     spin_unlock_irq(&lock, flags);
-    task64_block(filed ? ticks : 1);
+    ipc_block(filed ? ticks : 1);
     flags = spin_lock_irq(&lock);
     for (int i = 0; i < n; i++)
         del_waiter(es[i], me);
@@ -138,7 +139,7 @@ static void sleep_on(struct end **es, int n, irqflags_t flags,
 static void msg_free(struct umsg *m)
 {
     for (int i = 0; i < m->nfds; i++)
-        task64_fd_drop(&m->fds[i]);
+        ipc_fd_drop(&m->fds[i]);
     kfree(m);
 }
 
@@ -147,13 +148,13 @@ static void msg_free(struct umsg *m)
    write (IPC_SEND), both to be polled and waited on */
 static int end_for(int fd, int op)
 {
-    int kind = task64_fd_kind(fd);
+    int kind = ipc_fd_kind(fd);
     if (kind != FDK_USOCK && kind != FDK_POTOK_R && kind != FDK_POTOK_W)
         return -1;
     if ((kind == FDK_POTOK_R && (op == IPC_SEND || op == IPC_SHUTDOWN)) ||
         (kind == FDK_POTOK_W && (op == IPC_RECV || op == IPC_SHUTDOWN)))
         return -1;
-    int e = task64_fd_slot(fd);
+    int e = ipc_fd_slot(fd);
     return e >= 0 && e < ENDS ? e : -1;
 }
 
@@ -174,7 +175,7 @@ static struct umsg *msg_make(const void *buf, uint32_t len, const int *fdn,
     if (len)
         memcpy(m->data, buf, len);
     for (int i = 0; i < nfds; i++) {
-        if (task64_fd_copy(fdn[i], &m->fds[m->nfds]) < 0) {
+        if (ipc_fd_copy(fdn[i], &m->fds[m->nfds]) < 0) {
             msg_free(m);
             *err = -IPC_EBADF;
             return 0;
@@ -223,7 +224,7 @@ static long send_msg(int me, struct umsg *m, int dontwait)
             return -IPC_EAGAIN;
         }
         sleep_on(&p, 1, flags, 0);
-        if (task64_signal_pending()) {
+        if (ipc_interrupted()) {
             msg_free(m);
             return -IPC_EINTR;
         }
@@ -304,9 +305,9 @@ static long recv_msg(int me, void *buf, uint32_t len, int *fdn, int maxfds,
                 kfree(tmp);
             }
             for (int i = 0; i < ngot; i++) {
-                int fd = i < maxfds ? task64_fd_install(&got[i]) : -1;
+                int fd = i < maxfds ? ipc_fd_install(&got[i]) : -1;
                 if (i >= maxfds)
-                    task64_fd_drop(&got[i]);
+                    ipc_fd_drop(&got[i]);
                 if (fd < 0)
                     (*lost)++;
                 else
@@ -323,7 +324,7 @@ static long recv_msg(int me, void *buf, uint32_t len, int *fdn, int maxfds,
             return -IPC_EAGAIN;
         }
         sleep_on(&e, 1, flags, 0);
-        if (task64_signal_pending())
+        if (ipc_interrupted())
             return -IPC_EINTR;
     }
 }
@@ -578,7 +579,7 @@ static long memfd_new(void)
     spin_unlock_irq(&lock, flags);
     if (m < 0)
         return -IPC_ENOMEM;
-    int fd = task64_fd_new(FDK_MEMFD, m);
+    int fd = ipc_fd_new(FDK_MEMFD, m);
     if (fd < 0) {
         memfd64_unref(m);
         return -IPC_EMFILE;
@@ -589,12 +590,12 @@ static long memfd_new(void)
 /* The memfd's pages from 'off' at a fresh address of the mapping area */
 static long memfd_map(int fd, uint64_t off, uint64_t len)
 {
-    if (task64_fd_kind(fd) != FDK_MEMFD || (off & 4095) || !len)
+    if (ipc_fd_kind(fd) != FDK_MEMFD || (off & 4095) || !len)
         return -IPC_EINVAL;
-    int m = task64_fd_slot(fd);
+    int m = ipc_fd_slot(fd);
     uint64_t pages = (len + 4095) / 4096;
     uint64_t first = off / 4096;
-    uint64_t addr = proc64_mmap(pages * 4096);
+    uint64_t addr = ipc_map_area(pages * 4096);
     if (!addr)
         return -IPC_ENOMEM;
     for (uint64_t i = 0; i < pages; i++) {
@@ -605,12 +606,11 @@ static long memfd_map(int fd, uint64_t off, uint64_t len)
             pmm_frame_ref(frame);
         }
         spin_unlock_irq(&lock, flags);
-        if (!frame || paging64_map(addr + i * 4096, frame,
-                                   PG_USER | PG_WRITE | PG_FILE | PG_NX) < 0) {
+        if (!frame || ipc_map_page(addr + i * 4096, frame) < 0) {
             if (frame)
                 pmm_free_frame(frame);
             for (uint64_t k = 0; k < i; k++) {
-                uint64_t f = paging64_unmap(addr + k * 4096);
+                uint64_t f = ipc_unmap_page(addr + k * 4096);
                 if (f)
                     pmm_free_frame((uint32_t)f);
             }
@@ -623,11 +623,11 @@ static long memfd_map(int fd, uint64_t off, uint64_t len)
 /* munmap of a memfd's pages: each loses this mapping as an owner */
 static long memfd_unmap(uint64_t addr, uint64_t len)
 {
-    if ((addr & 4095) || addr < USER64_MMAP_BASE || len > USER64_MMAP_MAX ||
-        addr > USER64_MMAP_MAX - len)
+    if ((addr & 4095) || addr < IPC_MAP_BASE || len > IPC_MAP_MAX ||
+        addr > IPC_MAP_MAX - len)
         return -IPC_EINVAL;
     for (uint64_t va = addr; va < addr + len; va += 4096) {
-        uint64_t f = paging64_unmap(va);
+        uint64_t f = ipc_unmap_page(va);
         if (f)
             pmm_free_frame((uint32_t)f);
     }
@@ -675,16 +675,16 @@ static long pair(int type, uint64_t sv)
 {
     if (type != 1 && type != 5)
         return -IPC_EINVAL;
-    if (!paging64_user_writable(sv, 2 * sizeof(int)))
+    if (!ipc_user_writable(sv, 2 * sizeof(int)))
         return -IPC_EINVAL;
     int a, b;
     if (new_pair(type, &a, &b) < 0)
         return -IPC_ENOMEM;
-    int fa = task64_fd_new(FDK_USOCK, a);
-    int fb = fa >= 0 ? task64_fd_new(FDK_USOCK, b) : -1;
+    int fa = ipc_fd_new(FDK_USOCK, a);
+    int fb = fa >= 0 ? ipc_fd_new(FDK_USOCK, b) : -1;
     if (fb < 0) {
         if (fa >= 0)
-            task64_fd_close(fa);
+            ipc_fd_close(fa);
         else
             usock64_unref(a);
         usock64_unref(b);
@@ -701,7 +701,7 @@ static long io_call(int op, int fd, uint64_t iop)
     int me = end_for(fd, op);
     if (me < 0)
         return -IPC_EBADF;
-    if (!paging64_user_writable(iop, sizeof(struct ipc_io)))
+    if (!ipc_user_writable(iop, sizeof(struct ipc_io)))
         return -IPC_EINVAL;
     struct ipc_io *uio = (struct ipc_io *)(uintptr_t)iop;
     struct ipc_io io = *uio;
@@ -710,8 +710,8 @@ static long io_call(int op, int fd, uint64_t iop)
     if (io.nfds == (uint32_t)-1)
         return -IPC_EINVAL;
     if (io.nfds && !(op == IPC_SEND
-                     ? paging64_user_range(io.fds, io.nfds * sizeof(int))
-                     : paging64_user_writable(io.fds, io.nfds * sizeof(int))))
+                     ? ipc_user_readable(io.fds, io.nfds * sizeof(int))
+                     : ipc_user_writable(io.fds, io.nfds * sizeof(int))))
         return -IPC_EINVAL;
     int fdn[IPC_FDS_MAX];
     if (op == IPC_SEND) {
@@ -720,7 +720,7 @@ static long io_call(int op, int fd, uint64_t iop)
                 return -IPC_EMSGSIZE;
             io.len = IPC_MSG_MAX;       /* a stream takes what it can */
         }
-        if (io.len && !paging64_user_range(io.buf, io.len))
+        if (io.len && !ipc_user_readable(io.buf, io.len))
             return -IPC_EINVAL;
         for (uint32_t i = 0; i < io.nfds; i++)
             fdn[i] = ((const int *)(uintptr_t)io.fds)[i];
@@ -733,7 +733,7 @@ static long io_call(int op, int fd, uint64_t iop)
     }
     if (io.len > IPC_MSG_MAX)
         io.len = IPC_MSG_MAX;
-    if (io.len && !paging64_user_writable(io.buf, io.len))
+    if (io.len && !ipc_user_writable(io.buf, io.len))
         return -IPC_EINVAL;
     int got = 0, lost = 0;
     uint32_t whole = 0;
@@ -749,7 +749,7 @@ static long io_call(int op, int fd, uint64_t iop)
 
 static long wait_many(uint64_t fdsp, uint64_t n, int64_t ms)
 {
-    if (n > WAIT_MAX || (n && !paging64_user_range(fdsp, n * sizeof(int))))
+    if (n > WAIT_MAX || (n && !ipc_user_readable(fdsp, n * sizeof(int))))
         return -IPC_EINVAL;
     struct end *es[WAIT_MAX * 2];
     int idx[WAIT_MAX], want[WAIT_MAX];
@@ -781,7 +781,7 @@ static long wait_many(uint64_t fdsp, uint64_t n, int64_t ms)
             return any;
         }
         sleep_on(es, m, flags, ms < 0 ? 0 : (ticks ? ticks : 1));
-        if (task64_signal_pending())
+        if (ipc_interrupted())
             return -IPC_EINTR;
         slept = 1;      /* woken or timed out: one more look, then back */
     }
@@ -832,7 +832,7 @@ long ipc64_call(uint64_t op, uint64_t a, uint64_t b, uint64_t c)
         /* A program's standard input from nowhere, its output to
            nowhere - and it has to outlive exec as descriptor 0 or 1,
            so it is the kernel's, not a made-up file in libc */
-        int fd = task64_fd_new(FDK_NULL, 0);
+        int fd = ipc_fd_new(FDK_NULL, 0);
         return fd < 0 ? -IPC_EMFILE : fd;
     }
     }

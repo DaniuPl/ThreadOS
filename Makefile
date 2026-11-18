@@ -115,7 +115,7 @@ SHARED64 := string serial printk locale bootsplash mark mb2 fbcon vga pic pit pm
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 rtl8168 virtio_net netdev smp random hid iwlwifi acpios power \
-            devices uvc
+            devices uvc ipc
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -124,7 +124,7 @@ OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/elf64.o $(BUILD)/64/proc64.o \
           $(BUILD)/64/keyboard64.o $(BUILD)/64/shell64.o \
           $(BUILD)/64/signal64.o $(BUILD)/64/fpu64.o $(BUILD)/64/futex64.o \
-          $(BUILD)/64/pipe64.o $(BUILD)/64/ipc64.o $(BUILD)/64/compat64.o \
+          $(BUILD)/64/pipe64.o $(BUILD)/64/compat64.o \
           $(BUILD)/64/initrd64.o \
           $(BUILD)/64/efirt.o \
           $(BUILD)/64/syscall64_stub.o \
@@ -1985,7 +1985,8 @@ CFLAGSARM := --target=aarch64-none-elf -std=gnu11 -ffreestanding \
              -mstrict-align -Wall -Wextra -Wshadow -O2 -g
 # What of kernel/ the phone's screens are drawn with - the PC's own
 # graphics, fonts and mark - and the initrd that brings the fonts
-SHAREDARM := gfx ttf uitext fonts mark aurora initrd locale bootsplash
+SHAREDARM := gfx ttf uitext fonts mark aurora initrd locale bootsplash ipc \
+             net tcp dhcp
 OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/uart.o $(BUILD)/arm64/fdt.o \
              $(BUILD)/arm64/string.o $(BUILD)/arm64/vectors.o \
@@ -1997,6 +1998,7 @@ OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/video.o $(BUILD)/arm64/rtc.o \
              $(BUILD)/arm64/virtio.o $(BUILD)/arm64/touch.o \
              $(BUILD)/arm64/mobile.o $(BUILD)/arm64/proc.o \
+             $(BUILD)/arm64/netglue.o $(BUILD)/arm64/vnet.o \
              $(patsubst %,$(BUILD)/arm64/%.o,$(SHAREDARM))
 
 $(BUILD)/arm64:
@@ -2089,7 +2091,7 @@ libcarm64: $(LIBCARM)
 # Programs against it: libc/libcarm64.ld is libc/libc64.ld at the ARM64
 # kernel's program address. The test programs of libc/tests are the
 # PC's, unchanged - the point of them is that they print the same.
-MUSLARM_PROGS := libctest pthreadtest
+MUSLARM_PROGS := libctest pthreadtest ipctest nettest
 MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
 LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
                   -fno-stack-protector -fno-pic \

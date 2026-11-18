@@ -22,6 +22,7 @@
 #define GICD_CTLR       0x000
 #define GICD_ISENABLER  0x100
 #define GICD_IPRIORITYR 0x400
+#define GICD_ITARGETSR  0x800
 
 #define GICC_CTLR       0x000
 #define GICC_PMR        0x004
@@ -79,6 +80,10 @@ void gic_enable(unsigned intid, void (*handler)(void))
        first 32 IDs both these and the enable bits are banked per core,
        like the CPU interface: each core enables its own timer. */
     *(volatile uint8_t *)(gicd + GICD_IPRIORITYR + intid) = 0xA0;
+    /* A device's interrupt (32 and on) goes to the first core: nobody
+       is its target until told, and then it is never raised */
+    if (intid >= 32)
+        *(volatile uint8_t *)(gicd + GICD_ITARGETSR + intid) = 1;
     w32(gicd, GICD_ISENABLER + 4 * (intid / 32), 1u << (intid % 32));
 }
 

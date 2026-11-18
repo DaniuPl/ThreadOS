@@ -1,8 +1,8 @@
 /* Pipes
  *
- * A pipe is a pair of connected ends from ipc64.c used one way: the
+ * A pipe is a pair of connected ends from kernel/ipc.c used one way: the
  * read end only reads and the write end only writes (the descriptor's
- * kind, FDK_POTOK_R or FDK_POTOK_W, says which, and ipc64.c holds a
+ * kind, FDK_POTOK_R or FDK_POTOK_W, says which, and kernel/ipc.c holds a
  * descriptor to it). So a pipe waits by sleeping until the other side
  * does something, not in ten-millisecond naps; poll() can wait on it
  * (SYS64_IPC); it holds a quarter of a megabyte; and there are as many
@@ -16,7 +16,7 @@
  */
 
 #include "pipe64.h"
-#include "ipc64.h"
+#include "../kernel/include/ipc.h"
 
 int pipe64_new(int *reader, int *writer)
 {

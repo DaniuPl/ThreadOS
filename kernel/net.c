@@ -97,16 +97,6 @@ static uint32_t rx_dropped;
 
 /* --- byte order conversions -------------------------------------------- */
 
-static inline uint16_t hton16(uint16_t v)
-{
-    return (uint16_t)((v >> 8) | (v << 8));
-}
-
-static inline uint16_t ntoh16(uint16_t v)
-{
-    return hton16(v);
-}
-
 static void put32(uint8_t *p, uint32_t v)      /* IP -> network (big endian) */
 {
     p[0] = (uint8_t)(v >> 24);

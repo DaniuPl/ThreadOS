@@ -1,5 +1,5 @@
 /* ipctest - processes talking: Unix socket pairs, descriptors sent
- * over them, and shared memory (kernel64/ipc64.c, libc/overlay's
+ * over them, and shared memory (kernel/ipc.c, libc/overlay's
  * unix.c)
  *
  * Plain POSIX and Linux C: scripts/tests/t_ipc.py builds it a second

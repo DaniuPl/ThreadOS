@@ -6,7 +6,7 @@
 /* Pipes - a buffer between two processes
  *
  * A pipe is not a file and has nothing to do with the disk: it is a
- * pair of connected ends in kernel memory (ipc64.c), and its whole
+ * pair of connected ends in kernel memory (kernel/ipc.c), and its whole
  * substance comes from who is still holding them - when the last
  * writer disappears, the reader gets end of data instead of waiting
  * forever. The numbers here are ends, one per side.

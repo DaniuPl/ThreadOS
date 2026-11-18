@@ -77,8 +77,28 @@ static const char *fault_name(uint32_t fsc)
     return fsc == 0x21 ? "alignment fault" : "fault";
 }
 
-/* A translation fault, of the level that says no page is there */
+/* A translation fault, of the level that says no page is there, and a
+   permission fault; bit 6 of the syndrome says it was a write */
 #define TRANSLATION_FAULT(iss) (((iss) & 0x3C) == 0x04)
+#define PERMISSION_FAULT(iss)  (((iss) & 0x3C) == 0x0C)
+#define WRITE_FAULT(iss)       (((iss) & (1u << 6)) != 0)
+
+/* A fault on a program's page that the program may have: one not made
+   yet, or one shared since a fork and now written. The kernel touches
+   a program's memory for it too (read() into its buffer), and checks
+   the range first - but another thread of the program may fork, or
+   give pages back, between the check and the copy. */
+static int program_page(uint32_t iss)
+{
+    uint64_t far = read_sysreg(far_el1);
+    if (far < USER_BASE || far >= USER_TOP)
+        return 0;
+    if (TRANSLATION_FAULT(iss))
+        return proc_page_in(far, WRITE_FAULT(iss));
+    if (PERMISSION_FAULT(iss) && WRITE_FAULT(iss))
+        return proc_cow(far);
+    return 0;
+}
 
 /* Whatever a program did that is not a system call ends it: the kernel
    is not the one at fault, and goes on - except the first touch of a
@@ -90,8 +110,7 @@ static void from_program(struct trap_frame *f, uint32_t ec, uint32_t iss)
         proc_syscall(f);
         return;
     }
-    if (ec == EC_DATA_ABORT_LOWER && TRANSLATION_FAULT(iss) &&
-        proc_page_in(read_sysreg(far_el1), (iss & (1u << 6)) != 0)) {
+    if (ec == EC_DATA_ABORT_LOWER && program_page(iss)) {
         proc_return();
         return;
     }
@@ -143,6 +162,12 @@ void arm64_exception(struct trap_frame *f, uint64_t slot)
         f->elr += 4;
         return;
     }
+    /* (the address first: the kernel's own faults come before there are
+       threads to ask about, in the self-tests) */
+    if (ec == EC_DATA_ABORT && read_sysreg(far_el1) >= USER_BASE &&
+        read_sysreg(far_el1) < USER_TOP && thread_current()->proc &&
+        program_page(iss))
+        return;
     if (ec == EC_DATA_ABORT || ec == EC_DATA_ABORT_LOWER) {
         printk("Data abort: %s 0x%lx, ", (iss & (1u << 6)) ? "writing"
                                                             : "reading",

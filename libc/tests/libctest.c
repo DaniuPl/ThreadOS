@@ -9,10 +9,11 @@
  * process number, the date) is printed as a property, or on a line
  * starting with '~' that the test reads on its own terms.
  *
- * "libctest memory FILE" is the part a system with no disk to write and
- * no second process can run - the ARM64 kernel so far
- * (scripts/tests/t_arm64libc.py) - and FILE one it can read: every
- * section but those that write files or fork, and a file read instead.
+ * "libctest memory FILE" is the part a system with no disk to write
+ * can run - the ARM64 kernel so far (scripts/tests/t_arm64libc.py) -
+ * and FILE one it can read: every section but those that write files,
+ * a file read instead, and the program started again by posix_spawn
+ * ("libctest child ...", its output through a pipe).
  */
 
 #include <errno.h>
@@ -26,9 +27,12 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
+#include <spawn.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+
+extern char **environ;
 
 static int cmp_int(const void *a, const void *b)
 {
@@ -433,6 +437,45 @@ static void reading(const char *name)
 	printf("open of nothing: %d %s\n", fd, strerror(errno));
 }
 
+/* The program itself again, as another process: posix_spawn with its
+   output into a pipe (dup2 in the child, the pipe's other end closed
+   there), its code by waitpid - and a program that is not there,
+   which the child's exec failing tells posix_spawn */
+static void spawning(const char *self)
+{
+	int p[2];
+	if (pipe(p)) {
+		printf("spawn: no pipe\n");
+		return;
+	}
+	posix_spawn_file_actions_t fa;
+	posix_spawn_file_actions_init(&fa);
+	posix_spawn_file_actions_adddup2(&fa, p[1], 1);
+	posix_spawn_file_actions_addclose(&fa, p[0]);
+	posix_spawn_file_actions_addclose(&fa, p[1]);
+	char *args[] = { (char *)self, "child", "two", "three", 0 };
+	pid_t pid = 0;
+	int r = posix_spawn(&pid, self, &fa, 0, args, environ);
+	close(p[1]);
+	char said[128];
+	int n = 0;
+	ssize_t got;
+	while (n < (int)sizeof(said) - 1 &&
+	       (got = read(p[0], said + n, sizeof(said) - 1 - n)) > 0)
+		n += (int)got;
+	said[n] = 0;
+	close(p[0]);
+	int status = 0;
+	pid_t w = waitpid(pid, &status, 0);
+	printf("posix_spawn: %d, same pid %d, it said: %s", r, w == pid, said);
+	printf("and ended with %d (exited %d)\n", WEXITSTATUS(status),
+	       WIFEXITED(status));
+	posix_spawn_file_actions_destroy(&fa);
+	char *none[] = { "libc_nothing", 0 };
+	r = posix_spawn(&pid, "libc_nothing", 0, 0, none, environ);
+	printf("posix_spawn of nothing: %s\n", strerror(r));
+}
+
 static void processes(void)
 {
 	pid_t p = fork();
@@ -489,6 +532,12 @@ int main(int argc, char **argv)
 		for (;;)
 			sleep(1);
 	}
+	if (argc > 1 && !strcmp(argv[1], "child")) {
+		/* spawning()'s child: what it was given, and a code of its own */
+		printf("child: %d arguments, the last \"%s\"\n", argc,
+		       argv[argc - 1]);
+		return 9;
+	}
 	int memory = argc > 2 && !strcmp(argv[1], "memory");
 	atexit(bye);
 	printf("args: %d [%s]\n", argc, argc > 1 ? argv[1] : "");
@@ -501,6 +550,9 @@ int main(int argc, char **argv)
 	heap();
 	if (memory) {
 		reading(argv[2]);
+		fflush(stdout);
+		processes();
+		spawning(argv[0]);
 	} else {
 		files();
 		truncation();

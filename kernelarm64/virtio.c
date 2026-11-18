@@ -67,7 +67,7 @@ int virtio_probe(const uint64_t *bases, const uint32_t *irqs, int n,
     int found = 0;
     for (int i = 0; i < n && found < max; i++) {
         struct virtio_dev d = { (volatile uint8_t *)(uintptr_t)bases[i], 0,
-                                irqs[i] };
+                                irqs[i], 0 };
         if (rd(&d, MAGIC) != 0x74726976 || rd(&d, VERSION) != 2)
             continue;
         d.device_id = rd(&d, DEVICE_ID);
@@ -78,7 +78,7 @@ int virtio_probe(const uint64_t *bases, const uint32_t *irqs, int n,
     return found;
 }
 
-int virtio_begin(struct virtio_dev *d)
+int virtio_begin_with(struct virtio_dev *d, uint32_t want_lo)
 {
     wr(d, STATUS, 0);
     wr(d, STATUS, ST_ACKNOWLEDGE);
@@ -86,14 +86,22 @@ int virtio_begin(struct virtio_dev *d)
     wr(d, DEVICE_FEAT_SEL, 1);
     if (!(rd(d, DEVICE_FEATURES) & F_VERSION_1_HI))
         return -1;
+    wr(d, DEVICE_FEAT_SEL, 0);
+    uint32_t offered = rd(d, DEVICE_FEATURES);
+    d->features_lo = offered & want_lo;
     wr(d, DRIVER_FEAT_SEL, 0);
-    wr(d, DRIVER_FEATURES, 0);
+    wr(d, DRIVER_FEATURES, d->features_lo);
     wr(d, DRIVER_FEAT_SEL, 1);
     wr(d, DRIVER_FEATURES, F_VERSION_1_HI);
     wr(d, STATUS, ST_ACKNOWLEDGE | ST_DRIVER | ST_FEATURES_OK);
     if (!(rd(d, STATUS) & ST_FEATURES_OK))
         return -1;
     return 0;
+}
+
+int virtio_begin(struct virtio_dev *d)
+{
+    return virtio_begin_with(d, 0);
 }
 
 static void *page(void)
@@ -145,11 +153,17 @@ void virtio_ready(struct virtio_dev *d)
 int virtio_give(struct virtio_dev *d, unsigned index, struct virtq *q,
                 unsigned desc, void *buf, uint32_t len)
 {
+    return virtio_offer(d, index, q, desc, buf, len, 1);
+}
+
+int virtio_offer(struct virtio_dev *d, unsigned index, struct virtq *q,
+                 unsigned desc, void *buf, uint32_t len, int device_writes)
+{
     (void)d;
     (void)index;
     q->desc[desc].addr = (uint64_t)(uintptr_t)buf;
     q->desc[desc].len = len;
-    q->desc[desc].flags = VQ_DESC_WRITE;
+    q->desc[desc].flags = device_writes ? VQ_DESC_WRITE : 0;
     q->desc[desc].next = 0;
     q->avail->ring[q->avail->idx % q->size] = (uint16_t)desc;
     /* The entry is in the ring before the device can see the index */
@@ -175,6 +189,11 @@ int virtio_take(struct virtq *q, uint32_t *len)
         *len = q->used->ring[slot].len;
     q->last_used++;
     return id;
+}
+
+void virtio_ack(struct virtio_dev *d)
+{
+    wr(d, INTERRUPT_ACK, rd(d, INTERRUPT_STATUS));
 }
 
 uint8_t virtio_cfg8(struct virtio_dev *d, unsigned off)

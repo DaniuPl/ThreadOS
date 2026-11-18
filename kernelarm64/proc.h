@@ -28,6 +28,8 @@
 
 #define UMAP_WRITE  1
 #define UMAP_EXEC   2
+#define UMAP_SHARED 4                /* shared memory: fork shares it */
+#define UMAP_COW    8                /* shared after fork until written */
 
 /* mmu.c */
 uint64_t mmu_kernel_ttbr0(void);
@@ -37,21 +39,28 @@ uint64_t uspace_lookup(uint64_t *t, uint64_t va, int *flags);
 /* The page gone from the table and from every core's TLB: its frame,
    or 0 when there was none */
 uint64_t uspace_unmap(uint64_t *t, uint64_t va);
+/* fork: every page of 'from' in 'to' too - shared memory as it is, the
+   rest read-only on both sides until one writes (uspace_cow). -1 when
+   memory ran out for the tables, 'to' then partly filled. */
+int uspace_fork(uint64_t *from, uint64_t *to);
+/* A write to a page shared after fork: a copy of its own, or the page
+   itself when nobody else has it any more. 1 done, 0 not such a page,
+   -1 no memory. */
+int uspace_cow(uint64_t *t, uint64_t va);
 void uspace_free(uint64_t *t);
 void cache_sync_code(uint64_t start, uint64_t len);
 
 #define PROC_THREADS 64              /* threads of one program at once */
-#define PROC_FILES   16              /* files of the initrd it has open */
+#define FD_MAX       256             /* descriptors, as on the PC */
 #define FD_FIRST     3               /* 0, 1 and 2 are the console */
 
 struct thread;
-struct ufile {
-    const uint8_t *data;         /* 0 = a free slot */
-    uint32_t size, pos;
-};
+struct fd_entry;
 
 struct uproc {
     int pid;                     /* 0 = a free slot */
+    int parent;                  /* the program that started it, 0 the
+                                    kernel (or its parent has ended) */
     char name[16];
     uint64_t *table;             /* its TTBR0 */
     uint64_t entry, sp, argv;    /* where it starts */
@@ -65,9 +74,10 @@ struct uproc {
     struct thread *threads[PROC_THREADS];  /* until each is given back */
     int live;                    /* how many have not ended */
     volatile int exiting;        /* SYS64_EXIT_GROUP: all of them end */
-    struct ufile files[PROC_FILES];
+    struct fd_entry *fds;        /* FD_MAX of them, shared by its threads */
     volatile int done;
-    int code;                    /* what it ended with */
+    int reaping;                 /* being collected: by nobody else */
+    int code;                    /* what it ended with; -1 killed */
 };
 
 /* A program from the initrd, with its arguments (the name first, then
@@ -77,12 +87,21 @@ struct uproc {
 int proc_spawn(const char *name, const char *args);
 /* Waits for the program to end and gives back all it had: its code */
 int proc_wait(int pid);
+/* Waits for every program left whose parent is gone, and gives back
+   what they had */
+void proc_wait_orphans(void);
+/* Is there a program by that number that has not ended (the network
+   stack's question about a socket's owner) */
+int proc_alive(int pid);
 
 /* exceptions.c, for what comes from EL0 */
 void proc_syscall(struct trap_frame *f);
 /* A translation fault of the program's: 1 if the page was one it may
    have, now made, and the instruction is to be tried again */
 int proc_page_in(uint64_t addr, int write);
+/* A write to a page shared since a fork: 1 if it has a copy of its own
+   now, and the instruction is to be tried again */
+int proc_cow(uint64_t addr);
 /* On every way back to EL0: a program that is ending ends its threads
    here, whatever they were doing */
 void proc_return(void);

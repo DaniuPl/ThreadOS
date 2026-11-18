@@ -5,7 +5,7 @@ What a program built of several processes needs - WebKit is one, with
 a process for the window, one per page and one for the network:
 pairs of connected Unix sockets that carry descriptors with their
 bytes, and shared memory with a descriptor of its own
-(kernel64/ipc64.c, libc/overlay/src/threados/unix.c).
+(kernel/ipc.c, libc/overlay/src/threados/unix.c).
 
 libc/tests/ipctest.c is built a second time on this machine against
 glibc and run here on Linux; ThreadOS has to print the same lines, on

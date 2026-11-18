@@ -33,6 +33,7 @@ struct thread {
     uint64_t clear_tid;          /* zeroed and woken when it ends */
     volatile int ended;          /* it is past its last instruction */
     volatile int interrupted;    /* to stop waiting: its program ends */
+    volatile int woken;          /* thread_wait's flag for IPC waits */
 };
 
 /* The boot context of the first core becomes the thread "main" */
@@ -67,6 +68,8 @@ void thread_wait(const volatile int *flag, uint64_t until);
 void thread_wake(struct thread *t);
 /* Its waits end now and from now on (its program is ending) */
 void thread_interrupt(struct thread *t);
+/* The top of its kernel stack, where an exception from EL0 begins */
+uint64_t thread_stack_top(struct thread *t);
 struct thread *thread_current(void);
 
 /* Called on the way out of an interrupt: the timer may have asked for

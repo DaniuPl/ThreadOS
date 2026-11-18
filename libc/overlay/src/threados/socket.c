@@ -1097,7 +1097,7 @@ static short fd_events(int fd, short want, int *pair)
 	return want & (POLLIN | POLLOUT | POLLRDNORM | POLLWRNORM);
 }
 
-#define PAIRS_MAX 64                 /* WAIT_MAX, kernel64/ipc64.c */
+#define PAIRS_MAX 64                 /* WAIT_MAX, kernel/ipc.c */
 
 /* Between two looks. When everything watched is the end of a socket
    pair the kernel wakes us the moment one changes, so we sleep until

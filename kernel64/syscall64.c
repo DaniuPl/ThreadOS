@@ -53,7 +53,7 @@
 #include "../kernel/include/devices.h"
 #include "../kernel/include/uvc.h"
 #include "../kernel/include/cam_info.h"
-#include "ipc64.h"
+#include "../kernel/include/ipc.h"
 #include "../kernel/include/mic_info.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/random.h"

@@ -92,7 +92,17 @@ fp_restore:
    interrupts off while ELR and SPSR are set - an interrupt in between
    would write over them - and every other register cleared, so that
    nothing of the kernel's goes along. SPSR 0 is EL0 with interrupts
-   unmasked. */
+   unmasked.
+
+   enter_el0_stack(entry, user sp, x0, x1, kernel stack top) is the same
+   from deep inside the kernel - exec, in the middle of a system call:
+   the kernel's stack starts again at its top, or every exec would
+   leave the depth of a system call behind on it for good. (SP_EL1 is
+   where the next exception from EL0 puts its frame.) */
+.global enter_el0_stack
+enter_el0_stack:
+    msr     daifset, #2
+    mov     sp, x4
 .global enter_el0
 enter_el0:
     msr     daifset, #2

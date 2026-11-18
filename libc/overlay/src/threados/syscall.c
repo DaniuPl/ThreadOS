@@ -119,7 +119,7 @@ long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
 #define T_IPC      105
 #define T_FDCTL    106               /* FD_CLOEXEC: (fd, -1 ask / 0 / 1) */
 
-/* SYS64_IPC's operations (kernel64/ipc64.h) used here */
+/* SYS64_IPC's operations (kernel/include/ipc.h) used here */
 #define IPC_MEMFD 6
 #define IPC_MAP   7
 #define IPC_UNMAP 8

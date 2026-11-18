@@ -28,18 +28,24 @@ every core it wakes through PSCI, runs programs from its initrd at EL0
 in address spaces of their own (`kernelarm64/proc.c`, the PC's system
 call numbers) - freestanding ones in `userarm64/`, and musl programs:
 the same `libc/` and overlay built for aarch64 by the cross gcc
-(`gcc-aarch64-linux-gnu`), with threads, futexes, and memory made on
-first touch - and, given a phone's devices, is ThreadOS mobile: a ramfb screen set up through fw_cfg, the initrd
-through fw_cfg, a PL031 clock, a virtio-input touchscreen over
+(`gcc-aarch64-linux-gnu`), with threads, futexes, memory made on first
+touch, fork (copy-on-write), exec and wait, and pipes, Unix socket
+pairs and shared memory from `kernel/ipc.c`, which both kernels build
+(each gives it what it needs through `kernel/include/ipchost.h`), and
+the PC's network stack (`kernel/net.c`, `tcp.c`, `dhcp.c`) on a
+virtio-net card (`kernelarm64/vnet.c`, `netglue.c`) - and, given a
+phone's devices, is ThreadOS mobile: a ramfb screen set up through
+fw_cfg, the initrd through fw_cfg, a PL031 clock, a virtio-input
+touchscreen over
 virtio-mmio, and the shell in `kernelarm64/mobile.c`. Of `kernel/` it
 builds `string.c`, `heap.c`, `gfx.c`, `ttf.c`, `uitext.c`, `mark.c`,
-`aurora.c`, `fonts.c`, `initrd.c` and `locale.c` (`SHAREDARM` in the
-`Makefile`), on `kernel/include/io.h` and `spinlock.h`, which have an
+`aurora.c`, `fonts.c`, `initrd.c`, `locale.c`, `ipc.c`, `net.c`,
+`tcp.c` and `dhcp.c` (`SHAREDARM` in the `Makefile`), on `kernel/include/io.h` and `spinlock.h`, which have an
 AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
-`arm64mobile`, `arm64user` and `arm64libc`. The overlay's C layer
-(`libc/overlay/src/threados/`) is one file for both machines: a change
+`arm64mobile`, `arm64user`, `arm64libc` and `arm64net`. The overlay's C
+layer (`libc/overlay/src/threados/`) is one file for both machines: a change
 there is built and tested on both.
 
 ## Commands

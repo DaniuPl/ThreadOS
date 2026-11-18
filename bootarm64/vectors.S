@@ -72,6 +72,10 @@ exception_common:
     mov     x0, sp
     bl      arm64_exception         /* (frame, slot in x1) */
 
+/* The way out of an exception, with the frame at sp: a forked program's
+   first return to EL0 comes in here too (fork_return) */
+.global exception_return
+exception_return:
     ldp     x30, x2, [sp, #240]
     ldp     x3, x4, [sp, #256]
     msr     elr_el1, x2
@@ -94,3 +98,13 @@ exception_common:
     ldp     x0, x1, [sp, #0]
     add     sp, sp, #FRAME
     eret
+
+/* fork_return(frame): a new thread of the kernel's leaves for EL0 as if
+   from an exception it never took - a forked program's child, whose
+   registers are its parent's at the system call, the answer 0. The
+   frame is on this thread's own stack, and the stack goes on below it. */
+.global fork_return
+fork_return:
+    msr     daifset, #2
+    mov     sp, x0
+    b       exception_return

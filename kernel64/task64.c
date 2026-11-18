@@ -22,7 +22,7 @@
 #include "../kernel/include/fs.h"
 #include "../kernel/include/user.h"
 #include "pipe64.h"
-#include "ipc64.h"
+#include "../kernel/include/ipc.h"
 #include "proc64.h"
 #include "../kernel/include/spinlock.h"
 #include "../kernel/include/smp.h"
@@ -56,7 +56,7 @@
 #define FD_FIRST 3
 
 /* The kinds live in the header - programs and syscalls know about them
-   too, and so does struct fd_entry, which ipc64.c carries between
+   too, and so does struct fd_entry, which kernel/ipc.c carries between
    processes. A free number 0, 1 or 2 means "the default input and
    output": the keyboard and the console. Only a redirection puts
    something else there. */
@@ -1742,7 +1742,7 @@ int task64_fd_seek(int fd, uint32_t pos)
 }
 
 /* One more holder of what an entry stands for - a copy in another
-   number (dup2), another process (fork), or a message (ipc64.c) */
+   number (dup2), another process (fork), or a message (kernel/ipc.c) */
 static void hold(const struct fd_entry *e)
 {
     if (e->kind == FDK_POTOK_R || e->kind == FDK_POTOK_W)

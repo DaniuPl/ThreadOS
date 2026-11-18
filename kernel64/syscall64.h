@@ -175,7 +175,7 @@
    count of pages it could not drop (shared with another space), which
    the program has to clear itself; -1 for a range not its own. */
 #define SYS64_DISCARD 104
-/* Unix socket pairs and memfds (kernel64/ipc64.h): (op, a, b, c) */
+/* Unix socket pairs and memfds (kernel/include/ipc.h): (op, a, b, c) */
 #define SYS64_IPC 105
 /* FD_CLOEXEC of a descriptor: (fd, value) - value -1 asks, 0/1 sets;
    returns the flag, -1 for no such descriptor */

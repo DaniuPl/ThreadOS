@@ -15,8 +15,11 @@ the machine's own and are read on their own terms):
   math library, strings, setjmp, the heap - 3 MiB blocks, which musl
   maps, freed and asked for again, realloc and calloc - a file of the
   initrd read through stdio and by its descriptor (stat, lseek, pread),
-  one that is not there, nanosleep against the monotonic clock, gmtime,
-  atexit and main's return value; and the date from the PL031 clock
+  one that is not there, fork and waitpid, the program started again
+  by posix_spawn - an exec - with its output through a pipe, and a
+  program that is not there, nanosleep against the monotonic clock,
+  gmtime, atexit and main's return value; and the date from the PL031
+  clock
 
   pthreadtest with every test that needs neither a disk to write nor a
   second process: a mutex and atomics under contention, joins, thread-
@@ -28,7 +31,13 @@ the machine's own and are read on their own terms):
 
   pthreadtest endall: exit(5) in a thread ends the whole program - with
   one thread computing at EL0 and one asleep - with code 5, as glibc's
-  build does
+  build does; and "exit", the same in a forked child
+
+  ipctest, on one core and on four: the PC's test of processes talking
+  (kernel/ipc.c, which the ARM64 kernel now builds too) - socket pairs,
+  stream and seqpacket, descriptors sent with SCM_RIGHTS to a forked
+  child, memfds mapped shared in two processes, poll woken by threads,
+  pipes, a megabyte through each, EOF and EPIPE
 
 and after each run every page the program had is free again, its
 threads' included.
@@ -52,7 +61,7 @@ from ptest import check, summary, ARM64_INITRD, ARM64_READY
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 THREAD_TESTS = ["mutex", "join", "tls", "queue", "sem", "sync", "lifetime",
-                "timed", "spread"]
+                "timed", "exit", "spread"]
 
 
 def host_build(work, name, *flags):
@@ -85,6 +94,18 @@ def arm_run(name, args, cores):
             pages.group(0) if pages else "nothing said",
             bool(pages) and pages.group(1) == pages.group(2),
             ARM64_READY in said)
+
+
+def in_order(want, got):
+    """Every line but the '~' ones, in the same order"""
+    plain_w = [l for l in want if not l.startswith("~")]
+    plain_g = [l for l in got if not l.startswith("~")]
+    first = next((i for i, (w, g) in enumerate(zip(plain_w, plain_g))
+                  if w != g), None)
+    where = (f"first difference: glibc {plain_w[first]!r}, ThreadOS "
+             f"{plain_g[first]!r}" if first is not None else
+             f"glibc {len(plain_w)} lines, ThreadOS {len(plain_g)}")
+    return plain_g == plain_w, where
 
 
 def same(want, got):
@@ -143,6 +164,16 @@ def main():
               any(l.startswith("read: ") and "at the end 1" in l
                   for l in got) and
               any(l.startswith("lseek end ") for l in got))
+        check("a forked child prints and ends with its code, and waitpid "
+              "collects it",
+              "child: says hello" in got and
+              "fork/wait: same 1 exited 1 code 7" in got)
+        check("posix_spawn starts the program again - fork, the pipe "
+              "dup2'ed in the child, exec - and its code comes back",
+              'posix_spawn: 0, same pid 1, it said: child: 4 arguments, '
+              'the last "three"' in got and
+              "and ended with 9 (exited 1)" in got and
+              "posix_spawn of nothing: No such file or directory" in got)
         check(f"and ends with main's return value, 3, after atexit "
               f"(got {code})", code == want_code == 3 and
               got[-1:] == ["atexit: ran"])
@@ -175,6 +206,20 @@ def main():
             check(f"{cores} core(s): it ends with 0, every thread gone and "
                   f"every page free again ({pages})",
                   code == want_code == 0 and back and ready)
+
+        # --- processes talking
+        ipctest = host_build(work, "ipctest", "-pthread")
+        check("ipctest builds against glibc too", ipctest is not None)
+        if ipctest:
+            want, want_code = host_run(ipctest, [], run_dir)
+            for cores in (1, 4):
+                got, code, pages, back, ready = arm_run("ipctest", [], cores)
+                ok, where = in_order(want, got)
+                check(f"{cores} core(s): ipctest prints exactly what "
+                      f"glibc's build prints ({where})", ok)
+                check(f"{cores} core(s): and ends with 0, every page free "
+                      f"again ({pages})",
+                      code == want_code == 0 and back and ready)
 
         # --- exit() in a thread
         want, want_code = host_run(pthreadtest, ["endall"], run_dir)

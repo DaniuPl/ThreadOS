@@ -134,6 +134,50 @@ class Servers:
         self.udp.close()
 
 
+def judge(lines, srv, reply, tcp_port, listen_port):
+    """What nettest printed and the host's side saw - the same on every
+    kernel it runs on (t_arm64net.py runs it on the ARM64 one)"""
+    def has(text):
+        return text in lines
+
+    check(f"getaddrinfo asks the network's DNS: {NAME} is 10.0.2.2",
+          has(f"resolved {NAME} to 10.0.2.2 port {tcp_port}"))
+    check("and a name the server does not know is not found",
+          has("a name nobody knows: not found"))
+    check("a TCP upload: the server's sum of 200000 bytes matches the "
+          "program's, and 100000 bytes came back intact",
+          has("tcp: sent 200000, the server's sum matches mine, got back "
+              "100000 bytes intact"))
+    check("a second thread on its own connection at the same time",
+          has("a second thread: sent 50000, the server's sum matches "
+              "mine, got back 30000 bytes intact"))
+    check(f"the server found every byte it was sent where it should be "
+          f"({srv.uploads})",
+          sorted(u[:2] for u in srv.uploads if u[2]) ==
+          [(50000, 77), (200000, 3)])
+    check("a connect that does not wait: EINPROGRESS, then poll says "
+          "writable and SO_ERROR is 0",
+          has("nonblocking connect: EINPROGRESS, then poll 1 writable, "
+              "SO_ERROR 0"))
+    check("a read with nothing to read does not wait",
+          has("a read with nothing there: EAGAIN"))
+    check("select on a quiet socket times out after its 300 ms",
+          has("select on a quiet socket: 0 after about 300 ms"))
+    check("a port nobody listens on is refused",
+          has("a port nobody listens on: ECONNREFUSED"))
+    check(f"UDP: three datagrams answered ({srv.datagrams} reached the "
+          "server)",
+          has("udp: 3 of 3 datagrams answered, from the port they went "
+              "to") and srv.datagrams == 3)
+    check("poll on a quiet datagram socket times out after its 300 ms",
+          has("poll on a quiet datagram socket: 0 after about 300 ms"))
+    check(f"a server in the guest answers the host ({reply!r})",
+          reply == b"HELLO FROM THE HOST\n")
+    check("and sees the host's side of QEMU's network, on its own port",
+          has(f"accepted a connection from 10.0.2.2, to my port "
+              f"{listen_port}"))
+
+
 def main():
     reason = no64()
     if reason:
@@ -196,45 +240,7 @@ def main():
         if os.environ.get("SOCKET_DEBUG"):
             print("\n".join(lines))
 
-        def has(text):
-            return text in lines
-
-        check(f"getaddrinfo asks the network's DNS: {NAME} is 10.0.2.2",
-              has(f"resolved {NAME} to 10.0.2.2 port {tcp_port}"))
-        check("and a name the server does not know is not found",
-              has("a name nobody knows: not found"))
-        check("a TCP upload: the server's sum of 200000 bytes matches the "
-              "program's, and 100000 bytes came back intact",
-              has("tcp: sent 200000, the server's sum matches mine, got back "
-                  "100000 bytes intact"))
-        check("a second thread on its own connection at the same time",
-              has("a second thread: sent 50000, the server's sum matches "
-                  "mine, got back 30000 bytes intact"))
-        check(f"the server found every byte it was sent where it should be "
-              f"({srv.uploads})",
-              sorted(u[:2] for u in srv.uploads if u[2]) ==
-              [(50000, 77), (200000, 3)])
-        check("a connect that does not wait: EINPROGRESS, then poll says "
-              "writable and SO_ERROR is 0",
-              has("nonblocking connect: EINPROGRESS, then poll 1 writable, "
-                  "SO_ERROR 0"))
-        check("a read with nothing to read does not wait",
-              has("a read with nothing there: EAGAIN"))
-        check("select on a quiet socket times out after its 300 ms",
-              has("select on a quiet socket: 0 after about 300 ms"))
-        check("a port nobody listens on is refused",
-              has("a port nobody listens on: ECONNREFUSED"))
-        check(f"UDP: three datagrams answered ({srv.datagrams} reached the "
-              "server)",
-              has("udp: 3 of 3 datagrams answered, from the port they went "
-                  "to") and srv.datagrams == 3)
-        check("poll on a quiet datagram socket times out after its 300 ms",
-              has("poll on a quiet datagram socket: 0 after about 300 ms"))
-        check(f"a server in the guest answers the host ({reply!r})",
-              reply == b"HELLO FROM THE HOST\n")
-        check("and sees the host's side of QEMU's network, on its own port",
-              has(f"accepted a connection from 10.0.2.2, to my port "
-                  f"{listen_port}"))
+        judge(lines, srv, reply, tcp_port, listen_port)
         check("nettest ends with code 0",
               "[nettest] done, exit code 0" in out)
     finally:
@@ -244,4 +250,5 @@ def main():
     return summary()
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

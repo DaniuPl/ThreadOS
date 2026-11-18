@@ -207,6 +207,7 @@ static struct thread *new_thread(const char *name, void (*fn)(void *),
     t->clear_tid = 0;
     t->ended = 0;
     t->interrupted = 0;
+    t->woken = 0;
     return t;
 }
 
@@ -317,6 +318,11 @@ void thread_wake(struct thread *t)
     if (t->state == T_SLEEPING)
         t->state = T_READY;
     spin_unlock_irq(&rq, f);
+}
+
+uint64_t thread_stack_top(struct thread *t)
+{
+    return ((uint64_t)(uintptr_t)t->stack + STACK_SIZE) & ~15UL;
 }
 
 void thread_interrupt(struct thread *t)

@@ -9540,3 +9540,87 @@ works and is checked by `make test`.
       back each time. Run with the IRQ path's end of a program taken
       out, "endall" never ends, and the test fails. libc, pthread,
       socket, ipc and sqlite pass on the PC with the shared layer.
+- [x] **Processes and IPC on the ARM64 kernel; one IPC for both kernels**
+      (kernel/ipc.c (was kernel64/ipc64.c), kernel/include/ipc.h,
+      ipchost.h, kernel64/ipchost64.h, kernelarm64/ipchost.h, proc.c,
+      proc.h, mmu.c, pmm.c, thread.c, thread.h, exceptions.c, kmain.c,
+      bootarm64/vectors.S, switch.S, libc/tests/libctest.c, Makefile,
+      scripts/tests/t_arm64libc.py)
+      The third stage of Weft on ARM64: Weft is three processes that
+      start each other and talk over Unix socket pairs, passing
+      descriptors and shared memory. The PC's code for that - socket
+      pairs with SCM_RIGHTS, pipes, memfds, the waits poll is built on -
+      moves to kernel/ipc.c and is built by both kernels: what it needs
+      of a kernel (descriptors, sleeping and waking, the program's
+      memory, mapping pages) it asks by the names of
+      kernel/include/ipchost.h, which kernel64/ipchost64.h answers with
+      the PC's own calls, one for one, and kernelarm64/ipchost.h with
+      the ARM64 kernel's. The PC's kernel is the same code as before.
+      The ARM64 kernel gets the rest of what that takes. Descriptors are
+      the PC's, by its numbers and kinds (the initrd's files, pipes,
+      socket ends, memfds, /dev/null), held and let go as on the PC.
+      fork copies the calling thread into a program whose pages are its
+      parent's, read-only on both sides until one writes - a page of its
+      own then, or the page itself once nobody else has it (frames now
+      count their owners); shared memory stays shared; every core's TLB
+      is told. The kernel's own writes into a program's memory copy such
+      a page first, and a fault the kernel takes on a program's page
+      that a fork or a give-back raced with is resolved the same way.
+      exec loads another program from the initrd in the caller's place,
+      its arguments copied first, its kernel stack started again, the
+      descriptors marked close-on-exec closed - which is how
+      posix_spawn's parent learns the exec worked. wait and trywait
+      collect a child; a program whose parent ended is the kernel's to
+      collect; kill ends a program (no signal handlers yet).
+      libctest's ARM64 run now forks, and starts itself again by
+      posix_spawn with its output through a pipe, and a program that is
+      not there; on the PC the run is as it was.
+      t_arm64libc adds ipctest, on one core and on four: its 73 lines
+      are glibc's - socket pairs, SCM_RIGHTS to a forked child, memfds
+      mapped shared in two processes, poll woken by threads, pipes, a
+      megabyte through each - and every page comes back; libctest's
+      fork, posix_spawn and the missing program match glibc's;
+      pthreadtest's exit test, which forks, ends with 5. Run with fork
+      sharing pages without copy-on-write, the programs never end and
+      the group fails. t_ipc, socket and pthread pass on the PC with
+      the shared file.
+- [x] **The network on the ARM64 kernel: the PC's stack on virtio-net**
+      (kernelarm64/vnet.c, netglue.c, netglue.h, proc.c, kmain.c,
+      virtio.c, virtio.h, gic.c, kernel/net.c, Makefile,
+      scripts/tests/t_arm64net.py, t_socket.py, run_tests.py,
+      .github/workflows/build.yml)
+      The rest of the third stage: wpenetproc fetches pages, so the
+      ARM64 kernel needs the network. The PC's stack - kernel/net.c,
+      tcp.c and dhcp.c - is built for it unchanged. It was written for a
+      kernel that runs it one thread at a time: its sections are
+      irq_save to irq_restore and it waits in task_sleep. Here one lock
+      does what the PC's big lock does (netglue.c): every way into the
+      stack - a program's call, the thread that hands it frames, its
+      own DHCP and resend threads - takes it, with interrupts off so the
+      holder is never preempted on its core, and task_sleep lets it go
+      while the thread sleeps. task_create, task_alive (a socket's
+      owner is its program's number), pit_ticks and random_bytes are
+      answered there too; the TCP sequence numbers come from the
+      counter's jitter through SplitMix64, and getrandom still answers
+      -1, there being no source fit for keys yet. vnet.c is the virt
+      machine's virtio-net card over MMIO - a receive queue of 64
+      buffers, a transmit queue of 32, the MAC offered by the card - and
+      is kernel/include/netdev.h for this kernel; its interrupt only
+      wakes the thread that runs the stack on what came. virtio.c can
+      now agree to a device's features and offer buffers the device
+      reads; the GIC sends a device's interrupt to the first core (left
+      with no target, it was never raised). The PC's network calls are
+      the ARM64 kernel's too, each inside the lock. "dns=IP" on the
+      command line names the name server, as the PC's shell command
+      does. kernel/net.c loses two byte-order helpers nothing called,
+      which clang warned of.
+      t_arm64net runs the PC's nettest on two cores with t_socket's own
+      host side and checks - t_socket's checks are now one function both
+      call: the card found and DHCP's address granted, getaddrinfo
+      through the test's DNS server and an unknown name, 200000 bytes up
+      and 50000 more from a second thread at once with every byte
+      checked by the server and the downloads by the program, a connect
+      that does not wait, EAGAIN, select and poll timing out,
+      ECONNREFUSED, UDP datagrams answered, and a server in the guest
+      the host connects to; nettest ends with 0 and every page comes
+      back. socket passes on the PC with the shared checks.

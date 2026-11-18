@@ -44,6 +44,10 @@
 #include "video64.h"
 #include "rtc.h"
 #include "virtio.h"
+#include "netglue.h"
+#include "../kernel/include/net.h"
+#include "../kernel/include/dhcp.h"
+#include "../kernel/include/tcp.h"
 #include "touch.h"
 #include "mobile.h"
 #include "proc.h"
@@ -89,6 +93,53 @@ static const char *core_name(uint64_t midr)
     return 0;
 }
 
+/* The value of a "name=value" word of the command line, into out */
+static int word_value(const char *line, const char *name, char *out, int max)
+{
+    size_t n = strlen(name);
+    for (const char *p = line; p && *p; ) {
+        while (*p == ' ')
+            p++;
+        const char *start = p;
+        while (*p && *p != ' ')
+            p++;
+        if ((size_t)(p - start) > n && !memcmp(start, name, n)) {
+            int k = 0;
+            for (const char *c = start + n; c < p && k < max - 1; c++)
+                out[k++] = *c;
+            out[k] = 0;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/* The PC's network stack (kernel/net.c, tcp.c, dhcp.c) on the virtio
+   card, if there is one: DHCP asks for an address, and the programs on
+   the command line start once it has one - or after a few seconds
+   without, as on a machine with no network behind its card. "dns=IP"
+   names the name server in place of DHCP's, as the PC's shell command
+   'dns' does. */
+static void start_network(struct virtio_dev *vdevs, int nv,
+                          const char *line)
+{
+    if (vnet_init(vdevs, nv) < 0)
+        return;
+    dhcp_start();
+    tcp_init();
+    for (int i = 0; i < 800 && !net_configured(); i++)
+        thread_sleep_ms(10);
+    char text[20];
+    uint32_t ip;
+    if (word_value(line, "dns=", text, sizeof(text)) &&
+        net_parse_ip(text, &ip)) {
+        net_enter();
+        net_set_dns(ip);
+        net_leave();
+        printk("[net] DNS server set by the command line: %s\n", text);
+    }
+}
+
 /* Every "run=NAME,ARG,ARG" word of the command line: the programs, all
    started before any is waited for - so that they run beside each other
    - and each one's end said with its code */
@@ -130,6 +181,8 @@ static void run_programs(const char *line)
         if (pids[i] > 0)
             printk("[proc] %s (pid %d) ended with code %d\n", names[i],
                    pids[i], proc_wait(pids[i]));
+    /* And what they started and left behind */
+    proc_wait_orphans();
     /* Every page a program had - its file, its stack, its heap and its
        tables - is back */
     if (n)
@@ -461,6 +514,7 @@ void kmain(uint64_t x0)
         smp_start(&fi);
         boot_splash_update(70, "Checking the threads");
         threads_selftest();
+        start_network(vdevs, nv, fi.bootargs);
         run_programs(fi.bootargs);
         boot_splash_update(96, "Starting the phone");
         if (screen)

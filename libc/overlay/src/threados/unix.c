@@ -1,4 +1,4 @@
-/* musl on ThreadOS 64: Unix socket pairs (kernel64/ipc64.c)
+/* musl on ThreadOS 64: Unix socket pairs (kernel/ipc.c)
  *
  * socketpair(AF_UNIX) gives two descriptors of the kernel's own, the
  * connected ends of a pair. What goes in at one end comes out at the
@@ -40,7 +40,7 @@
 #define T_FDS   256                  /* FD_MAX in kernel64/task64.c */
 #define K_USOCK   4
 
-/* kernel64/ipc64.h */
+/* kernel/include/ipc.h */
 #define IPC_PAIR     0
 #define IPC_SEND     1
 #define IPC_RECV     2
@@ -473,7 +473,7 @@ static long sock_getopt(int fd, int level, int opt, void *val, socklen_t *len)
 	case SO_ERROR:    v = 0; break;
 	case SO_ACCEPTCONN: v = 0; break;
 	case SO_SNDBUF:
-	case SO_RCVBUF:   v = 256 * 1024; break;   /* QUEUE_MAX, ipc64.c */
+	case SO_RCVBUF:   v = 256 * 1024; break;   /* QUEUE_MAX, kernel/ipc.c */
 	default:          return -ENOPROTOOPT;
 	}
 	touch(len, sizeof(*len));

@@ -206,12 +206,12 @@ void task64_set_mmap_next(uint64_t adr);
 #define FDK_FILE    1
 #define FDK_POTOK_R 2
 #define FDK_POTOK_W 3
-#define FDK_USOCK   4                /* an end of a Unix socket pair (ipc64.c) */
-#define FDK_MEMFD   5                /* shared memory with a descriptor (ipc64.c) */
+#define FDK_USOCK   4                /* an end of a Unix socket pair (kernel/ipc.c) */
+#define FDK_MEMFD   5                /* shared memory with a descriptor (kernel/ipc.c) */
 #define FDK_NULL    6                /* /dev/null: reads end at once, writes vanish */
 
 /* What a descriptor number stands for. Public because a descriptor can
-   travel: ipc64.c carries copies of these from one process to another */
+   travel: kernel/ipc.c carries copies of these from one process to another */
 struct fd_entry {
     int kind;
     int slot;                    /* a TFS inode, a pipe, a socket end, a memfd */
@@ -219,7 +219,7 @@ struct fd_entry {
     uint32_t cloexec;            /* closed by exec (FD_CLOEXEC) */
 };
 
-/* For ipc64.c: a copy of descriptor 'fd' with its own hold on what it
+/* For kernel/ipc.c: a copy of descriptor 'fd' with its own hold on what it
    stands for (0, or -1 for no such descriptor); a copy put into the
    current table, the hold going with it (the number, or -1 when the
    table is full - the hold is then let go); a copy's hold let go */
