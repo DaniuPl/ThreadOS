@@ -1298,7 +1298,6 @@ static void on_signal(int sig, siginfo_t *info, void *uc)
 		if (sig == SIGCHLD || sig == SIGWINCH || sig == SIGURG ||
 		    sig == SIGCONT)
 			return;
-#if defined(__aarch64__)
 		/* A fault of the program's own (si_code above 0): no handler
 		   for the kernel any more, and back to the instruction, which
 		   faults again - and the kernel ends the program saying where,
@@ -1309,7 +1308,6 @@ static void on_signal(int sig, siginfo_t *info, void *uc)
 			tos(T_SIGNAL, 0, 0, 0, 0);
 			return;
 		}
-#endif
 		tos(T_EXIT_GROUP, 128 + sig, 0, 0, 0);
 	}
 	if (a.flags & SA_RESETHAND)

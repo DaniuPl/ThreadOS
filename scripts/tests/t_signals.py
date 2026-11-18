@@ -20,8 +20,11 @@ handlers with siginfo_t and a ucontext_t holding the registers the
 thread was interrupted with, its stack pointer and its SSE state,
 masks, sigsuspend, kill to a program whose thread holds the signal
 back, a wait in read, on a condition variable and in waitpid that goes
-on after the handler, and WebKit's way of stopping a thread to scan its
-stack. On four cores the thread interrupted while computing runs on a
+on after the handler, WebKit's way of stopping a thread to scan its
+stack, and faults as signals: a write where nothing is (SIGSEGV,
+SEGV_MAPERR, its address), one to the program's own code (SEGV_ACCERR),
+an undefined instruction (SIGILL), each left by siglongjmp, while a
+fault with no handler is still the kernel's to end. On four cores the thread interrupted while computing runs on a
 core of its own, which only its timer interrupts.
 
 Everything is read from the serial port, which gets every console's
@@ -138,7 +141,7 @@ def main():
     want = host[0] if host else []
     check("(the comparison is not empty: glibc's build reports every check "
           "it makes, each one passed)",
-          len(want) == 15 and WEBKIT_WAY in want and
+          len(want) == 19 and WEBKIT_WAY in want and
           want[-1] == "sigtest: done")
 
     disk = tempfile.mktemp(suffix=".img")

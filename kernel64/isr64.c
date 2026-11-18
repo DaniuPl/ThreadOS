@@ -335,6 +335,52 @@ static void isr64_dispatch(struct regs *r)
          * switches to another thread and the interrupt frame is
          * abandoned together with the dead task's stack. */
         if ((r->cs & 3) == 3) {
+            /* A program that handles its faults hears of this one as
+               Linux tells it - the signal, why (si_code) and where -
+               on its way back; one that does not is ended below */
+            int sig = 0, code = 0;
+            uint64_t where = r->rip;
+            switch (r->int_no) {
+            case 14:
+                /* Something of the program's there, but not to be done
+                   that way - or, as far as the program is concerned,
+                   nothing: the kernel's own pages are no more its than
+                   pages that are not there */
+                sig = SIG_SEGV;
+                where = read_cr2();
+                code = (r->err_code & 0x01) && paging64_user_range(where, 1)
+                       ? SEGV_ACCERR : SEGV_MAPERR;
+                break;
+            case 13:
+                sig = SIG_SEGV;
+                code = SI_KERNEL;
+                where = 0;
+                break;
+            case 12:
+                sig = SIG_BUS;
+                code = SI_KERNEL;
+                where = 0;
+                break;
+            case 6:
+                sig = SIG_ILL;
+                code = ILL_ILLOPN;
+                break;
+            case 0:
+                sig = SIG_FPE;
+                code = FPE_INTDIV;
+                break;
+            case 16:
+            case 19:
+                sig = SIG_FPE;
+                code = FPE_FLTINV;
+                break;
+            case 17:
+                sig = SIG_BUS;
+                code = BUS_ADRALN;
+                break;
+            }
+            if (sig && task64_fault_signal(sig, code, where))
+                return;
             user_fault_seen = 1;
             user_fault_vec = (uint32_t)r->int_no;
             user_fault_err = (uint32_t)r->err_code;

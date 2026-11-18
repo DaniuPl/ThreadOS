@@ -94,6 +94,8 @@ struct task64 {
     int sig_suspended;
     int32_t sig_from[64];        /* the sender's program (0: the kernel) */
     int16_t sig_code[64];        /* SI_USER, SI_TKILL, SI_KERNEL */
+    int sig_fault;               /* a fault of its own, as a signal: which */
+    uint64_t sig_fault_addr;     /* ... and where (siginfo_t's si_addr) */
     uint64_t sig_handler;        /* the program's handler (0 = kill) */
     uint64_t sig_restorer;       /* the return from the handler into the kernel */
     struct fd_entry *fds;        /* = table->fds */
@@ -1348,6 +1350,28 @@ int task64_take_signal(uint64_t *mask, int *from, int *code)
     *code = current->sig_code[sig - 1];
     irq_restore(flags);
     return sig;
+}
+
+int task64_fault_signal(int sig, int code, uint64_t addr)
+{
+    if (!current || !task64_sighandler() ||
+        (current->sig_blocked & SIG_BIT(sig)))
+        return 0;
+    current->sig_from[sig - 1] = current->tgid;
+    current->sig_code[sig - 1] = (int16_t)code;
+    current->sig_fault = sig;
+    current->sig_fault_addr = addr;
+    __atomic_fetch_or(&current->sig_pending, SIG_BIT(sig), __ATOMIC_SEQ_CST);
+    return 1;
+}
+
+int task64_fault_addr(int sig, uint64_t *addr)
+{
+    if (!current || current->sig_fault != sig)
+        return 0;
+    current->sig_fault = 0;
+    *addr = current->sig_fault_addr;
+    return 1;
 }
 
 uint64_t task64_sigmask(void)

@@ -118,6 +118,12 @@ int task64_signal_pending(void);
    sigsuspend while in it, which is also the task's mask again now.
    0 = none. */
 int task64_take_signal(uint64_t *mask, int *from, int *code);
+/* A fault of the current thread's own as a signal to it, delivered on
+   the way back to the instruction: 0 when it has no handler or holds
+   the signal back, and the fault is the kernel's to end. And, as the
+   signal is taken, where the fault was (siginfo_t's si_addr) */
+int task64_fault_signal(int sig, int code, uint64_t addr);
+int task64_fault_addr(int sig, uint64_t *addr);
 /* The current task's mask; SIGKILL and SIGSTOP are never held back */
 uint64_t task64_sigmask(void);
 void task64_set_sigmask(uint64_t mask);

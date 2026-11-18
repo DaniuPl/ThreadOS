@@ -19,6 +19,18 @@ struct regs;
 #define SI_KERNEL  0x80 /* the kernel itself (Ctrl+C) */
 #define SI_TKILL   (-6) /* tkill, to one thread */
 
+/* A program's own faults, and their si_code */
+#define SIG_ILL    4
+#define SIG_BUS    7
+#define SIG_FPE    8
+#define SIG_SEGV   11
+#define SEGV_MAPERR 1   /* nothing at that address */
+#define SEGV_ACCERR 2   /* something, but not to be done there */
+#define ILL_ILLOPN  2   /* an undefined instruction */
+#define FPE_INTDIV  1   /* an integer divided by zero */
+#define FPE_FLTINV  7   /* a floating-point operation the unit refused */
+#define BUS_ADRALN  1   /* an address not aligned */
+
 /* Delivers a waiting signal, if there is one. Called just before the
    return to ring 3 - and only then, because only then does the frame
    in 'r' describe the program and not the kernel. */

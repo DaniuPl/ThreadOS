@@ -10180,3 +10180,24 @@ works and is checked by `make test`.
       stops its machine but runs it to the end on two cores, its
       parallel timing missed twice - the same batch without hostile
       gives the same times on this kernel and the one before.
+- [x] **The PC's faults as signals, after the PC's signals came in**
+      (kernel64/isr64.c, task64.c, task64.h, signal64.c, signal64.h,
+      libc/overlay/src/threados/syscall.c, scripts/tests/t_signals.py,
+      kernelarm64/winmob.c, scripts/tests/t_arm64win.py)
+      The PC's signals (above) were written against a sigtest without
+      its faults; merged, sigtest stopped at its first fault there, which
+      ended the program instead of reaching its handler. A program's
+      exception now becomes the signal Linux sends - a page fault
+      SIGSEGV (SEGV_ACCERR on a page of the program's that may not be
+      used so, SEGV_MAPERR anywhere else, the kernel's own pages
+      included, with the address), #GP SIGSEGV, #UD SIGILL, a division
+      by zero SIGFPE, #AC SIGBUS - delivered on the way back to the
+      instruction when the program has a handler and lets the signal
+      through; otherwise the kernel ends it and says where, as before.
+      The C library's way back for a fault whose signal has no handler
+      of its own (the kernel's handler unset, the instruction again) is
+      the PC's too now. t_signals expects sigtest's nineteen lines, the
+      faults' among them, as glibc prints them; t_faults and t_hostile
+      pass as they did. And on the phone, the home indicator's strip
+      under a program's window carries its last row on, so Weft's
+      toolbar goes down to the screen's edge.

@@ -200,7 +200,11 @@ void signal64_deliver(struct regs *r)
     f->uc.sigmask = mask;
     f->info.signo = sig;
     f->info.code = code;
-    f->info.pid = from;
+    uint64_t addr;
+    if (task64_fault_addr(sig, &addr))
+        memcpy(&f->info.pid, &addr, sizeof(addr));   /* si_addr's place */
+    else
+        f->info.pid = from;
 
     /* This core's SSE registers are the program's: the kernel is built
        without them, and a switch puts a task's back before it runs.

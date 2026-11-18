@@ -574,12 +574,22 @@ void winmob_name(int win, char *out, int max)
 void winmob_draw(int win)
 {
     irqflags_t f = spin_lock_irq(&lock);
-    if (winmob_exists(win))
+    if (winmob_exists(win)) {
         for (int y = 0; y < wh; y++) {
             uint32_t *row = video_prow32(wtop + y);
             if (row)
                 memcpy(row, wins[win].px + (long)y * ww, (size_t)ww * 4);
         }
+        /* Under it, to the screen's bottom - the home indicator's strip
+           - its last row goes on, as an app on a phone goes on under
+           the indicator */
+        const uint32_t *last = wins[win].px + (long)(wh - 1) * ww;
+        for (int y = wtop + wh; y < video_ph(); y++) {
+            uint32_t *row = video_prow32(y);
+            if (row)
+                memcpy(row, last, (size_t)ww * 4);
+        }
+    }
     spin_unlock_irq(&lock, f);
 }
 
