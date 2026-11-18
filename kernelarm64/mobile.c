@@ -1305,17 +1305,26 @@ static void draw_draw(void)
     pill(0x1C1C1E);
 }
 
-/* The program's pixels below, the phone's status bar above */
+/* Light enough that what goes on it is dark */
+static int light(uint32_t c)
+{
+    return ((((c >> 16) & 0xFF) * 77 + ((c >> 8) & 0xFF) * 150 +
+             (c & 0xFF) * 29) >> 8) > 150;
+}
+
+/* The program's pixels below, the phone's status bar above - in the
+   colour of the program's top, as an iPhone's app goes on under it,
+   what it says dark or light to read on that */
 static void draw_window(void)
 {
-    gfx_fill(0, 0, lw, (win_top * 16 + video_k() - 1) / video_k(), 0x000000,
-             255);
-    status_bar(WHITE);
+    uint32_t top = winmob_edge_colour(shown, 0);
+    gfx_fill(0, 0, lw, (win_top * 16 + video_k() - 1) / video_k(), top, 255);
+    status_bar(light(top) ? 0x1C1C1E : WHITE);
     winmob_draw(shown);
     /* the program waits for typing: the keyboard over its bottom */
     if (winmob_keyboard(shown))
         mob_kb_draw();
-    pill(0x8E8E93);
+    pill(light(winmob_edge_colour(shown, 1)) ? 0x1C1C1E : 0xF2F2F7);
 }
 
 static void type_into_window(const char *s)

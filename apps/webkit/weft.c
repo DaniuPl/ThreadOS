@@ -138,6 +138,23 @@ static int sheet;
 static int cards_scroll, press_x, press_y, press_scroll;
 static gboolean press_moved;
 
+/* The toolbar hides while the page is read on down, and comes back when
+   it is scrolled up or the foot of the window is tapped, as a phone's
+   browser's does: a finger BAR_DRAG pixels up the page hides it, as far
+   down shows it */
+#define BAR_DRAG 24
+static gboolean bar_hidden, tap_reveals;
+static int drag_y, drag_travel;
+
+/* A page that keeps something at its foot - a site's own bar of
+   buttons, fixed to the bottom - ends above the toolbar while the
+   toolbar is there, as an iPhone's Safari puts it, instead of having
+   it covered; any other page goes on under the glass */
+static gboolean keeps_foot;
+static void foot_band(void);
+static gboolean foot_watch(gpointer data);
+
+
 /* The pages visited, newest first: the history (in memory - the phone
    has no disk of its own to keep it on yet) */
 #define HISTORY_MAX 100
@@ -152,6 +169,9 @@ static int nhistory;
 #define BOOKMARKS_MAX 100
 static struct visit bookmarks[BOOKMARKS_MAX];
 static int nbookmarks;
+static int bookmarks_back;           /* where their Done goes: the page,
+                                        or the settings they were opened
+                                        from */
 
 /* The browser's settings */
 static const struct engine {
@@ -168,9 +188,11 @@ static const struct engine {
 static struct {
     int engine;
     gboolean desktop_site, dark, no_js;
+    gboolean plain_start;            /* new tabs without the favourites */
 } prefs;
 
 static void draw_band(void);
+static void bar_show(gboolean show);
 static struct tab *tab_new(const char *uri, WebKitWebView *related);
 static void tab_front(int i);
 static void tab_close(int i);
@@ -259,9 +281,13 @@ static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
     t->loading = event != WEBKIT_LOAD_FINISHED;
     if (event == WEBKIT_LOAD_COMMITTED) {
         say("[weft] load committed %s%s\n", uri, NULL);
+        if (mobile && tabs[front] == t)
+            bar_show(TRUE);
     } else if (event == WEBKIT_LOAD_FINISHED) {
         say("[weft] load finished %s%s\n", uri, NULL);
         remember(uri, t->title);
+        if (mobile && tabs[front] == t)
+            foot_watch(NULL);
         if (eval_script && index_of(view) == 0)
             webkit_web_view_evaluate_javascript(view, eval_script, -1, NULL,
                                                 NULL, NULL, evaluated, NULL);
@@ -350,14 +376,64 @@ static WebKitWebView *page_wants_window(WebKitWebView *view,
     return t->view;
 }
 
-static const char start_page[] =
+static const char start_plain[] =
     "<!doctype html><html><head><meta charset=utf-8><title>New tab</title>"
-    "<style>body{margin:0;height:100vh;display:flex;align-items:center;"
-    "justify-content:center;font-family:sans-serif;color:#555;"
-    "background:#f4f4f6}h1{font-weight:normal;font-size:28px;margin:0}"
+    "<style>:root{color-scheme:light dark}body{margin:0;height:100vh;"
+    "display:flex;align-items:center;justify-content:center;"
+    "font-family:sans-serif;color:#555;background:#f4f4f6}"
+    "@media (prefers-color-scheme:dark){body{color:#aeb6cc;"
+    "background:#101218}}h1{font-weight:normal;font-size:28px;margin:0}"
     "p{margin:8px 0 0;font-size:13px;text-align:center}</style></head>"
     "<body><div><h1>Weft</h1><p>Type an address or words above</p>"
     "</div></body></html>";
+
+/* A new tab's page: the bookmarks as a phone's browser shows its
+   favourites, a tile each with the site's first letter, in rows of
+   squares (t_arm64weft.py finds the tiles by their colour, START_TILE) -
+   or, with none kept or the setting off, a word on what to do */
+#define START_TILE "#0a84ff"
+static char *start_page(void)
+{
+    if (!nbookmarks || prefs.plain_start)
+        return g_strdup(start_plain);
+    GString *g = g_string_new(
+        "<!doctype html><html><head><meta charset=utf-8>"
+        "<title>New tab</title><style>:root{color-scheme:light dark}"
+        "body{margin:0;font-family:sans-serif;background:#f2f2f7;"
+        "color:#1c1c1e}@media (prefers-color-scheme:dark){body{"
+        "background:#101218;color:#fff}}"
+        "h2{margin:0;padding:24px 20px 0;height:56px;box-sizing:border-box;"
+        "font-size:22px;line-height:32px}"
+        ".g{display:grid;grid-template-columns:repeat(auto-fill,"
+        "minmax(76px,1fr));gap:16px 8px;padding:12px 16px}"
+        "a{color:inherit;text-decoration:none;text-align:center;"
+        "font-size:12px;min-width:0}"
+        ".t{width:60px;height:60px;margin:0 auto 6px;border-radius:16px;"
+        "background:" START_TILE ";color:#fff;display:flex;"
+        "align-items:center;justify-content:center;font-size:26px;"
+        "font-weight:600}span{display:block;overflow:hidden;"
+        "text-overflow:ellipsis;white-space:nowrap}</style></head>"
+        "<body><h2>Favourites</h2><div class=g>");
+    for (int i = 0; i < nbookmarks; i++) {
+        /* the site's first letter: its host's, past "www." */
+        const char *host = strstr(bookmarks[i].uri, "://");
+        host = host ? host + 3 : bookmarks[i].uri;
+        if (!strncmp(host, "www.", 4))
+            host += 4;
+        char letter[2] = { g_ascii_toupper(*host ? *host : '?'), 0 };
+        char *href = g_markup_escape_text(bookmarks[i].uri, -1);
+        char *name = g_markup_escape_text(*bookmarks[i].title
+                                          ? bookmarks[i].title : host, -1);
+        char *mark = g_markup_escape_text(letter, -1);
+        g_string_append_printf(g, "<a href=\"%s\"><div class=t>%s</div>"
+                               "<span>%s</span></a>", href, mark, name);
+        g_free(href);
+        g_free(name);
+        g_free(mark);
+    }
+    g_string_append(g, "</div></body></html>");
+    return g_string_free(g, FALSE);
+}
 
 static struct tab *tab_new(const char *uri, WebKitWebView *related)
 {
@@ -381,10 +457,13 @@ static struct tab *tab_new(const char *uri, WebKitWebView *related)
     g_signal_connect(t->view, "close", G_CALLBACK(page_closed), t);
     g_signal_connect(t->view, "create", G_CALLBACK(page_wants_window), t);
     tabs[ntabs++] = t;
-    if (uri)
+    if (uri) {
         webkit_web_view_load_uri(t->view, uri);
-    else if (!related)
-        webkit_web_view_load_html(t->view, start_page, NULL);
+    } else if (!related) {
+        char *html = start_page();
+        webkit_web_view_load_html(t->view, html, NULL);
+        g_free(html);
+    }
     return t;
 }
 
@@ -404,6 +483,7 @@ static void tab_front(int i)
     g_snprintf(n, sizeof(n), "%d", i + 1);
     g_snprintf(count, sizeof(count), "%d", ntabs);
     say("[weft] tab %s of %s\n", n, count);
+    foot_band();                     /* the toolbar over this view too */
     draw_band();
 }
 
@@ -869,6 +949,21 @@ static void draw_overlay(gpointer data)
         *slash = 0;
     int ax = bar_button(BTN_FWD) + 22, aw = bar_button(BTN_TABS) - 22 - ax;
     const char *label = *text ? text : "Search or address";
+    /* a name longer than the room ends in an ellipsis, not cut off */
+    char fit[256];
+    if (ud_width(label, UD_BOLD, M_TEXT_PX) > aw) {
+        size_t n = strlen(label);
+        if (n > sizeof(fit) - 4)
+            n = sizeof(fit) - 4;
+        memcpy(fit, label, n);
+        do {
+            while (n > 1 && ((unsigned char)fit[n - 1] & 0xC0) == 0x80)
+                n--;                 /* (a whole character at a time) */
+            n--;
+            memcpy(fit + n, "\xE2\x80\xA6", 4);
+        } while (n > 1 && ud_width(fit, UD_BOLD, M_TEXT_PX) > aw);
+        label = fit;
+    }
     int tw = ud_width(label, UD_BOLD, M_TEXT_PX);
     ud_clip(win, ax, y, aw, h);
     ud_text(win, ax + (tw < aw ? (aw - tw) / 2 : 0),
@@ -918,7 +1013,18 @@ static void draw_mobile(void)
     case SHEET_BOOKMARKS: draw_bookmarks(win, &l); return;
     }
     /* The page whole, and over it the floating toolbar - or, while an
-       address is typed, its field at the top, above the keyboard */
+       address is typed, its field at the top, above the keyboard. A
+       hidden toolbar is the page again where it was. */
+    static gboolean was_hidden;
+    if (bar_hidden && !editing) {
+        wpe_threados_toplevel_set_overlay(toplevel, NULL, NULL, 0, 0, 0, 0);
+        if (!was_hidden)
+            wpe_threados_view_show_last(
+                webkit_web_view_get_wpe_view(tabs[front]->view));
+        was_hidden = TRUE;
+        return;
+    }
+    was_hidden = FALSE;
     int x, y, w, h;
     if (editing)
         field_box(&x, &y, &w, &h);
@@ -977,7 +1083,10 @@ static void cards_show(gboolean on)
 #define LIST_ROW   56        /* the menu's, the history's and the settings'
                                 rows, under the heading (t_arm64weft.py
                                 reads these) */
-#define SETTINGS_ROWS 5
+#define SETTINGS_ROWS 7
+#define SET_BOOKMARKS 4      /* the bookmarks, to look through and prune */
+#define SET_START     5      /* favourites on new tabs */
+#define SET_CLEAR     6
 
 static const char *const menu_items[MENU_ITEMS] = {
     "New tab", "Add bookmark", "Bookmarks", "History", "Settings",
@@ -1166,21 +1275,26 @@ static void draw_settings(int win, const struct ud_look *l)
     draw_header(win, l, "Settings");
     static const char *const labels[SETTINGS_ROWS] = {
         "Search engine", "Desktop site", "Dark pages", "JavaScript",
-        "Clear history and cookies",
+        "Bookmarks", "Favourites on new tabs", "Clear history and cookies",
     };
     for (int i = 0; i < SETTINGS_ROWS; i++) {
         int y = M_HEAD_H + i * LIST_ROW, cy = y + LIST_ROW / 2;
         ud_text(win, 20, ud_baseline(y, LIST_ROW, M_TEXT_PX), labels[i],
-                i == 4 ? l->danger : l->text, UD_SANS, M_TEXT_PX);
+                i == SET_CLEAR ? l->danger : l->text, UD_SANS, M_TEXT_PX);
         ud_fill(win, 20, y + LIST_ROW - 1, w - 40, 1, l->line);
-        if (i == 0) {
-            const char *v = engines[prefs.engine].name;
+        if (i == 0 || i == SET_BOOKMARKS) {
+            /* what it is set to, or how many there are, and a > */
+            char n[16];
+            g_snprintf(n, sizeof(n), "%d", nbookmarks);
+            const char *v = i == 0 ? engines[prefs.engine].name : n;
             int vw = ud_width(v, UD_SANS, M_TEXT_PX);
-            ud_text(win, w - 20 - vw, ud_baseline(y, LIST_ROW, M_TEXT_PX), v,
+            ud_text(win, w - 40 - vw, ud_baseline(y, LIST_ROW, M_TEXT_PX), v,
                     l->dim, UD_SANS, M_TEXT_PX);
-        } else if (i < 4) {
-            int on = i == 1 ? prefs.desktop_site : i == 2 ? prefs.dark
-                                                          : !prefs.no_js;
+            ud_line(win, w - 26, cy - 5, w - 21, cy, 24, l->dim);
+            ud_line(win, w - 21, cy, w - 26, cy + 5, 24, l->dim);
+        } else if (i != SET_CLEAR) {
+            int on = i == 1 ? prefs.desktop_site : i == 2 ? prefs.dark :
+                     i == 3 ? !prefs.no_js : !prefs.plain_start;
             toggle(win, l, w - 20 - 44, cy, on);
         }
     }
@@ -1240,7 +1354,16 @@ static void setting(int row)
             NULL);
         webkit_web_view_reload(v);
         break;
-    case 4:
+    case SET_BOOKMARKS:
+        bookmarks_back = SHEET_SETTINGS;
+        show_sheet(SHEET_BOOKMARKS);
+        return;
+    case SET_START:
+        prefs.plain_start = !prefs.plain_start;
+        say("[weft] setting favourites on new tabs %s%s\n",
+            prefs.plain_start ? "off" : "on", NULL);
+        break;
+    case SET_CLEAR:
         nhistory = 0;
         webkit_website_data_manager_clear(
             webkit_network_session_get_website_data_manager(session),
@@ -1266,6 +1389,7 @@ static void sheet_tap(int x, int y)
             bookmark_toggle();
             show_sheet(SHEET_NONE);
         } else {
+            bookmarks_back = SHEET_NONE;
             show_sheet(i == 2 ? SHEET_BOOKMARKS : i == 3 ? SHEET_HISTORY
                                                          : SHEET_SETTINGS);
         }
@@ -1274,7 +1398,9 @@ static void sheet_tap(int x, int y)
     if (y < M_HEAD_H) {
         if (x >= win_w() - 100)              /* Done: from the engines,
                                                 back to the settings */
-            show_sheet(sheet == SHEET_ENGINES ? SHEET_SETTINGS : SHEET_NONE);
+            show_sheet(sheet == SHEET_ENGINES ? SHEET_SETTINGS :
+                       sheet == SHEET_BOOKMARKS ? bookmarks_back
+                                                : SHEET_NONE);
         return;
     }
     if (sheet == SHEET_HISTORY) {
@@ -1405,13 +1531,110 @@ static void mobile_tap(int x, int y)
 }
 
 /* A finger on the bands, or anywhere on the cards */
+static void bar_show(gboolean show)
+{
+    if (bar_hidden == !show)
+        return;
+    bar_hidden = !show;
+    say(show ? "[weft] toolbar shown%s%s\n" : "[weft] toolbar hidden%s%s\n",
+        NULL, NULL);
+    foot_band();
+    draw_band();
+}
+
+/* The room under the page: the toolbar's, from the gap above it down,
+   while it is there over a page that keeps a foot */
+static void foot_band(void)
+{
+    static int now = -1;
+    int want = mobile && keeps_foot && !bar_hidden ? G_BAR_H + 2 * G_BAR_GAP
+                                                   : 0;
+    if (want == now)
+        return;
+    now = want;
+    wpe_threados_toplevel_set_bottom(toplevel, want);
+}
+
+/* Is anything fixed to the foot of the page? What is at the bottom of
+   the window a quarter, half and three quarters across, and what holds
+   it, asked for its position - a few elements, not the page's
+   thousands */
+static const char foot_script[] =
+    "(() => { const H = innerHeight, W = innerWidth;"
+    "  for (const x of [W / 4, W / 2, W * 3 / 4])"
+    "    for (let e of document.elementsFromPoint(x, H - 6))"
+    "      for (; e && e !== document.body && e !== document.documentElement;"
+    "           e = e.parentElement) {"
+    "        const p = getComputedStyle(e).position;"
+    "        if (p === 'fixed' || p === 'sticky') {"
+    "          const r = e.getBoundingClientRect();"
+    "          if (r.bottom >= H - 8 && r.height < H / 3) return 1; } }"
+    "  return 0; })()";
+
+static void foot_found(GObject *object, GAsyncResult *result, gpointer data)
+{
+    (void)data;
+    JSCValue *value = webkit_web_view_evaluate_javascript_finish(
+        WEBKIT_WEB_VIEW(object), result, NULL);
+    if (!value)
+        return;
+    gboolean foot = jsc_value_to_int32(value) == 1;
+    g_object_unref(value);
+    if (WEBKIT_WEB_VIEW(object) != tabs[front]->view || foot == keeps_foot)
+        return;
+    keeps_foot = foot;
+    say(foot ? "[weft] the page keeps a foot: above the toolbar%s%s\n"
+             : "[weft] the page keeps no foot: under the toolbar%s%s\n",
+        NULL, NULL);
+    foot_band();
+    draw_band();
+}
+
+/* Asked now and then: a page puts its bar there once its scripts have
+   run, or takes it away */
+static gboolean foot_watch(gpointer data)
+{
+    (void)data;
+    if (mobile && ntabs && !sheet)
+        webkit_web_view_evaluate_javascript(tabs[front]->view, foot_script,
+                                            -1, NULL, NULL, NULL, foot_found,
+                                            NULL);
+    return G_SOURCE_CONTINUE;
+}
+
 static gboolean mobile_event(int type, int x, int y)
 {
     int bx, by, bw, bh, fx, fy, fw, fh;
     bar_box(&bx, &by, &bw, &bh);
     field_box(&fx, &fy, &fw, &fh);
-    gboolean band = sheet || (!editing && inside(x, y, bx, by, bw, bh)) ||
+    gboolean on_bar = !editing && inside(x, y, bx, by, bw, bh);
+    gboolean band = sheet || (on_bar && !bar_hidden) ||
                     (editing && inside(x, y, fx, fy, fw, fh));
+    /* The page's own drags, watched on their way to it: up the page
+       hides the toolbar, down brings it back; a tap where it was brings
+       it back too, and is not the page's */
+    if (!band && !sheet && !editing && !pressed_on_band) {
+        if (type == WEV_PRESS) {
+            drag_y = y;
+            drag_travel = 0;
+            press_x = x;
+            press_y = y;
+            tap_reveals = bar_hidden && on_bar;
+        } else if (type == WEV_DRAG) {
+            drag_travel += y - drag_y;
+            drag_y = y;
+            if (abs(y - press_y) + abs(x - press_x) > 8)
+                tap_reveals = FALSE;
+            if (drag_travel <= -BAR_DRAG || drag_travel >= BAR_DRAG) {
+                bar_show(drag_travel > 0);
+                drag_travel = 0;
+            }
+        } else if (type == WEV_RELEASE && tap_reveals) {
+            tap_reveals = FALSE;
+            bar_show(TRUE);
+            return TRUE;             /* not a click on the page */
+        }
+    }
     switch (type) {
     case WEV_CLICK:
         if (!band && editing) {
@@ -1652,6 +1875,8 @@ int main(int argc, char **argv)
     if (!uri)
         address_edit();
     g_timeout_add(20, watch_frames, NULL);
+    if (mobile)
+        g_timeout_add(1500, foot_watch, NULL);
     g_main_loop_run(loop);
 
     while (ntabs) {

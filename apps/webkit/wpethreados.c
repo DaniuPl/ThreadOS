@@ -263,6 +263,26 @@ static void blit_rect(WPEViewThreadOS *self, int win, int top, int k,
                       const guint8 *data, guint stride, int bw, int bh,
                       int x, int y, int w, int h);
 
+/* The band below the page, when the program keeps one (a phone's
+   toolbar, under which a page's own foot must not go): the colour the
+   page's last row has on the whole, as if the page went on */
+static void fill_bottom(WPEToplevelThreadOS *t, const guint8 *data,
+                        guint stride, int bw, int bh)
+{
+    if (t->bottom <= 0 || bh <= 0 || bw <= 0)
+        return;
+    const guint32 *row = (const guint32 *)(data + (gsize)(bh - 1) * stride);
+    guint64 r = 0, g = 0, b = 0;
+    for (int x = 0; x < bw; x++) {
+        r += (row[x] >> 16) & 0xFF;
+        g += (row[x] >> 8) & 0xFF;
+        b += row[x] & 0xFF;
+    }
+    uint32_t c = (uint32_t)(r / (guint64)bw) << 16 |
+                 (uint32_t)(g / (guint64)bw) << 8 | (uint32_t)(b / (guint64)bw);
+    ud_fill(t->win, 0, t->win_h - t->bottom, t->win_w, t->bottom, c);
+}
+
 void wpe_threados_toplevel_redraw_overlay(WPEToplevel *toplevel)
 {
     WPEToplevelThreadOS *t = ours(toplevel);
@@ -289,6 +309,7 @@ void wpe_threados_toplevel_redraw_overlay(WPEToplevel *toplevel)
             blit_rect(v, t->win, t->top * k / 16, k, data, stride, bw, bh,
                       t->ov_x * k / 16 - 1, (t->ov_y - t->top) * k / 16 - 1,
                       t->ov_w * k / 16 + 2, t->ov_h * k / 16 + 2);
+            fill_bottom(t, data, stride, bw, bh);
         }
     }
     t->overlay(t->overlay_data);
@@ -411,6 +432,7 @@ static gboolean show(WPEViewThreadOS *self, WPEBuffer *buffer,
         blit_rect(self, t->win, top, k, data, stride, bw, bh,
                   damage[i].x, damage[i].y, damage[i].width,
                   damage[i].height);
+    fill_bottom(t, data, stride, bw, bh);
     if (t->overlay) {
         /* Under the overlay, the page again, all of it: what the damage
            left alone there still has the overlay drawn over the frame

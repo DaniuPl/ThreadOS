@@ -60,7 +60,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, noarm64, Phone, ARM64_INITRD, ROUTES,
                    start_http_server, _kernel_define as define)
-from t_webkit import (PAGE, TALL, TALL_BG, TICKED, BAND_TOP, BAND_H,
+from t_webkit import (PAGE, TALL, TALL_BG, TICKED, BAND_TOP, BAND_H, BAR_TOP,
+                      BAR_H,
                       chromium_title,
                       node_number, find_box, RED, BLUE, GREEN, BROWN)
 
@@ -229,6 +230,14 @@ def hexdef(path, name):
                          src).group(1), 16)
 
 
+def css_colour(path, name):
+    """A colour #defined as a CSS string ("#rrggbb"), as (r, g, b)"""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), path)).read()
+    v = re.search(r'#define\s+%s\s+"#([0-9A-Fa-f]{6})"' % name, src).group(1)
+    return tuple(int(v[i:i + 2], 16) for i in (0, 2, 4))
+
+
 WIN_H = PHONE_H_ = Phone.LOGICAL[1] - define(MOB, "MOB_BAR_H") - \
     define(MOB, "MOB_SAFE_UP")
 
@@ -366,15 +375,18 @@ def fingers():
             time.sleep(1)
         check(f"and the screen shows it scrolled {moved} CSS pixels: the "
               f"band at {band}, where the page puts it {want}", band == want)
+        toolbar_hides(q, seen, spot, oy, moved, lift, tint_a)
         tabs(q, band)
         bookmarks(q, port)
         history_and_settings(q, port, agents)
+        toolbar_follows(q)
+        foot(q, port)
     finally:
         q.close()
         stop()
 
 
-def typing(q, port):
+def typing(q, port, path="tall.html"):
     """A tap on the address brings the phone's keyboard up; what is typed
     on it goes there, and Enter goes to it"""
     from t_arm64apps import KB_TOP, LETTERS, PITCH, note_key, a
@@ -390,7 +402,7 @@ def typing(q, port):
     enter = (Phone.LOGICAL[0] - 33, bottom_row)
     digit_rows = ["1234567890", "-/:;()&@\"'", ".,?!#%+"]
     letters = True
-    for c in f"10.0.2.2:{port}/tall.html":
+    for c in f"10.0.2.2:{port}/{path}":
         if c == ".":
             q.touch([dot], settle=0.3)
             continue
@@ -405,9 +417,9 @@ def typing(q, port):
     q.tap(*enter)
     go = wait_line(q, seen, "[weft] go ", 30)
     check(f"typed on it, the address goes there with Enter ({go})",
-          go == f"[weft] go http://10.0.2.2:{port}/tall.html")
+          go == f"[weft] go http://10.0.2.2:{port}/{path}")
     done = wait_line(q, seen, f"[weft] load finished http://10.0.2.2:{port}"
-                     f"/tall.html", 120)
+                     f"/{path}", 120)
     down = wait_line(q, seen, "[winmob] window ", 30)
     check(f"and loads, the keyboard down again ({down})",
           done is not None and down is not None and
@@ -482,7 +494,8 @@ def history_and_settings(q, port, agents):
     check(f"Settings: the search engine, chosen from a list ({chosen})",
           chosen == "[weft] setting search engine Google")
     seen = len(q.serial())
-    q.tap(width // 2, bar + head + 4 * row + row // 2)      # Clear
+    q.tap(width // 2, bar + head + define(WEFT_SRC, "SET_CLEAR") * row +
+          row // 2)                                         # Clear
     cleared = wait_line(q, seen, "[weft] cleared history and cookies", 30)
     q.tap(width - 30, bar + head // 2)                      # Done
     bar_tap(q, 3, width)
@@ -505,6 +518,116 @@ def history_and_settings(q, port, agents):
     go = wait_line(q, seen, "[weft] go ", 30)
     check(f"and words typed into the address are looked up there ({go})",
           go == "[weft] go https://www.google.com/search?q=kot")
+
+
+def page_colour(page_y):
+    """The tall page's colour at a CSS row, or None so near an edge that
+    the toolbar's blur reaches past it"""
+    for top, h, c in ((BAR_TOP, BAR_H, GREEN), (BAND_TOP, BAND_H, RED)):
+        if top - 8 <= page_y < top + h + 8:
+            return c if top + 8 <= page_y < top + h - 8 else None
+    return TALL_BG
+
+
+def toolbar_hides(q, seen, spot, oy, moved, lift, tint_a):
+    """Read on down the page and the toolbar goes: where it was, the
+    page itself; a tap there brings it back, glass over the page again,
+    and is not a click on the page"""
+    hidden = wait_line(q, seen, "[weft] toolbar hidden", 30)
+    under = page_colour((spot[1] - oy) // K + moved)
+    got = None
+    end = time.time() + 30
+    while under and got != under and time.time() < end:
+        time.sleep(0.5)
+        sw, sh, at = q.screen_raw()
+        got = at(*spot)
+    check(f"the drag down the page hid the toolbar ({hidden}): the page "
+          f"where it was, {got} ({under})", hidden is not None and
+          (under is None or got == under))
+    seen = len(q.serial())
+    q.tap(spot[0] / K, spot[1] / K)
+    shown = wait_line(q, seen, "[weft] toolbar shown", 30)
+    want = None if under is None else tuple(
+        ((v + ((255 - v) * lift >> 8)) * (256 - tint_a) + s * tint_a) >> 8
+        for v, s in zip(under, (0x1C, 0x1C, 0x1E)))
+    got = None
+    end = time.time() + 30
+    while want and got != want and time.time() < end:
+        time.sleep(0.5)
+        sw, sh, at = q.screen_raw()
+        got = at(*spot)
+    time.sleep(1)
+    check(f"a tap where it was brings it back ({shown}), glass over the "
+          f"page again ({got}, {want} worked out), and clicked nothing",
+          shown is not None and (want is None or got == want) and
+          "[weft] title tapped" not in q.serial()[seen:])
+
+
+FOOT_GREEN = (0x20, 0xC0, 0x60)
+FOOT_H = 56
+FOOT = (b'<!doctype html><html><head><meta charset="utf-8"><title>foot'
+        b'</title><style>html,body{margin:0;background:#405070}'
+        b'body{height:3000px}#foot{position:fixed;left:0;right:0;bottom:0;'
+        b'height:56px;background:#20c060}</style></head><body>'
+        b'<div id="foot"></div></body></html>')
+
+
+def foot_top(q):
+    """Where the foot page's green bar begins on the screen, panel pixels,
+    once it is there"""
+    end = time.time() + 30
+    while time.time() < end:
+        sw, sh, at = q.screen_raw()
+        box = find_box(at, sw, sh, FOOT_GREEN)
+        if box:
+            return box[1]
+        time.sleep(1)
+    return None
+
+
+def foot(q, port):
+    """A page with a bar of its own fixed to its foot, as YouTube's: it
+    stands above the toolbar, as on an iPhone, not under it - and with
+    the toolbar hidden, at the window's foot"""
+    ROUTES["/foot.html"] = lambda h, body: (
+        200, [("Content-Type", "text/html; charset=utf-8")], FOOT)
+    seen = len(q.serial())
+    typing(q, port, "foot.html")
+    kept = wait_line(q, seen, "[weft] the page keeps ", 30)
+    bar = define(MOB, "MOB_BAR_H")
+    band = define(WEFT_SRC, "G_BAR_H") + 2 * define(WEFT_SRC, "G_BAR_GAP")
+    above = (bar + WIN_H - band - FOOT_H) * K
+    top = None
+    end = time.time() + 30
+    while top != above and time.time() < end:
+        top = foot_top(q)
+    check(f"the page's own foot ({kept}) stands above the toolbar: its top "
+          f"at {top} ({above} worked out)",
+          kept == "[weft] the page keeps a foot: above the toolbar" and
+          top == above)
+    seen = len(q.serial())
+    q.touch([(180, 300 - 12 * i) for i in range(8)])
+    hidden = wait_line(q, seen, "[weft] toolbar hidden", 30)
+    down = (bar + WIN_H - FOOT_H) * K
+    end = time.time() + 30
+    while top != down and time.time() < end:
+        top = foot_top(q)
+    check(f"with the toolbar hidden ({hidden}) it goes to the window's "
+          f"foot: its top at {top} ({down} worked out)",
+          hidden is not None and top == down)
+
+
+def toolbar_follows(q):
+    """A finger up the page hides the toolbar, down brings it back"""
+    seen = len(q.serial())
+    q.touch([(180, 320 - 12 * i) for i in range(8)])
+    hidden = wait_line(q, seen, "[weft] toolbar hidden", 30)
+    seen = len(q.serial())
+    q.touch([(180, 220 + 12 * i) for i in range(8)])
+    shown = wait_line(q, seen, "[weft] toolbar shown", 30)
+    check(f"a finger up the page hides the toolbar ({hidden}), one down "
+          f"brings it back ({shown})", hidden is not None and
+          shown is not None)
 
 
 def look_changes(q, spot, lift, tint_a):
@@ -589,6 +712,61 @@ def bookmarks(q, port):
     done = wait_line(q, seen, "[weft] load finished", 120)
     check(f"and a tap on it goes there ({go})",
           go == f"[weft] go {page}" and done is not None)
+
+    # A new tab opens on the favourites: the bookmark a tile, which goes
+    # there when tapped
+    seen = len(q.serial())
+    bar_tap(q, 3, width)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(MENU_NEW))
+    opened = wait_line(q, seen, "[weft] tab 2 of 2", 30)
+    tile_rgb = css_colour(WEFT_SRC, "START_TILE")
+    page_end = (bar + bar_box(width)[1]) * K
+    tile = None
+    end = time.time() + 60
+    while tile is None and time.time() < end:
+        time.sleep(1)
+        sw, sh, at = q.screen_raw()
+        tile = find_box(at, sw, page_end, tile_rgb)
+    check(f"a new tab ({opened}) shows the bookmark among its favourites, "
+          f"a tile of 60 x 60 CSS pixels ({tile})",
+          tile is not None and tile[2] - tile[0] == 60 * K and
+          tile[3] - tile[1] == 60 * K)
+    if tile:
+        seen = len(q.serial())
+        q.tap((tile[0] + tile[2]) / 2 / K, (tile[1] + tile[3]) / 2 / K)
+        done = wait_line(q, seen, f"[weft] load finished {page}", 120)
+        check("and a tap on the tile goes there", done is not None)
+
+    # The browser's settings: the bookmarks, to look through - their
+    # Done goes back to the settings - and the favourites on new tabs
+    seen = len(q.serial())
+    bar_tap(q, 3, width)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(MENU_SETTINGS))
+    wait_line(q, seen, "[weft] settings shown", 30)
+    seen = len(q.serial())
+    q.tap(width // 2, bar + head + define(WEFT_SRC, "SET_BOOKMARKS") * row +
+          row // 2)
+    listed = wait_line(q, seen, "[weft] bookmarks shown", 30)
+    q.tap(width - 30, bar + head // 2)                      # Done
+    back = wait_line(q, seen, "[weft] settings shown", 30)
+    start_y = bar + head + define(WEFT_SRC, "SET_START") * row + row // 2
+    q.tap(width // 2, start_y)
+    off = wait_line(q, seen, "[weft] setting favourites", 30)
+    seen = len(q.serial())
+    q.tap(width // 2, start_y)
+    on = wait_line(q, seen, "[weft] setting favourites", 30)
+    check(f"Settings: Bookmarks lists them ({listed}), its Done back to "
+          f"the settings ({back}); favourites on new tabs off and on "
+          f"({off}; {on})",
+          listed == "[weft] bookmarks shown, 1 pages" and back is not None
+          and off == "[weft] setting favourites on new tabs off" and
+          on == "[weft] setting favourites on new tabs on")
+    seen = len(q.serial())
+    q.tap(width - 30, bar + head // 2)                      # Done
+    wait_line(q, seen, "[weft] settings hidden", 30)
+
     seen = len(q.serial())
     bar_tap(q, 3, width)
     wait_line(q, seen, "[weft] menu shown", 30)

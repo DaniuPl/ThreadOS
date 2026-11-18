@@ -191,16 +191,22 @@ def main():
                       timeout=20)
         mid = (ww // 2, wh // 2)
 
+        # the status bar above it takes the colour of its top row: the
+        # black corner and the red, on the whole
+        width = ww * K
+        bar_colour = tuple(c * (width - CORNER * K) // width for c in RED)
+
         def drawn(centre):
             return lambda at: (
                 at(*win(ww // 2, wh // 4)) == RED and
                 at(*win(ww // 2, wh * 3 // 4 + 40)) == BLUE and
                 at(*win(*mid)) == centre and
                 at(*win(CORNER // 2, CORNER // 2)) == BLACK and
-                at(2, 2) == BLACK)
-        check("once the phone is opened the window is in front, under the "
-              "status bar: red above, blue below, the green square in the "
-              "middle, the black corner - where the program drew them",
+                at(2, 2) == bar_colour)
+        check(f"once the phone is opened the window is in front, under the "
+              f"status bar: red above, blue below, the green square in the "
+              f"middle, the black corner - where the program drew them; the "
+              f"status bar the colour of its top row, {bar_colour}",
               poll_screen(q, drawn(GREEN)))
         w, h, at = q.screen_raw()
         sx, sy = win((ww - SQUARE) // 2, (wh - SQUARE) // 2)

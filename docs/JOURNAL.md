@@ -10323,3 +10323,45 @@ works and is checked by `make test`.
       the notifications are read where notes_area puts them. Two old
       checks read the serial port from its start and took this run's
       new lines for theirs: they read from a mark now.
+- [x] **Weft: the toolbar out of the way as an iPhone's Safari has it;
+      bookmarks in the settings, favourites on new tabs; repaints fixed**
+      (apps/webkit/weft.c, wpethreados.c, scripts/tests/t_arm64weft.py,
+      t_webkit.py)
+      Tried on YouTube: its page loads, but the floating toolbar covered
+      the bar of buttons YouTube fixes to the window's foot. Now the
+      toolbar hides while a page is read on down - a finger 24 pixels up
+      the page - and comes back when it is scrolled back up, when a page
+      is loaded, or when the foot of the window is tapped (that tap is
+      not the page's). A page that fixes something to its foot ends
+      above the toolbar while the toolbar is there, as Safari puts
+      YouTube's buttons above its own on an iPhone; under it, a band of
+      the colour of the page's last row. Which pages those are Weft asks
+      the page every second and a half and after each load: what is at
+      the window's bottom a quarter, a half and three quarters across,
+      and is anything holding it fixed or sticky - a few elements, not
+      the page's thousands. Any other page goes on under the glass. The
+      site's name on the toolbar ends in an ellipsis when it is longer
+      than the room. The browser's Settings list the bookmarks (their
+      Done goes back to the settings) and switch the favourites on new
+      tabs: a new tab is a page of the bookmarks, a tile each with the
+      site's first letter, light or dark as the system is. t_arm64weft:
+      the toolbar hidden by the drag down the page - the page itself
+      where it was - and brought back by a tap there, glass again and no
+      click; a finger up and down hides it and brings it back; a page
+      with a bar fixed to its foot has that bar above the toolbar, and
+      at the window's foot with the toolbar hidden; a new tab's
+      favourites tile, 60 x 60 CSS pixels, goes to the bookmark;
+      Settings' Bookmarks and favourites switch. YouTube Music will not
+      start ("not optimised for your browser") and no video plays: this
+      WebKit is built without media (ENABLE_VIDEO, MEDIA_SOURCE and
+      WEB_AUDIO off, no GStreamer) - the next large step.
+- [x] **The status bar in the colour of the program's top**
+      (kernelarm64/mobile.c, winmob.c, scripts/tests/t_arm64win.py)
+      Over a program's window the status bar was black; on an iPhone the
+      app goes on under it. It now takes the colour the window's top row
+      has on the whole, as the home indicator's strip takes its bottom
+      row's, and what it says - the time, the bars, the battery - is
+      dark on a light top and white on a dark one; the home indicator
+      dark or light by the strip in the same way. t_arm64win works the
+      colour out from what wintest draws in its top row (its black
+      corner and the red) and finds it in the status bar.

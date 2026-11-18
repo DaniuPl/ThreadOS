@@ -46,6 +46,7 @@ int64_t winmob_draw_cmd(int win, int owner, const struct win_draw *d,
 /* The display size changed: each window is told its new size */
 void winmob_rescale(void);
 void winmob_look_changed(void);
+uint32_t winmob_edge_colour(int win, int bottom);
 /* SYS64_WIN_KEYBOARD: the program waits for typing - the shell shows
    its keyboard over the window - or no longer does */
 int64_t winmob_set_keyboard(int win, int owner, int on);

@@ -593,6 +593,32 @@ void winmob_name(int win, char *out, int max)
     spin_unlock_irq(&lock, f);
 }
 
+/* The colour a row of a window's pixels has on the whole */
+static uint32_t row_colour(const uint32_t *row)
+{
+    uint32_t sr = 0, sg = 0, sb = 0;
+    for (int x = 0; x < ww; x++) {
+        sr += (row[x] >> 16) & 0xFF;
+        sg += (row[x] >> 8) & 0xFF;
+        sb += row[x] & 0xFF;
+    }
+    return ww ? (sr / (uint32_t)ww) << 16 | (sg / (uint32_t)ww) << 8 |
+                sb / (uint32_t)ww : 0;
+}
+
+/* The colour of a window's top row, or its bottom one - what the
+   phone's status bar above it and the home indicator's strip below it
+   take, so that a program's own colours go on to the screen's edges */
+uint32_t winmob_edge_colour(int win, int bottom)
+{
+    irqflags_t f = spin_lock_irq(&lock);
+    uint32_t c = 0;
+    if (winmob_exists(win))
+        c = row_colour(wins[win].px + (bottom ? (long)(wh - 1) * ww : 0));
+    spin_unlock_irq(&lock, f);
+    return c;
+}
+
 void winmob_draw(int win)
 {
     irqflags_t f = spin_lock_irq(&lock);
@@ -608,15 +634,7 @@ void winmob_draw(int win)
            - the colour its last row has on the whole: a program's own
            bar goes on under the indicator, and a picture there does not
            smear down into streaks */
-        const uint32_t *last = wins[win].px + (long)(wh - 1) * ww;
-        uint32_t sr = 0, sg = 0, sb = 0;
-        for (int x = 0; x < ww; x++) {
-            sr += (last[x] >> 16) & 0xFF;
-            sg += (last[x] >> 8) & 0xFF;
-            sb += last[x] & 0xFF;
-        }
-        uint32_t flat = ww ? (sr / (uint32_t)ww) << 16 |
-                             (sg / (uint32_t)ww) << 8 | sb / (uint32_t)ww : 0;
+        uint32_t flat = row_colour(wins[win].px + (long)(wh - 1) * ww);
         for (int y = wtop + wh; y < video_ph(); y++) {
             uint32_t *row = video_prow32(y);
             for (int x = 0; row && x < ww; x++)
