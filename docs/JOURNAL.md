@@ -10201,3 +10201,21 @@ works and is checked by `make test`.
       pass as they did. And on the phone, the home indicator's strip
       under a program's window carries its last row on, so Weft's
       toolbar goes down to the screen's edge.
+- [x] **Weft's menu: the history and the browser's settings**
+      (apps/webkit/weft.c, scripts/tests/t_arm64weft.py)
+      A phone's browser keeps what it has been shown and lets its owner
+      choose how it behaves; Weft did neither. On a touchscreen the
+      toolbar's last button is a menu - a new tab, History, Settings -
+      opened over the page, dimmed behind it. History lists the pages
+      visited, newest first, each once, by the title it gave itself and
+      its address without the scheme; a tap goes back to one, and the
+      list can be cleared. Settings: the search engine words typed into
+      the address go to (DuckDuckGo, Google, Bing); the desktop site,
+      which asks again as a computer does ("ThreadOS 1.0; Linux
+      aarch64", no "Mobile"); dark pages (prefers-color-scheme), from
+      the system's look to start with; JavaScript; and clearing the
+      history and every site's data (cookies, caches). Kept in memory
+      for now: the phone has no disk of its own yet. t_arm64weft: the
+      menu's new tab, History listing the tall page and going back to
+      it, the desktop site's next request a computer's, the history
+      empty once cleared.

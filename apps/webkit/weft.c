@@ -18,9 +18,12 @@
  * reload and the address field, a thin bar of how far a page has
  * loaded, and the page under them. On a touchscreen - a phone's or a
  * tablet's - it is a mobile browser's instead: the address alone at the
- * top, a toolbar at the bottom (back, forward, home, the tabs, a new
- * tab) within the thumb's reach, and the tabs side by side as cards,
- * each with its page's picture, behind the toolbar's tabs button. Each tab is a WebKit view of its
+ * top, a toolbar at the bottom (back, forward, home, the tabs, a menu)
+ * within the thumb's reach, the tabs side by side as cards, each with
+ * its page's picture, behind the toolbar's tabs button, and behind the
+ * menu a new tab, the history of the pages visited and the settings -
+ * the search engine, the desktop site, dark pages, JavaScript, and
+ * clearing the history and the cookies. Each tab is a WebKit view of its
  * own; only the one in front is in the window (wpe_view_set_toplevel),
  * the others are kept, unmapped, as they were. Typing in the address
  * field and pressing Enter goes there - an address without its scheme
@@ -40,7 +43,10 @@
  *   [weft] load failed <uri>: <why>
  *   [weft] go <uri>            (from the address field)
  *   [weft] tab <n> of <count>  (the tab in front changed)
- *   [weft] tabs shown, [weft] tabs hidden   (a touchscreen's cards)
+ *   [weft] tabs shown, [weft] tabs hidden   (a touchscreen's cards; the
+ *                       menu, history and settings the same way)
+ *   [weft] history shown, <n> pages
+ *   [weft] setting <name> <value>
  *   [weft] user agent <agent>
  */
 
@@ -79,7 +85,7 @@
 #define M_PILL_H   40
 #define M_TEXT_PX  15
 #define M_BOT_H    52        /* the toolbar: */
-#define M_BUTTONS  5         /* back, forward, home, tabs, new tab */
+#define M_BUTTONS  5         /* back, forward, home, tabs, the menu */
 #define M_HEAD_H   52        /* the tabs' screen: its heading, */
 #define M_GAP      12        /* cards in columns, this far apart, */
 #define M_CARD_W   170       /* at least this wide - two on a phone, */
@@ -127,10 +133,37 @@ static char typed[1024];
 static gboolean pressed_on_band;
 
 /* A touchscreen, a phone's or a tablet's, and a mobile browser on it;
-   its tabs' cards shown, scrolled so far */
-static gboolean touch, mobile, cards;
+   what is over the page - the tabs' cards, the menu, the history, the
+   settings - scrolled so far */
+static gboolean touch, mobile;
+enum { SHEET_NONE, SHEET_CARDS, SHEET_MENU, SHEET_HISTORY, SHEET_SETTINGS };
+static int sheet;
+#define cards (sheet == SHEET_CARDS)
 static int cards_scroll, press_x, press_y, press_scroll;
 static gboolean press_moved;
+
+/* The pages visited, newest first: the history (in memory - the phone
+   has no disk of its own to keep it on yet) */
+#define HISTORY_MAX 100
+static struct visit {
+    char title[96];
+    char uri[512];
+} history[HISTORY_MAX];
+static int nhistory;
+
+/* The browser's settings */
+static const struct engine {
+    const char *name, *query;
+} engines[] = {
+    { "DuckDuckGo", "https://duckduckgo.com/html/?q=" },
+    { "Google", "https://www.google.com/search?q=" },
+    { "Bing", "https://www.bing.com/search?q=" },
+};
+#define ENGINES ((int)(sizeof(engines) / sizeof(engines[0])))
+static struct {
+    int engine;
+    gboolean desktop_site, dark, no_js;
+} prefs;
 
 static void draw_band(void);
 static struct tab *tab_new(const char *uri, WebKitWebView *related);
@@ -195,6 +228,24 @@ static const char *shown_uri(WebKitWebView *view)
     return uri;
 }
 
+/* A page into the history, at its top: once, however often visited */
+static void remember(const char *uri, const char *title)
+{
+    if (!uri || !*uri || !strncmp(uri, "about:", 6) ||
+        !strncmp(uri, "data:", 5))
+        return;
+    int i = 0;
+    while (i < nhistory && strcmp(history[i].uri, uri))
+        i++;
+    if (i == nhistory && nhistory < HISTORY_MAX)
+        nhistory++;
+    if (i == HISTORY_MAX)
+        i = HISTORY_MAX - 1;
+    memmove(&history[1], &history[0], (size_t)i * sizeof(history[0]));
+    g_strlcpy(history[0].uri, uri, sizeof(history[0].uri));
+    g_strlcpy(history[0].title, title ? title : "", sizeof(history[0].title));
+}
+
 static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
                          gpointer data)
 {
@@ -205,6 +256,7 @@ static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
         say("[weft] load committed %s%s\n", uri, NULL);
     } else if (event == WEBKIT_LOAD_FINISHED) {
         say("[weft] load finished %s%s\n", uri, NULL);
+        remember(uri, t->title);
         if (eval_script && index_of(view) == 0)
             webkit_web_view_evaluate_javascript(view, eval_script, -1, NULL,
                                                 NULL, NULL, evaluated, NULL);
@@ -229,6 +281,11 @@ static void title_changed(WebKitWebView *view, GParamSpec *pspec,
     struct tab *t = data;
     const char *title = webkit_web_view_get_title(view);
     g_strlcpy(t->title, title && *title ? title : "", sizeof(t->title));
+    /* a page names itself after it has loaded: its visit takes it */
+    const char *uri = webkit_web_view_get_uri(view);
+    for (int i = 0; uri && i < nhistory; i++)
+        if (!strcmp(history[i].uri, uri))
+            g_strlcpy(history[i].title, t->title, sizeof(history[i].title));
     if (title && *title)
         say("[weft] title %s%s\n", title, NULL);
     if (index_of(view) == front)
@@ -390,7 +447,7 @@ static char *address_of(const char *s)
                             !strncmp(s, "localhost", 9)))
         return g_strconcat("http://", s, NULL);
     char *q = g_uri_escape_string(s, NULL, FALSE);
-    char *uri = g_strconcat("https://duckduckgo.com/html/?q=", q, NULL);
+    char *uri = g_strconcat(engines[prefs.engine].query, q, NULL);
     g_free(q);
     return uri;
 }
@@ -718,6 +775,10 @@ static void draw_cards(int win, const struct ud_look *l)
             "Done", l->accent, UD_BOLD, M_TEXT_PX);
 }
 
+static void draw_menu(int win, const struct ud_look *l);
+static void draw_history(int win, const struct ud_look *l);
+static void draw_settings(int win, const struct ud_look *l);
+
 static void draw_mobile(void)
 {
     int win = wpe_threados_toplevel_window(toplevel);
@@ -729,9 +790,11 @@ static void draw_mobile(void)
         keyboard = editing;
         win_keyboard(win, keyboard);
     }
-    if (cards) {
-        draw_cards(win, &l);
-        return;
+    switch (sheet) {
+    case SHEET_CARDS:    draw_cards(win, &l); return;
+    case SHEET_MENU:     draw_menu(win, &l); return;
+    case SHEET_HISTORY:  draw_history(win, &l); return;
+    case SHEET_SETTINGS: draw_settings(win, &l); return;
     }
     int w = win_w(), h = win_h();
     WebKitWebView *v = tabs[front]->view;
@@ -796,22 +859,255 @@ static void draw_mobile(void)
     char count[8];
     g_snprintf(count, sizeof(count), "%d", ntabs);
     ud_text_mid(win, bx - 11, cy - 11, 22, 22, count, l.text, UD_BOLD, 12);
-    int nx = button_x(4);                         /* a new tab */
-    ud_line(win, nx - 9, cy, nx + 9, cy, 32, l.text);
-    ud_line(win, nx, cy - 9, nx, cy + 9, 32, l.text);
+    int nx = button_x(4);                         /* the menu: three dots */
+    for (int i = -1; i <= 1; i++)
+        ud_disc(win, nx - 2, cy + i * 7 - 2, 5, l.text);
+}
+
+/* What is over the page: the page is covered - not drawn, not touched
+   - while anything is */
+static void show_sheet(int which)
+{
+    static const char *const names[] = { "page", "tabs", "menu", "history",
+                                         "settings" };
+    if (sheet == which)
+        return;
+    int was = sheet;
+    sheet = which;
+    cards_scroll = 0;
+    editing = FALSE;
+    wpe_threados_toplevel_cover(toplevel, which != SHEET_NONE);
+    if (was != SHEET_NONE)
+        say("[weft] %s hidden%s\n", names[was], NULL);
+    if (which == SHEET_MENU) {
+        /* the page, dimmed, behind the menu: once, as it opens */
+        int win = wpe_threados_toplevel_window(toplevel);
+        ud_fill_a(win, 0, M_TOP_H, win_w(), win_h() - M_TOP_H - M_BOT_H,
+                  0x000000, 110);
+    }
+    if (which == SHEET_HISTORY) {
+        char n[16];
+        g_snprintf(n, sizeof(n), "%d", nhistory);
+        say("[weft] history shown, %s pages%s\n", n, NULL);
+    } else if (which != SHEET_NONE) {
+        say("[weft] %s shown%s\n", names[which], NULL);
+    }
+    draw_band();
 }
 
 static void cards_show(gboolean on)
 {
-    if (cards == on)
-        return;
-    cards = on;
-    cards_scroll = 0;
-    editing = FALSE;
-    wpe_threados_toplevel_cover(toplevel, on);
-    say(on ? "[weft] tabs shown%s%s\n" : "[weft] tabs hidden%s%s\n", NULL,
-        NULL);
+    show_sheet(on ? SHEET_CARDS : SHEET_NONE);
+}
+
+/* --- The menu, the history and the settings ------------------------- */
+
+#define MENU_ROW   52        /* the menu's rows (t_arm64weft.py reads) */
+#define MENU_ITEMS 3         /* a new tab, the history, the settings */
+#define LIST_ROW   56        /* the history's and the settings' rows */
+#define SETTINGS_ROWS 5
+
+static const char *const menu_items[MENU_ITEMS] = {
+    "New tab", "History", "Settings",
+};
+
+static int menu_top(void)
+{
+    return win_h() - M_BOT_H - MENU_ITEMS * MENU_ROW - 16;
+}
+
+static void draw_header(int win, const struct ud_look *l, const char *title)
+{
+    int w = win_w();
+    ud_fill(win, 0, 0, w, M_HEAD_H, l->bg);
+    ud_fill(win, 0, M_HEAD_H - 1, w, 1, l->line);
+    ud_text(win, M_GAP + 4, ud_baseline(0, M_HEAD_H, 17), title, l->text,
+            UD_BOLD, 17);
+    int dw = ud_width("Done", UD_BOLD, M_TEXT_PX);
+    ud_text(win, w - M_GAP - 8 - dw, ud_baseline(0, M_HEAD_H, M_TEXT_PX),
+            "Done", l->accent, UD_BOLD, M_TEXT_PX);
+}
+
+static void toggle(int win, const struct ud_look *l, int x, int cy, int on)
+{
+    ud_round(win, x, cy - 13, 44, 26, 13, on ? l->accent : l->line);
+    ud_disc(win, on ? x + 20 : x + 2, cy - 11, 22, 0xFFFFFF);
+}
+
+static void draw_menu(int win, const struct ud_look *l)
+{
+    int w = win_w(), y0 = menu_top();
+    ud_round(win, 8, y0, w - 16, MENU_ITEMS * MENU_ROW + 8, 14, l->bg);
+    for (int i = 0; i < MENU_ITEMS; i++) {
+        int y = y0 + 4 + i * MENU_ROW;
+        if (i)
+            ud_fill(win, 24, y, w - 48, 1, l->line);
+        ud_text(win, 28, ud_baseline(y, MENU_ROW, M_TEXT_PX), menu_items[i],
+                l->text, UD_SANS, M_TEXT_PX);
+    }
+}
+
+static void draw_history(int win, const struct ud_look *l)
+{
+    int w = win_w(), h = win_h();
+    ud_fill(win, 0, 0, w, h, l->bg);
+    for (int i = 0; i < nhistory; i++) {
+        int y = M_HEAD_H + i * LIST_ROW - cards_scroll;
+        if (y + LIST_ROW <= M_HEAD_H || y >= h - M_BOT_H)
+            continue;
+        char shown[256];
+        short_uri(history[i].uri, shown, sizeof(shown));
+        ud_clip(win, 0, MAX(y, M_HEAD_H), w, LIST_ROW);
+        ud_text(win, 20, y + 24, *history[i].title ? history[i].title : shown,
+                l->text, UD_BOLD, 14);
+        ud_text(win, 20, y + 44, shown, l->dim, UD_SANS, 12);
+        ud_fill(win, 20, y + LIST_ROW - 1, w - 40, 1, l->line);
+        ud_unclip(win);
+    }
+    if (!nhistory)
+        ud_text_mid(win, 0, M_HEAD_H, w, 80, "No pages yet", l->dim,
+                    UD_SANS, M_TEXT_PX);
+    draw_header(win, l, "History");
+    int y0 = h - M_BOT_H;
+    ud_fill(win, 0, y0, w, M_BOT_H, l->bg);
+    ud_fill(win, 0, y0, w, 1, l->line);
+    ud_text_mid(win, 0, y0, w, M_BOT_H, "Clear history", l->danger, UD_BOLD,
+                M_TEXT_PX);
+}
+
+static void draw_settings(int win, const struct ud_look *l)
+{
+    int w = win_w(), h = win_h();
+    ud_fill(win, 0, 0, w, h, l->bg);
+    draw_header(win, l, "Settings");
+    static const char *const labels[SETTINGS_ROWS] = {
+        "Search engine", "Desktop site", "Dark pages", "JavaScript",
+        "Clear history and cookies",
+    };
+    for (int i = 0; i < SETTINGS_ROWS; i++) {
+        int y = M_HEAD_H + i * LIST_ROW, cy = y + LIST_ROW / 2;
+        ud_text(win, 20, ud_baseline(y, LIST_ROW, M_TEXT_PX), labels[i],
+                i == 4 ? l->danger : l->text, UD_SANS, M_TEXT_PX);
+        ud_fill(win, 20, y + LIST_ROW - 1, w - 40, 1, l->line);
+        if (i == 0) {
+            const char *v = engines[prefs.engine].name;
+            int vw = ud_width(v, UD_SANS, M_TEXT_PX);
+            ud_text(win, w - 20 - vw, ud_baseline(y, LIST_ROW, M_TEXT_PX), v,
+                    l->dim, UD_SANS, M_TEXT_PX);
+        } else if (i < 4) {
+            int on = i == 1 ? prefs.desktop_site : i == 2 ? prefs.dark
+                                                          : !prefs.no_js;
+            toggle(win, l, w - 20 - 44, cy, on);
+        }
+    }
+    int y = M_HEAD_H + SETTINGS_ROWS * LIST_ROW + 24;
+    ud_text(win, 20, y, "Weft " THREADOS_VERSION " on ThreadOS "
+            THREADOS_VERSION, l->dim, UD_SANS, 12);
+}
+
+static void set_agent(WebKitSettings *s);
+
+/* A setting changed: said, kept, put to work */
+static void setting(int row)
+{
+    WebKitWebView *v = tabs[front]->view;
+    switch (row) {
+    case 0:
+        prefs.engine = (prefs.engine + 1) % ENGINES;
+        say("[weft] setting search engine %s%s\n", engines[prefs.engine].name,
+            NULL);
+        break;
+    case 1:
+        prefs.desktop_site = !prefs.desktop_site;
+        set_agent(settings);
+        say("[weft] setting desktop site %s%s\n",
+            prefs.desktop_site ? "on" : "off", NULL);
+        webkit_web_view_reload(v);
+        break;
+    case 2:
+        prefs.dark = !prefs.dark;
+        wpe_settings_set_boolean(wpe_display_get_settings(display),
+                                 WPE_SETTING_DARK_MODE, prefs.dark,
+                                 WPE_SETTINGS_SOURCE_APPLICATION, NULL);
+        say("[weft] setting dark pages %s%s\n", prefs.dark ? "on" : "off",
+            NULL);
+        webkit_web_view_reload(v);
+        break;
+    case 3:
+        prefs.no_js = !prefs.no_js;
+        webkit_settings_set_enable_javascript(settings, !prefs.no_js);
+        say("[weft] setting javascript %s%s\n", prefs.no_js ? "off" : "on",
+            NULL);
+        webkit_web_view_reload(v);
+        break;
+    case 4:
+        nhistory = 0;
+        webkit_website_data_manager_clear(
+            webkit_network_session_get_website_data_manager(session),
+            WEBKIT_WEBSITE_DATA_ALL, 0, NULL, NULL, NULL);
+        say("[weft] cleared history and cookies%s%s\n", NULL, NULL);
+        break;
+    }
     draw_band();
+}
+
+static void sheet_tap(int x, int y)
+{
+    int h = win_h();
+    if (sheet == SHEET_MENU) {
+        int y0 = menu_top() + 4;
+        int i = (y - y0) / MENU_ROW;
+        if (y < y0 || i >= MENU_ITEMS) {
+            show_sheet(SHEET_NONE);          /* a tap beside it closes it */
+            return;
+        }
+        if (i == 0) {
+            show_sheet(SHEET_NONE);
+            if (tab_new(NULL, NULL))
+                tab_front(ntabs - 1);
+        } else {
+            show_sheet(i == 1 ? SHEET_HISTORY : SHEET_SETTINGS);
+        }
+        return;
+    }
+    if (y < M_HEAD_H) {
+        if (x >= win_w() - 100)
+            show_sheet(SHEET_NONE);          /* Done */
+        return;
+    }
+    if (sheet == SHEET_HISTORY) {
+        if (y >= h - M_BOT_H) {
+            nhistory = 0;
+            say("[weft] history cleared%s%s\n", NULL, NULL);
+            draw_band();
+            return;
+        }
+        int i = (y - M_HEAD_H + cards_scroll) / LIST_ROW;
+        if (i >= 0 && i < nhistory) {
+            char uri[512];
+            g_strlcpy(uri, history[i].uri, sizeof(uri));
+            show_sheet(SHEET_NONE);
+            say("[weft] go %s%s\n", uri, NULL);
+            webkit_web_view_load_uri(tabs[front]->view, uri);
+        }
+        return;
+    }
+    if (sheet == SHEET_SETTINGS) {
+        int i = (y - M_HEAD_H) / LIST_ROW;
+        if (i >= 0 && i < SETTINGS_ROWS)
+            setting(i);
+    }
+}
+
+static int sheet_room(void)
+{
+    if (sheet == SHEET_CARDS)
+        return cards_room();
+    if (sheet == SHEET_HISTORY) {
+        int all = nhistory * LIST_ROW, room = win_h() - M_HEAD_H - M_BOT_H;
+        return all > room ? all - room : 0;
+    }
+    return 0;
 }
 
 static void cards_tap(int x, int y)
@@ -868,10 +1164,7 @@ static void mobile_tap(int x, int y)
     case 1: webkit_web_view_go_forward(v); break;
     case 2: webkit_web_view_load_html(v, start_page, NULL); break;
     case 3: cards_show(TRUE); return;
-    case 4:
-        if (tab_new(NULL, NULL))
-            tab_front(ntabs - 1);
-        return;
+    case 4: show_sheet(SHEET_MENU); return;
     }
     draw_band();
 }
@@ -880,7 +1173,7 @@ static void mobile_tap(int x, int y)
 static gboolean mobile_event(int type, int x, int y)
 {
     int h = win_h();
-    gboolean band = cards || y < M_TOP_H || y >= h - M_BOT_H;
+    gboolean band = sheet || y < M_TOP_H || y >= h - M_BOT_H;
     switch (type) {
     case WEV_CLICK:
         if (!band && editing) {
@@ -900,9 +1193,9 @@ static gboolean mobile_event(int type, int x, int y)
             return FALSE;
         if (abs(y - press_y) + abs(x - press_x) > 8)
             press_moved = TRUE;
-        if (cards && press_moved) {
+        if (sheet && press_moved) {
             int s = press_scroll - (y - press_y);
-            cards_scroll = s < 0 ? 0 : MIN(s, cards_room());
+            cards_scroll = s < 0 ? 0 : MIN(s, sheet_room());
             draw_band();
         }
         return TRUE;
@@ -913,6 +1206,8 @@ static gboolean mobile_event(int type, int x, int y)
         if (!press_moved) {
             if (cards)
                 cards_tap(press_x, press_y);
+            else if (sheet)
+                sheet_tap(press_x, press_y);
             else
                 mobile_tap(press_x, press_y);
         }
@@ -995,7 +1290,7 @@ static gboolean band_event(gpointer data, int type, int x, int y, int val)
 static void set_agent(WebKitSettings *s)
 {
     char ua[256];
-    if (!touch)
+    if (!touch || prefs.desktop_site)
         g_snprintf(ua, sizeof(ua), "Mozilla/5.0 (ThreadOS " THREADOS_VERSION
                    "; Linux " AGENT_ARCH ") " AGENT_ENGINE " Safari/605.1.15 "
                    "Weft/" THREADOS_VERSION);
@@ -1066,8 +1361,9 @@ int main(int argc, char **argv)
     mobile = touch;
     struct ud_look look;
     ud_look(&look);
+    prefs.dark = look.dark != 0;
     wpe_settings_set_boolean(wpe_display_get_settings(display),
-                             WPE_SETTING_DARK_MODE, look.dark != 0,
+                             WPE_SETTING_DARK_MODE, prefs.dark,
                              WPE_SETTINGS_SOURCE_APPLICATION, NULL);
     if (mobile) {
         wpe_threados_toplevel_set_bottom(toplevel, M_BOT_H);

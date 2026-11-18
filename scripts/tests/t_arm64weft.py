@@ -38,11 +38,14 @@ and a second page, for the finger: it is 360 CSS pixels wide at a
 devicePixelRatio of 2; a tap on its box is a click there, and a drag
 up scrolls it - by as much as its script reads in scrollY, and the
 screen shows the band far down the page exactly that much higher,
-twice as many of the panel's pixels; the toolbar's + opens a second
+twice as many of the panel's pixels; the toolbar's menu opens a second
 tab, and its tabs button shows both as cards side by side - the count
 in the heading, each card's title, and on the first the picture of its
 page as it was left, the red band in it; a tap on that card brings it
-back, the band where it was, and a card's x closes its tab
+back, the band where it was, and a card's x closes its tab; the menu's
+History lists the pages visited, newest first, and a tap goes back to
+one; its Settings ask for the desktop site - the next request is a
+computer's, ThreadOS 1.0 on aarch64 - and clear the history
 """
 
 import os
@@ -228,8 +231,12 @@ def fingers():
     page with the finger, and the screen shows the page where its
     script says it is"""
     print("--- Weft and the finger ---")
-    ROUTES["/tall.html"] = lambda h, body: (
-        200, [("Content-Type", "text/html; charset=utf-8")], TALL)
+    agents = []
+
+    def tall(h, body):
+        agents.append(h.headers.get("User-Agent") or "")
+        return 200, [("Content-Type", "text/html; charset=utf-8")], TALL
+    ROUTES["/tall.html"] = tall
     port, stop = start_http_server()
     q = Phone(cores=4, mib=2048,
               append=f"run=weft,http://10.0.2.2:{port}/tall.html",
@@ -290,6 +297,7 @@ def fingers():
         check(f"and the screen shows it scrolled {moved} CSS pixels: the "
               f"band at {band}, where the page puts it {want}", band == want)
         tabs(q, band)
+        history_and_settings(q, port, agents)
     finally:
         q.close()
         stop()
@@ -337,6 +345,74 @@ def typing(q, port):
           down.endswith("keyboard down"))
 
 
+def menu_row(i):
+    """The middle of the menu's i-th row, on the screen"""
+    win_h = PHONE_H - define(MOB, "MOB_BAR_H") - define(MOB, "MOB_SAFE_UP")
+    top = (win_h - define(WEFT_SRC, "M_BOT_H") -
+           define(WEFT_SRC, "MENU_ITEMS") * define(WEFT_SRC, "MENU_ROW") - 16)
+    return (define(MOB, "MOB_BAR_H") + top + 4 +
+            i * define(WEFT_SRC, "MENU_ROW") + define(WEFT_SRC, "MENU_ROW") // 2)
+
+
+def history_and_settings(q, port, agents):
+    """The menu's History lists the pages visited, newest first, and
+    goes back to one; its Settings ask for the desktop site, and clear
+    the history"""
+    bar = define(MOB, "MOB_BAR_H")
+    width = PANEL[0] // K
+    cy = PHONE_H - define(MOB, "MOB_SAFE_UP") - define(WEFT_SRC, "M_BOT_H") // 2
+    row, head = define(WEFT_SRC, "LIST_ROW"), define(WEFT_SRC, "M_HEAD_H")
+    seen = len(q.serial())
+    q.tap(button_x(4, width), cy)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(1))
+    shown = wait_line(q, seen, "[weft] history shown", 30)
+    time.sleep(1.5)
+    sw, sh, at = q.screen_raw()
+    first = q.find_ui(16 * K, (width - 20) * K, (bar + head + 44) * K,
+                      px=12 * K, screen=(sw, sh, at),
+                      charset="hmtpl:/.0123456789a")
+    check(f"the menu's History lists the pages visited ({shown}), the "
+          f"newest first: {first!r}",
+          shown is not None and first == f"10.0.2.2:{port}/tall.html")
+    seen = len(q.serial())
+    q.tap(width // 2, bar + head + row // 2)
+    go = wait_line(q, seen, "[weft] go ", 30)
+    done = wait_line(q, seen, "[weft] load finished", 120)
+    check(f"and a tap on one goes back to it ({go})",
+          go == f"[weft] go http://10.0.2.2:{port}/tall.html" and
+          done is not None)
+
+    seen = len(q.serial())
+    q.tap(button_x(4, width), cy)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(2))
+    wait_line(q, seen, "[weft] settings shown", 30)
+    asked = len(agents)
+    q.tap(width // 2, bar + head + row + row // 2)          # Desktop site
+    said = wait_line(q, seen, "[weft] setting desktop site", 30)
+    end = time.time() + 120
+    while len(agents) == asked and time.time() < end:
+        time.sleep(0.5)
+    wait_line(q, seen, "[weft] load finished", 120)
+    ua = agents[-1] if len(agents) > asked else ""
+    check(f"Settings: the desktop site asks again as a computer does "
+          f"({said}; {ua!r})", said == "[weft] setting desktop site on" and
+          re.match(r"Mozilla/5\.0 \(ThreadOS 1\.0; Linux aarch64\) "
+                   r".* Safari/[\d.]+ Weft/1\.0$", ua) is not None and
+          "Mobile" not in ua)
+    seen = len(q.serial())
+    q.tap(width // 2, bar + head + 4 * row + row // 2)      # Clear
+    cleared = wait_line(q, seen, "[weft] cleared history and cookies", 30)
+    q.tap(width - 30, bar + head // 2)                      # Done
+    q.tap(button_x(4, width), cy)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(1))
+    shown = wait_line(q, seen, "[weft] history shown", 30)
+    check(f"and clear the history ({cleared}; {shown})",
+          cleared is not None and shown == "[weft] history shown, 0 pages")
+
+
 def tabs(q, band):
     """The toolbar's + and tabs buttons, and the cards"""
     bar = define(MOB, "MOB_BAR_H")
@@ -344,7 +420,10 @@ def tabs(q, band):
     cy = PHONE_H - define(MOB, "MOB_SAFE_UP") - define(WEFT_SRC, "M_BOT_H") // 2
     seen = len(q.serial())
     q.tap(button_x(4, width), cy)
-    check("the toolbar's + opens a second tab",
+    menu = wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(0))
+    check("the toolbar's menu opens a second tab",
+          menu is not None and
           wait_line(q, seen, "[weft] tab 2 of 2", 60) is not None)
     wait_line(q, seen, "[weft] title New tab", 60)
     seen = len(q.serial())
@@ -396,6 +475,9 @@ def tabs(q, band):
     q.tap(x + cw - 17, bar + y + bar_h // 2)
     check("and a card's x closes its tab",
           wait_line(q, seen, "[weft] tab 1 of 1", 30) is not None)
+    seen = len(q.serial())
+    q.tap(PANEL[0] // K - 40, cy)                            # Done
+    wait_line(q, seen, "[weft] tabs hidden", 30)
 
 
 if __name__ == "__main__":
