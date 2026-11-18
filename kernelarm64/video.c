@@ -67,10 +67,37 @@ int video_ramfb_init(int width, int height, int scale16)
     return 0;
 }
 
+void video_set_scale(int scale16)
+{
+    k16 = scale16 < 16 ? 16 : scale16;
+}
+
+/* The screen's brightness, in 256ths: ramfb has no backlight to turn
+   down, so the picture itself is dimmed on its way to the screen */
+static int bright = 256;
+
+void video_set_brightness(int level)
+{
+    bright = level < 16 ? 16 : level > 256 ? 256 : level;
+}
+
 void video_present(void)
 {
-    if (front)
-        memcpy(front, back, (uint32_t)pw * (uint32_t)ph * 4);
+    if (!front)
+        return;
+    uint32_t n = (uint32_t)pw * (uint32_t)ph;
+    if (bright >= 256) {
+        memcpy(front, back, n * 4);
+        return;
+    }
+    const uint32_t *s = back;
+    uint32_t *d = front;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t c = s[i];
+        d[i] = ((((c >> 16) & 0xFF) * (uint32_t)bright >> 8) << 16) |
+               ((((c >> 8) & 0xFF) * (uint32_t)bright >> 8) << 8) |
+               ((c & 0xFF) * (uint32_t)bright >> 8);
+    }
 }
 
 /* What kernel/bootsplash.c asks before it draws: whether there is a

@@ -43,6 +43,14 @@ static uint8_t mac[6];
 static uint32_t rx_count, tx_count;
 static struct thread *rx_thread;
 static volatile int rx_kick;
+/* Airplane mode (the phone's settings): the card neither sends nor
+   hears, as a phone's radio switched off */
+static volatile int quiet;
+
+void vnet_airplane(int on)
+{
+    quiet = on;
+}
 
 static void rx_irq(void)
 {
@@ -69,7 +77,8 @@ static void rx_main(void *arg)
             if (id < RX_BUFS) {
                 if (len > HDR && len <= BUF) {
                     rx_count++;
-                    net_rx(rxbuf[id] + HDR, (uint16_t)(len - HDR));
+                    if (!quiet)
+                        net_rx(rxbuf[id] + HDR, (uint16_t)(len - HDR));
                 }
                 virtio_give(dev, 0, &rxq, (unsigned)id, rxbuf[id], BUF);
                 given = 1;
@@ -155,7 +164,7 @@ const uint8_t *netdev_mac(void)
 /* Under the stack's lock, as every caller of it is */
 int netdev_send(const void *frame, uint16_t len)
 {
-    if (!dev || !frame || len > FRAME_MAX)
+    if (!dev || !frame || len > FRAME_MAX || quiet)
         return -1;
     int slot = -1;
     for (int tries = 0; slot < 0 && tries < 100000; tries++) {

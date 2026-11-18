@@ -59,6 +59,12 @@ static int multitouch;
 static uint32_t min_x, max_x, min_y, max_y;
 static int scr_w, scr_h;
 
+void touch_screen(int w, int h)
+{
+    scr_w = w;
+    scr_h = h;
+}
+
 /* What the finger is doing, as the reports so far have it */
 static int raw_x, raw_y, down, was_down, slot;
 

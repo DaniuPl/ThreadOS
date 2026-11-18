@@ -9834,3 +9834,72 @@ works and is checked by `make test`.
       another name - HTTP/2, the public suffix list, OpenSSL's hashes.
       All ARM64 groups pass; on the PC libc, pthread, signals, ipc and
       glib do.
+- [x] **The phone's shell grows up: a dock, the shade, settings and apps**
+      (kernelarm64/mobile.c, mobile.h, mobapps.c, mobapps.h, video.c,
+      video64.h, touch.c, touch.h, vnet.c, netglue.h, kmain.c, proc.c,
+      user64/usys64.h, libc/tests/notetest.c, Makefile,
+      scripts/tests/t_arm64apps.py, t_arm64mobile.py)
+      What a phone's owner reaches for first, on ThreadOS mobile. The
+      status bar has the battery - what fw_cfg's opt/threados/battery
+      says ("73 discharging"), or mains power where there is none, as
+      on QEMU's virt; yellow with battery saver - and the network's
+      bars (a card with an address, one without, none, or a plane in
+      airplane mode), a crossed bell in silent mode. Home has a dock,
+      85% of the width, its icons evenly apart: Notes, Calculator,
+      Settings and the first package's application. Pulled down from
+      the status bar (from anywhere on home) the shade has the time,
+      six quick settings - the network, airplane mode, the dark look, do
+      not disturb, the flashlight, battery saver - the brightness and
+      the notifications: the kernel's (the network up with its address,
+      a package taken, a program stopped by a fault) and programs'
+      (SYS64_NOTIFY, the PC's call), each a banner for four seconds
+      unless do not disturb or Settings say not, and the latest on the
+      lock screen.
+      The apps (mobapps.c): Notes, with a keyboard on the screen - a
+      layer of digits and signs, one of Polish letters, shift, a
+      backspace that takes a character whole; Calculator, in decimal
+      fixed point (six places, twelve digits; the kernel is built
+      without the FP registers), each result on the serial port;
+      Settings, pages of rows: the network, Display (brightness, the
+      display size - 200, 175 or 150% - that changes the logical screen
+      everything is laid out on: what sits at the bottom is placed from
+      it, the touchscreen maps onto it, programs' windows stay as they
+      were in panel pixels), Appearance (the theme - Matte, Liquid Glass
+      or Solid - the dark look, four wallpapers, five accents, round
+      icons), Sound & notifications (silent mode, the volume, banners,
+      the lock screen; there is no speaker yet, and it says so), Battery
+      (saver: the screen held to 60%, the shell waking a third as
+      often; the percentage), Navigation (the iPhone's gestures or
+      Android's three buttons, with a screen of recent apps), Date &
+      time (a 12-hour clock), About. Airplane mode switches the card
+      off (vnet.c sends nothing and lets go of what it hears); the
+      brightness dims the picture on its way to the screen, ramfb
+      having no backlight.
+      Liquid Glass, as an iPhone's since iOS 26: under a panel the
+      picture shows through, a little brighter, bent at the rim as
+      through a lens; a bright rim lit from above; and the shade's
+      backdrop is the screen blurred - averaged in blocks, smoothed,
+      drawn back between them. panel=720x1600 on the command line gives
+      the phone the Moto G34's panel, as make run-phone now does; the
+      tests keep 720 x 1280.
+      t_arm64apps boots the phone with a battery, a network card, a
+      clock at 15:34 and a package whose program posts a notification,
+      and reads everything off the screen and the serial port: the lock
+      screen's notification with DHCP's address; 73% and four bars; the
+      dock's colours; ten sums against Python's decimal module (a chain,
+      a sign changed, division by zero, a result past twelve digits) and
+      the last on the screen; a note typed with shift, a space and the
+      Polish layer, a backspace through a Polish letter, kept across
+      home; the dark look off and on, the accent in a switch, the Sunset
+      slope as home's background row for row, round icons, brightness
+      at half scaling a pixel exactly, battery saver's yellow at 60%,
+      the percentage hidden, silent mode's bell, 3:34 against 15:34,
+      airplane mode's bars gone and back; the shade's flashlight; with
+      do not disturb no banner but the list first, without it a banner,
+      Clear; Android's buttons, back, recent apps, home; Liquid Glass's
+      lens - the Ocean slope from the rows the lens says, brighter -
+      against matte's blend, and the shade's backdrop worked out from
+      the home screen by the same blocks; and the display size at 150%:
+      480 x 853, a tile where 1.5 to one puts it, a tap at the new
+      size's places opening Calculator. t_arm64mobile and t_arm64win pass
+      as before.

@@ -120,6 +120,7 @@ static void load_packages(void)
         const struct package *p = package_at(package_count() - 1);
         printk("[ OK ] Package %s %u: %s, %u KiB\n", p->id, p->version,
                p->name, size / 1024);
+        mobile_notify(p->name, "Installed and ready to open");
     }
 }
 
@@ -159,6 +160,28 @@ static void start_network(struct virtio_dev *vdevs, int nv,
     tcp_init();
     for (int i = 0; i < 800 && !net_configured(); i++)
         thread_sleep_ms(10);
+    if (net_configured()) {
+        uint32_t ip = net_ip();
+        char s[48];
+        int n = 0;
+        const char *head = "Connected, ";
+        while (head[n]) {
+            s[n] = head[n];
+            n++;
+        }
+        for (int i = 3; i >= 0; i--) {
+            uint32_t v = (ip >> (i * 8)) & 0xFF;
+            if (v >= 100)
+                s[n++] = (char)('0' + v / 100);
+            if (v >= 10)
+                s[n++] = (char)('0' + v / 10 % 10);
+            s[n++] = (char)('0' + v % 10);
+            if (i)
+                s[n++] = '.';
+        }
+        s[n] = 0;
+        mobile_notify("Network", s);
+    }
     char text[20];
     uint32_t ip;
     if (word_value(line, "dns=", text, sizeof(text)) &&
@@ -458,10 +481,26 @@ void kmain(uint64_t x0)
     if (fwcfg_init(fi.fwcfg) == 0) {
         /* The screen first, so that the loading screen - the PC's own,
            kernel/bootsplash.c - is up for the rest of the start */
-        int r = video_ramfb_init(720, 1280, 32);
+        /* panel=720x1600: a phone's own panel (the Moto G34's), where
+           the tests' phone is 720x1280 */
+        int pw = 720, ph = 1280;
+        char v[16];
+        if (word_value(fi.bootargs, "panel=", v, sizeof(v))) {
+            int a = 0, b = 0, i = 0;
+            while (v[i] >= '0' && v[i] <= '9')
+                a = a * 10 + (v[i++] - '0');
+            if (v[i] == 'x')
+                for (i++; v[i] >= '0' && v[i] <= '9'; i++)
+                    b = b * 10 + (v[i] - '0');
+            if (a >= 320 && a <= 2048 && b >= 480 && b <= 4096) {
+                pw = a;
+                ph = b;
+            }
+        }
+        int r = video_ramfb_init(pw, ph, 32);
         if (r == 0) {
             screen = 1;
-            printk("Screen: ramfb, 720x1280, two pixels to one\n");
+            printk("Screen: ramfb, %dx%d, two pixels to one\n", pw, ph);
             boot_splash_start(1);
         } else if (r != -1) {
             printk("Screen: ramfb would not start (%d)\n", r);
@@ -512,6 +551,16 @@ void kmain(uint64_t x0)
     }
     mi.cpu = name ? cpu_text : "an ARM64 core";
     mi.cores = fi.cpus;
+    {
+        /* scale=150 or 175: the phone's display size from the start */
+        char v[8];
+        if (word_value(fi.bootargs, "scale=", v, sizeof(v))) {
+            int n = 0;
+            for (int i = 0; v[i] >= '0' && v[i] <= '9'; i++)
+                n = n * 10 + (v[i] - '0');
+            mi.scale = n;
+        }
+    }
     mi.mem_mib = (uint32_t)(fi.mem_total >> 20);
     mi.screen_w = video_pw();
     mi.screen_h = video_ph();

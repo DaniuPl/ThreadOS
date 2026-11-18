@@ -6,5 +6,11 @@
    -1 no ramfb, -2 no memory for it, -3 fw_cfg would not take it.
    Everything else is kernel/include/video.h. */
 int video_ramfb_init(int width, int height, int scale16);
+/* The picture's brightness on its way to the screen, in 256ths (16 to
+   256): ramfb has no backlight */
+void video_set_brightness(int level);
+/* Panel pixels to sixteen logical ones from now on (the phone's display
+   size): 32 is two to one */
+void video_set_scale(int scale16);
 
 #endif

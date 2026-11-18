@@ -18,6 +18,8 @@ struct touch_event {
    w x h logical pixels. 0 = there is one; its name is touch_name(). */
 int touch_init(struct virtio_dev *devs, int n, int w, int h);
 const char *touch_name(void);
+/* The screen's logical size changed (the phone's display size) */
+void touch_screen(int w, int h);
 /* The next touch, or 0 when there is none waiting. Reads what the device
    has sent first, so it can be called from a loop that sleeps between. */
 int touch_next(struct touch_event *e);

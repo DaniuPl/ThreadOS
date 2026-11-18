@@ -65,6 +65,8 @@ def colour(name):
 def apps():
     """mobile.c's apps: (name, colour), in their order on home"""
     src = open(os.path.join(ROOT, SRC)).read()
+    # (the grid's own array; the dock's comes after it)
+    src = re.search(r"apps\[\] = \{(.*?)\n\};", src, re.S).group(1)
     out = []
     for name, c in re.findall(r'\{\s*"(\w+)",\s*APP_\w+,\s*0x([0-9A-Fa-f]{6})'
                               r'\s*\}', src):

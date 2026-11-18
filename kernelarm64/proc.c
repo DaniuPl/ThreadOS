@@ -51,6 +51,7 @@
 #include "ipchost.h"
 #include "netglue.h"
 #include "winmob.h"
+#include "mobile.h"
 #include "rtc.h"
 #include "thread.h"
 #include "uart.h"
@@ -2275,6 +2276,19 @@ void proc_syscall(struct trap_frame *f)
     case SYS64_SIGMASK:
         r = sys_sigmask(p, x[0], x[1], x[2]);
         break;
+    case SYS64_NOTIFY: {
+        /* The PC's call (title, body): on the phone, the shade's list
+           and a banner */
+        char t[40], b[80];
+        if (copy_string(p, x[0], t, sizeof(t)) < 0 ||
+            copy_string(p, x[1], b, sizeof(b)) < 0) {
+            r = -1;
+            break;
+        }
+        mobile_notify(t, b);
+        r = 0;
+        break;
+    }
     case SYS64_SIGSUSPEND:
         r = sys_sigsuspend(x[0]);
         break;
@@ -2343,6 +2357,7 @@ void proc_fault(struct trap_frame *f, const char *what, uint64_t addr,
     struct uproc *p = self();
     printk("[proc] %s (pid %d): %s 0x%lx (%s), at 0x%lx - ended\n",
            p->name, p->pid, what, addr, why, f->elr);
+    mobile_notify(p->name, "Stopped after a fault");
     /* A fault ends the whole program, every thread of it */
     end_program(p, PROC_KILLED);
 }

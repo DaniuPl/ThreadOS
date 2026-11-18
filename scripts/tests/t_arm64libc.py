@@ -250,7 +250,9 @@ def main():
                 # The kernel's own word on the child that faulted with
                 # no handler of its own, which glibc's side has not
                 kernel = [l for l in said if l.startswith("[proc] ")]
-                got = [l for l in said if not l.startswith("[proc] ")]
+                notes = [l for l in said if l.startswith("[notify] ")]
+                got = [l for l in said
+                       if not l.startswith(("[proc] ", "[notify] "))]
                 ok, where = same(want, got)
                 check(f"{cores} core(s): sigtest prints exactly what "
                       f"glibc's build prints ({where})", ok)
@@ -261,6 +263,9 @@ def main():
                           r"\[proc\] sigtest \(pid \d+\): writing 0x10 "
                           r"\(translation fault\), at 0x[0-9a-f]+ - ended$",
                           kernel[0]) is not None)
+                check(f"{cores} core(s): and told the phone's shell, whose "
+                      f"notification says so ({notes})",
+                      notes == ["[notify] sigtest: Stopped after a fault"])
                 check(f"{cores} core(s): WebKit's way of stopping a thread "
                       f"works: it stood still, its frame had its stack",
                       any(l.startswith("WebKit's suspend and resume") and

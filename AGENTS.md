@@ -38,7 +38,9 @@ the PC's network stack (`kernel/net.c`, `tcp.c`, `dhcp.c`) on a
 virtio-net card (`kernelarm64/vnet.c`, `netglue.c`) - and, given a
 phone's devices, is ThreadOS mobile: a ramfb screen set up through
 fw_cfg, the initrd through fw_cfg, a PL031 clock, a virtio-input
-touchscreen over virtio-mmio, the shell in `kernelarm64/mobile.c`, and
+touchscreen over virtio-mmio, the shell in `kernelarm64/mobile.c` (a
+dock, the pulled-down shade, notifications) with its apps and Settings
+in `kernelarm64/mobapps.c`, and
 programs' windows through the PC's window calls (`kernelarm64/winmob.c`:
 a window is the screen below the status bar, the finger the program's
 mouse; `user64/usys64.h` builds for AArch64 too). Of `kernel/` it
@@ -49,7 +51,7 @@ AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
 `arm64mobile`, `arm64user`, `arm64libc`, `arm64net`, `arm64win`,
-`arm64rand` and `arm64libs`. The libraries above musl - and WebKit -
+`arm64rand`, `arm64libs`, `arm64soup` and `arm64apps`. The libraries above musl - and WebKit -
 build for aarch64 by the PC's own rules: `TARGET=aarch64` switches the
 compilers, flags, `--host`, cross files and linker script, into a build
 directory of its own (`$(BUILD)/aarch64`, `make arm64-libs`,
