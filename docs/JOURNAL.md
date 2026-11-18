@@ -9711,3 +9711,20 @@ works and is checked by `make test`.
       Pillow's libwebp, the keymap's and the font's own definitions have
       it. glib, wpedeps, random, libc, pthread, socket and ipc pass on
       the PC with the switch in the rules.
+- [x] **Application packages on the phone**
+      (kernelarm64/kmain.c, fwcfg.c, fwcfg.h, mobile.c, scripts/ptest.py,
+      scripts/tests/t_arm64win.py)
+      Weft comes as a package (weft.tapp), and the ARM64 kernel had no
+      way to be handed one. What the PC's loader hands over as modules,
+      QEMU now hands over as fw_cfg files under opt/threados/apps/; the
+      kernel reads each, checks and takes it with the PC's own code
+      (kernel/initrd.c: the image, the manifest, programs for this
+      processor), and runs its programs as it runs the initrd's. The
+      phone's home has a tile for each package's application after its
+      own apps, and a tap starts the package's program - whose window
+      then opens like any other's.
+      t_arm64win boots a second phone with two packages: wintest under a
+      name only the package has, built for aarch64, and the same built
+      for x86_64. The kernel takes the first and passes over the second
+      (its programs are for another processor); home has the first's
+      tile, and a tap on it starts the program, whose window opens.

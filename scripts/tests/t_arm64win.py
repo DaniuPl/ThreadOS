@@ -27,16 +27,29 @@ screen and its tablet:
 
   a tap in the corner ends the program; its window goes with it, the
   phone goes home, the tile is gone and every page is free again
+
+and the same program from an application package (.tapp,
+scripts/mktapp.py) handed over through fw_cfg, as the PC's loader hands
+packages over as modules: the kernel takes it - and passes over one
+built for the PC - the phone's home has its tile, and a tap on it
+starts the package's program, whose window opens; its program runs
+under a name only the package has
 """
 
 import os
 import re
+import subprocess
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, noarm64, Phone, ARM64_INITRD, _kernel_define
+
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+WINTEST_ELF = os.path.join(os.path.dirname(ARM64_INITRD), "arm64", "libc",
+                           "wintest.elf")
 
 K = 2                         # panel pixels to a logical one
 MOB = "kernelarm64/mobile.c"
@@ -54,6 +67,7 @@ CORNER = _kernel_define(WIN, "CORNER")
 RED, BLUE = (0xE0, 0x20, 0x20), (0x20, 0x40, 0xE0)
 GREEN, YELLOW, BLACK = (0x20, 0xB0, 0x40), (0xF0, 0xD0, 0x20), (0, 0, 0)
 TILE_COLOUR = (0x5E, 0x5C, 0xE6)
+PKG_COLOUR = (0xFF, 0x9F, 0x0A)
 
 
 def poll_screen(q, test, timeout=30):
@@ -68,6 +82,56 @@ def poll_screen(q, test, timeout=30):
             pass
         time.sleep(0.3)
     return False
+
+
+def package(work, name, arch):
+    """wintest as an application package's program, under a name only
+    the package has"""
+    out = os.path.join(work, name + ".tapp")
+    subprocess.run([sys.executable, os.path.join(ROOT, "scripts",
+                                                 "mktapp.py"), out,
+                    "--id", name, "--name", "Pack win", "--version", "3",
+                    "--arch", arch, "--exec", "pkgwin",
+                    "pkgwin=" + WINTEST_ELF], check=True,
+                   capture_output=True)
+    return out
+
+
+def from_package():
+    work = tempfile.mkdtemp()
+    ours = package(work, "packwin", "aarch64")
+    other = package(work, "pcwin", "x86_64")
+    q = Phone(cores=2, mib=1024, extra=[
+        "-fw_cfg", "name=opt/threados/apps/packwin,file=" + ours,
+        "-fw_cfg", "name=opt/threados/apps/pcwin,file=" + other])
+    try:
+        out = q.wait_serial("[mobile] lock screen", timeout=120)
+        check("the kernel takes the package handed over through fw_cfg "
+              "(%s)" % next((l for l in out.splitlines()
+                             if "Package packwin" in l), "no line"),
+              re.search(r"\[ OK \] Package packwin 3: Pack win, \d+ KiB",
+                        out) is not None)
+        check("and passes over the one built for the PC",
+              "a package passed over: its programs are for another "
+              "processor" in out)
+        q.touch([(180, 560), (180, 420), (180, 300)])
+        q.wait_serial("[mobile] home (swipe up)", timeout=20)
+        tx = GRID_X + APPS * GRID_STEP
+        tile = (tx * K + 8, (GRID_Y + TILE // 2) * K)
+        check("home has the package's tile after the apps",
+              poll_screen(q, lambda at: at(*tile) == PKG_COLOUR))
+        q.tap(tx + TILE // 2, GRID_Y + TILE // 2)
+        out = q.wait_serial('[mobile] window "Win test" (opened)',
+                            timeout=60)
+        check("a tap on it starts the package's program, and its window "
+              "opens",
+              re.search(r"\[mobile\] Pack win started from its package "
+                        r"\(pid \d+\)", out) is not None and
+              re.search(r"\[proc\] pkgwin|\[winmob\] window \d+ for "
+                        r"program \d+", out) is not None)
+    finally:
+        q.close()
+        subprocess.run(["rm", "-rf", work])
 
 
 def main():
@@ -183,6 +247,7 @@ def main():
               m is not None and m.group(1) == m.group(2))
     finally:
         q.close()
+    from_package()
     return summary()
 
 

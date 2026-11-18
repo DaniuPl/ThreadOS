@@ -20,6 +20,9 @@
  *   the finger in it is the program's; home, its window is a tile
  *   after the apps until the program ends
  *
+ *   applications from packages (.tapp, kernel/initrd.c): a tile each
+ *   after the phone's own apps, and a tap starts the package's program
+ *
  * Every touch that ends is said on the serial port in logical pixels,
  * and every change of screen: that is how t_arm64mobile holds what the
  * shell understood against what it sent.
@@ -31,6 +34,8 @@
 #include "thread.h"
 #include "touch.h"
 #include "winmob.h"
+#include "proc.h"
+#include "../kernel/include/initrd.h"
 #include "../kernel/include/aurora.h"
 #include "../kernel/include/gfx.h"
 #include "../kernel/include/mark.h"
@@ -64,6 +69,7 @@
 #define MOB_INFO_Y     260      /* About's first line */
 #define MOB_INFO_STEP  30
 #define MOB_WIN_TILE   0x5E5CE6 /* a program's tile */
+#define MOB_PKG_TILE   0xFF9F0A /* an application package's */
 
 #define WHITE   0xFFFFFF
 #define MUTED   0xAEB6CC
@@ -240,7 +246,18 @@ static void draw_home(void)
         centred(UI_SANS, MOB_LABEL_PX, x + MOB_TILE / 2,
                 y + MOB_TILE + 18, apps[k].name, WHITE);
     }
-    /* The programs' windows, each a tile with its title's first letter */
+    /* The packages' applications, then the programs' windows: each a
+       tile with its name's first letter */
+    for (int i = 0; i < package_count(); i++) {
+        const struct package *p = package_at(i);
+        char letter[2] = { p->name[0] ? p->name[0] : '?', 0 };
+        int x, y;
+        tile_xy(APPS + i, &x, &y);
+        gfx_rrect(x, y, MOB_TILE, MOB_TILE, MOB_TILE_R, MOB_PKG_TILE, 255);
+        centred(UI_BOLD, 30, x + MOB_TILE / 2, y + 41, letter, WHITE);
+        centred(UI_SANS, MOB_LABEL_PX, x + MOB_TILE / 2,
+                y + MOB_TILE + 18, p->name, WHITE);
+    }
     for (int i = 0; i < winmob_count(); i++) {
         int x, y, win = winmob_nth(i);
         char name[32], letter[2] = { 0, 0 };
@@ -248,7 +265,7 @@ static void draw_home(void)
             break;
         winmob_name(win, name, sizeof(name));
         letter[0] = name[0] ? name[0] : '?';
-        tile_xy(APPS + i, &x, &y);
+        tile_xy(APPS + package_count() + i, &x, &y);
         gfx_rrect(x, y, MOB_TILE, MOB_TILE, MOB_TILE_R, MOB_WIN_TILE, 255);
         centred(UI_BOLD, 30, x + MOB_TILE / 2, y + 41, letter, WHITE);
         centred(UI_SANS, MOB_LABEL_PX, x + MOB_TILE / 2,
@@ -392,9 +409,23 @@ static void tap(int x, int y)
                 return;
             }
         }
-        for (int i = 0; i < winmob_count(); i++) {
+        for (int i = 0; i < package_count(); i++) {
             int tx, ty;
             tile_xy(APPS + i, &tx, &ty);
+            if (x >= tx && x < tx + MOB_TILE && y >= ty && y < ty + MOB_TILE) {
+                const struct package *p = package_at(i);
+                int pid = proc_spawn(p->exec, p->exec);
+                if (pid > 0)
+                    printk("[mobile] %s started from its package (pid %d)\n",
+                           p->name, pid);
+                else
+                    printk("[mobile] %s did not start (%d)\n", p->name, pid);
+                return;
+            }
+        }
+        for (int i = 0; i < winmob_count(); i++) {
+            int tx, ty;
+            tile_xy(APPS + package_count() + i, &tx, &ty);
             if (x >= tx && x < tx + MOB_TILE && y >= ty && y < ty + MOB_TILE &&
                 winmob_nth(i) >= 0) {
                 show(winmob_nth(i), "its tile");

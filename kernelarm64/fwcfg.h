@@ -9,6 +9,9 @@
 int fwcfg_init(uint64_t base);
 /* A file by name: its item number and size. 0 = found. */
 int fwcfg_find(const char *name, uint16_t *item, uint32_t *size);
+/* The n-th file (from 0) whose name starts so: 0 = there is one */
+int fwcfg_find_nth(const char *prefix, int nth, uint16_t *item,
+                   uint32_t *size);
 /* Moves len bytes between memory and an item, by DMA. 0 = done. */
 int fwcfg_read(uint16_t item, void *buf, uint32_t len);
 int fwcfg_write(uint16_t item, const void *buf, uint32_t len);

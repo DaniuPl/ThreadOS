@@ -72,7 +72,10 @@ int fwcfg_init(uint64_t base)
     return 0;
 }
 
-int fwcfg_find(const char *name, uint16_t *item, uint32_t *size)
+/* The n-th file whose name starts with 'prefix' (fwcfg_find is the
+   whole name) */
+static int find(const char *name, int prefix, int nth, uint16_t *item,
+                uint32_t *size)
 {
     if (!regs)
         return -1;
@@ -89,13 +92,25 @@ int fwcfg_find(const char *name, uint16_t *item, uint32_t *size)
         } e;
         read_bytes(&e, sizeof(e));
         e.name[55] = 0;
-        if (strcmp(e.name, name) == 0) {
+        if (prefix ? !memcmp(e.name, name, strlen(name)) && nth-- == 0
+                   : !strcmp(e.name, name)) {
             *item = be16(e.item);
             *size = be32(e.size);
             return 0;
         }
     }
     return -1;
+}
+
+int fwcfg_find(const char *name, uint16_t *item, uint32_t *size)
+{
+    return find(name, 0, 0, item, size);
+}
+
+int fwcfg_find_nth(const char *prefix, int nth, uint16_t *item,
+                   uint32_t *size)
+{
+    return find(prefix, 1, nth, item, size);
 }
 
 static int dma(uint16_t item, void *buf, uint32_t len, uint32_t op)

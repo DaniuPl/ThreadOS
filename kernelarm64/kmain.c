@@ -94,6 +94,35 @@ static const char *core_name(uint64_t midr)
     return 0;
 }
 
+/* Application packages (.tapp, scripts/mktapp.py): what the PC's loader
+   hands over as modules, QEMU hands over as fw_cfg files under
+   opt/threados/apps/ (-fw_cfg name=opt/threados/apps/weft,file=...).
+   Each is checked and taken as on the PC (kernel/initrd.c) - an image of
+   ThreadOS's, a manifest, programs for this processor - and its programs
+   run like the initrd's. */
+static void load_packages(void)
+{
+    uint16_t item;
+    uint32_t size;
+    for (int n = 0; fwcfg_find_nth("opt/threados/apps/", n, &item, &size) == 0;
+         n++) {
+        void *image = (void *)(uintptr_t)pmm_alloc_contiguous(
+            (size + PAGE_SIZE - 1) / PAGE_SIZE);
+        if (!image || fwcfg_read(item, image, size) != 0) {
+            printk("[ !! ] a package could not be read (%u bytes)\n", size);
+            continue;
+        }
+        int rc = package_use(image, size);
+        if (rc < 0) {
+            printk("[ !! ] a package passed over: %s\n", package_why(rc));
+            continue;
+        }
+        const struct package *p = package_at(package_count() - 1);
+        printk("[ OK ] Package %s %u: %s, %u KiB\n", p->id, p->version,
+               p->name, size / 1024);
+    }
+}
+
 /* The value of a "name=value" word of the command line, into out */
 static int word_value(const char *line, const char *name, char *out, int max)
 {
@@ -452,6 +481,7 @@ void kmain(uint64_t x0)
                        "read or is not an initrd\n");
             }
         }
+        load_packages();
         boot_splash_update(25, "Loading system files");
     }
     if (fi.rtc) {
