@@ -480,26 +480,46 @@ static void exit_test(void)
  * After a fork the parent and the child share their pages until one of
  * them writes. A write by the kernel on the program's behalf - read()
  * into a buffer - has to split the page too, and on every core: the
- * child must keep seeing its own copy. A thread does the read once it
- * runs on a core other than the first (where it ran shows in a '~'
- * line). */
+ * child must keep seeing its own copy. The read is done by a thread
+ * running on a core other than the first (where it ran shows in a '~'
+ * line).
+ *
+ * Not by one thread waiting to be moved there: a thread that keeps its
+ * core busy stays on it while the others have nothing to do - an idle
+ * core takes a thread that is ready to run, not one that is running -
+ * and one spinning on the first core was moved only if another core's
+ * timer happened to tick in the moment the first core had it put
+ * aside. So there is a reader for each core, and the first to find
+ * itself off the first core does the read: while it spins on core 0,
+ * the others wait their turn there, and that wait is what an idle core
+ * takes them from. With one core there is nothing to wait for. */
 
 static char cow_buf[4096] __attribute__((aligned(4096))) =
     "the child's own copy";
 
+#define COW_READERS 8
+
+static int cow_fd;
+static int cow_wait;                     /* more than one core */
+static struct timespec cow_t0;
+static atomic_int cow_taken;
+
 static void *cow_reader(void *arg)
 {
-    int fd = *(int *)arg;
-    struct timespec t0;
-    clock_gettime(CLOCK_MONOTONIC, &t0);
+    (void)arg;
     volatile unsigned long x = 0;
-    while (sched_getcpu() == 0 && ms_since(&t0) < 3000)
+    while (!atomic_load(&cow_taken)) {
+        long core = sched_getcpu();
+        if ((core != 0 || !cow_wait || ms_since(&cow_t0) >= 3000) &&
+            !atomic_exchange(&cow_taken, 1)) {
+            if (read(cow_fd, cow_buf, 21) != 21)
+                printf("cow: the read failed\n");
+            return (void *)core;
+        }
         for (int i = 0; i < 100000; i++)
             x += i;
-    long core = sched_getcpu();
-    if (read(fd, cow_buf, 21) != 21)
-        printf("cow: the read failed\n");
-    return (void *)core;
+    }
+    return (void *)-1L;              /* another reader did it */
 }
 
 static void cow_test(void)
@@ -521,14 +541,25 @@ static void cow_test(void)
         fflush(stdout);
         _exit(0);
     }
-    fd = open("cow.txt", O_RDONLY);
-    pthread_t t;
-    void *core = NULL;
-    pthread_create(&t, NULL, cow_reader, &fd);
-    pthread_join(t, &core);
-    close(fd);
+    cow_fd = open("cow.txt", O_RDONLY);
+    long cores = sysconf(_SC_NPROCESSORS_ONLN);
+    int readers = cores < 1 ? 1 : cores > COW_READERS ? COW_READERS : cores;
+    cow_wait = readers > 1;
+    atomic_store(&cow_taken, 0);
+    clock_gettime(CLOCK_MONOTONIC, &cow_t0);
+    pthread_t t[COW_READERS];
+    for (int i = 0; i < readers; i++)
+        pthread_create(&t[i], NULL, cow_reader, NULL);
+    long core = -1;
+    for (int i = 0; i < readers; i++) {
+        void *r;
+        pthread_join(t[i], &r);
+        if ((long)r >= 0)
+            core = (long)r;
+    }
+    close(cow_fd);
     printf("cow: the parent read '%.21s'\n", cow_buf);
-    printf("~written on core %ld\n", (long)core);
+    printf("~written on core %ld\n", core);
     fflush(stdout);
     if (write(p[1], "x", 1) != 1)
         printf("cow: the child was not told\n");
