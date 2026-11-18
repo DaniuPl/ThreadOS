@@ -18,10 +18,10 @@ program is fetched onto the ThreadOS disk over HTTP and run from there
 twice, by the shell (a new process) and by execv (a process replacing
 itself), which are the kernel's two ways of loading a program.
 
-And from the applications' image: a second module in the initrd's
-format which the loader hands over beside the initrd under the name
-"apps" (apps64.img, where the web engine's programs are). A disc whose
-GRUB brings one with bigprog in it boots, says it found the image, and
+And from an application package (.tapp, scripts/mktapp.py): an image
+in the initrd's format which the loader hands over beside the initrd
+under the name "tapp" (Weft's programs come so). A disc whose GRUB
+brings one with bigprog in it boots, says it took the package, and
 runs bigprog from it with the same answers - the initrd itself does not
 have it.
 
@@ -81,26 +81,29 @@ def answers():
 
 
 def from_apps_image(work, want):
-    """bigprog from the applications' image, on a disc whose GRUB hands
-    one over as the module "apps" """
-    apps = os.path.join(work, "apps64.img")
+    """bigprog from an application package, on a disc whose GRUB hands
+    it over as a module named "tapp" """
+    apps = os.path.join(work, "bigprog.tapp")
     root = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
     made = subprocess.run([sys.executable,
-                           os.path.join(root, "scripts", "mkinitrd.py"),
-                           apps, "bigprog=" + ELF],
+                           os.path.join(root, "scripts", "mktapp.py"), apps,
+                           "--id", "bigprog", "--name", "Bigprog",
+                           "--version", "1", "--arch", "x86_64",
+                           "--exec", "bigprog", "bigprog=" + ELF],
                           capture_output=True).returncode == 0
     iso = os.path.join(work, "apps.iso")
-    check("an applications' image with bigprog in it, and a disc that "
-          "brings it beside the initrd",
-          made and make_iso64(os.path.join(work, "isoapps"), iso, apps=apps))
+    check("a package with bigprog in it, and a disc that brings it "
+          "beside the initrd",
+          made and make_iso64(os.path.join(work, "isoapps"), iso,
+                              tapps=[apps]))
     q = Qemu(KERNEL, INITRD, cdrom=iso, serial=os.path.join(work, "a.log"),
              qemu="qemu-system-x86_64", ram_mib=512)
     try:
         q.wait_serial(PROMPT, timeout=90)
         log = q.serial()
-        m = re.search(r"Applications' image: (\d+) KiB", log)
-        check(f"the kernel takes the image the loader named 'apps' "
+        m = re.search(r"Package bigprog 1: Bigprog, (\d+) KiB", log)
+        check(f"the kernel takes the package the loader named 'tapp' "
               f"({m.group(0) if m else 'nothing said'})",
               m is not None and
               int(m.group(1)) == os.path.getsize(apps) // 1024)

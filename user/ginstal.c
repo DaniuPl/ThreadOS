@@ -22,7 +22,7 @@
  *
  * The steps, one per turn of the loop. The kernel could write all the
  * files in one call and the window would freeze for the length of it -
- * the applications' image alone is 180 MB.
+ * Weft's package alone is 180 MB.
  * Asking for one step per turn means the bar moves and the name under
  * it says which file is being written - and a person watching a disk
  * being written to has a right to see where it is.
@@ -113,7 +113,7 @@ static const char *STEP_NAME[INST_STEPS] = {
     "/EFI/ThreadOS/BOOTX64.EFI",
     "/EFI/ThreadOS/threados64.bin",
     "/EFI/ThreadOS/initrd64.img",
-    "/EFI/ThreadOS/apps64.img",
+    "/EFI/ThreadOS/apps",
     "/EFI/BOOT/BOOTX64.EFI",
     "boot menu entry (UEFI)"
 };
@@ -128,7 +128,7 @@ static const char *STEP_WHOLE[INST_STEPS_WHOLE] = {
     "/EFI/ThreadOS/BOOTX64.EFI",
     "/EFI/ThreadOS/threados64.bin",
     "/EFI/ThreadOS/initrd64.img",
-    "/EFI/ThreadOS/apps64.img",
+    "/EFI/ThreadOS/apps",
     "/EFI/BOOT/BOOTX64.EFI",
     "boot menu entry (UEFI)"
 };
@@ -361,10 +361,11 @@ static void draw_plan(int win)
         say(win, COL_SIZE, rowy(7 + i), line, C_DIM);
     }
 
-    /* The applications' image, when the stick brought one, takes the
-       row under the initrd and moves the fallback name one down. Where
-       it does not fit the row says so: the system is whole without it,
-       but a person who wanted the browser should not find out later. */
+    /* The application packages, when the stick brought any, take the
+       row under the initrd - their directory and what they come to -
+       and move the fallback name one down. Where they do not fit the
+       row says so: the system is whole without them, but a person who
+       wanted the browser should not find out later. */
     int fb = 10;
     if (info.apps_size) {
         say(win, IND, rowy(10), STEP_NAME[4], info.apps ? C_TEXT : C_DIM);
@@ -426,7 +427,7 @@ static void draw_wipe(int win)
     say_l(win, IND, rowy(12), "and write the system onto it.", C_TEXT);
     if (info.apps_size && !info.apps)
         say_l(win, IND, rowy(13),
-              "apps64.img does not fit - the disk is too small", C_DIM);
+              "the packages do not fit - the disk is too small", C_DIM);
 
     say_l(win, PAD, rowy(14),
           "No other disk is touched - only this one.", C_TEXT);

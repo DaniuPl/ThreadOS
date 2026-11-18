@@ -1,23 +1,24 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: installing the applications' image.
+"""ThreadOS smoke test: installing the application packages.
 
-The web engine's programs do not live in the initrd every boot carries
-but in an image beside it, apps64.img, which the loader hands over as
-the module "apps". A stick that brought one should leave a disk that
-has one: otherwise the installed system starts without the web engine
-the stick had, and nobody is told why.
+Weft and the web engine's programs do not live in the initrd every boot
+carries but in a package beside it (.tapp, scripts/mktapp.py), which
+the loader hands over as a module named "tapp". A stick that brought
+packages should leave a disk that has them: otherwise the installed
+system starts without the browser the stick had, and nobody is told
+why.
 
-The image is optional, and so is writing it. Where it fits it is the
-fifth file in /EFI/ThreadOS; where it does not, the system is
-installed without it and the plan says so before anything is written.
-Three disks, one for each answer:
+Packages are optional, and so is writing them. Where they fit they go
+into /EFI/ThreadOS/apps, where the installed system's loader looks;
+where they do not, the system is installed without them and the plan
+says so before anything is written. Three disks, one for each answer:
 
   - an EFI partition with plenty of room, installed beside: written;
   - an EFI partition nearly full, installed beside: left out, said,
     and the rest of the system written all the same;
-  - the whole disk: the EFI partition made large enough to hold it,
-    and the installed system, started on its own, running a program
-    out of the image it now reads off its own disk.
+  - the whole disk: the EFI partition made large enough to hold them,
+    and the installed system, started on its own, its loader finding
+    the package in its directory and running a program out of it.
 
 What is on the disks afterwards is read by mtools, not asked of the
 system that wrote it. The case of a whole disk too small for the
@@ -51,9 +52,11 @@ BUILD = os.path.dirname(os.path.abspath(KERNEL64 or "build/x"))
 LOADER = os.path.join(BUILD, "BOOTX64.EFI")
 ECHO = os.path.join(BUILD, "user64", "uecho64.elf")
 
-# The program the image carries, under a name the initrd does not have:
-# a program that runs under it can only have come out of the image
+# The program the package carries, under a name the initrd does not
+# have: a program that runs under it can only have come out of it
 PROBE = "appsecho"
+PKG = "probe.tapp"
+PKG_PATH = "/EFI/ThreadOS/apps/" + PKG
 
 
 def blob(path):
@@ -62,14 +65,16 @@ def blob(path):
 
 
 def make_apps(path):
-    """An applications' image of the real format (scripts/mkinitrd.py):
-    a program, and a megabyte of data that has to arrive bit for bit"""
+    """A package (scripts/mktapp.py): a program, and a megabyte of data
+    that has to arrive bit for bit"""
     data = os.path.join(os.path.dirname(path), "pattern.bin")
     with open(data, "wb") as fh:
         fh.write(pattern("apps-image", 1 << 20))
     return subprocess.run([sys.executable,
-                           os.path.join(ROOT, "scripts", "mkinitrd.py"),
-                           path, f"{PROBE}={ECHO}", f"pattern.bin={data}"],
+                           os.path.join(ROOT, "scripts", "mktapp.py"), path,
+                           "--id", "probe", "--name", "Probe", "--version",
+                           "1", "--arch", "x86_64", "--exec", PROBE,
+                           f"{PROBE}={ECHO}", f"pattern.bin={data}"],
                           capture_output=True).returncode == 0
 
 
@@ -78,7 +83,8 @@ def make_stick(esp, apps):
     shutil.copy(LOADER, os.path.join(esp, "EFI", "BOOT", "BOOTX64.EFI"))
     shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
     shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
-    shutil.copy(apps, os.path.join(esp, "apps64.img"))
+    os.makedirs(os.path.join(esp, "apps"))
+    shutil.copy(apps, os.path.join(esp, "apps", PKG))
     stick_starts_live(esp)       # this group types at the shell
 
 
@@ -115,8 +121,8 @@ def beside(work, esp, apps, esp_mib, fill_to=None):
     try:
         check("the stick's system reaches its desktop", q.wait_desktop())
         log = q.serial()
-        m = re.search(r"Applications' image: (\d+) KiB", log)
-        check("the stick's loader brought the applications' image",
+        m = re.search(r"Package probe 1: Probe, (\d+) KiB", log)
+        check("the stick's loader brought the package from \\apps",
               m is not None
               and int(m.group(1)) == os.path.getsize(apps) // 1024)
         plan = q.command("install text", "Type YES", timeout=40)
@@ -128,7 +134,7 @@ def beside(work, esp, apps, esp_mib, fill_to=None):
 
 def main():
     print()
-    print("--- installing the applications' image ---")
+    print("--- installing the application packages ---")
 
     reason = no64()
     if reason:
@@ -152,46 +158,44 @@ def main():
 
     work = tempfile.mkdtemp()
     try:
-        apps = os.path.join(work, "apps64.img")
-        check("an applications' image with a program in it",
-              make_apps(apps))
+        apps = os.path.join(work, PKG)
+        check("a package with a program in it", make_apps(apps))
         want_apps = blob(apps)
         want_initrd = blob(INITRD64)
         esp = os.path.join(work, "stick")
         make_stick(esp, apps)
 
-        # --- beside, with room: the image is the fifth file
+        # --- beside, with room: the package goes into /EFI/ThreadOS/apps
         target, plan, done = beside(work, esp, apps, 600)
-        check("the plan lists the image with its size",
-              "/EFI/ThreadOS/apps64.img  %d B" % len(want_apps) in plan
-              and "DOES NOT FIT" not in plan)
+        check("the plan lists the package with its size",
+              "%s  %d B\n" % (PKG_PATH, len(want_apps))
+              in plan.replace("\r", "") and "DOES NOT FIT" not in plan)
         check("and writes it after the initrd",
               "/EFI/ThreadOS/initrd64.img - done" in done
-              and "/EFI/ThreadOS/apps64.img - done" in done
+              and "/EFI/ThreadOS/apps - done" in done
               and done.index("initrd64.img - done")
-              < done.index("apps64.img - done"))
-        got = fat_get(target, ESP_START, "/EFI/ThreadOS/apps64.img")
-        check("mtools reads the image off the disk byte for byte (%d B)"
+              < done.index("/EFI/ThreadOS/apps - done"))
+        got = fat_get(target, ESP_START, PKG_PATH)
+        check("mtools reads the package off the disk byte for byte (%d B)"
               % len(want_apps), got == want_apps)
 
         # --- beside, with too little room: the system without it.
         # Room for the system once and a half, which is enough to
         # install and not enough to keep an update's copy beside it
-        # with the image in the way.
+        # with the package in the way.
         need = (2 * os.path.getsize(LOADER) + os.path.getsize(KERNEL64)
                 + len(want_initrd)) + 64 * 1024
         target, plan, done = beside(work, esp, apps, 300,
                                     fill_to=need * 3 // 2)
-        check("on a nearly full EFI partition the plan says the image "
+        check("on a nearly full EFI partition the plan says the package "
               "does not fit, before anything is written",
-              "/EFI/ThreadOS/apps64.img  %d B  DOES NOT FIT" % len(want_apps)
-              in plan and "too little room" in plan)
+              "%s  %d B  DOES NOT FIT" % (PKG_PATH, len(want_apps))
+              in plan and "too little room for them" in plan)
         check("the system is installed all the same",
               "/EFI/ThreadOS/initrd64.img - done" in done
               and "boot menu entry (UEFI) - done" in done)
-        check("without the image", "apps64.img - done" not in done
-              and fat_get(target, ESP_START,
-                          "/EFI/ThreadOS/apps64.img") is None)
+        check("without the package", "/EFI/ThreadOS/apps - done" not in done
+              and fat_get(target, ESP_START, PKG_PATH) is None)
         check("and with the initrd whole",
               fat_get(target, ESP_START, "/EFI/ThreadOS/initrd64.img")
               == want_initrd)
@@ -205,14 +209,13 @@ def main():
         try:
             check("the stick's system reaches its desktop", q.wait_desktop())
             plan = q.command("install text whole", "Type ERASE", timeout=40)
-            check("the plan makes an EFI partition of %d MiB for the image"
+            check("the plan makes an EFI partition of %d MiB for the package"
                   % ESP_MIB_APPS,
                   "an EFI partition of %d MiB (FAT32)" % ESP_MIB_APPS in plan
-                  and "/EFI/ThreadOS/apps64.img  %d B" % len(want_apps)
-                  in plan)
+                  and "%s  %d B" % (PKG_PATH, len(want_apps)) in plan)
             done = q.command("ERASE", "Done", timeout=240)
-            check("and writes the image onto it",
-                  "/EFI/ThreadOS/apps64.img - done" in done)
+            check("and writes the package onto it",
+                  "/EFI/ThreadOS/apps - done" in done)
         finally:
             q.close()
         ok, parts, why = gpt_read(target)
@@ -220,8 +223,8 @@ def main():
               % ESP_MIB_APPS,
               ok and len(parts) == 2
               and parts[0][2] - parts[0][1] + 1 == ESP_MIB_APPS * 2048)
-        got = fat_get(target, ESP_START, "/EFI/ThreadOS/apps64.img")
-        check("mtools reads the image off it byte for byte",
+        got = fat_get(target, ESP_START, PKG_PATH)
+        check("mtools reads the package off it byte for byte",
               got == want_apps)
 
         # --- and the installed system, on its own, uses it
@@ -230,9 +233,9 @@ def main():
                  qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
         try:
             out = q.wait_serial("The 64-bit system is ready", timeout=120)
-            m = re.search(r"Applications' image: (\d+) KiB", out)
-            check("the installed loader hands the image over from its own "
-                  "disk (%s)" % (m.group(0) if m else "nothing said"),
+            m = re.search(r"Package probe 1: Probe, (\d+) KiB", out)
+            check("the installed loader hands the package over from its "
+                  "own disk (%s)" % (m.group(0) if m else "nothing said"),
                   m is not None
                   and int(m.group(1)) == len(want_apps) // 1024)
             check("the installed system reaches its desktop",

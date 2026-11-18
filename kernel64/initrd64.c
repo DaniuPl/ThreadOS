@@ -6,9 +6,9 @@
  * only long mode's paging can say (kernel64/paging64.c); the image is
  * then kernel/initrd.c's to take apart.
  *
- * The initrd is the first module. The applications' image, when the
- * loader brought it (apps64.img, the web engine), is the module it
- * named "apps" (boot/efi/efiboot.c, boot/grub64.cfg).
+ * The initrd is the first module. The application packages the loader
+ * found (.tapp: Weft, the web engine's browser, is one) are the modules
+ * it named "tapp" (boot/efi/efiboot.c, boot/grub64.cfg).
  */
 
 #include "../kernel/include/initrd.h"
@@ -16,19 +16,29 @@
 #include "../kernel/include/printk.h"
 #include "paging64.h"
 
-static void apps_init(void)
+/* The application packages: every module the loader named "tapp".
+   One that is not a package, or not one for this machine, is said and
+   passed over - a system with a broken package is still a system. */
+static void packages_init(void)
 {
     uint32_t start, size;
-    if (!mb2_module("apps", &start, &size) || !size)
-        return;
-    if ((uint64_t)start + size > paging64_identity_top()) {
-        printk("[ !! ] apps64.img lies outside managed memory (%x)\n", start);
-        return;
+    for (int n = 0; mb2_module_nth("tapp", n, &start, &size); n++) {
+        if (!size)
+            continue;
+        if ((uint64_t)start + size > paging64_identity_top()) {
+            printk("[ !! ] a package lies outside managed memory (%x)\n",
+                   start);
+            continue;
+        }
+        int rc = package_use((const void *)(uintptr_t)start, size);
+        if (rc < 0) {
+            printk("[ !! ] a package passed over: %s\n", package_why(rc));
+            continue;
+        }
+        const struct package *p = package_at(package_count() - 1);
+        printk("[ OK ] Package %s %u: %s, %u KiB\n", p->id, p->version,
+               p->name, size / 1024);
     }
-    if (initrd_use_apps((const void *)(uintptr_t)start, size) < 0)
-        printk("[ !! ] apps64.img is not an image of programs\n");
-    else
-        printk("[ OK ] Applications' image: %u KiB\n", size / 1024);
 }
 
 void initrd_init(const struct multiboot_info *mbi)
@@ -50,5 +60,5 @@ void initrd_init(const struct multiboot_info *mbi)
                    mod->end - mod->start) < 0)
         printk("[ !! ] initrd: the module is not an initrd (its magic, or "
                "a listing that reaches outside it)\n");
-    apps_init();
+    packages_init();
 }

@@ -180,6 +180,12 @@
 /* FD_CLOEXEC of a descriptor: (fd, value) - value -1 asks, 0/1 sets;
    returns the flag, -1 for no such descriptor */
 #define SYS64_FDCTL 106
+/* The application packages the loader brought (kernel/include/initrd.h):
+   SYS64_PACKAGE (index, &struct tapp_info) -> 0, -1 = no such package;
+   SYS64_PACKAGE_READ (index, offset, buf, len) -> bytes copied, -1.
+   Reading the whole package is how 'tapp verify' checks its signature. */
+#define SYS64_PACKAGE      107
+#define SYS64_PACKAGE_READ 108
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

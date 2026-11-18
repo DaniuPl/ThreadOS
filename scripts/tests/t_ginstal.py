@@ -132,15 +132,18 @@ def shell_disc(work):
     shutil.copy(KERNEL64, os.path.join(root, "boot", "threados64.bin"))
     shutil.copy(INITRD64, os.path.join(root, "boot", "initrd64.img"))
     shutil.copy(LOADER, os.path.join(root, "boot", "threadboot.efi"))
-    # And an applications' image, as a disc made after `make webkit`
+    # And an application package, as a disc made after `make webkit`
     # brings one: the window has to say what becomes of it
-    apps = os.path.join(root, "boot", "apps64.img")
+    os.makedirs(os.path.join(root, "boot", "apps"))
+    apps = os.path.join(root, "boot", "apps", "probe.tapp")
     data = os.path.join(work, "pattern.bin")
     with open(data, "wb") as fh:
         fh.write(b"apps" * 65536)
     if subprocess.run([sys.executable,
-                       os.path.join(ROOT, "scripts", "mkinitrd.py"),
-                       apps, "pattern.bin=" + data],
+                       os.path.join(ROOT, "scripts", "mktapp.py"), apps,
+                       "--id", "probe", "--name", "Probe", "--version", "1",
+                       "--arch", "x86_64", "--exec", "pattern.bin",
+                       "pattern.bin=" + data],
                       capture_output=True).returncode:
         return None
     with open(os.path.join(root, "boot", "grub", "grub.cfg"), "w") as fh:
@@ -151,7 +154,7 @@ def shell_disc(work):
                  "    module2 /boot/initrd64.img initrd64\n"
                  "    module2 /boot/threados64.bin the kernel\n"
                  "    module2 /boot/threadboot.efi loader\n"
-                 "    module2 /boot/apps64.img apps\n}\n")
+                 "    module2 /boot/apps/probe.tapp tapp\n}\n")
     iso = os.path.join(work, "shell.iso")
     made = subprocess.run(["grub-mkrescue", "-o", iso, root],
                           stdout=subprocess.DEVNULL,
@@ -199,7 +202,8 @@ def main():
         check("the disc with the shell entry builds", disc is not None)
         if disc is None:
             return summary()
-        want_apps = blob(os.path.join(work, "disc", "boot", "apps64.img"))
+        want_apps = blob(os.path.join(work, "disc", "boot", "apps",
+                                      "probe.tapp"))
 
         make_gpt_disk(target)
         made = fat_format(target, ESP_START, ESP_SECTORS, fat32=True,
@@ -297,13 +301,13 @@ def main():
                   and "/EFI/ThreadOS/initrd64.img" in text)
             check("the kernel size on the screen matches the file",
                   str(len(want_kernel)) in text)
-            # Whether the image fits depends on how big the system under
-            # test is; what the window says has to be what happens
-            if "/EFI/ThreadOS/apps64.img" in text:
+            # Whether the package fits depends on how big the system
+            # under test is; what the window says has to be what happens
+            if "/EFI/ThreadOS/apps" in text:
                 apps_said = ("written" if str(len(want_apps)) in text
                              else "left out" if "brak miejsca" in text
                              else None)
-            check(f"the applications' image the disc brought has a row of "
+            check(f"the package the disc brought has a row of "
                   f"its own: its size, or no room ({apps_said})",
                   apps_said is not None)
             check("it says /EFI/BOOT/BOOTX64.EFI is free",
@@ -406,8 +410,8 @@ def main():
             got = fat_get(target, ESP_START, path)
             check(f"{path} byte for byte ({len(want)} B)",
                   got is not None and got == want)
-        got = fat_get(target, ESP_START, "/EFI/ThreadOS/apps64.img")
-        check(f"the image is {apps_said} on the disk, as the window said",
+        got = fat_get(target, ESP_START, "/EFI/ThreadOS/apps/probe.tapp")
+        check(f"the package is {apps_said} on the disk, as the window said",
               (apps_said == "written" and got == want_apps)
               or (apps_said == "left out" and got is None))
         check("somebody elses bootmgfw.efi is untouched",

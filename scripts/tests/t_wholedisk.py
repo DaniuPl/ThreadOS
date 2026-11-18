@@ -92,20 +92,24 @@ def main():
         shutil.copy(KERNEL64, os.path.join(esp, "threados64.bin"))
         shutil.copy(INITRD64, os.path.join(esp, "initrd64.img"))
         stick_starts_live(esp)       # this group types at the shell
-        # An applications' image on the stick, which this disk is too
-        # small to take: the EFI partition that would hold it
-        # (ESP_MIB_APPS) and our partition behind it do not fit in
+        # An application package on the stick, in \apps, which this
+        # disk is too small to take: the EFI partition that would hold
+        # it (ESP_MIB_APPS) and our partition behind it do not fit in
         # 800 MiB. The system goes on without it, at the usual size.
         # Where it does fit is t_appsinst.
-        apps = os.path.join(esp, "apps64.img")
-        with open(os.path.join(esp, "pattern.bin"), "wb") as fh:
+        os.makedirs(os.path.join(esp, "apps"))
+        apps = os.path.join(esp, "apps", "probe.tapp")
+        data = os.path.join(esp, "pattern.bin")
+        with open(data, "wb") as fh:
             fh.write(b"apps" * 65536)
         made = subprocess.run([sys.executable,
-                               os.path.join(ROOT, "scripts", "mkinitrd.py"),
-                               apps, "pattern.bin=" +
-                               os.path.join(esp, "pattern.bin")],
+                               os.path.join(ROOT, "scripts", "mktapp.py"),
+                               apps, "--id", "probe", "--name", "Probe",
+                               "--version", "1", "--arch", "x86_64",
+                               "--exec", "pattern.bin",
+                               "pattern.bin=" + data],
                               capture_output=True).returncode == 0
-        check("the stick carries an applications' image too", made)
+        check("the stick carries an application package too", made)
 
         # A disk that belongs to somebody else, with a table of its own
         # and data in its partitions. All of it is going away, and the
@@ -141,10 +145,11 @@ def main():
                   and "partition (TFS)" in out)
             check("the word is different from the one for installing beside",
                   "Type ERASE" in out and "Type YES" not in out)
-            check("and it says the applications' image does not fit on a "
-                  "disk this size",
-                  "/EFI/ThreadOS/apps64.img  %d B  DOES NOT FIT - the disk "
-                  "is too small" % os.path.getsize(apps) in out)
+            check("and it says the package does not fit on a disk this size",
+                  "/EFI/ThreadOS/apps/probe.tapp  %d B  DOES NOT FIT"
+                  % os.path.getsize(apps) in out and
+                  "the disk is too small for an EFI partition to hold them"
+                  in out)
 
             # A word that is not the word - and the disk still has its
             # old table afterwards
@@ -222,7 +227,7 @@ def main():
         check("not one of the old partitions left an entry in the table",
               not any(x in new_starts for x in old_starts[1:]))
         check("the image was left out, as the plan said",
-              fat_get(target, 2048, "/EFI/ThreadOS/apps64.img") is None)
+              fat_get(target, 2048, "/EFI/ThreadOS/apps/probe.tapp") is None)
         check("and somebody else's bootmgfw.efi can no longer be read",
               fat_get(target, 2048, "/EFI/Microsoft/bootmgfw.efi") is None)
 

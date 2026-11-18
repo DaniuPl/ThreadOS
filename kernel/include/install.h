@@ -18,10 +18,11 @@
  * is loaded segments and not the file it came from. A system started
  * some other way says so and offers nothing.
  *
- * A fourth goes with them when the loader brought it: the applications'
- * image (apps64.img, the web engine). The system is whole without it,
- * so it is written only where it fits - and where it does not, the
- * plan says so and the rest is installed all the same.
+ * The application packages the loader brought (.tapp: Weft, the web
+ * engine's browser) go with them, into /EFI/ThreadOS/apps where the
+ * loader looks for them. The system is whole without them, so they
+ * are written only where they fit - and where they do not, the plan
+ * says so and the rest is installed all the same.
  *
  * Split in two on purpose. install_plan() reads and prints and changes
  * nothing; install_do() writes. Between the two sits a person saying
@@ -89,8 +90,8 @@ struct install_info {
     char disk_name[INST_NAME];   /* the driver behind it */
     char kind[8];                /* FAT16 / FAT32 */
     char label[INST_NAME];       /* what the partition calls itself */
-    uint32_t apps_size;          /* the applications' image brought, or 0 */
-    uint32_t apps;               /* 1 = it fits and will be written */
+    uint32_t apps_size;          /* the packages brought, all together, or 0 */
+    uint32_t apps;               /* 1 = they fit and will be written */
 };
 
 /* Reads a disk and fills the shape above for the way of installing

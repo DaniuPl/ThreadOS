@@ -1554,6 +1554,47 @@ static void handle(struct regs *r)
         r->rax = n;
         return;
     }
+    case SYS64_PACKAGE: {
+        /* The layout of struct tapp_info in user64/compat64.h */
+        struct {
+            char id[16], name[32], name_pl[32], exec[16];
+            uint32_t version;
+            int32_t art;
+            uint32_t dock, size;
+        } info;
+        const struct package *p = package_at((int)a1);
+        if (!p || !paging64_user_writable(a2, sizeof(info))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memset(&info, 0, sizeof(info));
+        memcpy(info.id, p->id, sizeof(info.id));
+        memcpy(info.name, p->name, sizeof(info.name));
+        memcpy(info.name_pl, p->name_pl, sizeof(info.name_pl));
+        memcpy(info.exec, p->exec, sizeof(info.exec));
+        info.version = p->version;
+        info.art = p->art;
+        info.dock = (uint32_t)p->dock;
+        info.size = p->size;
+        *(__typeof__(info) *)(uintptr_t)a2 = info;
+        r->rax = 0;
+        return;
+    }
+    case SYS64_PACKAGE_READ: {
+        const struct package *p = package_at((int)a1);
+        if (!p || a2 > p->size) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        uint64_t n = p->size - a2 < a4 ? p->size - a2 : a4;
+        if (n && !paging64_user_writable(a3, n)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memcpy((void *)(uintptr_t)a3, (const uint8_t *)p->base + a2, n);
+        r->rax = n;
+        return;
+    }
     case SYS64_UPDATE_ALLOWED:
         r->rax = (uint64_t)(int64_t)install_update_allowed();
         return;

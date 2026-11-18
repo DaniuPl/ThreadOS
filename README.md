@@ -169,7 +169,7 @@ A test that is missing an optional tool prints `SKIPPED` and the reason.
 |---|---|
 | `make` (or `make kernel64`) | `build/threados64.bin`, `build/initrd64.img` |
 | `make efi` | `build/BOOTX64.EFI` (threadboot) |
-| `make webkit` | `build/apps64.img`: WebKit's WPE port, the three programs of the web engine (hours on four cores, so not part of `make`) |
+| `make webkit` | `build/weft.tapp`: Weft, the browser on WebKit's WPE port, as an application package (hours on four cores, so not part of `make`; `TAPP_KEY=key.pem` signs it) |
 | `make kernelarm64` | `build/threados-arm64.elf`, the ARM64 kernel for QEMU's virt machine (clang + lld), and `build/initrd-arm64.img`, its fonts. `make run-arm64` boots it on the serial console, `make run-phone` as a phone with a screen and a touchscreen (the mouse is the finger) |
 | `make iso64` | `build/threados64.iso` (builds the 64-bit kernel and threadboot first) |
 | `make stick` | `build/threados-stick.img` |
@@ -320,10 +320,41 @@ openssl ec -in update-key.pem -pubout -outform DER | tail -c 65 | xxd -p -c 65
 ```
 
 1. Put the PEM in the secret.
-2. Replace `official_key[]` in `user/update.c` with the 65 printed bytes.
+2. Replace `official_key[]` in `user/usignkey.h` with the 65 printed
+   bytes. The same key signs releases and application packages.
 3. Release once. Systems older than that release will refuse updates
    signed with the new key until they are updated by hand, or until an
    admin writes the new key in hex to `update.key`.
+
+### Application packages (.tapp)
+
+An application that is not part of every system - Weft, the browser on
+WebKit, is the first - comes as a package: one file in the initrd's
+format, made by `scripts/mktapp.py`, with
+
+- a `manifest` first: `ThreadOS app`, then `id`, `name` (`name.pl`),
+  `version`, `arch` (`x86_64` or `aarch64`), `exec` (the program that
+  starts it), and optionally `art` (the dock's picture) and `dock yes`;
+- the programs and data, under the names they are run and read by;
+- a `signature` last: ECDSA P-256 over the SHA-256 of every byte before
+  it, made with the key that signs releases.
+
+threadboot loads every `*.tapp` in `\apps` (a stick) and
+`\EFI\ThreadOS\apps` (an installed system), GRUB those in `/boot/apps`
+on the disc, and the kernel takes each one that is a package for its
+processor: its programs run by name after the initrd's (a package cannot
+replace a program of the system's), and `dock yes` gives it a tile. The
+installer copies them to `\EFI\ThreadOS\apps`. `tapp` lists them,
+`tapp info FILE` shows what a package holds, and `tapp verify NAME`
+checks a package - one the system has, or a file - against the system's
+key. The EFI partition is as trusted as the kernel on it, so packages a
+loader finds there are not checked at boot.
+
+```sh
+python3 scripts/mktapp.py hello.tapp --id hello --name Hello --version 1 \
+    --arch x86_64 --exec hello --dock --key key.pem hello=build/user64/hello64.elf
+python3 scripts/mktapp.py --info hello.tapp
+```
 
 ### Generated files
 
@@ -390,8 +421,9 @@ what bringing one in involves.
   - WPA2 key derivation
 - **Weft, the browser on WebKit:** WPE WebKit 2.54 with tabs, back and
   forward, an address field and the dock's Web tile (`make webkit`
-  builds it into `apps64.img`, which the loader brings beside the
-  initrd and the installer writes onto the installed system): pages
+  builds it into the package `weft.tapp`, which the loader brings
+  beside the initrd and the installer writes onto the installed
+  system): pages
   fetched by libsoup, laid out by WebCore exactly as Chromium lays them
   out, scripts in JavaScriptCore, painted by Skia on the processor,
   with the mouse and the keyboard (Polish letters too).

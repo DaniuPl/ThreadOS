@@ -53,6 +53,10 @@ uint32_t mb2_rsdp(void);
  * is the sort of agreement that goes wrong without saying so.
  */
 int mb2_module(const char *name, uint32_t *start, uint32_t *size);
+/* The nth (from 0) of the modules of that name - the application
+   packages all come as "tapp" */
+int mb2_module_nth(const char *name, int nth, uint32_t *start,
+                   uint32_t *size);
 
 /* The UEFI system table and the firmware's memory map, when the loader
    was a UEFI one that passed them (GRUB does, and so does threadboot).

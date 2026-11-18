@@ -37,6 +37,7 @@
 #include "include/io.h"
 #include "include/config.h"
 #include "include/locale.h"
+#include "include/initrd.h"
 #include "include/rtc.h"
 #include "include/printk.h"
 #include "include/pmm.h"
@@ -302,6 +303,26 @@ static int other_of_app(const char *app)
     return -1;
 }
 
+/* The package whose program this is, or none: a package names the
+   program that starts it, and what it is called and wears */
+static const struct package *package_of_app(const char *app)
+{
+    for (int i = 0; i < package_count(); i++)
+        if (!strcmp(package_at(i)->exec, app))
+            return package_at(i);
+    return (const struct package *)0;
+}
+
+static int package_art(const struct package *p)
+{
+    return p->art >= 0 && p->art < ART_N ? p->art : ART_LETTER;
+}
+
+static const char *package_label(const struct package *p)
+{
+    return locale_is_polish() && p->name_pl[0] ? p->name_pl : p->name;
+}
+
 /* A program nobody gave a picture wears its first letter */
 static int art_of_app(const char *app)
 {
@@ -309,7 +330,10 @@ static int art_of_app(const char *app)
     if (k >= 0)
         return known_apps[k].art;
     k = other_of_app(app);
-    return k >= 0 ? other_apps[k].art : ART_LETTER;
+    if (k >= 0)
+        return other_apps[k].art;
+    const struct package *p = package_of_app(app);
+    return p ? package_art(p) : ART_LETTER;
 }
 
 static const char *label_of_app(const char *app)
@@ -318,7 +342,10 @@ static const char *label_of_app(const char *app)
     if (k >= 0)
         return known_apps[k].label;
     k = other_of_app(app);
-    return k >= 0 ? other_apps[k].label : app;
+    if (k >= 0)
+        return other_apps[k].label;
+    const struct package *p = package_of_app(app);
+    return p ? package_label(p) : app;
 }
 
 #define ICON_N icon_n
@@ -518,6 +545,36 @@ static int icons_read_list(void)
     icon_n = count;
     printk("[desktop] icons from the file '%s': %d\n", ICON_LIST_FILE, count);
     return 1;
+}
+
+/* The application packages that ask for a tile of their own (their
+   manifest's "dock yes") get one after the dock's own, in the order the
+   loader brought them, while there is room - unless their program has
+   one already, say because desktop.icons names it */
+static void icons_add_packages(void)
+{
+    for (int i = 0; i < package_count() && icon_n < ICON_MAX; i++) {
+        const struct package *p = package_at(i);
+        if (!p->dock || icon_of_app(p->exec) >= 0)
+            continue;
+        struct icon *ic = &icons[icon_n];
+        int j = 0;
+        for (const char *c = package_label(p);
+             *c && j < (int)sizeof(ic->store[0]) - 1; c++)
+            ic->store[0][j++] = *c;
+        ic->store[0][j] = 0;
+        j = 0;
+        for (const char *c = p->exec;
+             *c && j < (int)sizeof(ic->store[1]) - 1; c++)
+            ic->store[1][j++] = *c;
+        ic->store[1][j] = 0;
+        ic->label = ic->store[0];
+        ic->app = ic->store[1];
+        ic->art = package_art(p);
+        icon_n++;
+        printk("[desktop] a tile for the package %s: %s\n", p->id,
+               ic->label);
+    }
 }
 
 #define COL_RED    1      /* the close button */
@@ -8003,6 +8060,7 @@ static void desktop_thread(void *arg)
     video_set_palette(COL_ICON_LO, 186, 113, 0);
 
     icons_read_list();         /* which programs the dock holds, if the disk says */
+    icons_add_packages();      /* and the packages that ask for a tile */
     if (desktop_read_items())
         desktop_layout_load();
     wallpaper_load();          /* and the wallpaper, if the settings name one */

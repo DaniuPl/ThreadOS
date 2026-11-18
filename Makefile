@@ -714,7 +714,8 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/nettest.elf $(BUILD)/user64/zlibtest.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
-               $(BUILD)/user64/update.elf $(BUILD)/user64/wpedeps.elf
+               $(BUILD)/user64/update.elf $(BUILD)/user64/wpedeps.elf \
+               $(BUILD)/user64/tapp.elf
 
 # --- C++, and litehtml ------------------------------------------------
 #
@@ -1583,18 +1584,23 @@ $(WPE_ELFS) &: $(WPE_DIR)/build.ninja $(LIBC64) $(BUILD)/libc64/cxxrt.o \
 	for p in $(WPE_PROGRAMS); do \
 	    strip -o $(BUILD)/user64/$$p.elf $(WPE_DIR)/bin/$$p || exit 1; done
 
-# The applications' image: the three programs in the initrd's format,
-# a second module beside the initrd which the loader brings when it is
-# there (boot/efi/efiboot.c, boot/grub64.cfg) and whose programs the
-# kernel runs like the initrd's (kernel/initrd.c). The disc and the
-# stick carry it once it has been built.
-APPS64 := $(BUILD)/apps64.img
+# Weft as an application package (scripts/mktapp.py): the three programs
+# and a manifest, a module beside the initrd which the loader brings
+# when it finds it (boot/efi/efiboot.c, boot/grub64.cfg) and whose
+# programs the kernel runs like the initrd's (kernel/initrd.c). The disc
+# and the stick carry it once it has been built. Signed when TAPP_KEY
+# names the key that signs releases (make webkit TAPP_KEY=key.pem);
+# 'tapp verify weft' says which it is.
+WEFT_TAPP := $(BUILD)/weft.tapp
+TAPPS = $(wildcard $(BUILD)/*.tapp)
 
-$(APPS64): $(WPE_ELFS) scripts/mkinitrd.py
-	python3 scripts/mkinitrd.py $@ \
+$(WEFT_TAPP): $(WPE_ELFS) scripts/mktapp.py scripts/mkupdate.py
+	python3 scripts/mktapp.py $@ --id weft --name Weft --art 5 \
+	    --version $(VERSION) --arch x86_64 --exec weft \
+	    $(if $(TAPP_KEY),--key $(TAPP_KEY)) \
 	    $(foreach p,$(WPE_PROGRAMS),$(p)=$(BUILD)/user64/$(p).elf)
 
-webkit: $(APPS64)
+webkit: $(WEFT_TAPP)
 
 # layouttest lays pages out with a font of known sizes and prints every
 # box; scripts/tests/t_browser.py holds what it prints on ThreadOS
@@ -1766,7 +1772,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    mbedtest=$(BUILD)/user64/mbedtest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    jsc=$(BUILD)/user64/jsc.elf \
-	    update=$(BUILD)/user64/update.elf \
+	    update=$(BUILD)/user64/update.elf tapp=$(BUILD)/user64/tapp.elf \
 	    iwl3160.ucode=third_party/iwlwifi/iwlwifi-3160-17.ucode \
 	    cacert.pem=third_party/cacert/cacert.pem \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)
@@ -1859,7 +1865,7 @@ ISO64 := $(BUILD)/threados64.iso
 ISO64_LOADER := $(if $(shell command -v clang 2>/dev/null),$(BUILD)/BOOTX64.EFI)
 
 $(ISO64): $(KERNEL64) $(INITRD64) boot/grub64.cfg $(ISO64_LOADER) \
-          $(wildcard $(APPS64))
+          $(TAPPS)
 	@command -v grub-mkrescue >/dev/null || { \
 	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
@@ -1870,7 +1876,8 @@ grub-common xorriso mtools"; \
 	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
 	cp boot/grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
 	$(if $(ISO64_LOADER),cp $(ISO64_LOADER) $(BUILD)/isodir64/boot/threadboot.efi)
-	$(if $(wildcard $(APPS64)),cp $(APPS64) $(BUILD)/isodir64/boot/apps64.img)
+	rm -rf $(BUILD)/isodir64/boot/apps
+	$(if $(TAPPS),mkdir -p $(BUILD)/isodir64/boot/apps && cp $(TAPPS) $(BUILD)/isodir64/boot/apps/)
 	grub-mkrescue -o $@ $(BUILD)/isodir64
 	@echo "Done: $@ (BIOS + UEFI)"
 
@@ -2047,13 +2054,13 @@ OVMF_VARS := /usr/share/OVMF/OVMF_VARS_4M.fd
 # Torito.
 STICK := $(BUILD)/threados-stick.img
 
-# With the applications' image when it has been built (make webkit)
+# With the application packages that have been built (make webkit)
 $(STICK): $(EFI_OUT) $(KERNEL64) $(INITRD64) scripts/mkstick.py \
-          $(wildcard $(APPS64))
+          $(TAPPS)
 	@command -v mformat >/dev/null || { \
 	    echo "ERROR: no mtools (apt install mtools)"; exit 1; }
 	python3 scripts/mkstick.py $@ $(EFI_OUT) $(KERNEL64) $(INITRD64) \
-	    $(if $(wildcard $(APPS64)),--apps $(APPS64))
+	    $(foreach t,$(TAPPS),--tapp $(t))
 
 stick: $(STICK)
 

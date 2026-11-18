@@ -19,7 +19,7 @@ So, from outside, on the images given:
   the function compiled with -march=x86-64-v3 first and ARCH64 after
   it, as a distribution's default and our flags meet, has none
 
-  the kernel and every program in the initrd (and in apps64.img, when
+  the kernel and every program in the initrd (and in weft.tapp, when
   the build has one) hold only the first x86-64's instructions, outside the code that asks the processor
   first (OpenSSL, Mbed TLS's AES-NI, simdutf, RDRAND) - and those
   exceptions are all still in the initrd, so the list does not grow
@@ -101,7 +101,7 @@ def the_checker(work):
 def the_images():
     # The applications' image, when this build made one (make webkit)
     apps = os.path.join(os.path.dirname(os.path.abspath(ptest.INITRD)),
-                        "apps64.img")
+                        "weft.tapp")
     apps = apps if os.path.exists(apps) else None
     wrong, excused = checkisa.check(ptest.KERNEL, ptest.INITRD, apps)
     for name, found in wrong:
@@ -112,7 +112,7 @@ def the_images():
     check("the kernel and all %d programs of the initrd%s hold only the "
           "first x86-64's instructions outside code that asks first "
           "(%d files beyond it)"
-          % (len(programs), " and apps64.img" if apps else "",
+          % (len(programs), " and weft.tapp" if apps else "",
              len(wrong)), not wrong)
     names = {"kernel"} | set(programs)
     asks = dict(checkisa.ASKS_FIRST,

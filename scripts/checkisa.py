@@ -16,8 +16,9 @@ below with its reason: code that asks the processor (CPUID) before it
 uses an extension, and tzcnt, which a processor without BMI1 runs as
 bsf - the compiler emits it only where the two agree.
 
-Usage: checkisa.py KERNEL INITRD [APPS]   (exit status 1 when something
-is beyond the baseline; APPS is the applications' image, apps64.img)
+Usage: checkisa.py KERNEL INITRD [PACKAGE]   (exit status 1 when
+something is beyond the baseline; PACKAGE is an application package in
+the initrd's format, weft.tapp)
 """
 
 import collections
@@ -69,8 +70,8 @@ ASKS_FIRST = {
                 "OSXSAVE bit says the system has it", {"xgetbv"}),
 }
 
-# The same for the applications' image (apps64.img, make webkit), which
-# a build has only when WebKit was built
+# The same for Weft's package (weft.tapp, make webkit), which a build
+# has only when WebKit was built
 APPS_ASKS_FIRST = {
     "weft": ("WebKit's simdutf (CPUID and XGETBV) and Skia's SkOpts "
                 "(SkCpu::Supports) pick their SSSE3, AVX2 and AVX-512 "

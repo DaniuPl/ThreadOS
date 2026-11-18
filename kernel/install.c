@@ -45,7 +45,7 @@
 #define PATH_LOADER  "/EFI/ThreadOS/BOOTX64.EFI"
 #define PATH_KERNEL  "/EFI/ThreadOS/threados64.bin"
 #define PATH_INITRD  "/EFI/ThreadOS/initrd64.img"
-#define PATH_APPS    "/EFI/ThreadOS/apps64.img"
+#define DIR_APPS     "/EFI/ThreadOS/apps"
 #define DIR_FALLBACK "/EFI/BOOT"
 #define PATH_FALLBACK "/EFI/BOOT/BOOTX64.EFI"
 #define DIR_UPDATE_BACKUP "/EFI/ThreadOS/previous"
@@ -79,12 +79,12 @@ int install_update_allowed(void)
    still FAT32 comfortably (more than 65524 clusters). */
 #define ESP_MIB 256
 
-/* The same, when the applications' image (apps64.img - the web engine,
-   180 MB today) goes onto the disk as well. It is not part of what an
-   update keeps a copy of, so it needs room once and room to grow: a
-   FAT32 of 1 GiB holds the system twice and the image several times
+/* The same, when application packages (.tapp - Weft, the web engine's
+   browser, is 180 MB) go onto the disk as well. They are not part of
+   what an update keeps a copy of, so they need room once and room to
+   grow: a FAT32 of 1 GiB holds the system twice and Weft several times
    over. A disk too small for that, and our partition's 64 MiB behind
-   it, gets the smaller partition and the system without the image. */
+   it, gets the smaller partition and the system without them. */
 #define ESP_MIB_APPS 1024
 
 static struct {
@@ -94,7 +94,6 @@ static struct {
     const uint8_t *loader;
     const uint8_t *kernel;
     const uint8_t *initrd;
-    const uint8_t *apps;         /* the applications' image, or 0 */
     uint32_t esp_mib;            /* the EFI partition to make (whole disk) */
     int entry;                   /* the boot entry made, or -1 */
 } plan;
@@ -222,13 +221,14 @@ int install_look(int mode, int disk, struct install_info *out)
     plan.initrd = initrd_image(&in->initrd_size);
     if (!plan.loader || !plan.kernel || !plan.initrd || !in->initrd_size)
         return no(out, INST_NO_FILES);
-    /* The applications' image is welcome but not needed: without it
-       the system is whole and the desktop's own browser stands in for
-       the web engine. So it never makes the answer no - it is only
-       left out where it does not fit, and the plan says so. */
-    plan.apps = initrd_apps_image(&in->apps_size);
-    if (!plan.apps)
-        in->apps_size = 0;
+    /* The packages the loader brought are welcome but not needed:
+       without them the system is whole, and the desktop's own browser
+       stands in for Weft. So they never make the answer no - they are
+       only left out, all of them, where they do not fit, and the plan
+       says so. */
+    in->apps_size = 0;
+    for (int i = 0; i < package_count(); i++)
+        in->apps_size += package_at(i)->size;
 
     say(in->disk_name, blk_name(), INST_NAME);
     in->disk_mib = blk_sectors() / 2048;
@@ -329,7 +329,7 @@ const char *install_step_name(int n)
     case 1: return PATH_LOADER;
     case 2: return PATH_KERNEL;
     case 3: return PATH_INITRD;
-    case 4: return PATH_APPS;
+    case 4: return DIR_APPS;
     case 5: return PATH_FALLBACK;
     case 6: return "boot menu entry (UEFI)";
     default: return "?";
@@ -434,13 +434,30 @@ int install_step(int n)
     case 3:
         return fat_write_file(PATH_INITRD, plan.initrd,
                               plan.info.initrd_size) < 0 ? -1 : 0;
-    case 4:
-        /* 1, "nothing to do", when the image was not brought or does
-           not fit: the system is whole without it */
+    case 4: {
+        /* 1, "nothing to do", when no package was brought or they do
+           not fit: the system is whole without them. Each goes in as
+           <id>.tapp, where the loader looks for packages. */
         if (!plan.info.apps)
             return 1;
-        return fat_write_file(PATH_APPS, plan.apps,
-                              plan.info.apps_size) < 0 ? -1 : 0;
+        if (fat_mkdir(DIR_APPS) < 0)
+            return -1;
+        for (int i = 0; i < package_count(); i++) {
+            const struct package *p = package_at(i);
+            char path[sizeof(DIR_APPS) + sizeof(p->id) + 8];
+            int at = 0;
+            for (const char *c = DIR_APPS "/"; *c; c++)
+                path[at++] = *c;
+            for (const char *c = p->id; *c; c++)
+                path[at++] = *c;
+            for (const char *c = ".tapp"; *c; c++)
+                path[at++] = *c;
+            path[at] = 0;
+            if (fat_write_file(path, p->base, p->size) < 0)
+                return -1;
+        }
+        return 0;
+    }
     case 5:
         /* The name the firmware falls back to. On a machine that has
            one already it belongs to whoever boots that machine today,
@@ -528,14 +545,14 @@ int install_plan(int mode, int disk)
     printk("  %s  %u B\n", PATH_LOADER, in.loader_size);
     printk("  %s  %u B\n", PATH_KERNEL, in.kernel_size);
     printk("  %s  %u B\n", PATH_INITRD, in.initrd_size);
-    if (in.apps)
-        printk("  %s  %u B\n", PATH_APPS, in.apps_size);
-    else if (in.apps_size)
-        printk("  %s  %u B  DOES NOT FIT - %s;\n"
-               "      the system goes on without the web engine\n",
-               PATH_APPS, in.apps_size, in.mode == INST_WHOLE
-                   ? "the disk is too small for its EFI partition"
-                   : "the EFI partition has too little room for it");
+    for (int i = 0; i < package_count(); i++)
+        printk("  %s/%s.tapp  %u B%s\n", DIR_APPS, package_at(i)->id,
+               package_at(i)->size, in.apps ? "" : "  DOES NOT FIT");
+    if (in.apps_size && !in.apps)
+        printk("      %s; the system goes on without its packages\n",
+               in.mode == INST_WHOLE
+                   ? "the disk is too small for an EFI partition to hold them"
+                   : "the EFI partition has too little room for them");
     if (in.fallback_free)
         printk("  %s  %u B  (not there - the machine will boot on its own)\n",
                PATH_FALLBACK, in.loader_size);

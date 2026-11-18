@@ -66,7 +66,9 @@ struct tag_module {
 } __attribute__((packed));
 
 #define MMAP_MAX 32
-#define MODS_MAX 4
+/* The initrd, the kernel's own file and the loader's, and the
+   application packages (kernel/include/initrd.h PKG_MAX) */
+#define MODS_MAX 20
 
 static struct multiboot_info info;
 static struct multiboot_mmap_entry mmap[MMAP_MAX];
@@ -118,6 +120,12 @@ static uint32_t nmods_kept;
 
 int mb2_module(const char *name, uint32_t *start, uint32_t *size)
 {
+    return mb2_module_nth(name, 0, start, size);
+}
+
+int mb2_module_nth(const char *name, int nth, uint32_t *start,
+                   uint32_t *size)
+{
     if (!name)
         return 0;
     for (uint32_t i = 0; i < nmods_kept; i++) {
@@ -127,7 +135,7 @@ int mb2_module(const char *name, uint32_t *start, uint32_t *size)
         int k = 0;
         while (name[k] && s[k] == name[k])
             k++;
-        if (name[k] || s[k])
+        if (name[k] || s[k] || nth-- > 0)
             continue;
         if (start)
             *start = mods[i].start;

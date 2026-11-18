@@ -7,7 +7,8 @@ weft opens a window through the ThreadOS platform
 the page with libsoup, and wpewebproc, which parses it, runs its script
 in JavaScriptCore, lays it out and paints it with Skia on the processor
 into shared memory, which the window shows. They come from the
-applications' image (apps64.img) the disc hands over beside the initrd.
+package weft.tapp (scripts/mktapp.py) the disc hands over beside the
+initrd.
 
 A page served from the host is loaded, and from outside:
 
@@ -64,7 +65,7 @@ from ptest import ui_font_baseline_in as baseline_in
 from ptest import _kernel_define as define
 
 BUILD = os.path.dirname(os.path.abspath(KERNEL64 or "build/x"))
-APPS = os.path.join(BUILD, "apps64.img")
+APPS = os.path.join(BUILD, "weft.tapp")
 SRC = "apps/webkit/weft.c"
 RED, BLUE = (0xC0, 0x30, 0x30), (0x33, 0x66, 0xCC)
 GREEN, BROWN = (0x22, 0xAA, 0x44), (0x80, 0x60, 0x40)
@@ -479,7 +480,7 @@ def main():
         print("SKIPPED: " + reason)
         return summary()
     if not os.path.exists(APPS):
-        print("SKIPPED: no apps64.img - make webkit")
+        print("SKIPPED: no weft.tapp - make webkit")
         return summary()
     width, height = define(SRC, "WIDTH"), define(SRC, "HEIGHT")
     want = chromium_title(width, height)
@@ -502,15 +503,16 @@ def main():
     try:
         check("the disc with the kernel and the applications' image builds",
               make_iso64(os.path.join(work, "iso"), iso, graphics=True,
-                         apps=APPS))
+                         tapps=[APPS]))
         q = Qemu(KERNEL, INITRD, cdrom=iso,
                  serial=os.path.join(work, "serial.log"),
                  qemu="qemu-system-x86_64", ram_mib=2048)
         try:
             q.wait_serial("thread64>", timeout=120)
             q.wait_serial("[net] DHCP", timeout=60)
-            check("the kernel takes the applications' image",
-                  "Applications' image:" in q.serial())
+            check("the kernel takes Weft's package",
+                  re.search(r"Package weft \d+: Weft, ", q.serial())
+                  is not None)
             q.type_line("desktop")
             q.wait_serial("The desktop is starting", timeout=30)
             check("the desktop comes up", q.wait_desktop())

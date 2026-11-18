@@ -358,6 +358,34 @@ static inline uint32_t sys_getticks(void)
 
 /* --- Printing numbers ----------------------------------------------- */
 
+/* An application package the loader brought (kernel/include/initrd.h).
+   The layout must match the kernel's (kernel64/syscall64.c). */
+struct tapp_info {
+    char id[16];
+    char name[32];
+    char name_pl[32];
+    char exec[16];
+    uint32_t version;
+    int32_t art;                  /* the dock's picture, or -1 */
+    uint32_t dock;
+    uint32_t size;                /* the whole package, in bytes */
+};
+
+/* The index-th package: 0, or -1 when there are fewer */
+static inline int32_t sys_package(int32_t index, struct tapp_info *out)
+{
+    return (int32_t)syscall64(SYS64_PACKAGE, index,
+                              (int64_t)(uintptr_t)out);
+}
+
+/* Bytes of the index-th package from 'offset': how many, -1 = none */
+static inline int64_t sys_package_read(int32_t index, uint64_t offset,
+                                       void *buf, uint64_t len)
+{
+    return syscall64_4(SYS64_PACKAGE_READ, index, (int64_t)offset,
+                       (int64_t)(uintptr_t)buf, (int64_t)len);
+}
+
 /* A file of the initrd, read into 'buf': how many bytes, -1 = none */
 static inline int64_t sys_initrd_read(const char *name, void *buf,
                                       uint64_t max)

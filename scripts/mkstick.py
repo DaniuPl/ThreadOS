@@ -124,22 +124,22 @@ def main():
     ap.add_argument("kernel")
     ap.add_argument("initrd")
     ap.add_argument("--mib", type=int, default=192)
-    # The applications' image (apps64.img, the web engine), beside the
-    # initrd, where the loader looks for it
-    ap.add_argument("--apps")
+    # Application packages (.tapp: Weft, the web engine's browser), in
+    # \apps, where the loader looks for them
+    ap.add_argument("--tapp", action="append", default=[])
     args = ap.parse_args()
 
-    for f in (args.loader, args.kernel, args.initrd, args.apps):
+    for f in [args.loader, args.kernel, args.initrd] + args.tapp:
         if f and not os.path.exists(f):
             sys.stderr.write("mkstick: there is no %s\n" % f)
             return 1
 
-    # With the applications' image, room for the files and as much
-    # again for the system to grow by, if that is more than asked
+    # With packages, room for the files and as much again for the
+    # system to grow by, if that is more than asked
     mib = args.mib
-    if args.apps:
+    if args.tapp:
         files = sum(os.path.getsize(f) for f in
-                    (args.loader, args.kernel, args.initrd, args.apps))
+                    [args.loader, args.kernel, args.initrd] + args.tapp)
         mib = max(mib, (2 * files) // (1 << 20) + 64)
     total = mib * 2048
     first = 2048
@@ -166,8 +166,11 @@ def main():
         ["mcopy", "-i", at, args.kernel, "::/threados64.bin"],
         ["mcopy", "-i", at, args.initrd, "::/initrd64.img"],
     ]
-    if args.apps:
-        steps.append(["mcopy", "-i", at, args.apps, "::/apps64.img"])
+    if args.tapp:
+        steps.append(["mmd", "-i", at, "::/apps"])
+    for t in args.tapp:
+        steps.append(["mcopy", "-i", at, t,
+                      "::/apps/" + os.path.basename(t)])
     for step in steps:
         if not mtool(step, env):
             sys.stderr.write("mkstick: it did not work: %s\n" % " ".join(step))

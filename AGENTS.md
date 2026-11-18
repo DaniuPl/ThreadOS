@@ -42,7 +42,7 @@ x86. Its tests are `arm64boot`, `arm64core`, `arm64threads` and
 make -j8                      # kernel + initrd (build/threados64.bin, build/initrd64.img)
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
 make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld)
-make webkit                   # WebKit's WPE port: build/apps64.img (hours; not in the default build)
+make webkit                   # Weft on WebKit's WPE port: build/weft.tapp (hours; not in the default build)
 make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
 make run-phone                # ThreadOS mobile: the ARM64 kernel with a screen and touch
 make iso64 stick              # hybrid disc and USB image

@@ -9341,3 +9341,55 @@ works and is checked by `make test`.
       and clicks the bare desktop first: a window goes from the screen a
       frame after its program ends, and the first key typed in between
       was the closing window's.
+
+- [x] **Application packages (.tapp), and Weft the first of them**
+      (scripts/mktapp.py, kernel/initrd.c, include/initrd.h,
+      kernel64/initrd64.c, kernel/mb2.c, boot/efi/efiboot.c,
+      boot/grub64.cfg, kernel/desktop.c, kernel/install.c,
+      kernel64/syscall64.c, user/tapp.c, user/usignkey.h, user/update.c,
+      user/ginstal.c, Makefile, scripts/mkstick.py, scripts/ptest.py,
+      scripts/tests/t_tapp.py and the groups below)
+      apps64.img was one image with no name, no version and no word of
+      what it held, and nothing else could be added beside it. An
+      application is now a package: an image in the initrd's format -
+      so the kernel takes one apart with the code it already checks
+      initrds with - whose first entry is a manifest (id, name and its
+      Polish form, version, processor, the program that starts it, the
+      dock's picture, whether it wants a tile) and whose last is an
+      ECDSA P-256 signature over everything before it, made with the
+      key that signs releases (now in user/usignkey.h, shared with
+      update). scripts/mktapp.py makes, inspects and - through OpenSSL -
+      verifies them; `make webkit` makes weft.tapp.
+      threadboot loads every *.tapp in \apps and \EFI\ThreadOS\apps,
+      GRUB those in /boot/apps, each as a module named "tapp" (the
+      kernel keeps twenty modules now, not four). The kernel takes a
+      package only if its listing lies inside it, its manifest says
+      what it is, its processor is this one, the program it names is in
+      it and no package has its name already; one it passes over is
+      said with the reason. Its programs run by name after the initrd's,
+      so a package cannot stand in for a program of the system's. A
+      package that asks for a tile gets one after the dock's own, and a
+      window of its program wears its picture and its name. The
+      installer writes every package into /EFI/ThreadOS/apps where the
+      loader looks, or none where they do not fit. 'tapp' lists the
+      packages, 'tapp info' shows a package file, 'tapp verify' checks
+      one - the system's or a file - against the system's key, reading
+      it start to end so that Weft's 180 MB are never in memory twice.
+      The EFI partition is as trusted as the kernel on it, so a package
+      a loader finds there is not checked at boot; checking is for a
+      package that comes from elsewhere, and installing one from the
+      Files app is the next step.
+      t_tapp boots a disc with five packages made here - one signed with
+      the test's key and asking for a tile, one unsigned, one for
+      aarch64, one without a manifest, one with a name already taken -
+      and checks that the kernel takes the first two and says why not
+      the others, that 'tapp' lists them as their manifests say, that a
+      package's program runs, that 'tapp verify' says what OpenSSL says
+      on the host (not signed by the built-in key; signed once
+      update.key holds the test's; no signature; a copy with one bit
+      changed not signed), that 'tapp info' prints the manifest, and
+      that the dock has a tile called Hello whose click starts its
+      program. t_appsinst, t_wholedisk and t_ginstal install packages
+      instead of an image, the installed system's loader finding them
+      in its directory; t_bigprog runs bigprog out of a package; t_webkit
+      and t_isa take Weft's package.

@@ -37,20 +37,11 @@
 #include "ucert.h"
 #include "usha256.h"
 #include "uecdsa.h"
+#include "usignkey.h"
 
 #define DEFAULT_URL "https://github.com/DaniuPl/ThreadOS/releases/latest/download/"
 #define MANIFEST_MAX 4096
 #define URL_MAX 256
-
-/* The public half of the key that signs releases (P-256, 0x04 || X || Y) */
-static const uint8_t official_key[65] = {
-    0x04, 0x40, 0x6f, 0xcb, 0x12, 0x6f, 0x92, 0xdc, 0xe9, 0x07, 0x05, 0xde,
-    0x16, 0x84, 0x7e, 0xc4, 0x48, 0x34, 0x31, 0xf3, 0x1e, 0x9f, 0xd2, 0x6d,
-    0x48, 0xac, 0x16, 0x85, 0x09, 0x5a, 0xdb, 0x86, 0xf1, 0x18, 0xc1, 0x24,
-    0xba, 0x54, 0x0e, 0x70, 0xf2, 0xb3, 0x1f, 0x77, 0xcc, 0xdd, 0x9a, 0x02,
-    0xef, 0xaa, 0x08, 0xfd, 0x1a, 0xc2, 0xf4, 0xcf, 0x4b, 0xaf, 0x38, 0xb6,
-    0x88, 0x32, 0x93, 0x65, 0x0e
-};
 
 /* What update.txt says, and in the kernel's order: kernel, initrd,
    loader (SYS64_UPDATE_WRITE's numbers) */
@@ -236,26 +227,16 @@ static int parse(const char *t, uint32_t len, struct release *r)
 }
 
 /* The key: update.key from the disk if an admin put one there, else
-   the one this program was built with. By its full name: only in the
-   root directory is update.key a system file nobody but an admin can
-   write, and a session starts in its own home - where a plain user's
-   update.key would otherwise be the key an admin's 'sudo run update'
-   trusted. */
+   the one this program was built with (user/usignkey.h) */
 static const uint8_t *signing_key(void)
 {
-    static uint8_t key[65];
-    static char text[140];
-    int fd = sys_open("/update.key", O_READ);
-    if (fd < 0)
-        return official_key;
-    int64_t n = sys_read(fd, text, sizeof(text) - 1);
-    sys_close(fd);
-    if (n >= 130 && unhex(text, key, 65) && key[0] == 0x04) {
+    int from;
+    const uint8_t *key = signing_key_from(&from);
+    if (from == SIGNKEY_DISK)
         say("checking signatures against update.key\n");
-        return key;
-    }
-    say("update.key is not a key - ignoring it\n");
-    return official_key;
+    else if (from == SIGNKEY_BAD)
+        say("update.key is not a key - ignoring it\n");
+    return key;
 }
 
 static int initrd_text(const char *name, char *out, uint32_t cap)

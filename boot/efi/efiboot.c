@@ -217,6 +217,64 @@ static int read_file(const CHAR16 *name, struct blob *out)
     return 1;
 }
 
+/* --- application packages ------------------------------------------ */
+
+/* Every .tapp in a directory (scripts/mktapp.py): each becomes a module
+   named "tapp", which the kernel checks and takes (kernel/initrd.c).
+   None is needed to boot; one that does not fit in memory is left
+   behind rather than stopping the boot. A directory is read an
+   EFI_FILE_INFO at a time: three sizes, three times and the attributes
+   in 80 bytes, then the name. */
+#define TAPP_MAX 16                     /* kernel/include/initrd.h PKG_MAX */
+static struct blob tapps[TAPP_MAX];
+static int ntapps;
+
+static int is_tapp(const CHAR16 *name)
+{
+    UINTN n = 0;
+    while (name[n])
+        n++;
+    static const CHAR16 ext[] = L".tapp";
+    if (n < 6)
+        return 0;
+    for (UINTN i = 0; i < 5; i++) {
+        CHAR16 c = name[n - 5 + i];
+        if (c >= 'A' && c <= 'Z')
+            c = (CHAR16)(c - 'A' + 'a');
+        if (c != ext[i])
+            return 0;
+    }
+    return 1;
+}
+
+static void read_packages(const CHAR16 *dir)
+{
+    EFI_FILE_PROTOCOL *d;
+    if (root->Open(root, &d, (CHAR16 *)dir, EFI_FILE_MODE_READ, 0)
+        != EFI_SUCCESS)
+        return;
+    static UINT64 info[128];            /* 1 KiB, aligned for the sizes */
+    while (ntapps < TAPP_MAX) {
+        UINTN n = sizeof(info);
+        if (d->Read(d, &n, info) != EFI_SUCCESS || n < 82)
+            break;                      /* the end, or a name too long */
+        const CHAR16 *name = (const CHAR16 *)((UINT8 *)info + 80);
+        if ((info[9] & 0x10) || !is_tapp(name))
+            continue;                   /* a directory, or not a package */
+        CHAR16 path[300];
+        UINTN at = 0;
+        for (const CHAR16 *c = dir; *c && at < 280; c++)
+            path[at++] = *c;
+        path[at++] = '\\';
+        for (const CHAR16 *c = name; *c && at < 298; c++)
+            path[at++] = *c;
+        path[at] = 0;
+        if (read_file(path, &tapps[ntapps]) > 0)
+            ntapps++;
+    }
+    d->Close(d);
+}
+
 /* The first of the places a file may be: 1 found and read, otherwise
    the loader stops, saying which of the two things went wrong */
 static void read_one(const CHAR16 *const *names, int n, struct blob *out,
@@ -960,21 +1018,12 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     read_one(initrds, 3, &initrd, L"I found no initrd64.img",
              L"There is not enough memory for initrd64.img");
 
-    /* The applications' image, where there is one: the web engine's
-     * programs, too large to be in the initrd every boot carries. It is
-     * not needed to boot, and a system without it simply has no web
-     * engine; one that does not fit in memory is left behind the same
-     * way rather than stopping the boot. */
-    struct blob apps;
-    apps.data = 0;
-    apps.size = 0;
-    static const CHAR16 *const appss[] = {
-        L"\\apps64.img", L"\\EFI\\BOOT\\apps64.img",
-        L"\\EFI\\ThreadOS\\apps64.img"
-    };
-    for (int i = 0; i < 3 && !apps.data; i++)
-        if (read_file(appss[i], &apps) <= 0)
-            apps.data = 0;
+    /* The application packages: a stick's in \apps, an installed
+     * system's in \EFI\ThreadOS\apps (kernel/install.c). Weft, the web
+     * engine's browser, is one - too large to be in the initrd every
+     * boot carries. */
+    read_packages(L"\\apps");
+    read_packages(L"\\EFI\\ThreadOS\\apps");
 
     /* And the loader itself, as a file.
      *
@@ -1031,7 +1080,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     put_num(kernel.size, 10);
     put(L" B\r\n  initrd: ");
     put_num(initrd.size, 10);
-    put(L" B\r\n  loader: ");
+    put(L" B\r\n  packages: ");
+    put_num((UINT64)ntapps, 10);
+    put(L"\r\n  loader: ");
     if (self.data) {
         put_num(self.size, 10);
         put(L" B\r\n");
@@ -1095,8 +1146,8 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *st)
     tag_module((UINTN)kernel.data, kernel.size, "the kernel");
     if (self.data)
         tag_module((UINTN)self.data, self.size, "loader");
-    if (apps.data)
-        tag_module((UINTN)apps.data, apps.size, "apps");
+    for (int i = 0; i < ntapps; i++)
+        tag_module((UINTN)tapps[i].data, tapps[i].size, "tapp");
 
     if (sc.have) {
         UINT8 *p = tag_open(TAG_FRAMEBUF, 8 + 22 + 6);
