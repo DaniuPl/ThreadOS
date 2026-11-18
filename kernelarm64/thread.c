@@ -115,12 +115,19 @@ static struct thread *pick(struct thread *old)
 }
 
 /* With interrupts off. The current thread becomes 'state' and another
-   one runs, if there is one that may. */
-static void reschedule(int state, uint64_t wake_at)
+   one runs, if there is one that may - unless it was to sleep and
+   'unless' says it need not (thread_wait), which is looked at here,
+   under the lock that thread_wake takes too. */
+static void reschedule_unless(const volatile int *unless, int state,
+                              uint64_t wake_at)
 {
     struct cpu *c = cpu_this();
     spin_lock(&rq);
     struct thread *old = c->current;
+    if (state == T_SLEEPING && ((unless && *unless) || old->interrupted)) {
+        spin_unlock(&rq);
+        return;
+    }
     old->wake_at = wake_at;
     old->state = state;
 
@@ -139,6 +146,11 @@ static void reschedule(int state, uint64_t wake_at)
     switch_program_state(old, next);
     switch_to(&old->sp, next->sp);
     finish_switch();
+}
+
+static void reschedule(int state, uint64_t wake_at)
+{
+    reschedule_unless(0, state, wake_at);
 }
 
 /* Where a new thread's first switch returns to */
@@ -191,6 +203,10 @@ static struct thread *new_thread(const char *name, void (*fn)(void *),
     t->ttbr0 = 0;
     t->tpidr_el0 = 0;
     t->fpstate = 0;
+    t->tid = 0;
+    t->clear_tid = 0;
+    t->ended = 0;
+    t->interrupted = 0;
     return t;
 }
 
@@ -213,10 +229,13 @@ struct thread *thread_create(const char *name, void (*fn)(void *), void *arg)
 }
 
 /* Everything a program's thread carries is in place before it can be
-   picked: the first switch to it loads its tables */
+   picked: the first switch to it loads its tables. It is held - asleep
+   with no time to wake - until thread_wake: what its program has to
+   know of it (its number, written where the C library looks) is
+   written before it can run on another core. */
 struct thread *thread_create_program(const char *name, void (*fn)(void *),
                                      void *arg, struct uproc *p,
-                                     uint64_t ttbr0)
+                                     uint64_t ttbr0, uint64_t tpidr_el0)
 {
     struct thread *t = new_thread(name, fn, arg);
     uint64_t *fp = kmalloc(FPSTATE_WORDS * sizeof(uint64_t));
@@ -232,7 +251,10 @@ struct thread *thread_create_program(const char *name, void (*fn)(void *),
         fp[i] = 0;
     t->proc = p;
     t->ttbr0 = ttbr0;
+    t->tpidr_el0 = tpidr_el0;
     t->fpstate = fp;
+    t->state = T_SLEEPING;
+    t->wake_at = ~0UL;
     return add_thread(t);
 }
 
@@ -257,25 +279,50 @@ void thread_exit(void)
     arm64_halt();                    /* never comes back here */
 }
 
+int thread_try_join(struct thread *t)
+{
+    irqflags_t f = spin_lock_irq(&rq);
+    if (t->state != T_DEAD) {
+        spin_unlock_irq(&rq, f);
+        return 0;
+    }
+    struct thread **pp = &threads;
+    while (*pp && *pp != t)
+        pp = &(*pp)->next;
+    if (*pp)
+        *pp = t->next;
+    spin_unlock_irq(&rq, f);
+    kfree(t->stack);
+    kfree(t->fpstate);
+    kfree(t);
+    return 1;
+}
+
 void thread_join(struct thread *t)
 {
-    for (;;) {
-        irqflags_t f = spin_lock_irq(&rq);
-        if (t->state == T_DEAD) {
-            struct thread **pp = &threads;
-            while (*pp && *pp != t)
-                pp = &(*pp)->next;
-            if (*pp)
-                *pp = t->next;
-            spin_unlock_irq(&rq, f);
-            kfree(t->stack);
-            kfree(t->fpstate);
-            kfree(t);
-            return;
-        }
-        spin_unlock_irq(&rq, f);
+    while (!thread_try_join(t))
         thread_sleep_ms(1);
-    }
+}
+
+void thread_wait(const volatile int *flag, uint64_t until)
+{
+    irqflags_t f = irq_save();
+    reschedule_unless(flag, T_SLEEPING, until);
+    irq_restore(f);
+}
+
+void thread_wake(struct thread *t)
+{
+    irqflags_t f = spin_lock_irq(&rq);
+    if (t->state == T_SLEEPING)
+        t->state = T_READY;
+    spin_unlock_irq(&rq, f);
+}
+
+void thread_interrupt(struct thread *t)
+{
+    t->interrupted = 1;
+    thread_wake(t);
 }
 
 void sched_preempt(void)

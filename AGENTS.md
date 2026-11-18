@@ -21,14 +21,15 @@ came with it (`kernel/include/task.h`, for one) are still used by the
 shared code and answered by `kernel64/compat64.c`.
 
 A second kernel for ARM64 (`bootarm64/` + `kernelarm64/`, QEMU's `virt`
-machine, built with clang) is at its fifth stage: it boots, reads the
+machine, built with clang) is at its sixth stage: it boots, reads the
 device tree, catches exceptions, runs with the MMU on, takes timer
 interrupts through a GICv2, preempts kernel threads and runs them on
 every core it wakes through PSCI, runs programs from its initrd at EL0
-in address spaces of their own (`kernelarm64/proc.c`, programs in
-`userarm64/`, the PC's system call numbers) - and, given a phone's
-devices, is
-ThreadOS mobile: a ramfb screen set up through fw_cfg, the initrd
+in address spaces of their own (`kernelarm64/proc.c`, the PC's system
+call numbers) - freestanding ones in `userarm64/`, and musl programs:
+the same `libc/` and overlay built for aarch64 by the cross gcc
+(`gcc-aarch64-linux-gnu`), with threads, futexes, and memory made on
+first touch - and, given a phone's devices, is ThreadOS mobile: a ramfb screen set up through fw_cfg, the initrd
 through fw_cfg, a PL031 clock, a virtio-input touchscreen over
 virtio-mmio, and the shell in `kernelarm64/mobile.c`. Of `kernel/` it
 builds `string.c`, `heap.c`, `gfx.c`, `ttf.c`, `uitext.c`, `mark.c`,
@@ -37,14 +38,16 @@ builds `string.c`, `heap.c`, `gfx.c`, `ttf.c`, `uitext.c`, `mark.c`,
 AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
-`arm64mobile` and `arm64user`.
+`arm64mobile`, `arm64user` and `arm64libc`. The overlay's C layer
+(`libc/overlay/src/threados/`) is one file for both machines: a change
+there is built and tested on both.
 
 ## Commands
 
 ```sh
 make -j8                      # kernel + initrd (build/threados64.bin, build/initrd64.img)
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
-make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld)
+make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld; musl by aarch64-linux-gnu-gcc)
 make webkit                   # Weft on WebKit's WPE port: build/weft.tapp (hours; not in the default build)
 make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
 make run-phone                # ThreadOS mobile: the ARM64 kernel with a screen and touch

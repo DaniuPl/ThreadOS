@@ -83,5 +83,7 @@ void pmm_init_range(uint64_t ram_base, uint64_t ram_size, uint64_t first_free);
 /* smp.c */
 struct fdt_info;
 int smp_start(const struct fdt_info *fi);
+/* How many cores run - the first, and those it woke */
+int smp_online(void);
 
 #endif

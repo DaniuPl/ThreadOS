@@ -8,6 +8,11 @@
  * setjmp, sorting - and what cannot be the same on two machines (a
  * process number, the date) is printed as a property, or on a line
  * starting with '~' that the test reads on its own terms.
+ *
+ * "libctest memory FILE" is the part a system with no disk to write and
+ * no second process can run - the ARM64 kernel so far
+ * (scripts/tests/t_arm64libc.py) - and FILE one it can read: every
+ * section but those that write files or fork, and a file read instead.
  */
 
 #include <errno.h>
@@ -385,6 +390,49 @@ static void mappings(void)
 	unlink(name);
 }
 
+/* A file only read - byte by byte, from places, by its descriptor -
+   and one that is not there */
+static void reading(const char *name)
+{
+	FILE *f = fopen(name, "rb");
+	if (!f) {
+		printf("read %s: %s\n", name, strerror(errno));
+		return;
+	}
+	unsigned long h = 0xcbf29ce484222325UL;
+	long n = 0;
+	int c;
+	while ((c = getc(f)) != EOF) {
+		h = (h ^ (unsigned char)c) * 0x100000001b3UL;
+		n++;
+	}
+	printf("read: %ld bytes, fnv %016lx, at the end %d\n", n, h, feof(f));
+	fseek(f, 1000, SEEK_SET);
+	unsigned char b[4] = { 0 };
+	size_t got = fread(b, 1, sizeof(b), f);
+	long at = ftell(f);
+	printf("fseek 1000: %zu bytes %02x%02x%02x%02x, ftell %ld\n", got,
+	       b[0], b[1], b[2], b[3], at);
+	fseek(f, -2, SEEK_END);
+	got = fread(b, 1, sizeof(b), f);
+	printf("fseek end-2: %zu bytes\n", got);
+	fclose(f);
+
+	struct stat st;
+	int r = stat(name, &st);
+	printf("stat: %d size %lld regular %d\n", r, (long long)st.st_size,
+	       S_ISREG(st.st_mode));
+	int fd = open(name, O_RDONLY);
+	off_t end = lseek(fd, 0, SEEK_END);
+	ssize_t pr = pread(fd, b, sizeof(b), 0);
+	off_t still = lseek(fd, 0, SEEK_CUR);
+	printf("lseek end %lld, pread %zd: %02x%02x%02x%02x, position %lld\n",
+	       (long long)end, pr, b[0], b[1], b[2], b[3], (long long)still);
+	printf("close: %d\n", close(fd));
+	fd = open("libc_none.txt", O_RDONLY);
+	printf("open of nothing: %d %s\n", fd, strerror(errno));
+}
+
 static void processes(void)
 {
 	pid_t p = fork();
@@ -441,6 +489,7 @@ int main(int argc, char **argv)
 		for (;;)
 			sleep(1);
 	}
+	int memory = argc > 2 && !strcmp(argv[1], "memory");
 	atexit(bye);
 	printf("args: %d [%s]\n", argc, argc > 1 ? argv[1] : "");
 	numbers();
@@ -450,12 +499,16 @@ int main(int argc, char **argv)
 	else
 		printf("longjmp: back from 1000 calls deep\n");
 	heap();
-	files();
-	truncation();
-	unlinked();
-	mappings();
-	fflush(stdout);
-	processes();
+	if (memory) {
+		reading(argv[2]);
+	} else {
+		files();
+		truncation();
+		unlinked();
+		mappings();
+		fflush(stdout);
+		processes();
+	}
 	timing();
 	printf("~isatty: %d\n", isatty(1));
 	fprintf(stderr, "stderr: also seen\n");

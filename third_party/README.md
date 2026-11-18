@@ -44,9 +44,12 @@ as code of our own around it (`apps/js`).
 
 Trimmed, not modified:
 
-- **musl**: only the x86_64 and generic architecture directories are
-  kept (`arch/`, and the per-architecture subdirectories of `src/`);
-  the other architectures' files are never built for ThreadOS.
+- **musl**: only the x86_64, aarch64 and generic architecture
+  directories are kept (`arch/`, `crt/` and the per-architecture
+  subdirectories of `src/`); the other architectures' files are never
+  built for ThreadOS. The aarch64 ones, for the ARM64 kernel's
+  programs, came later from the same release archive (musl-1.2.5.tar.gz,
+  SHA-256 `a9a118bbe84d8764da0ea0d28b3ab3fae8477fc7e4085d90102b8596fc7c75e4`).
 - **QuickJS**: only the engine's core - `quickjs.c`, `libregexp.c`,
   `libunicode.c`, `dtoa.c`, `cutils.c` and their headers. Not the
   `qjs`/`qjsc` programs, `quickjs-libc` (its host for POSIX systems -

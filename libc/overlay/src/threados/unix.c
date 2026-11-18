@@ -68,15 +68,7 @@ int __tos_fd_flags(int fd);
 void __tos_fd_set_flags(int fd, int flags);
 void __tos_set_cloexec(int fd);
 
-static long tos(long n, long a1, long a2, long a3, long a4)
-{
-	long ret;
-	register long r10 __asm__("r10") = a4;
-	__asm__ __volatile__ ("syscall" : "=a"(ret)
-		: "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
-		: "rcx", "r11", "memory");
-	return ret;
-}
+#include "tos.h"
 
 static void touch(const void *p, size_t len)
 {

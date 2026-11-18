@@ -6,6 +6,12 @@
  * only on whether the primitives did their job. Lines starting with '~'
  * are this machine's own (how many cores, how long) and are not
  * compared.
+ *
+ * With names, only the tests named run: a system with no second
+ * process and no disk to write (the ARM64 kernel so far,
+ * scripts/tests/t_arm64libc.py) runs those that need neither. "endall"
+ * is the end of the exit test without its fork: the program itself
+ * ends, with 5, from a thread - while one computes and one sleeps.
  */
 
 #define _GNU_SOURCE
@@ -530,8 +536,32 @@ static void cow_test(void)
     unlink("cow.txt");
 }
 
-int main(void)
+/* What exit_test's child does, as the whole program */
+static void end_all(void)
 {
+    static long spins;
+    pthread_t a, b, c;
+    pthread_create(&a, NULL, spin_forever, &spins);
+    pthread_create(&b, NULL, sleep_forever, NULL);
+    pthread_create(&c, NULL, exit_five, NULL);
+    pthread_join(a, NULL);             /* never returns by itself */
+    _exit(1);
+}
+
+static int named(int argc, char **argv, const char *name)
+{
+    if (argc < 2)
+        return 1;
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], name))
+            return 1;
+    return 0;
+}
+
+int main(int argc, char **argv)
+{
+    if (argc > 1 && !strcmp(argv[1], "endall"))
+        end_all();
     struct timespec t0;
     clock_gettime(CLOCK_MONOTONIC, &t0);
     /* Never joined: when main returns, exit() has to end it too (the
@@ -548,6 +578,8 @@ int main(void)
         { "spread", spread_test }, { "cow", cow_test },
     };
     for (unsigned i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
+        if (!named(argc, argv, tests[i].name))
+            continue;
         struct timespec t;
         clock_gettime(CLOCK_MONOTONIC, &t);
         tests[i].fn();

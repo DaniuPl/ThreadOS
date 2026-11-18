@@ -25,6 +25,17 @@ int __libc_start_main(int (*)(), int, char **,
 
 extern char __tls_image[], __tls_filesz[], __tls_memsz[], __tls_align[];
 
+/* The sizes are absolute symbols, small numbers. On ARM64 a program is
+   at 256 GiB, and the compiler reaches a symbol by adrp - within 4 GiB
+   of the code - so a number near zero is out of its reach; a literal
+   holds it whole instead. */
+#if defined(__aarch64__)
+#define LINKED(sym) ({ unsigned long v_; \
+	__asm__ ("ldr %0, =" #sym : "=r"(v_)); v_; })
+#else
+#define LINKED(sym) ((unsigned long)sym)
+#endif
+
 #define ARGS_MAX 64
 
 __attribute__((__used__))
@@ -35,9 +46,9 @@ void _start_c(long argc, char **argv)
 	Elf64_Phdr tls = {
 		.p_type = PT_TLS,
 		.p_vaddr = (unsigned long)__tls_image,
-		.p_filesz = (unsigned long)__tls_filesz,
-		.p_memsz = (unsigned long)__tls_memsz,
-		.p_align = (unsigned long)__tls_align,
+		.p_filesz = LINKED(__tls_filesz),
+		.p_memsz = LINKED(__tls_memsz),
+		.p_align = LINKED(__tls_align),
 	};
 	unsigned char random[16];
 	int n = 0;
@@ -52,11 +63,18 @@ void _start_c(long argc, char **argv)
 	block[n++] = 0;                  /* and of the environment */
 
 	/* AT_RANDOM is what musl seeds the stack protector's canary from.
-	   The time stamp counter is no randomness worth the name, but the
+	   The time stamp counter (on ARM64 the generic timer's, which the
+	   kernel lets EL0 read) is no randomness worth the name, but the
 	   canary is the only thing that reads it. */
+#if defined(__aarch64__)
+	unsigned long long x;
+	__asm__ __volatile__ ("mrs %0, cntvct_el0" : "=r"(x));
+	x |= 1;
+#else
 	unsigned lo, hi;
 	__asm__ __volatile__ ("rdtsc" : "=a"(lo), "=d"(hi));
 	unsigned long long x = ((unsigned long long)hi << 32) | lo;
+#endif
 	for (int i = 0; i < 16; i++) {
 		x ^= x << 13; x ^= x >> 7; x ^= x << 17;
 		random[i] = (unsigned char)x;
@@ -77,7 +95,20 @@ void _start_c(long argc, char **argv)
 
 /* The kernel enters with the stack aligned the way it is right after a
    call (kernel64/proc64.c), the arguments already in the registers the
-   C function wants them in */
+   C function wants them in. The ARM64 kernel enters with the stack on
+   a sixteen-byte line, which is what a call leaves there. */
+#if defined(__aarch64__)
+__asm__(
+".text \n"
+".global _start \n"
+".type _start,%function \n"
+"_start: \n"
+"	mov x29, #0 \n"
+"	mov x30, #0 \n"
+"	bl _start_c \n"
+"	brk #0 \n"
+);
+#else
 __asm__(
 ".text \n"
 ".global _start \n"
@@ -87,3 +118,4 @@ __asm__(
 "	call _start_c \n"
 "	ud2 \n"
 );
+#endif

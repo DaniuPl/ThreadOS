@@ -24,7 +24,8 @@ BUILD   := build
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
 
 .PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
-        kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone webkit
+        kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone webkit \
+        libcarm64
 
 all: kernel64
 
@@ -2035,14 +2036,89 @@ $(BUILD)/arm64/user/%.elf: userarm64/%.c userarm64/usys.h userarm64/user.ld \
 	clang $(CFLAGSARMUSER) -c $< -o $(@:.elf=.o)
 	ld.lld -nostdlib -static -T userarm64/user.ld $(@:.elf=.o) -o $@
 
+# musl for the ARM64 kernel: the same release (third_party/musl, whose
+# aarch64 directories are kept for this) and the same overlay as the
+# PC's, built for aarch64. The overlay's layer (src/threados) is one C
+# file for both machines - musl names its Linux calls (SYS_openat) and
+# the layer answers by name - and only the handful of files musl writes
+# in assembly have an aarch64 copy beside the x86_64 one. The compiler
+# is the cross gcc (g++-aarch64-linux-gnu), for the libgcc it brings:
+# on AArch64 a long double is 128 bits, done in software, and musl's
+# printf and strtod work in it. No fused multiply-add: what musl's
+# arithmetic gives has to be what it gives on the PC, where the tests
+# compare it with glibc.
+ARMCC         := aarch64-linux-gnu-gcc
+MUSLARM_TREE  := $(BUILD)/arm64/musl/tree
+MUSLARM_ROOT  := $(BUILD)/arm64/musl/root
+MUSLARM_STAMP := $(MUSLARM_TREE)/installed.stamp
+LIBCARM       := $(MUSLARM_ROOT)/lib/libc.a
+MUSLARM_CFLAGS := -O2 -march=armv8-a -mno-outline-atomics \
+                  -fno-stack-protector -fno-pic \
+                  -fno-asynchronous-unwind-tables -ffp-contract=off
+
+$(MUSLARM_TREE)/config.mak: Makefile third_party/musl/VERSION \
+                            third_party/musl/tools/mkalltypes.sed \
+                            $(wildcard third_party/musl/tools/*.sh) \
+                            third_party/musl/arch/aarch64/bits/alltypes.h.in \
+                            third_party/musl/include/alltypes.h.in \
+                            $(filter %.h,$(MUSL_OVERLAY))
+	rm -rf $(MUSLARM_TREE) && mkdir -p $(MUSLARM_TREE)
+	cp -r third_party/musl/. $(MUSLARM_TREE)/
+	sed -i 's/\r$$//' $(MUSLARM_TREE)/configure \
+	    $(MUSLARM_TREE)/VERSION \
+	    $(MUSLARM_TREE)/tools/mkalltypes.sed \
+	    $(MUSLARM_TREE)/tools/*.sh \
+	    $(MUSLARM_TREE)/arch/aarch64/bits/alltypes.h.in \
+	    $(MUSLARM_TREE)/include/alltypes.h.in
+	cd $(MUSLARM_TREE) && CC=$(ARMCC) AR=aarch64-linux-gnu-ar \
+	    RANLIB=aarch64-linux-gnu-ranlib CFLAGS="$(MUSLARM_CFLAGS)" \
+	    ./configure --target=aarch64 --prefix=/ --disable-shared >/dev/null
+
+$(MUSLARM_STAMP): $(MUSLARM_TREE)/config.mak $(MUSL_OVERLAY)
+	cp -r libc/overlay/. $(MUSLARM_TREE)/
+	$(MAKE) -s -C $(MUSLARM_TREE) lib/libc.a lib/crt1.o lib/crti.o lib/crtn.o
+	$(MAKE) -s -C $(MUSLARM_TREE) install-libs install-headers \
+	    DESTDIR=$(abspath $(MUSLARM_ROOT)) INSTALL="install -C"
+	touch $@
+
+$(LIBCARM): $(MUSLARM_STAMP)
+	@test -f $@
+
+libcarm64: $(LIBCARM)
+
+# Programs against it: libc/libcarm64.ld is libc/libc64.ld at the ARM64
+# kernel's program address. The test programs of libc/tests are the
+# PC's, unchanged - the point of them is that they print the same.
+MUSLARM_PROGS := libctest pthreadtest
+MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
+LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
+                  -fno-stack-protector -fno-pic \
+                  -fno-asynchronous-unwind-tables -ffp-contract=off \
+                  -nostdinc -isystem $(MUSLARM_ROOT)/include
+LIBCARM_LINK = $(ARMCC) -static -no-pie -nostdlib -s -Wl,--build-id=none \
+               -Wl,-z,max-page-size=0x1000 -T libc/libcarm64.ld \
+               $(MUSLARM_ROOT)/lib/crt1.o $(MUSLARM_ROOT)/lib/crti.o $(1) \
+               $(LIBCARM) $$($(ARMCC) -print-libgcc-file-name) \
+               $(MUSLARM_ROOT)/lib/crtn.o
+
+$(BUILD)/arm64/libc:
+	mkdir -p $@
+
+$(BUILD)/arm64/libc/%.elf: libc/tests/%.c $(MUSLARM_STAMP) libc/libcarm64.ld \
+                           | $(BUILD)/arm64/libc
+	$(ARMCC) $(LIBCARM_CFLAGS) -isystem $$($(ARMCC) -print-file-name=include) \
+	    -c $< -o $(@:.elf=.o)
+	$(call LIBCARM_LINK,$(@:.elf=.o)) -o $@
+
 # The phone's initrd: the fonts and the programs. QEMU hands it over
 # through fw_cfg (-fw_cfg name=opt/threados/initrd,file=...).
 INITRDARM := $(BUILD)/initrd-arm64.img
 $(INITRDARM): scripts/mkinitrd.py fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf \
-              $(USERARM_ELFS)
+              $(USERARM_ELFS) $(MUSLARM_ELFS)
 	python3 scripts/mkinitrd.py $@ sans.ttf=fonts/sans.ttf \
 	    bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
-	    $(foreach p,$(USERARM),$(p)=$(BUILD)/arm64/user/$(p).elf)
+	    $(foreach p,$(USERARM),$(p)=$(BUILD)/arm64/user/$(p).elf) \
+	    $(foreach p,$(MUSLARM_PROGS),$(p)=$(BUILD)/arm64/libc/$(p).elf)
 
 kernelarm64: $(KERNELARM) $(INITRDARM)
 	@echo "Done: $(KERNELARM) (AArch64, QEMU virt), $(INITRDARM)"

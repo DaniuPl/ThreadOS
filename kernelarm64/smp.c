@@ -101,3 +101,8 @@ int smp_start(const struct fdt_info *fi)
            fi->psci == 2 ? "smc" : "hvc");
     return online;
 }
+
+int smp_online(void)
+{
+    return __atomic_load_n(&online, __ATOMIC_ACQUIRE);
+}

@@ -77,12 +77,22 @@ static const char *fault_name(uint32_t fsc)
     return fsc == 0x21 ? "alignment fault" : "fault";
 }
 
+/* A translation fault, of the level that says no page is there */
+#define TRANSLATION_FAULT(iss) (((iss) & 0x3C) == 0x04)
+
 /* Whatever a program did that is not a system call ends it: the kernel
-   is not the one at fault, and goes on */
+   is not the one at fault, and goes on - except the first touch of a
+   page the program may have (its heap, its mappings, its stack), which
+   is made then (proc.c), and the instruction tried again */
 static void from_program(struct trap_frame *f, uint32_t ec, uint32_t iss)
 {
     if (ec == EC_SVC64) {
         proc_syscall(f);
+        return;
+    }
+    if (ec == EC_DATA_ABORT_LOWER && TRANSLATION_FAULT(iss) &&
+        proc_page_in(read_sysreg(far_el1), (iss & (1u << 6)) != 0)) {
+        proc_return();
         return;
     }
     if (ec == EC_DATA_ABORT_LOWER)
@@ -105,6 +115,11 @@ void arm64_exception(struct trap_frame *f, uint64_t slot)
            switch from here may not come back for a while, and the GIC
            holds back everything of lower priority until then */
         sched_preempt();
+        /* A program whose other thread ended it ends this thread too,
+           even one that never calls the kernel: the timer brings it
+           here */
+        if (FROM_EL0(slot))
+            proc_return();
         return;
     }
     if (kind != KIND_SYNC) {

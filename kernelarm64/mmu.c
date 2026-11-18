@@ -188,7 +188,27 @@ int uspace_map(uint64_t *t, uint64_t va, uint64_t pa, int flags)
                  ((flags & UMAP_WRITE) ? AP_EL0_RW : AP_EL0_RO) |
                  ((flags & UMAP_EXEC) && !(flags & UMAP_WRITE) ? 0 : UXN);
     *pte = d;
+    /* Out to where the table walk reads it - on every core: a page made
+       for one thread of a program is there for all of them. A missing
+       entry is never kept in a TLB, so nothing has to be forgotten. */
+    __asm__ volatile("dsb ishst; isb" ::: "memory");
     return 0;
+}
+
+uint64_t uspace_unmap(uint64_t *t, uint64_t va)
+{
+    uint64_t *pte = pte_of(t, va, 0);
+    if (!pte || !(*pte & 1))
+        return 0;
+    uint64_t pa = *pte & ADDR_MASK;
+    *pte = 0;
+    /* Every core forgets it - the program's other threads may be on any
+       of them - before the frame can be anybody else's. No address-space
+       numbers yet, so by address alone, for every program: another one's
+       entry for the same address is only fetched again. */
+    __asm__ volatile("dsb ishst; tlbi vaae1is, %0; dsb ish; isb"
+                     :: "r"((va >> 12) & 0xFFFFFFFFFFFUL) : "memory");
+    return pa;
 }
 
 uint64_t uspace_lookup(uint64_t *t, uint64_t va, int *flags)

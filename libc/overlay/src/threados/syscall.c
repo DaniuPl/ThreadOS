@@ -141,19 +141,21 @@ long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
 #define K_NULL   6                   /* /dev/null */
 
 #define T_FDS    256                 /* FD_MAX in kernel64/task64.c */
+/* Where the main thread's stack ends, and how far down it may grow:
+   USER64_STACK_TOP and _MAX (kernel64/elf64.h), USER_TOP and
+   USER_STACK on ARM64 (kernelarm64/proc.h) */
+#if defined(__aarch64__)
+#define T_STACK_TOP  (512UL << 30)
+#define T_STACK_ROOM (8UL << 20)
+#else
+#define T_STACK_TOP  0x60000000UL
+#define T_STACK_ROOM (4UL << 20)
+#endif
 #define T_HZ     100                 /* the timer, kernel64/kmain64.c */
 #define T_CHUNK  4096                /* the most one read or write moves */
 #define AT_EMPTY  0x1000             /* AT_EMPTY_PATH, a GNU name */
 
-static long tos(long n, long a1, long a2, long a3, long a4)
-{
-	long ret;
-	register long r10 __asm__("r10") = a4;
-	__asm__ __volatile__ ("syscall" : "=a"(ret)
-		: "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
-		: "rcx", "r11", "memory");
-	return ret;
-}
+#include "tos.h"
 
 /* What this file keeps for the whole program, threads included, is
    changed under this lock. It is held for a few instructions, never
@@ -1349,8 +1351,13 @@ static long do_uname(struct utsname *u)
 	copy_name(u->sysname, "ThreadOS");
 	copy_name(u->nodename, "threados");
 	copy_name(u->release, "1.0");
+#if defined(__aarch64__)
+	copy_name(u->version, "ThreadOS ARM64");
+	copy_name(u->machine, "aarch64");
+#else
 	copy_name(u->version, "ThreadOS 64");
 	copy_name(u->machine, "x86_64");
+#endif
 	return 0;
 }
 
@@ -1376,13 +1383,16 @@ static long do_prlimit(int res, const struct rlimit *fresh, struct rlimit *old)
 		touch(old, sizeof(*old));
 		old->rlim_cur = old->rlim_max = RLIM_INFINITY;
 		if (res == RLIMIT_STACK)
-			old->rlim_cur = old->rlim_max = 4 << 20;  /* USER64_STACK_MAX */
+			old->rlim_cur = old->rlim_max = T_STACK_ROOM;
 		if (res == RLIMIT_NOFILE)
 			old->rlim_cur = old->rlim_max = T_FDS;
 	}
 	return 0;
 }
 
+/* x86-64 only: on ARM64 the thread pointer is TPIDR_EL0, which a
+   program sets itself (src/thread/aarch64/__set_thread_area.s) */
+#ifdef SYS_arch_prctl
 static long do_arch_prctl(int code, unsigned long addr)
 {
 	if (code == 0x1002) {            /* ARCH_SET_FS */
@@ -1401,6 +1411,28 @@ static long do_arch_prctl(int code, unsigned long addr)
 		return 0;
 	}
 	return -EINVAL;
+}
+#endif
+
+static long do_pipe2(int *fds, long flags)
+{
+	touch(fds, 2 * sizeof(int));
+	if (tos(T_PIPE, (long)fds, 0, 0, 0) < 0)
+		return -EMFILE;
+	int nb = flags & O_NONBLOCK ? O_NONBLOCK : 0;
+	set_flags(fds[0], O_RDONLY | nb);
+	set_flags(fds[1], O_WRONLY | nb);
+	if (flags & O_CLOEXEC) {
+		set_cloexec(fds[0], 1);
+		set_cloexec(fds[1], 1);
+	}
+	return 0;
+}
+
+static long do_fork(void)
+{
+	long r = tos(T_FORK, 0, 0, 0, 0);
+	return r < 0 ? -EAGAIN : r;
 }
 
 /* --- The switch ---------------------------------------------------- */
@@ -1428,7 +1460,6 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		do_lseek(a, at, SEEK_SET);
 		return r;
 	}
-	case SYS_open:       return do_open((const char *)a, b);
 	case SYS_openat:
 		if (a != AT_FDCWD && ((const char *)b)[0] != '/')
 			return -ENOSYS;
@@ -1436,8 +1467,6 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_close:      return do_close(a);
 	case SYS_lseek:      return do_lseek(a, b, c);
 	case SYS_fstat:      return do_fstat(a, (struct kstat *)b);
-	case SYS_stat:
-	case SYS_lstat:      return do_stat((const char *)a, (struct kstat *)b);
 	case SYS_newfstatat:
 		if ((d & AT_EMPTY) && !*(const char *)b)
 			return do_fstat(a, (struct kstat *)c);
@@ -1445,15 +1474,12 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 			return -ENOSYS;
 		return do_stat((const char *)b, (struct kstat *)c);
 	case SYS_statx:      return -ENOSYS;   /* musl falls back to fstatat */
-	case SYS_access:
-		return do_stat((const char *)a, &(struct kstat){0});
 	case SYS_faccessat:
 	case SYS_faccessat2:
 		return do_stat((const char *)b, &(struct kstat){0});
 	case SYS_ioctl:      return do_ioctl(a, b, (void *)c);
 	case SYS_fcntl:      return do_fcntl(a, b, c);
 	case SYS_dup:        return do_dupfd(a, 3);
-	case SYS_dup2:       return do_dup2(a, b);
 	case SYS_dup3: {
 		if (a == b)
 			return -EINVAL;
@@ -1462,21 +1488,7 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 			set_cloexec(r, 1);
 		return r;
 	}
-	case SYS_pipe:
-	case SYS_pipe2: {
-		int *fds = (int *)a;
-		touch(fds, 2 * sizeof(int));
-		if (tos(T_PIPE, a, 0, 0, 0) < 0)
-			return -EMFILE;
-		int nb = n == SYS_pipe2 && (b & O_NONBLOCK) ? O_NONBLOCK : 0;
-		set_flags(fds[0], O_RDONLY | nb);
-		set_flags(fds[1], O_WRONLY | nb);
-		if (n == SYS_pipe2 && (b & O_CLOEXEC)) {
-			set_cloexec(fds[0], 1);
-			set_cloexec(fds[1], 1);
-		}
-		return 0;
-	}
+	case SYS_pipe2:      return do_pipe2((int *)a, b);
 	case SYS_memfd_create: {
 		/* MFD_CLOEXEC and MFD_ALLOW_SEALING: nothing to do (no seals
 		   are ever added, so allowing them changes nothing) */
@@ -1511,18 +1523,12 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	}
 	case SYS_getcwd:     return do_getcwd((char *)a, b);
 	case SYS_chdir:      return name_call(T_CHDIR, (const char *)a);
-	case SYS_mkdir:      return name_call(T_MKDIR, (const char *)a);
 	case SYS_mkdirat:    return name_call(T_MKDIR, (const char *)b);
-	case SYS_rmdir:
-	case SYS_unlink:     return name_call(T_UNLINK, (const char *)a);
 	case SYS_unlinkat:   return name_call(T_UNLINK, (const char *)b);
-	case SYS_rename:     return do_rename((const char *)a, (const char *)b);
 	case SYS_renameat:
 	case SYS_renameat2:  return do_rename((const char *)b, (const char *)d);
-	case SYS_readlink:
 	case SYS_readlinkat: return -EINVAL;     /* there are no links */
 	case SYS_umask:      return 022;
-	case SYS_chmod:
 	case SYS_fchmod:
 	case SYS_fchmodat:
 	case SYS_utimensat:  return 0;
@@ -1536,12 +1542,12 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 		   for the bottom of the main thread's stack a page at a time
 		   (WebKit asks where its stack ends): "in use" (ENOMEM)
 		   while the page is inside the room the stack may grow into
-		   (USER64_STACK_TOP and _MAX, kernel64/elf64.h), "nothing
-		   there" (EFAULT) below it */
+		   (T_STACK_TOP and T_STACK_ROOM), "nothing there"
+		   (EFAULT) below it */
 		if (d & 1)
 			return -ENOMEM;
-		return a >= 0x60000000UL - 4 * 1024 * 1024 && a < 0x60000000UL
-		       ? -ENOMEM : -EFAULT;
+		return (unsigned long)a >= T_STACK_TOP - T_STACK_ROOM &&
+		       (unsigned long)a < T_STACK_TOP ? -ENOMEM : -EFAULT;
 	case SYS_madvise:
 		/* MADV_DONTNEED and MADV_FREE: the pages may go, and read as
 		   zeros afterwards; the rest are hints */
@@ -1568,13 +1574,6 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 			((long *)a)[1] = ts.tv_nsec / 1000;
 		}
 		return 0;
-	}
-	case SYS_time: {
-		struct timespec ts;
-		wall_clock(&ts);
-		if (a)
-			*(long *)a = ts.tv_sec;
-		return ts.tv_sec;
 	}
 	case SYS_nanosleep:
 		return do_sleep(CLOCK_MONOTONIC, 0, (const struct timespec *)a);
@@ -1618,15 +1617,16 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_getegid:
 		return tos(T_LEVEL, 0, 0, 0, 0) == 0 ? 0 : 1000;
 	case SYS_getpgid:
-	case SYS_getsid:
-	case SYS_getpgrp:    return tos(T_GETTGID, 0, 0, 0, 0);
+	case SYS_getsid:     return tos(T_GETTGID, 0, 0, 0, 0);
 	case SYS_setpgid:
 	case SYS_setsid:     return 0;
-	case SYS_fork:
-	case SYS_vfork: {
-		long r = tos(T_FORK, 0, 0, 0, 0);
-		return r < 0 ? -EAGAIN : r;
-	}
+	case SYS_clone:
+		/* Only as musl's fork asks where Linux has no fork call
+		   (AArch64): a child with its own copy of everything, and
+		   SIGCHLD for its end. Threads come by __clone. */
+		if (a != SIGCHLD || b)
+			return -ENOSYS;
+		return do_fork();
 	case SYS_execve:     return do_execve((const char *)a, (char *const *)b);
 	case SYS_wait4:      return do_wait4(a, (int *)b, c);
 	case SYS_kill:
@@ -1650,7 +1650,6 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_sigaltstack:
 		return 0;
 
-	case SYS_arch_prctl: return do_arch_prctl(a, b);
 	case SYS_uname:      return do_uname((struct utsname *)a);
 	case SYS_sysinfo:    return do_sysinfo((struct sysinfo *)a);
 	case SYS_prlimit64:  return do_prlimit(b, (const struct rlimit *)c,
@@ -1684,6 +1683,35 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_futex:
 		return do_futex((int *)a, b, c, (const struct timespec *)d,
 		                (int *)e, f);
+
+#ifdef SYS_open
+	/* Linux's older calls, which the PC has and AArch64 does not:
+	   there musl uses the *at ones above for all of them */
+	case SYS_open:       return do_open((const char *)a, b);
+	case SYS_stat:
+	case SYS_lstat:      return do_stat((const char *)a, (struct kstat *)b);
+	case SYS_access:
+		return do_stat((const char *)a, &(struct kstat){0});
+	case SYS_dup2:       return do_dup2(a, b);
+	case SYS_pipe:       return do_pipe2((int *)a, 0);
+	case SYS_mkdir:      return name_call(T_MKDIR, (const char *)a);
+	case SYS_rmdir:
+	case SYS_unlink:     return name_call(T_UNLINK, (const char *)a);
+	case SYS_rename:     return do_rename((const char *)a, (const char *)b);
+	case SYS_readlink:   return -EINVAL;
+	case SYS_chmod:      return 0;
+	case SYS_time: {
+		struct timespec ts;
+		wall_clock(&ts);
+		if (a)
+			*(long *)a = ts.tv_sec;
+		return ts.tv_sec;
+	}
+	case SYS_getpgrp:    return tos(T_GETTGID, 0, 0, 0, 0);
+	case SYS_fork:
+	case SYS_vfork:      return do_fork();
+	case SYS_arch_prctl: return do_arch_prctl(a, b);
+#endif
 	}
 	return -ENOSYS;
 }

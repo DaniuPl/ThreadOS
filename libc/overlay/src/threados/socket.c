@@ -98,15 +98,7 @@ NET_HIDDEN int __tos_unix_want(int fd, short events);
 #define K_PIPE_W 3
 #define K_USOCK  4
 
-static long tos(long n, long a1, long a2, long a3, long a4)
-{
-	long ret;
-	register long r10 __asm__("r10") = a4;
-	__asm__ __volatile__ ("syscall" : "=a"(ret)
-		: "a"(n), "D"(a1), "S"(a2), "d"(a3), "r"(r10)
-		: "rcx", "r11", "memory");
-	return ret;
-}
+#include "tos.h"
 
 static void touch(const void *p, size_t len)
 {
@@ -1226,7 +1218,12 @@ NET_HIDDEN int __tos_net_owns(long n, long fd)
 	case SYS_sendto: case SYS_recvfrom: case SYS_sendmsg: case SYS_recvmsg:
 	case SYS_shutdown: case SYS_getsockname: case SYS_getpeername:
 	case SYS_setsockopt: case SYS_getsockopt:
-	case SYS_poll: case SYS_ppoll: case SYS_select: case SYS_pselect6:
+	case SYS_ppoll: case SYS_pselect6:
+#ifdef SYS_poll
+	/* The PC's only: on AArch64 there are no such calls, and musl's
+	   poll() and select() are ppoll and pselect6 */
+	case SYS_poll: case SYS_select:
+#endif
 	case SYS_pidfd_open:
 		return 1;
 	case SYS_waitid:
@@ -1330,10 +1327,9 @@ NET_HIDDEN long __tos_net(long n, long a, long b, long c, long d, long e, long f
 		if (a != AF_UNIX)
 			return a == AF_INET ? -EOPNOTSUPP : -EAFNOSUPPORT;
 		return __tos_unix_pair(b, c, (int *)d);
+#ifdef SYS_poll
 	case SYS_poll:
 		return do_poll((struct pollfd *)a, b, c);
-	case SYS_ppoll:
-		return do_poll((struct pollfd *)a, b, ts_ms((const void *)c));
 	case SYS_select: {
 		long ms = -1;
 		if (e) {
@@ -1343,6 +1339,9 @@ NET_HIDDEN long __tos_net(long n, long a, long b, long c, long d, long e, long f
 		}
 		return do_select(a, (void *)b, (void *)c, (void *)d, ms);
 	}
+#endif
+	case SYS_ppoll:
+		return do_poll((struct pollfd *)a, b, ts_ms((const void *)c));
 	case SYS_pselect6:
 		return do_select(a, (void *)b, (void *)c, (void *)d,
 		                 ts_ms((const void *)e));

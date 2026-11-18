@@ -47,6 +47,9 @@ void timer_start(unsigned hz)
     c->timer_next = counter_now() + interval;
     write_sysreg(cntv_cval_el0, c->timer_next);
     write_sysreg(cntv_ctl_el0, 1);       /* enabled, not masked */
+    /* A program may read the counter (EL0VCTEN) - the C library's
+       start-up seeds from it - but not set the timers */
+    write_sysreg(cntkctl_el1, (read_sysreg(cntkctl_el1) & ~0x3FFUL) | 2);
     gic_enable(VTIMER_INTID, tick);
 }
 

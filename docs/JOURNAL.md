@@ -9478,3 +9478,65 @@ works and is checked by `make test`.
       -1; the same on four cores; and every page comes back.
       t_arm64mobile now counts the initrd's files from the image, which
       carries the programs too.
+- [x] **musl runs on the ARM64 kernel, threads and all**
+      (kernelarm64/proc.c, proc.h, thread.c, thread.h, mmu.c,
+      exceptions.c, timer.c, smp.c, arm64.h, libc/overlay/,
+      libc/libcarm64.ld, libc/tests/libctest.c, pthreadtest.c,
+      third_party/musl/ (its aarch64 directories), Makefile,
+      .github/workflows/build.yml, scripts/tests/t_arm64libc.py)
+      The second stage of Weft on ARM64: the C library every program of
+      Weft is built on. musl 1.2.5 is built for aarch64 from the same
+      release - its aarch64 directories now kept in third_party/ - with
+      the same overlay as the PC's. The overlay's C layer
+      (src/threados/) stays one file for both machines: musl names its
+      Linux calls (SYS_openat), the layer answers by name, and the calls
+      only the PC has (open, stat, pipe, fork...) are one block of their
+      own; AArch64's musl forks by clone(SIGCHLD), which the layer now
+      takes for fork. The ThreadOS call itself (syscall on the PC, svc
+      on ARM64) is one helper, src/threados/tos.h. The few files musl
+      writes in assembly have aarch64 copies (clone, syscall_cp,
+      __unmapself, vfork, restore); crt1.c starts an AArch64 program
+      too, and reads the absolute TLS sizes through literals, adrp
+      reaching only 4 GiB from a program at 256 GiB. The cross gcc
+      builds it, for the libgcc it brings - a long double is 128 bits
+      in software there, and printf and strtod work in it - with no
+      fused multiply-add, so that it computes what the PC's does.
+      The kernel answers what musl asks, by the PC's numbers and with
+      the PC's answers. Memory: SYS64_MMAP and SYS64_SBRK only move a
+      mark; the heap, the mappings and all of the stack but its top
+      page (8 MiB of it now) are made on the first touch, from a
+      translation fault or when a system call is handed the address,
+      under a lock of the program's so that two threads touching one
+      page on two cores make it once; SYS64_DISCARD gives pages back,
+      every core's TLB told. Threads: SYS64_CLONE starts one in the
+      same table with its stack and TPIDR_EL0, held until its number is
+      written where the library looks; SYS64_EXIT zeroes and wakes the
+      word pthread_join waits on; futexes wait, wake and requeue on a
+      list keyed by table and address, the flag set before the wake
+      looked at under the scheduler's lock (thread_wait), so no wake is
+      lost; SYS64_EXIT_GROUP ends every thread - a waiting one is woken
+      and ends on its way out, one computing at EL0 ends at the next
+      tick (proc_return), and a fault now ends all of a program's
+      threads. And the rest: the PL031 clock as the PC's rtc_time, the
+      core count, the initrd's files to read, EL0 reads of the counter.
+      libctest and pthreadtest take arguments now, so that the part a
+      kernel with no disk to write and no second process can run is
+      one run: "libctest memory FILE" leaves out what writes or forks
+      and reads FILE instead; pthreadtest runs the tests it is given,
+      and "endall" is the exit test without its fork.
+      t_arm64libc runs both on the ARM64 kernel and against glibc on
+      this machine with the same arguments: libctest's 39 lines -
+      printf, strtod, the math library, the heap with musl's mapped 3
+      MiB blocks, setjmp, a file of the initrd read by stdio and by its
+      descriptor, nanosleep, gmtime, atexit - are glibc's and it ends
+      with 3, the date is the clock's and uname says aarch64;
+      pthreadtest's mutex, atomics, joins, TLS, condition variables,
+      semaphores, once, barrier, rwlock, detached and 300 sequential
+      threads and a timed wait print what glibc's build prints on one
+      core and on four (where they ran on all four), and end with every
+      thread gone - one main never joined, asleep, included; exit(5) in
+      a thread ends the program with 5, a thread computing and one
+      asleep with it, on one core and on four; and every page comes
+      back each time. Run with the IRQ path's end of a program taken
+      out, "endall" never ends, and the test fails. libc, pthread,
+      socket, ipc and sqlite pass on the PC with the shared layer.
