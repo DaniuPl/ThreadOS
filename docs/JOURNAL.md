@@ -9797,3 +9797,91 @@ works and is checked by `make test`.
       sysinfo's memory, which t_arm64libc holds to the 512 MiB QEMU was
       given. All ARM64 groups pass; on the PC libc, pthread, signals,
       glib, ipc, socket, k64proc and random do.
+- [x] **Signals on the PC kernel as on Linux**
+      (kernel64/task64.c, task64.h, signal64.c, signal64.h, syscall64.c,
+      syscall64.h, isr64.c, proc64.c, futex64.c, futex64.h, pipe64.c,
+      pipe64.h, fpu64.c, fpu64.h, boot64/syscall64.S, user64/usys64.h,
+      user64/spin64.c, libc/overlay/src/threados/syscall.c, Makefile,
+      scripts/tests/t_signals.py)
+      The ARM64 kernel learned Linux's signals for WebKit's garbage
+      collector; the PC still had one signal waiting per task and no
+      mask, and called the C library's handler with the signal number
+      alone. WTF's Thread::suspend - pthread_kill, a handler that keeps
+      &ucontext->uc_mcontext, sem_post, sigsuspend, a second signal to
+      resume - got a pointer to nothing in its third argument and a
+      sigsuspend that returned at once, so stopping a thread to scan its
+      stack was not something the collector could count on here.
+      The PC kernel now has the ARM64 kernel's model. A task has a bit
+      per signal sent to it and a mask of those it holds back, and who
+      sent each how (SI_USER, SI_TKILL, or SI_KERNEL for Ctrl+C);
+      SYS64_KILL's third argument says a thread's number (tkill) or a
+      program's (kill, taken by the named thread if it lets the signal
+      through, else by the first of its program's that does). Group
+      exit and the kernel's own kills set SIGKILL's bit, which no mask
+      holds. Delivery builds Linux's x86-64 struct rt_sigframe below
+      the 128-byte red zone: the restorer as the return address, a
+      ucontext_t whose sigcontext has every register in glibc's gregs
+      order, the mask to give back and the siginfo_t after it, and the
+      FXSAVE area aligned to 64 below the frame, its fpstate pointer in
+      the sigcontext; RDI, RSI and RDX are the handler's three
+      arguments, DF and TF are cleared, and the handler starts with a
+      clean SSE unit and its signal held back. SYS64_SIGRETURN finds
+      the frame eight bytes under the stack pointer (the handler's ret
+      took the restorer's address), restores every register through the
+      iretq exit, keeps only the arithmetic flags, sets the user
+      segments, refuses a RIP or RSP outside the program's half (iretq
+      to one faults in ring 0), and FXRSTORs the SSE state with MXCSR
+      masked by the processor's mxcsr_mask. SYS64_SIGMASK and
+      SYS64_SIGSUSPEND are the ARM64 kernel's calls; the frame of the
+      handler that ends sigsuspend gets the mask from before it.
+      A wait cut short by a signal - a pipe's or socket pair's read and
+      write, SYS64_IPC, a futex wait and a sleep (with the time left),
+      a wait for children - is made again after the handler: the frame
+      goes back onto the syscall instruction with its number in RAX, as
+      Linux does with SA_RESTART. A program's sleep is now cut short by
+      a signal (task64_sleep_signal) and a program's sleep or block
+      does not start once a signal it lets through is pending - decided
+      under the task list lock a sender takes, so sigsuspend cannot
+      miss one sent while it changed its mask. The keyboard's read
+      still ends with -1, as ush64's Ctrl+C needs. Signals now also
+      reach a thread computing on a secondary core: the local APIC
+      timer's interrupt returned before delivery, and that is the only
+      interrupt such a core takes; a page made on first touch delivers
+      too. Fork keeps the handler and the forking thread's mask, exec
+      forgets the handler, a new thread has its creator's mask; with no
+      handler SIGCHLD, SIGCONT, SIGURG and SIGWINCH are let go and
+      SIGSTOP ends a program as SIGKILL does. sys_kill in usys64.h
+      passes 0 as the third argument rather than whatever RDX held.
+      The C library passes siginfo_t and ucontext_t to SA_SIGINFO
+      handlers on both machines and always keeps the mask in the
+      kernel.
+      sigtest is built for the PC and in its initrd. t_signals builds it
+      against this machine's glibc too and runs it on the PC on one core
+      and on four: every one of its fifteen lines is the same - raise
+      and kill with si_code and si_pid, the masks in and after a
+      handler, a thread interrupted while computing whose ucontext_t
+      holds the value it keeps in RBX and its stack pointer and whose
+      XMM0 is back after a handler zeroed it, WebKit's suspend and
+      resume fifty times, read on a pipe, a condition variable and
+      waitpid going on after a handler, sigsuspend, kill to a program
+      whose thread holds the signal back, nested handlers,
+      SA_RESETHAND and a forked child's handler.
+      The old kernel fails all six of those checks: sigtest ends at its
+      first line. The ARM64 groups that build the overlay (arm64libc,
+      arm64user, arm64threads) pass, and on the PC signals, libc,
+      pthread, ipc, glib, socket, k64proc, gtermlive, jsc, k64shell,
+      hostile, consoles64, sem, lockless, proccores, faults, smp, tls64
+      and process do.
+      t_lockless found something on the way: two processes calling the
+      kernel on two cores came out at 0.6-0.9 of one where the old
+      kernel gave 0.53. The code of the path had not changed; the
+      per-core blocks of the syscall entry had moved by eight bytes (a
+      new variable in fpu64.c's .data), and the scratch cell the stub
+      writes on every call put core 0 into the cache line of cores 1-3,
+      which already shared one. Each core's block now has a line of its
+      own, and two processes take 0.5 of one's time again. t_pthread's
+      copy-on-write check, which waits up to three seconds for a
+      spinning thread to be moved off the boot core, misses about one
+      run in four on the old kernel and the new alike (80 runs each):
+      a thread that never sleeps moves only if another core's tick
+      comes while the boot core has briefly put it aside.

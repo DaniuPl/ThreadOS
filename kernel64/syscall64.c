@@ -94,14 +94,19 @@ static int auth_recent(void)
 extern void syscall64_entry(void);
 
 /* The core's data block, seen by the entry stub through the GS
-   register. The layout has to match boot64/syscall64.S. */
+   register. The layout has to match boot64/syscall64.S. A cache line
+   each: the stub writes the scratch cell on every system call, and
+   cores sharing a line made two processes calling the kernel on two
+   cores wait for each other's line - by how much depended on where an
+   unrelated variable of .data put the array's start. */
 struct core_syscall {
     uint64_t kernel_rsp;     /* offset 0 */
     uint64_t scratch;        /* offset 8 */
+    uint8_t pad[48];
 };
 extern struct core_syscall syscall64_blocks[];
-_Static_assert(sizeof(struct core_syscall) == 16,
-               "the stub counts sixteen bytes per core");
+_Static_assert(sizeof(struct core_syscall) == 64,
+               "the stub's array has a cache line per core");
 
 static int user_ran;
 static uint32_t user_cs;
