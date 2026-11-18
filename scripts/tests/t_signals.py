@@ -13,6 +13,17 @@ busy - the way one ends a program that holds its own console. SIGTERM
 ends a program with no handler and is caught by one that has a handler;
 SIGKILL is caught by nobody.
 
+Then signals as a C library's program sees them: sigtest (libc/tests),
+built against musl and against this machine's glibc, has to print the
+same lines here, on one core and on four, as it does under Linux -
+handlers with siginfo_t and a ucontext_t holding the registers the
+thread was interrupted with, its stack pointer and its SSE state,
+masks, sigsuspend, kill to a program whose thread holds the signal
+back, a wait in read, on a condition variable and in waitpid that goes
+on after the handler, and WebKit's way of stopping a thread to scan its
+stack. On four cores the thread interrupted while computing runs on a
+core of its own, which only its timer interrupts.
+
 Everything is read from the serial port, which gets every console's
 text: GRUB gives the kernel a framebuffer, so the VGA character memory
 says nothing.
@@ -23,6 +34,8 @@ groups in parallel.
 
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -51,7 +64,83 @@ def no_leak(said, name):
         (m.group(1) + " -> " + m.group(2)) if m else "no line"
 
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))
+WEBKIT_WAY = ("WebKit's suspend and resume, 50 times: the thread stood still "
+              "while suspended 1, the stack pointer in its frame in its stack "
+              "1, it ran on after each 1")
+
+
+def host_sigtest(work):
+    """sigtest built and run against this machine's own C library: the
+    lines Linux's signals make it print"""
+    exe = os.path.join(work, "sigtest")
+    src = os.path.join(ROOT, "libc", "tests", "sigtest.c")
+    if subprocess.run(["gcc", "-O2", "-w", "-pthread", "-o", exe,
+                       src]).returncode:
+        return None
+    p = subprocess.run([exe], cwd=work, capture_output=True, text=True,
+                       timeout=120)
+    return p.stdout.splitlines() + p.stderr.splitlines(), p.returncode
+
+
+def sigtest_here(q, start):
+    """sigtest from the kernel's shell: what it printed, its exit code"""
+    q.type_line("run sigtest")
+    out = until(q, start, "[sigtest] done, exit code", timeout=180)
+    m = re.search(r"\[sigtest\] done, exit code (-?\d+)", out)
+    lines = [l.strip("\r") for l in out.replace("\r", "").split("\n")]
+    # (the echo of the command, and what the kernel says about the
+    # program and the children it forks - sigtest's own lines never
+    # start with a bracket)
+    body = [l for l in lines[1:] if l and not l.startswith(
+            ("[", "thread64>"))]
+    return body, int(m.group(1)) if m else None
+
+
+def compare_sigtest(want, got, code, cores):
+    first = next((i for i, (w, g) in enumerate(zip(want, got)) if w != g),
+                 None)
+    where = (f"first difference at line {first + 1}: glibc {want[first]!r}, "
+             f"ThreadOS {got[first]!r}" if first is not None else
+             f"glibc {len(want)} lines, ThreadOS {len(got)}")
+    check(f"{cores} core(s): sigtest prints exactly what glibc's build "
+          f"prints ({where})", got == want)
+    check(f"{cores} core(s): WebKit's way of stopping a thread works: it "
+          f"stood still, its frame had its stack", WEBKIT_WAY in got)
+    check(f"{cores} core(s): and sigtest ends with 0 (got {code})", code == 0)
+
+
+def sigtest_on_four(want):
+    """The same on a machine with four cores"""
+    disk = tempfile.mktemp(suffix=".img")
+    with open(disk, "wb") as f:
+        f.write(b"\0" * DISK_SIZE)
+    slog = tempfile.mktemp(suffix=".log")
+    q = Qemu(KERNEL, INITRD, disk, append=TEXT_MODE, serial=slog, cpus=4)
+    try:
+        q.wait_serial("thread64>", timeout=90)
+        time.sleep(0.5)
+        got, code = sigtest_here(q, len(q.serial()))
+        compare_sigtest(want, got, code, 4)
+    finally:
+        q.close()
+        for f in (disk, slog):
+            if os.path.exists(f):
+                os.unlink(f)
+
+
 def main():
+    work = tempfile.mkdtemp()
+    host = host_sigtest(work)
+    check("sigtest builds and runs against glibc on this machine",
+          host is not None and host[1] == 0)
+    want = host[0] if host else []
+    check("(the comparison is not empty: glibc's build reports every check "
+          "it makes, each one passed)",
+          len(want) == 15 and WEBKIT_WAY in want and
+          want[-1] == "sigtest: done")
+
     disk = tempfile.mktemp(suffix=".img")
     with open(disk, "wb") as f:
         f.write(b"\0" * DISK_SIZE)
@@ -171,11 +260,19 @@ def main():
         out = until(q, start, "[ush64] done, exit code")
         check("the interrupted shell leaves cleanly (code 0)",
               "[ush64] done, exit code 0" in out)
+
+        # --- A C library's signals, on this one core ------------------
+        if want:
+            got, code = sigtest_here(q, len(q.serial()))
+            compare_sigtest(want, got, code, 1)
     finally:
         q.close()
         for f in (disk, slog):
             if os.path.exists(f):
                 os.unlink(f)
+    if want:
+        sigtest_on_four(want)
+    shutil.rmtree(work, ignore_errors=True)
 
     return summary()
 

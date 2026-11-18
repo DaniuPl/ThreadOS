@@ -12,7 +12,8 @@
  * goes the reader gets the end of the data, and when the last reader
  * goes a writer gets an error instead of waiting for ever. A wait can
  * be interrupted by a signal - a signal is delivered only on the return
- * to ring 3, so a wait inside the kernel has to give way to it itself.
+ * to ring 3, so a wait inside the kernel has to give way to it itself,
+ * and is made again after the handler (syscall64.c).
  */
 
 #include "pipe64.h"
@@ -38,7 +39,7 @@ int pipe64_read(int end, char *buf, uint32_t len)
     if (!len)
         return -1;
     long n = usock64_read(end, buf, len);
-    return n < 0 ? -1 : (int)n;
+    return n == -IPC_EINTR ? PIPE64_EINTR : n < 0 ? -1 : (int)n;
 }
 
 int pipe64_write(int end, const char *buf, uint32_t len)
@@ -46,5 +47,5 @@ int pipe64_write(int end, const char *buf, uint32_t len)
     if (!len)
         return -1;
     long n = usock64_write(end, buf, len);
-    return n < 0 ? -1 : (int)n;
+    return n == -IPC_EINTR ? PIPE64_EINTR : n < 0 ? -1 : (int)n;
 }

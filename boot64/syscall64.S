@@ -178,14 +178,14 @@ enter_ring3_64:
 .size enter_ring3_64, . - enter_ring3_64
 
 .section .data
-.align 8
+.align 64
 /* Per-core block: the kernel stack (offset 0) and the scratch cell for
-   the program's stack (offset 8). The layout must match struct
-   core_syscall in kernel64/syscall64.c - a _Static_assert there
-   watches over it. */
+   the program's stack (offset 8), a cache line each. The layout must
+   match struct core_syscall in kernel64/syscall64.c - a _Static_assert
+   there watches over it. */
 .global syscall64_blocks
 syscall64_blocks:
-    .fill 8 * 16, 1, 0
+    .fill 8 * 64, 1, 0
 
 /* Code meant to run in ring 3.
  *

@@ -190,13 +190,14 @@
    installed system and taken (kernel/install.c install_package) - an
    administrator's only: -2 for anybody else */
 #define SYS64_PACKAGE_INSTALL 109
-/* A thread's signal mask (bit n-1 for signal n), on the ARM64 kernel:
+/* A thread's signal mask (bit n-1 for signal n), on both kernels:
    SYS64_SIGMASK (how: 0 block, 1 unblock, 2 set, 3 only ask; the bits;
    where to put the old mask, or 0) -> 0, -1. SYS64_SIGSUSPEND (mask):
    that mask until a signal it lets through is handled, then the old one
-   again; -1 when it was. The PC has neither yet: its C library then
-   keeps no mask, as before. SYS64_KILL takes a third argument there: 1
-   says the number is a thread's (tkill), 0 a program's (kill). */
+   again; -1 when it was. SYS64_KILL takes a third argument: 1 says the
+   number is a thread's (tkill), 0 a program's (kill). A handler gets
+   Linux's frame: the signal, its siginfo_t and ucontext_t, and returns
+   through SYS64_SIGRETURN. */
 #define SYS64_SIGMASK    110
 #define SYS64_SIGSUSPEND 111
 /* Pixels at the panel's own resolution, into a window whose logical

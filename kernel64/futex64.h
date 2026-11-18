@@ -16,13 +16,14 @@
  */
 
 #define FUTEX64_EAGAIN    11     /* the word no longer held the value */
-#define FUTEX64_EINTR      4     /* a signal came first */
+#define FUTEX64_EINTR      4     /* a signal came first: '*ms' is then
+                                    what is left of the time */
 #define FUTEX64_EFAULT    14
 #define FUTEX64_EINVAL    22
 #define FUTEX64_ETIMEDOUT 110
 
-/* Sleeps while *addr == val, at most 'ms' milliseconds (0 = no limit) */
-int futex64_wait(uint64_t addr, uint32_t val, uint32_t ms);
+/* Sleeps while *addr == val, at most '*ms' milliseconds (0 = no limit) */
+int futex64_wait(uint64_t addr, uint32_t val, uint32_t *ms);
 /* Wakes up to n waiters on the word; how many woke */
 int futex64_wake(uint64_t space, uint64_t addr, int n);
 /* Wakes up to n, and moves up to m of the rest to wait on addr2 */

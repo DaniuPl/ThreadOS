@@ -20,6 +20,11 @@
    of it instead of starting from random bits */
 static uint8_t clean[FPU_AREA] __attribute__((aligned(16)));
 static int enabled;
+/* The MXCSR bits this processor has (the area's word at 28; 0 there
+   means the older processors' 0xFFBF). fxrstor of any other bit set is
+   a general protection fault - in the kernel, which loads a state a
+   program handed it back from a signal frame. */
+static uint32_t mxcsr_mask = 0xFFBF;
 
 /* The control registers are the CORE's, not the system's.
  *
@@ -53,6 +58,9 @@ int fpu64_init(void)
     /* The pattern for a new task is taken once, from the boot core -
        a freshly initialized unit looks the same on every one of them */
     __asm__ volatile("fxsave (%0)" : : "r"(clean) : "memory");
+    uint32_t m = *(const uint32_t *)(clean + 28);
+    if (m)
+        mxcsr_mask = m;
 
     enabled = 1;
     return 1;
@@ -97,4 +105,14 @@ void fpu64_load(const void *area)
 {
     if (enabled && area)
         __asm__ volatile("fxrstor (%0)" : : "r"(area) : "memory");
+}
+
+void fpu64_reset(void)
+{
+    fpu64_load(clean);
+}
+
+uint32_t fpu64_mxcsr_mask(void)
+{
+    return mxcsr_mask;
 }

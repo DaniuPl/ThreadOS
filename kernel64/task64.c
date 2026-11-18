@@ -15,6 +15,7 @@
 #include <stdint.h>
 #include "task64.h"
 #include "../kernel/include/signal.h"
+#include "signal64.h"
 #include "paging64.h"
 #include "syscall64.h"
 #include "elf64.h"
@@ -83,7 +84,16 @@ struct task64 {
     uint64_t kstack_top;         /* the kernel stack for entries from ring 3 */
     int id;
     int parent;                  /* who created it - for waiting on its end */
-    int sig_pending;             /* a signal awaiting delivery */
+    /* Signals, as bits - signal n is bit n-1: those sent to this thread
+       and not yet delivered, those it holds back (sigprocmask), and
+       while it waits in sigsuspend, the mask it had before. Who sent
+       each and how is what its handler's siginfo_t says. */
+    volatile uint64_t sig_pending;
+    uint64_t sig_blocked;
+    uint64_t sig_saved;
+    int sig_suspended;
+    int32_t sig_from[64];        /* the sender's program (0: the kernel) */
+    int16_t sig_code[64];        /* SI_USER, SI_TKILL, SI_KERNEL */
     uint64_t sig_handler;        /* the program's handler (0 = kill) */
     uint64_t sig_restorer;       /* the return from the handler into the kernel */
     struct fd_entry *fds;        /* = table->fds */
@@ -148,6 +158,12 @@ struct task64 {
 };
 
 extern void context_switch64(uint64_t *old_rsp, uint64_t new_rsp);
+
+/* A signal waits for this task that it does not hold back */
+static int deliverable(const struct task64 *t)
+{
+    return (t->sig_pending & ~t->sig_blocked) != 0;
+}
 
 /* --- What belongs to a core ------------------------------------------
  *
@@ -288,7 +304,6 @@ void scheduler64_init(void)
     main_task->space = 0;
     main_task->kstack_top = 0;
     main_task->parent = -1;
-    main_task->sig_pending = 0;
     main_task->sig_handler = 0;
     main_task->sig_restorer = 0;
     table_new(main_task);
@@ -341,7 +356,6 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->space = 0;
     t->kstack_top = 0;
     t->parent = current ? current->id : -1;
-    t->sig_pending = 0;
     t->sig_handler = 0;
     t->sig_restorer = 0;
     if (table_new(t) < 0) {
@@ -429,6 +443,10 @@ struct task64 *task64_create_thread(const char *name, void (*entry)(void *),
     t->tgid = current->tgid;
     t->sig_handler = current->sig_handler;
     t->sig_restorer = current->sig_restorer;
+    /* As on Linux, the creator's mask: a C library holds every signal
+       back while it makes a thread, and the thread lets them through
+       itself once it is ready for a handler */
+    t->sig_blocked = current->sig_blocked;
     kfree(t->table);             /* the empty one task64_create made */
     t->table = current->table;
     t->fds = current->table->fds;
@@ -522,8 +540,9 @@ static int has_children(int id)
 }
 
 /* Waits for any child of its own to end. Returns its number and writes
-   the exit code; -1 means "there is nothing to wait for" or "the wait
-   was interrupted by a signal".
+   the exit code; -1 means "there is nothing to wait for", -2 "the wait
+   was interrupted by a signal" (a program's is made again after the
+   handler, syscall64.c).
  *
  * The second of those matters here as much as the first. A signal is
  * delivered ONLY on the return to ring 3, and this loop never returns
@@ -539,7 +558,7 @@ int task64_wait(int *code)
            has its trace in the table already. Asked after, a child
            ending on another core in between was neither. */
         int alive = has_children(current->id);
-        int signalled = current->sig_pending != 0;
+        int signalled = deliverable(current);
         for (int i = 0; i < EXIT_SLOTS; i++) {
             if (finished[i].used && finished[i].parent == current->id) {
                 int id = finished[i].id;
@@ -552,8 +571,10 @@ int task64_wait(int *code)
         }
         irq_restore(flags);
 
-        if (!alive || signalled)
+        if (!alive)
             return -1;
+        if (signalled)
+            return -2;
         task64_sleep(10);
     }
 }
@@ -806,9 +827,15 @@ static void switch_to(int new_state)
        stack is still in use. */
     /* Decided under the lock that task64_wake takes too, so a wake that
        came after the waiter queued itself and before it got here turns
-       the sleep into a mere yield */
+       the sleep into a mere yield. The same for a signal a program lets
+       through: a sender that looked at its mask before sigsuspend
+       changed it did not wake it, but set the bit before this lock was
+       free. (A kernel thread never takes a signal - one left pending
+       must not turn its every sleep into a yield.) */
     if (new_state == SWITCH_BLOCK)
-        new_state = cores[nr].running->woken ? -1 : TASK_SLEEPING;
+        new_state = cores[nr].running->woken ||
+                    (cores[nr].running->space &&
+                     deliverable(cores[nr].running)) ? -1 : TASK_SLEEPING;
     if (new_state >= 0)
         cores[nr].running->state = (enum task_state)new_state;
     reap_zombies();
@@ -893,7 +920,6 @@ void task_core_enter(int nr)
     t->space = 0;
     t->kstack_top = 0;
     t->parent = -1;
-    t->sig_pending = 0;
     t->sig_handler = 0;
     t->sig_restorer = 0;
     if (table_new(t) < 0) {
@@ -971,15 +997,21 @@ void task64_sleep(uint32_t ms)
 /* What every way out of a thread does before anything else: tell the
    C library it is gone (clear_tid), while the address space is still
    there and interrupts are still on - the word may be on a page that
-   went out to disk, and fetching it back needs the disk's interrupt. */
+   went out to disk, and fetching it back needs the disk's interrupt.
+   SYS64_CLONE took only a word the program could write, but the check
+   is the one for writing here as well: a page shared with a child
+   forked since is split rather than written through, and a word the
+   kernel may not write is left alone, as Linux leaves it, rather than
+   faulted on in ring 0. */
 static void say_gone(void)
 {
     uint64_t at = current->clear_tid;
     if (!at || !current->space)
         return;
     current->clear_tid = 0;
-    if (!paging64_user_range(at, 4) &&
-        !(paging64_swap_in(current->space, at) && paging64_user_range(at, 4)))
+    if (!paging64_user_writable(at, 4) &&
+        !(paging64_swap_in(current->space, at) &&
+          paging64_user_writable(at, 4)))
         return;
     *(volatile uint32_t *)(uintptr_t)at = 0;
     futex64_wake(current->space, at, 1);
@@ -998,7 +1030,8 @@ static void end_group(int code)
             t->state != TASK_ZOMBIE) {
             t->group_exit = 1;
             t->group_code = code;
-            t->sig_pending = SIGKILL;
+            __atomic_fetch_or(&t->sig_pending, SIG_BIT(SIGKILL),
+                              __ATOMIC_SEQ_CST);
             t->woken = 1;
             if (t->state == TASK_SLEEPING)
                 t->state = TASK_READY;
@@ -1210,48 +1243,154 @@ void task64_kill_fault(const char *why, uint64_t addr)
 
 /* --- Signals -------------------------------------------------------
  *
- * A task carries one signal awaiting delivery. One is enough: a signal
- * is a notification, not a message - a second Ctrl+C before the first
- * is delivered carries no new information.
+ * As on Linux: a thread has a bit for each signal sent to it and not
+ * yet delivered, and a mask of those it holds back. A signal is sent
+ * to a thread by its number (tkill) or to a program (kill), and one
+ * for a program goes to the thread named if that one lets it through,
+ * else to the first of the program's threads that does - WebKit's
+ * collector and every C library count on a thread that holds a signal
+ * back not being the one interrupted by it.
  *
  * Delivery cannot happen here: the task is somewhere else at this
  * moment, it may be asleep, it may be in the middle of a system call.
  * It will receive it only on the return to ring 3 - and that is the
- * only moment at which its frame can be replaced. */
-int task64_signal(int id, int sig)
+ * only moment at which its frame can be replaced (signal64.c). A wait
+ * in the kernel ends for a signal the task lets through, and a
+ * program's is made again after the handler (syscall64.c). */
+
+/* The thread a signal for a whole program goes to. Under the lock. */
+static struct task64 *taker(struct task64 *named, int sig)
 {
+    if (!(named->sig_blocked & SIG_BIT(sig)) || !named->space)
+        return named;
+    for (struct task64 *t = named->next; t != named; t = t->next)
+        if (t->tgid == named->tgid && t->space &&
+            t->state != TASK_ZOMBIE && !(t->sig_blocked & SIG_BIT(sig)))
+            return t;
+    return named;                /* it waits there until let through */
+}
+
+/* 'from' < 0: the current program is the sender */
+static int send(int id, int sig, int to_thread, int from, int code)
+{
+    if (sig < 0 || sig > 64)
+        return 0;
     /* Under the task list lock, like task64_wake: a task going to sleep
        in task64_block decides there whether something woke it */
     irqflags_t flags = spin_lock_irq(&lock);
-    struct task64 *t = current;
-    int found = 0;
+    struct task64 *t = current, *named = NULL, *group = NULL;
     do {
-        if (t->id == id && t->state != TASK_ZOMBIE) {
-            t->sig_pending = sig;
-            t->woken = 1;
-            if (t->state == TASK_SLEEPING)
-                t->state = TASK_READY;      /* a signal interrupts the wait */
-            found = 1;
-            break;
+        if (t->state != TASK_ZOMBIE) {
+            if (t->id == id) {
+                named = t;
+                break;
+            }
+            /* a program whose first thread has ended lives on in the
+               others, and kill still reaches it by its number */
+            if (!to_thread && !group && t->tgid == id && t->space)
+                group = t;
         }
         t = t->next;
     } while (t != current);
+    if (!named)
+        named = group;
+    if (named && sig) {
+        struct task64 *to = to_thread ? named : taker(named, sig);
+        to->sig_from[sig - 1] = from < 0 ? current->tgid : from;
+        to->sig_code[sig - 1] = (int16_t)code;
+        __atomic_fetch_or(&to->sig_pending, SIG_BIT(sig), __ATOMIC_SEQ_CST);
+        /* A wait it is in ends now - unless it holds the signal back,
+           when it would only end too soon: a sleep cut short for a
+           signal that is then not taken */
+        if (!(to->sig_blocked & SIG_BIT(sig))) {
+            to->woken = 1;
+            if (to->state == TASK_SLEEPING)
+                to->state = TASK_READY;
+        }
+    }
     spin_unlock_irq(&lock, flags);
-    return found;
+    return named != NULL;
+}
+
+int task64_signal(int id, int sig)
+{
+    return send(id, sig, 0, 0, SI_KERNEL);
+}
+
+int task64_kill(int id, int sig, int to_thread)
+{
+    return send(id, sig, to_thread, -1, to_thread ? SI_TKILL : SI_USER);
 }
 
 int task64_signal_pending(void)
 {
-    return current ? current->sig_pending : 0;
+    return current ? deliverable(current) : 0;
 }
 
-int task64_take_signal(void)
+int task64_take_signal(uint64_t *mask, int *from, int *code)
 {
     irqflags_t flags = irq_save();
-    int sig = current->sig_pending;
-    current->sig_pending = 0;
+    /* The mask the frame is to give back: in sigsuspend, the one from
+       before it - the handler's return ends the wait's own mask */
+    uint64_t before = current->sig_suspended ? current->sig_saved
+                                             : current->sig_blocked;
+    uint64_t ready = current->sig_pending & ~current->sig_blocked;
+    current->sig_blocked = before;
+    current->sig_suspended = 0;
+    if (!ready) {
+        irq_restore(flags);
+        return 0;
+    }
+    int sig = __builtin_ctzll(ready) + 1;
+    __atomic_fetch_and(&current->sig_pending, ~SIG_BIT(sig), __ATOMIC_SEQ_CST);
+    *mask = before;
+    *from = current->sig_from[sig - 1];
+    *code = current->sig_code[sig - 1];
     irq_restore(flags);
     return sig;
+}
+
+uint64_t task64_sigmask(void)
+{
+    return current->sig_blocked;
+}
+
+/* Only the thread itself changes its mask; a sender reads it under the
+   task list lock and at worst wakes a thread that then goes on waiting */
+void task64_set_sigmask(uint64_t mask)
+{
+    current->sig_blocked = mask & ~SIG_ALWAYS;
+}
+
+void task64_sigsuspend(uint64_t mask)
+{
+    irqflags_t flags = irq_save();
+    current->sig_saved = current->sig_blocked;
+    current->sig_blocked = mask & ~SIG_ALWAYS;
+    current->sig_suspended = 1;
+    irq_restore(flags);
+    for (;;) {
+        task64_block_prepare();
+        if (deliverable(current))
+            return;
+        task64_block(0);
+    }
+}
+
+uint32_t task64_sleep_signal(uint32_t ms)
+{
+    uint32_t until = pit_ticks() + (ms + 9) / 10;   /* one tick = 10 ms */
+    for (;;) {
+        task64_block_prepare();
+        if (deliverable(current))
+            break;
+        int32_t left = (int32_t)(until - pit_ticks());
+        if (left <= 0)
+            return 0;
+        task64_block((uint32_t)left);
+    }
+    int32_t left = (int32_t)(until - pit_ticks());
+    return left > 0 ? (uint32_t)left * 10 : 1;
 }
 
 void task64_set_sighandler(uint64_t handler, uint64_t restorer)
@@ -1259,6 +1398,17 @@ void task64_set_sighandler(uint64_t handler, uint64_t restorer)
     irqflags_t flags = irq_save();
     current->sig_handler = handler;
     current->sig_restorer = restorer;
+    irq_restore(flags);
+}
+
+/* fork: the handler and the mask go with the memory they belong to; what
+   was sent to the parent stays the parent's */
+void task64_inherit_signals(struct task64 *child)
+{
+    irqflags_t flags = irq_save();
+    child->sig_handler = current->sig_handler;
+    child->sig_restorer = current->sig_restorer;
+    child->sig_blocked = current->sig_blocked;
     irq_restore(flags);
 }
 
@@ -1408,7 +1558,9 @@ void task64_kill_uid(int uid)
     do {
         if (t->uid == uid && t->space && t->state != TASK_ZOMBIE) {
             t->level = USER_PLAIN;
-            t->sig_pending = SIGKILL;
+            __atomic_fetch_or(&t->sig_pending, SIG_BIT(SIGKILL),
+                              __ATOMIC_SEQ_CST);
+            t->woken = 1;
             if (t->state == TASK_SLEEPING)
                 t->state = TASK_READY;
         }

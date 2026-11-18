@@ -63,9 +63,11 @@ static void at_the_edge(int sig)
 /* A page of the stack far below anything the program has used gets
  * touched - from ring 3, so it is the ordinary stack growth - and the
  * stack pointer goes 64 bytes above its bottom. The page under it is
- * not there. A signal frame is nearly two hundred bytes, so the kernel
- * has to put most of it into that missing page: grow the stack, as a
- * push from the program would, rather than call the stack full.
+ * not there. A signal frame goes below the 128 bytes under the stack
+ * pointer that the interrupted code may still be using, and is itself
+ * near a kilobyte with the SSE state, so the kernel has to put it into
+ * that missing page: grow the stack, as a push from the program would,
+ * rather than call the stack full.
  *
  * The waiting is a loop of bare system calls, with no call and no push
  * of its own - C code would touch the missing page itself, and the

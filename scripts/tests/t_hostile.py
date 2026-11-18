@@ -13,6 +13,12 @@ honestly, which has to go through:
   a signal handler, or its return address, in kernel memory or in the
   program's data rather than its code
 
+  a thread made with SYS64_CLONE whose number (parent_tid), or the zero
+  the kernel writes when it ends (clear_tid), was to go into the
+  program's read-only data - the kernel's write faulted in ring 0 and
+  the machine stopped; the honest twin's thread gets its number and its
+  end written into the program's own data
+
   an installation step - writing the disk - from a program nobody
   authorized, on a system started from a stick (only the installer the
   kernel itself starts on the whole screen may, there)
@@ -60,6 +66,8 @@ VERDICTS = [
     "a signal handler in kernel memory",
     "a signal handler in the program's data",
     "a handler's return into kernel memory",
+    "a thread's number written into read-only memory",
+    "a thread's end written into read-only memory",
     "an installation step from an unauthorized program",
     "a segment both writable and executable",
     "a segment whose offset wraps round 2^64",
@@ -72,6 +80,9 @@ def attempts(q):
     check("the honest program off the disk runs (exit code 42) - the "
           "loader takes a well-made one",
           "the honest program ended with 42" in out)
+    check("the honest thread's number and its end were written into the "
+          "program's own data",
+          "the honest thread's number went where it was asked: 1" in out)
     for what in VERDICTS:
         line = next((l for l in out.splitlines()
                      if l.startswith("[hostile64] " + what + ":")), "")

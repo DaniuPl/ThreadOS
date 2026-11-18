@@ -41,8 +41,9 @@ static int word_ready(uint64_t space, uint64_t addr)
     return paging64_swap_in(space, addr) && paging64_user_range(addr, 4);
 }
 
-int futex64_wait(uint64_t addr, uint32_t val, uint32_t ms)
+int futex64_wait(uint64_t addr, uint32_t val, uint32_t *ms_left)
 {
+    uint32_t ms = *ms_left;
     uint64_t space = paging64_current_space();
     if (addr & 3)
         return -FUTEX64_EINVAL;
@@ -87,9 +88,16 @@ int futex64_wait(uint64_t addr, uint32_t val, uint32_t ms)
 
     if (woken)
         return 0;
-    if (task64_signal_pending())
+    uint32_t spent = pit_ticks() - start;
+    if (task64_signal_pending()) {
+        /* Made again after the handler, for the time that is left (at
+           least a millisecond - 0 would be no limit) */
+        if (ms)
+            *ms_left = spent < (ms + 9) / 10 ? ((ms + 9) / 10 - spent) * 10
+                                              : 1;
         return -FUTEX64_EINTR;
-    if (ms && pit_ticks() - start >= (ms + 9) / 10)
+    }
+    if (ms && spent >= (ms + 9) / 10)
         return -FUTEX64_ETIMEDOUT;
     return 0;                                 /* a spurious wake is allowed */
 }

@@ -101,11 +101,34 @@ void task64_kill_current(const char *why);
 /* The same for a processor exception, with the address it was about
    (the page fault's, or where the program was) */
 void task64_kill_fault(const char *why, uint64_t addr);
-/* Signals. Sending merely queues a signal and wakes a sleeping task -
-   it is delivered only by the return to ring 3. */
+/* Signals. Sending merely marks a signal at a thread and wakes it, if
+   it lets that signal through - it is delivered only by the return to
+   ring 3. task64_signal is the kernel's own (Ctrl+C, the desktop, the
+   shell), to a program; task64_kill a program's (SYS64_KILL): to the
+   thread with number 'id' (tkill), or to the program, one of whose
+   threads that lets the signal through takes it (kill). Signal 0 only
+   asks. 1 = there is such a task. */
 int task64_signal(int id, int sig);
-int task64_signal_pending(void);      /* is anything waiting for delivery */
-int task64_take_signal(void);         /* 0 = nothing is waiting */
+int task64_kill(int id, int sig, int to_thread);
+/* Is a signal waiting that the current task lets through */
+int task64_signal_pending(void);
+/* Takes the lowest such signal off the current task's pending set and
+   says who sent it how (siginfo_t's si_pid and si_code), and the mask
+   its handler's frame is to give back - the one from before
+   sigsuspend while in it, which is also the task's mask again now.
+   0 = none. */
+int task64_take_signal(uint64_t *mask, int *from, int *code);
+/* The current task's mask; SIGKILL and SIGSTOP are never held back */
+uint64_t task64_sigmask(void);
+void task64_set_sigmask(uint64_t mask);
+/* Waits with 'mask' in place until a signal it lets through is to be
+   delivered; the delivery gives the old mask back */
+void task64_sigsuspend(uint64_t mask);
+/* A program's sleep: cut short by a signal it lets through. The
+   milliseconds left then (at least 1); 0 = it slept them all. */
+uint32_t task64_sleep_signal(uint32_t ms);
+/* fork: the child gets the handler and the mask */
+void task64_inherit_signals(struct task64 *child);
 void task64_set_sighandler(uint64_t handler, uint64_t restorer);
 uint64_t task64_sighandler(void);
 uint64_t task64_sigrestorer(void);

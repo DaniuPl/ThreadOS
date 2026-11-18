@@ -12,6 +12,11 @@
  *   a signal handler, and its return, pointed at kernel memory and at
  *   the program's own data instead of its code
  *
+ *   a thread made with SYS64_CLONE whose number (parent_tid), or the
+ *   zero written when it ends (clear_tid), is to go into the program's
+ *   read-only data: the kernel writing there faulted in ring 0, and the
+ *   machine stopped
+ *
  *   an installation step from a program nobody authorized, on a
  *   system started from a stick
  *
@@ -36,6 +41,7 @@
 
 #define SYS64_INSTALL_STEP_NR 61
 #define SYS64_BG_PREVIEW_NR   71
+#define SYS64_CLONE_NR        83
 #define OPEN_CREATE 1
 
 static int holes, proven, unproven;
@@ -125,6 +131,60 @@ static void signal_handler(void)
                       0x100000);
     verdict("a handler's return into kernel memory", got, got < 0, ok == 0);
     syscall64_3(SYS64_SIGNAL, SIGINT, 0, 0);
+}
+
+/* --- a thread's numbers ------------------------------------------------ */
+
+/* The kernel writes into the program's memory where SYS64_CLONE says:
+   the new thread's number at once, zero when the thread ends. The
+   honest twin hands it two words of its own data, and the thread it
+   makes ends at once - so both words are written before the honest
+   call is judged. */
+struct clone64 {
+    uint64_t entry, stack, tls, parent_tid, clear_tid;
+};
+
+static const uint32_t read_only_word = 7;        /* in .rodata */
+static volatile uint32_t number_word, end_word;
+static uint8_t thread_stacks[3][4096] __attribute__((aligned(16)));
+
+static void thread_ends(void)
+{
+    sys_exit(0);                     /* this thread, not the program */
+}
+
+static int64_t clone_thread(int n, const volatile void *parent_tid,
+                            const volatile void *clear_tid)
+{
+    /* eight below a sixteen-byte boundary, as after a call */
+    struct clone64 c = {
+        (uint64_t)(uintptr_t)thread_ends,
+        (uint64_t)(uintptr_t)(thread_stacks[n] + sizeof(thread_stacks[n])) - 8,
+        0, (uint64_t)(uintptr_t)parent_tid, (uint64_t)(uintptr_t)clear_tid,
+    };
+    return syscall64(SYS64_CLONE_NR, (int64_t)(uintptr_t)&c, 0);
+}
+
+static void thread_numbers(void)
+{
+    number_word = 0;
+    end_word = 1;
+    int64_t tid = clone_thread(0, &number_word, &end_word);
+    for (int i = 0; i < 500 && end_word; i++)
+        sys_sleep(10);
+    int ok = tid > 0 && number_word == (uint32_t)tid && end_word == 0;
+    print("[hostile64] the honest thread's number went where it was asked: ");
+    print_signed(ok);
+    print("\n");
+
+    int64_t got = clone_thread(1, &read_only_word, 0);
+    verdict("a thread's number written into read-only memory", got,
+            got < 0, ok);
+    got = clone_thread(2, 0, &read_only_word);
+    for (int i = 0; got >= 0 && i < 20; i++)
+        sys_sleep(10);               /* (had it been taken: its end) */
+    verdict("a thread's end written into read-only memory", got,
+            got < 0, ok);
 }
 
 /* --- installing --------------------------------------------------------- */
@@ -318,6 +378,7 @@ void _start(int argc, char **argv)
 
     preview();
     signal_handler();
+    thread_numbers();
     install_step();
     programs();
     print("[hostile64] done: ");

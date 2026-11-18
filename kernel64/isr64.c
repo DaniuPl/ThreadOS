@@ -256,12 +256,16 @@ void isr64_handler(struct regs *r)
        present and the frame under it changes. */
     if (r->int_no == 14) {
         uint64_t cr2 = read_cr2();
-        if ((r->err_code & 0x02) && paging64_handle_cow(cr2)) {
+        if (((r->err_code & 0x02) && paging64_handle_cow(cr2)) ||
+            (z_ring3 && !(r->err_code & 0x01) && demand_page_nolock(cr2))) {
             count_nolock();
-            return;
-        }
-        if (z_ring3 && !(r->err_code & 0x01) && demand_page_nolock(cr2)) {
-            count_nolock();
+            /* A thread that only touches new memory still takes a
+               signal sent to it on its way back */
+            if (z_ring3 && task64_signal_pending()) {
+                biglock_enter();
+                signal64_deliver(r);
+                biglock_leave();
+            }
             return;
         }
         faults_locked++;
@@ -270,8 +274,15 @@ void isr64_handler(struct regs *r)
     if (z_ring3)
         biglock_enter();
     isr64_dispatch(r);
-    if (z_ring3)
+    /* A program interrupted mid-step is the most frequent moment at
+       which a signal can be delivered - and the only one that works
+       even when the program asks the kernel for nothing: a thread
+       computing on a secondary core comes here on its timer's tick and
+       on nothing else */
+    if (z_ring3) {
+        signal64_deliver(r);
         biglock_leave();
+    }
 }
 
 
@@ -392,10 +403,4 @@ static void isr64_dispatch(struct regs *r)
         if (irq_handlers[irq])
             irq_handlers[irq](r);
     }
-
-    /* A program interrupted mid-step is the most frequent moment at
-       which a signal can be delivered - and the only one that works
-       even when the program asks the kernel for nothing */
-    if ((r->cs & 3) == 3)
-        signal64_deliver(r);
 }

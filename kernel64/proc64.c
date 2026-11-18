@@ -183,6 +183,9 @@ int64_t proc64_fork(struct regs *r)
         task64_inherit_fds(child);   /* open files go with the memory */
         task64_inherit_brk(child);
         task64_mmap_inherit(child);  /* and mapped files too */
+        /* and the signal handler, which is code in that memory, with
+           the forking thread's mask - as on Linux */
+        task64_inherit_signals(child);
     }
     if (!child) {
         kfree(fa);
@@ -270,6 +273,9 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     prog_close(&prog);
     task64_set_brk_base(brk_base);   /* new image, new heap */
     task64_rename(kname);
+    /* The handler was the old image's code; what is held back stays
+       held back, as on Linux */
+    task64_set_sighandler(0, 0);
 
     uint64_t argv_va = 0;
     rsp = build_args(rsp, &args, &argv_va);
@@ -489,10 +495,17 @@ int proc64_clone(const struct clone64 *c)
        pointer are not checked further: ring 3 is the only one using
        them, and a bad one ends in the thread's own page fault. */
     if (!paging64_user_range(c->entry, 1) || !c->stack ||
-        (c->tls && !paging64_user_range(c->tls, 8)) ||
-        (c->clear_tid && (c->clear_tid & 3)))
+        (c->tls && !paging64_user_range(c->tls, 8)))
         return -1;
-    if (c->parent_tid && !paging64_user_range(c->parent_tid, 4))
+    /* The kernel writes into both words itself - the number below, zero
+       when the thread ends (task64.c, say_gone) - so both have to be
+       the program's to write: a word it may only read would fault in
+       ring 0 and stop the machine. (One shared with a forked child is
+       split by the check, not written through.) clear_tid is a futex
+       word too, and those are aligned. */
+    if ((c->clear_tid && ((c->clear_tid & 3) ||
+                          !paging64_user_writable(c->clear_tid, 4))) ||
+        (c->parent_tid && !paging64_user_writable(c->parent_tid, 4)))
         return -1;
 
     struct task64 *t = start_thread(c->entry, 0, c->stack);

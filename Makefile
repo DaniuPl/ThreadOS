@@ -510,6 +510,15 @@ $(BUILD)/user64/ipctest.elf: libc/tests/ipctest.c $(LIBC64) libc/libc64.ld \
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/ipctest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/ipctest.o) -o $@
 
+# Signals: handlers with siginfo_t and the interrupted registers, masks,
+# sigsuspend, waits that go on, WebKit's way of stopping a thread - the
+# same program the ARM64 kernel runs, and the tests compare both with
+# its glibc build
+$(BUILD)/user64/sigtest.elf: libc/tests/sigtest.c $(LIBC64) libc/libc64.ld \
+                             | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/sigtest.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/sigtest.o) -o $@
+
 $(BUILD)/user64/nettest.elf: libc/tests/nettest.c $(LIBC64) libc/libc64.ld \
                              | $(BUILD)/user64 $(BUILD)/libc64
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/nettest.o
@@ -747,7 +756,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
                $(BUILD)/user64/bigmap.elf \
-               $(BUILD)/user64/ipctest.elf \
+               $(BUILD)/user64/ipctest.elf $(BUILD)/user64/sigtest.elf \
                $(BUILD)/user64/bigram.elf \
                $(BUILD)/user64/glibtest.elf \
                $(BUILD)/user64/imgtest.elf $(BUILD)/user64/xmltest.elf \
@@ -1818,6 +1827,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
 	    bigmap=$(BUILD)/user64/bigmap.elf \
 	    ipctest=$(BUILD)/user64/ipctest.elf \
+	    sigtest=$(BUILD)/user64/sigtest.elf \
 	    bigram=$(BUILD)/user64/bigram.elf \
 	    glibtest=$(BUILD)/user64/glibtest.elf \
 	    imgtest=$(BUILD)/user64/imgtest.elf \

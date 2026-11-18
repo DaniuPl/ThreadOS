@@ -33,4 +33,10 @@ void fpu64_load(const void *area);
 
 int fpu64_enabled(void);
 
+/* The unit as a new task finds it, on this core: what a signal handler
+   starts with, as on Linux */
+void fpu64_reset(void);
+/* The MXCSR bits fxrstor takes (see fpu64.c) */
+uint32_t fpu64_mxcsr_mask(void);
+
 #endif
