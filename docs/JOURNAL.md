@@ -9228,3 +9228,36 @@ works and is checked by `make test`.
       tabs or the desktop's dock tile; the installer does not write
       apps64.img onto the installed system; fontconfig has no cache
       (it scans three small fonts each time).
+
+- [x] **The installer writes the applications' image too**
+      (kernel/install.c, kernel/include/install.h, user/ginstal.c,
+      user64/compat64.h, kernel/locale.c, scripts/tests/t_appsinst.py,
+      t_wholedisk.py, t_ginstal.py)
+      A stick that brought apps64.img installed a system without it:
+      the installer wrote the loader, the kernel and the initrd, and
+      the installed machine started with no web engine and no word of
+      why. Now the image is a step of its own after the initrd,
+      /EFI/ThreadOS/apps64.img, where the loader already looks for it.
+      It is optional, and so is writing it. Beside another system it
+      goes in only where the EFI partition keeps room for an update's
+      copy of the system afterwards (twice the system, plus the image);
+      taking the whole disk makes the EFI partition 1 GiB instead of
+      256 MiB when the image comes along (ESP_MIB_APPS), if the disk has
+      that and 64 MiB for our partition behind it. Where it does not
+      fit the plan says so before anything is written - the text
+      installer in a line, the window in the row under the initrd - and
+      the step does nothing, the way the fallback name does when it is
+      somebody else's.
+      t_appsinst makes a real image (mkinitrd: uecho64 under a name the
+      initrd does not have, and a megabyte of pattern) and installs from
+      a stick that carries it onto three disks: beside, with room, the
+      plan lists it with its size and mtools reads it back byte for
+      byte; beside, on an EFI partition left with room for the system
+      once and a half, the plan says it does not fit and the system is
+      installed without it; the whole disk gets an EFI partition of
+      1 GiB, read in the GPT from the host, with the image on it, and
+      the installed system, started on its own, says its loader handed
+      over the image and runs the program out of it. t_wholedisk, on its
+      800 MiB disk, sees the image left out and the partition at 256 MiB;
+      t_ginstal's disc brings one as well, and the window's row for it -
+      its size, or no room - is what the disk shows afterwards.

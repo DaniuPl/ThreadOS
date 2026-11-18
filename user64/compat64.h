@@ -244,8 +244,8 @@ static inline int32_t sys_snd_beep(uint32_t hz, uint32_t ms)
 #define INST_ALONGSIDE 0
 #define INST_WHOLE     1
 
-#define INST_STEPS       6
-#define INST_STEPS_WHOLE 9
+#define INST_STEPS       7
+#define INST_STEPS_WHOLE 10
 
 struct install_info {
     uint32_t ok;
@@ -268,6 +268,8 @@ struct install_info {
     char disk_name[INST_NAME];
     char kind[8];
     char label[INST_NAME];
+    uint32_t apps_size;
+    uint32_t apps;
 };
 
 static inline int32_t sys_install_look(int32_t mode, int32_t disk,

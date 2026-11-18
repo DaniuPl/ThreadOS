@@ -20,8 +20,9 @@
  * this one. It is one word and it costs a second, and on the other
  * side of that second is a laptop somebody boots tomorrow.
  *
- * The steps, one per turn of the loop. The kernel could write all five
- * files in one call and the window would freeze for the length of it.
+ * The steps, one per turn of the loop. The kernel could write all the
+ * files in one call and the window would freeze for the length of it -
+ * the applications' image alone is 180 MB.
  * Asking for one step per turn means the bar moves and the name under
  * it says which file is being written - and a person watching a disk
  * being written to has a right to see where it is.
@@ -103,7 +104,7 @@ static void field(int win, int x, int y, int w, const char *s)
     ud_fill(win, end + 1, y + 1, 1, ROW_H - 2, L.text);     /* the caret */
 }
 
-/* The same six steps the kernel takes, in the same order. The paths
+/* The same seven steps the kernel takes, in the same order. The paths
    are shown on the screen above the button anyway - a person who is
    told what will be written should see the same names move past while
    it is. */
@@ -112,6 +113,7 @@ static const char *STEP_NAME[INST_STEPS] = {
     "/EFI/ThreadOS/BOOTX64.EFI",
     "/EFI/ThreadOS/threados64.bin",
     "/EFI/ThreadOS/initrd64.img",
+    "/EFI/ThreadOS/apps64.img",
     "/EFI/BOOT/BOOTX64.EFI",
     "boot menu entry (UEFI)"
 };
@@ -126,6 +128,7 @@ static const char *STEP_WHOLE[INST_STEPS_WHOLE] = {
     "/EFI/ThreadOS/BOOTX64.EFI",
     "/EFI/ThreadOS/threados64.bin",
     "/EFI/ThreadOS/initrd64.img",
+    "/EFI/ThreadOS/apps64.img",
     "/EFI/BOOT/BOOTX64.EFI",
     "boot menu entry (UEFI)"
 };
@@ -358,13 +361,28 @@ static void draw_plan(int win)
         say(win, COL_SIZE, rowy(7 + i), line, C_DIM);
     }
 
+    /* The applications' image, when the stick brought one, takes the
+       row under the initrd and moves the fallback name one down. Where
+       it does not fit the row says so: the system is whole without it,
+       but a person who wanted the browser should not find out later. */
+    int fb = 10;
+    if (info.apps_size) {
+        say(win, IND, rowy(10), STEP_NAME[4], info.apps ? C_TEXT : C_DIM);
+        if (info.apps) {
+            add(line, num(line, info.apps_size), " B");
+            say(win, COL_SIZE, rowy(10), line, C_DIM);
+        } else {
+            say_l(win, COL_SIZE, rowy(10), "no room - left out", C_DIM);
+        }
+        fb = 11;
+    }
     if (info.fallback_free) {
-        say(win, IND, rowy(10), STEP_NAME[4], C_TEXT);
-        say_l(win, IND, rowy(11), "free - the machine will boot on its own",
+        say(win, IND, rowy(fb), STEP_NAME[5], C_TEXT);
+        say_l(win, IND, rowy(fb + 1), "free - the machine will boot on its own",
               C_HEAD);
     } else {
-        say(win, IND, rowy(10), STEP_NAME[4], C_RED);
-        say_l(win, IND, rowy(11), "somebody else's - not touching it",
+        say(win, IND, rowy(fb), STEP_NAME[5], C_RED);
+        say_l(win, IND, rowy(fb + 1), "somebody else's - not touching it",
               C_RED);
     }
 
@@ -406,6 +424,9 @@ static void draw_wipe(int win)
     say(win, IND, rowy(10), line, C_TEXT);
     say(win, IND, rowy(11), STEP_WHOLE[2], C_TEXT);
     say_l(win, IND, rowy(12), "and write the system onto it.", C_TEXT);
+    if (info.apps_size && !info.apps)
+        say_l(win, IND, rowy(13),
+              "apps64.img does not fit - the disk is too small", C_DIM);
 
     say_l(win, PAD, rowy(14),
           "No other disk is touched - only this one.", C_TEXT);

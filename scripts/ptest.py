@@ -153,7 +153,7 @@ HUGE_PAGE = b"<p>ThreadOS TFS3: an indirect block, then a doubly indirect one.</
 BIG_PAGE = b"<p>ThreadOS TFS3: block after block.</p>\n" * 3000
 
 
-def make_gpt_disk(path, mib=800):
+def make_gpt_disk(path, mib=800, esp_mib=100):
     """A disk image with a GPT partition table on it: an EFI system
     partition, a Windows one and a Linux one.
 
@@ -170,12 +170,13 @@ def make_gpt_disk(path, mib=800):
     def guid(s):
         return uuid.UUID(s).bytes_le
 
+    esp = esp_mib * 2048
     parts = [
-        ("C12A7328-F81F-11D2-BA4B-00A0C93EC93B", 2048, 2048 + 204800 - 1,
+        ("C12A7328-F81F-11D2-BA4B-00A0C93EC93B", 2048, 2048 + esp - 1,
          "EFI system partition"),
-        ("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7", 2048 + 204800,
-         2048 + 204800 + 409600 - 1, "Windows"),
-        ("0FC63DAF-8483-4772-8E79-3D69D8477DE4", 2048 + 204800 + 409600,
+        ("EBD0A0A2-B9E5-4433-87C0-68B6B72699C7", 2048 + esp,
+         2048 + esp + 409600 - 1, "Windows"),
+        ("0FC63DAF-8483-4772-8E79-3D69D8477DE4", 2048 + esp + 409600,
          total - 34, "linux-root"),
     ]
     ent = bytearray(128 * 128)

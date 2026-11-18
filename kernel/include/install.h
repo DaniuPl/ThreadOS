@@ -18,6 +18,11 @@
  * is loaded segments and not the file it came from. A system started
  * some other way says so and offers nothing.
  *
+ * A fourth goes with them when the loader brought it: the applications'
+ * image (apps64.img, the web engine). The system is whole without it,
+ * so it is written only where it fits - and where it does not, the
+ * plan says so and the rest is installed all the same.
+ *
  * Split in two on purpose. install_plan() reads and prints and changes
  * nothing; install_do() writes. Between the two sits a person saying
  * yes - which the shells ask for, because reading the keyboard is
@@ -84,6 +89,8 @@ struct install_info {
     char disk_name[INST_NAME];   /* the driver behind it */
     char kind[8];                /* FAT16 / FAT32 */
     char label[INST_NAME];       /* what the partition calls itself */
+    uint32_t apps_size;          /* the applications' image brought, or 0 */
+    uint32_t apps;               /* 1 = it fits and will be written */
 };
 
 /* Reads a disk and fills the shape above for the way of installing
@@ -94,8 +101,8 @@ int install_look(int mode, int disk, struct install_info *out);
 
 /* How many steps each way takes, and what each of them is called. A
    person watching a bar move wants to know what is moving. */
-#define INST_STEPS       6   /* alongside */
-#define INST_STEPS_WHOLE 9   /* the whole disk */
+#define INST_STEPS       7   /* alongside */
+#define INST_STEPS_WHOLE 10  /* the whole disk */
 const char *install_step_name(int n);
 
 /* One step (0 .. steps-1) of the way install_look() was last asked
