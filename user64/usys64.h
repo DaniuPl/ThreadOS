@@ -11,6 +11,8 @@
  * Apart from those two and the RAX holding the result, all registers
  * come back untouched: the kernel saves them at its end. That is part
  * of the contract and this list rests on it.
+ *
+ * Built for AArch64, the same calls go to the ARM64 kernel by svc.
  */
 
 #ifndef THREADOS_USYS64_H
@@ -126,6 +128,36 @@
 #define SIGKILL  9
 #define SIGTERM 15
 
+#if defined(__aarch64__)
+/* The ARM64 kernel takes the same numbers by Linux's AArch64 convention
+   (kernelarm64/proc.c): svc, the number in x8, the arguments from x0 on,
+   the answer in x0. Every other register comes back as it went. */
+static inline int64_t syscall64_4(int64_t nr, int64_t a1, int64_t a2,
+                                  int64_t a3, int64_t a4)
+{
+    register int64_t x8 __asm__("x8") = nr;
+    register int64_t x0 __asm__("x0") = a1;
+    register int64_t x1 __asm__("x1") = a2;
+    register int64_t x2 __asm__("x2") = a3;
+    register int64_t x3 __asm__("x3") = a4;
+    __asm__ volatile("svc #0"
+                     : "+r"(x0)
+                     : "r"(x8), "r"(x1), "r"(x2), "r"(x3)
+                     : "memory");
+    return x0;
+}
+
+static inline int64_t syscall64(int64_t nr, int64_t a1, int64_t a2)
+{
+    return syscall64_4(nr, a1, a2, 0, 0);
+}
+
+static inline int64_t syscall64_3(int64_t nr, int64_t a1, int64_t a2,
+                                  int64_t a3)
+{
+    return syscall64_4(nr, a1, a2, a3, 0);
+}
+#else
 static inline int64_t syscall64(int64_t nr, int64_t a1, int64_t a2)
 {
     int64_t ret;
@@ -160,6 +192,7 @@ static inline int64_t syscall64_4(int64_t nr, int64_t a1, int64_t a2,
                      : "rcx", "r11", "memory");
     return ret;
 }
+#endif
 
 static inline uint64_t ustrlen(const char *s)
 {
@@ -237,12 +270,14 @@ static inline uint64_t sys_ticks(void)
 /* Only the processor knows the code selector, and its two lowest bits
    say which ring the program is REALLY running in. The program has no
    way of making that up - it can only pass on what it read. */
+#if !defined(__aarch64__)
 static inline void sys_report_ring(void)
 {
     uint64_t cs;
     __asm__ volatile("movw %%cs, %%ax; movzwq %%ax, %0" : "=r"(cs) :: "rax");
     syscall64(SYS64_RING, (int64_t)cs, 0);
 }
+#endif
 
 /* A decimal number into a buffer; returns the length */
 static inline int utoa(uint64_t v, char *buf)
@@ -500,10 +535,17 @@ static inline int64_t sys_read(int fd, void *buf, uint64_t len)
  * of this label under the handler as the return address - so an
  * ordinary ret lands here, and from here one call goes back into the
  * kernel for the frame. */
+#if defined(__aarch64__)
+__asm__(".globl threados_sigreturn\n"
+        "threados_sigreturn:\n"
+        "    mov x8, #10\n"             /* SYS64_SIGRETURN */
+        "    svc #0\n");
+#else
 __asm__(".globl threados_sigreturn\n"
         "threados_sigreturn:\n"
         "    movq $10, %rax\n"          /* SYS64_SIGRETURN */
         "    syscall\n");
+#endif
 extern void threados_sigreturn(void);
 
 /* Sets the signal handler (0 = kill the program, which is the

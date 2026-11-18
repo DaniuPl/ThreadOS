@@ -515,10 +515,12 @@ void kmain(uint64_t x0)
         boot_splash_update(70, "Checking the threads");
         threads_selftest();
         start_network(vdevs, nv, fi.bootargs);
-        run_programs(fi.bootargs);
+        /* The phone before the programs: a program's window needs a
+           screen to go to */
         boot_splash_update(96, "Starting the phone");
-        if (screen)
-            thread_create("mobile", mobile_main, &mi);
+        if (screen && mobile_init(&mi) == 0)
+            thread_create("mobile", mobile_main, 0);
+        run_programs(fi.bootargs);
     }
 
     printk("The ARM64 kernel is ready.\n");

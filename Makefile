@@ -1999,6 +1999,7 @@ OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/virtio.o $(BUILD)/arm64/touch.o \
              $(BUILD)/arm64/mobile.o $(BUILD)/arm64/proc.o \
              $(BUILD)/arm64/netglue.o $(BUILD)/arm64/vnet.o \
+             $(BUILD)/arm64/winmob.o \
              $(patsubst %,$(BUILD)/arm64/%.o,$(SHAREDARM))
 
 $(BUILD)/arm64:
@@ -2091,7 +2092,7 @@ libcarm64: $(LIBCARM)
 # Programs against it: libc/libcarm64.ld is libc/libc64.ld at the ARM64
 # kernel's program address. The test programs of libc/tests are the
 # PC's, unchanged - the point of them is that they print the same.
-MUSLARM_PROGS := libctest pthreadtest ipctest nettest
+MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest
 MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
 LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
                   -fno-stack-protector -fno-pic \
@@ -2105,6 +2106,10 @@ LIBCARM_LINK = $(ARMCC) -static -no-pie -nostdlib -s -Wl,--build-id=none \
 
 $(BUILD)/arm64/libc:
 	mkdir -p $@
+
+# ThreadOS's own calls, the PC's library of them (its AArch64 branch)
+$(BUILD)/arm64/libc/wintest.elf: LIBCARM_CFLAGS += -Iuser64
+$(BUILD)/arm64/libc/wintest.elf: user64/usys64.h
 
 $(BUILD)/arm64/libc/%.elf: libc/tests/%.c $(MUSLARM_STAMP) libc/libcarm64.ld \
                            | $(BUILD)/arm64/libc

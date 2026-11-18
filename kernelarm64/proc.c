@@ -50,6 +50,7 @@
 #include "proc.h"
 #include "ipchost.h"
 #include "netglue.h"
+#include "winmob.h"
 #include "rtc.h"
 #include "thread.h"
 #include "uart.h"
@@ -950,6 +951,7 @@ static void end_thread(struct uproc *p, int code)
         /* Its pipes' readers see the end of the data now, not when it
            is collected; its children are the kernel's from now on */
         close_fds(p, 0);
+        winmob_drop(p->pid);
         f = spin_lock_irq(&lock);
         for (int i = 0; i < PROC_MAX; i++)
             if (procs[i].pid && procs[i].parent == p->pid)
@@ -1645,6 +1647,63 @@ static int64_t net_call(struct uproc *p, uint64_t n, const uint64_t *x)
     return -1;
 }
 
+/* --- windows -----------------------------------------------------------------
+ *
+ * The PC's window calls, on the phone's screen (winmob.c): what Weft's
+ * WPE platform draws and hears through. A window is its program's.
+ */
+
+/* struct win_blit_cmd, user64/usys64.h */
+struct blit_cmd {
+    int32_t x, y, w, h;
+    uint64_t pixels;
+};
+
+static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
+{
+    char title[32];
+    switch (n) {
+    case SYS64_WIN_CREATE:
+        if (!x[2])
+            title[0] = 0;
+        else if (copy_string(p, x[2], title, sizeof(title)) < 0)
+            return -1;
+        return winmob_create(p->pid, title);
+    case SYS64_WIN_TRUECOL:          /* every window here is in colours */
+    case SYS64_WIN_KEEP:             /* nobody closes one here yet */
+        return winmob_mine((int)x[0], p->pid) ? 0 : -1;
+    case SYS64_WIN_TITLE:
+        if (copy_string(p, x[1], title, sizeof(title)) < 0)
+            return -1;
+        return winmob_title((int)x[0], p->pid, title);
+    case SYS64_WIN_POLL: {
+        struct win_event ev;
+        int64_t got = winmob_poll((int)x[0], p->pid, &ev);
+        if (got == 1) {
+            if (!user_range(p, x[1], sizeof(ev), 1))
+                return -1;
+            memcpy((void *)(uintptr_t)x[1], &ev, sizeof(ev));
+        }
+        return got;
+    }
+    case SYS64_WIN_BLIT32: {
+        /* Bigger blocks than the PC's desktop takes (1024 pixels): a
+           whole page at once, here */
+        struct blit_cmd c;
+        if (!user_range(p, x[1], sizeof(c), 0))
+            return -1;
+        memcpy(&c, (const void *)(uintptr_t)x[1], sizeof(c));
+        if (c.w <= 0 || c.h <= 0 || c.w > 4096 || c.h > 4096 ||
+            c.w * c.h > 65536 ||
+            !user_range(p, c.pixels, (uint64_t)c.w * (uint64_t)c.h * 4, 0))
+            return -1;
+        return winmob_blit32((int)x[0], p->pid, c.x, c.y, c.w, c.h,
+                             (const uint32_t *)(uintptr_t)c.pixels);
+    }
+    }
+    return -1;
+}
+
 /* --- the calls ---------------------------------------------------------- */
 
 void proc_syscall(struct trap_frame *f)
@@ -1789,6 +1848,14 @@ void proc_syscall(struct trap_frame *f)
     case SYS64_TCP_POLL:
     case SYS64_TCP_ADDR:
         r = net_call(p, x[8], x);
+        break;
+    case SYS64_WIN_CREATE:
+    case SYS64_WIN_TRUECOL:
+    case SYS64_WIN_KEEP:
+    case SYS64_WIN_TITLE:
+    case SYS64_WIN_POLL:
+    case SYS64_WIN_BLIT32:
+        r = win_call(p, x[8], x);
         break;
     default:
         r = -1;                          /* not on this kernel yet */

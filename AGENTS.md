@@ -36,15 +36,17 @@ the PC's network stack (`kernel/net.c`, `tcp.c`, `dhcp.c`) on a
 virtio-net card (`kernelarm64/vnet.c`, `netglue.c`) - and, given a
 phone's devices, is ThreadOS mobile: a ramfb screen set up through
 fw_cfg, the initrd through fw_cfg, a PL031 clock, a virtio-input
-touchscreen over
-virtio-mmio, and the shell in `kernelarm64/mobile.c`. Of `kernel/` it
+touchscreen over virtio-mmio, the shell in `kernelarm64/mobile.c`, and
+programs' windows through the PC's window calls (`kernelarm64/winmob.c`:
+a window is the screen below the status bar, the finger the program's
+mouse; `user64/usys64.h` builds for AArch64 too). Of `kernel/` it
 builds `string.c`, `heap.c`, `gfx.c`, `ttf.c`, `uitext.c`, `mark.c`,
 `aurora.c`, `fonts.c`, `initrd.c`, `locale.c`, `ipc.c`, `net.c`,
 `tcp.c` and `dhcp.c` (`SHAREDARM` in the `Makefile`), on `kernel/include/io.h` and `spinlock.h`, which have an
 AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
-`arm64mobile`, `arm64user`, `arm64libc` and `arm64net`. The overlay's C
+`arm64mobile`, `arm64user`, `arm64libc`, `arm64net` and `arm64win`. The overlay's C
 layer (`libc/overlay/src/threados/`) is one file for both machines: a change
 there is built and tested on both.
 

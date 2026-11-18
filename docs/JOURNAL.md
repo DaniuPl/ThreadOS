@@ -9624,3 +9624,40 @@ works and is checked by `make test`.
       ECONNREFUSED, UDP datagrams answered, and a server in the guest
       the host connects to; nettest ends with 0 and every page comes
       back. socket passes on the PC with the shared checks.
+- [x] **Programs' windows on the phone**
+      (kernelarm64/winmob.c, winmob.h, mobile.c, mobile.h, proc.c,
+      kmain.c, user64/usys64.h, libc/tests/wintest.c, Makefile,
+      scripts/ptest.py, scripts/tests/t_arm64win.py, run_tests.py,
+      .github/workflows/build.yml)
+      The fourth stage of Weft on ARM64: Weft's WPE platform draws and
+      hears through the PC's window calls, so the phone answers them. A
+      window there is the whole screen below the status bar, whatever
+      size was asked for - the first event a program hears is the size
+      it has (WEV_SIZE), which Weft's platform and every PC program
+      already redraw at - and its pixels are its own buffer, which the
+      shell puts in front under its status bar and home indicator.
+      win_create, win_truecolour, win_blit32 (whole pages at a time
+      here), win_poll, win_title and win_keep are the calls; a window is
+      its program's and goes when the program ends. The finger in a
+      window is the mouse the program knows, in the window's pixels: a
+      touch is a click and a press, moving is dragging, lifting the
+      release; the bottom edge and the status bar stay the phone's. A
+      window made while the phone is locked is shown once it is opened;
+      home, a program's window is a tile after the apps - its title's
+      first letter - until the program ends. The shell now starts
+      before the command line's programs (their windows need a screen),
+      with its screens' memory taken before their pages are counted.
+      user64/usys64.h, the PC's library of ThreadOS calls that Weft's
+      platform is written against, builds for AArch64: svc in place of
+      syscall, and the ring check left to the PC.
+      t_arm64win runs wintest - built against musl and usys64.h - on the
+      phone: its window's size is the panel's width by its height less
+      the status bar; shown once the phone is opened, the screen holds
+      what it drew, colour for colour, where it drew it; a tap in its
+      square reaches it as click, press and release at that pixel, and
+      the square turns yellow on the screen; a drag reaches it as press,
+      drags and release along the path; the swipe home from the edge is
+      not the program's, home has its tile, a tap on it brings the
+      window back as it was; a tap in the corner ends the program, the
+      phone goes home, the tile goes, and every page - the window's
+      buffer too - is free again.

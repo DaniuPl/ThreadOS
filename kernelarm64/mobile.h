@@ -14,7 +14,10 @@ struct mobile_info {
     const char *touch;          /* the touchscreen's name, or 0 */
 };
 
+/* Its screens' memory, before the programs start (their pages are
+   counted from then on): 0, or -1 when there is none */
+int mobile_init(const struct mobile_info *info);
 /* The shell's thread: the lock screen, then whatever the finger says */
-void mobile_main(void *info);
+void mobile_main(void *arg);
 
 #endif

@@ -15,6 +15,11 @@
  *   finger draws); a swipe up from the bottom edge goes home, as on
  *   any phone of the last years
  *
+ *   programs' windows (winmob.c): a program that makes one is shown in
+ *   it at once - once the phone is open - under the status bar, and
+ *   the finger in it is the program's; home, its window is a tile
+ *   after the apps until the program ends
+ *
  * Every touch that ends is said on the serial port in logical pixels,
  * and every change of screen: that is how t_arm64mobile holds what the
  * shell understood against what it sent.
@@ -25,6 +30,7 @@
 #include "rtc.h"
 #include "thread.h"
 #include "touch.h"
+#include "winmob.h"
 #include "../kernel/include/aurora.h"
 #include "../kernel/include/gfx.h"
 #include "../kernel/include/mark.h"
@@ -57,13 +63,14 @@
 #define MOB_ROW_PX     15
 #define MOB_INFO_Y     260      /* About's first line */
 #define MOB_INFO_STEP  30
+#define MOB_WIN_TILE   0x5E5CE6 /* a program's tile */
 
 #define WHITE   0xFFFFFF
 #define MUTED   0xAEB6CC
 #define APP_BG  0x101218
 #define ACCENT  0x0A84FF
 
-enum { LOCK, HOME, APP_ABOUT, APP_CLOCK, APP_DRAW };
+enum { LOCK, HOME, APP_ABOUT, APP_CLOCK, APP_DRAW, APP_WINDOW };
 
 static const struct app {
     const char *name;
@@ -78,6 +85,8 @@ static const struct app {
 
 static const struct mobile_info *info;
 static int lw, lh, screen = LOCK, dirty = 1;
+static int shown = -1;          /* the program's window on the screen */
+static int pending = -1;        /* one made while the phone was locked */
 static uint32_t *bg;                       /* the aurora, drawn once */
 static struct gfx_surface canvas;          /* Draw's page */
 static uint32_t frame_bytes;
@@ -231,6 +240,20 @@ static void draw_home(void)
         centred(UI_SANS, MOB_LABEL_PX, x + MOB_TILE / 2,
                 y + MOB_TILE + 18, apps[k].name, WHITE);
     }
+    /* The programs' windows, each a tile with its title's first letter */
+    for (int i = 0; i < winmob_count(); i++) {
+        int x, y, win = winmob_nth(i);
+        char name[32], letter[2] = { 0, 0 };
+        if (win < 0)
+            break;
+        winmob_name(win, name, sizeof(name));
+        letter[0] = name[0] ? name[0] : '?';
+        tile_xy(APPS + i, &x, &y);
+        gfx_rrect(x, y, MOB_TILE, MOB_TILE, MOB_TILE_R, MOB_WIN_TILE, 255);
+        centred(UI_BOLD, 30, x + MOB_TILE / 2, y + 41, letter, WHITE);
+        centred(UI_SANS, MOB_LABEL_PX, x + MOB_TILE / 2,
+                y + MOB_TILE + 18, name, WHITE);
+    }
     pill(WHITE);
 }
 
@@ -301,14 +324,24 @@ static void draw_draw(void)
     pill(0x1C1C1E);
 }
 
+/* The program's pixels below, the phone's status bar above */
+static void draw_window(void)
+{
+    gfx_fill(0, 0, lw, MOB_BAR_H, 0x000000, 255);
+    status_bar(WHITE);
+    winmob_draw(shown);
+    pill(0x8E8E93);
+}
+
 static void draw(void)
 {
     switch (screen) {
-    case LOCK:      draw_lock(); break;
-    case HOME:      draw_home(); break;
-    case APP_ABOUT: draw_about(); break;
-    case APP_CLOCK: draw_clock(); break;
-    case APP_DRAW:  draw_draw(); break;
+    case LOCK:       draw_lock(); break;
+    case HOME:       draw_home(); break;
+    case APP_ABOUT:  draw_about(); break;
+    case APP_CLOCK:  draw_clock(); break;
+    case APP_DRAW:   draw_draw(); break;
+    case APP_WINDOW: draw_window(); break;
     }
     video_present();
 }
@@ -318,11 +351,12 @@ static void draw(void)
 static const char *screen_name(int s)
 {
     switch (s) {
-    case LOCK:      return "lock screen";
-    case HOME:      return "home";
-    case APP_ABOUT: return "About";
-    case APP_CLOCK: return "Clock";
-    default:        return "Draw";
+    case LOCK:       return "lock screen";
+    case HOME:       return "home";
+    case APP_ABOUT:  return "About";
+    case APP_CLOCK:  return "Clock";
+    case APP_WINDOW: return "window";
+    default:         return "Draw";
     }
 }
 
@@ -330,7 +364,19 @@ static void go(int s, const char *why)
 {
     screen = s;
     dirty = 1;
-    printk("[mobile] %s (%s)\n", screen_name(s), why);
+    if (s == APP_WINDOW) {
+        char name[32];
+        winmob_name(shown, name, sizeof(name));
+        printk("[mobile] window \"%s\" (%s)\n", name, why);
+    } else {
+        printk("[mobile] %s (%s)\n", screen_name(s), why);
+    }
+}
+
+static void show(int win, const char *why)
+{
+    shown = win;
+    go(APP_WINDOW, why);
 }
 
 static void tap(int x, int y)
@@ -346,6 +392,15 @@ static void tap(int x, int y)
                 return;
             }
         }
+        for (int i = 0; i < winmob_count(); i++) {
+            int tx, ty;
+            tile_xy(APPS + i, &tx, &ty);
+            if (x >= tx && x < tx + MOB_TILE && y >= ty && y < ty + MOB_TILE &&
+                winmob_nth(i) >= 0) {
+                show(winmob_nth(i), "its tile");
+                return;
+            }
+        }
     } else if (screen == APP_DRAW && y < MOB_TITLE_Y + 12 &&
                x > lw - 100) {
         clear_canvas();
@@ -354,7 +409,15 @@ static void tap(int x, int y)
     }
 }
 
-static struct { int on, x0, y0; } finger;
+static struct { int on, x0, y0, program; } finger;
+
+/* A finger in a program's window, in the window's own pixels: the
+   panel's, from below the status bar (video_k is in sixteenths) */
+static void to_program(int kind, int x, int y)
+{
+    int k = video_k();
+    winmob_touch(shown, kind, x * k / 16, (y - MOB_BAR_H) * k / 16);
+}
 
 static void touch(const struct touch_event *e)
 {
@@ -365,10 +428,18 @@ static void touch(const struct touch_event *e)
         last_x = e->x;
         last_y = e->y;
         printk("[touch] down %d,%d\n", e->x, e->y);
+        /* The bottom edge is the home gesture's, the status bar the
+           phone's; the rest of a window is its program's */
+        finger.program = screen == APP_WINDOW && e->y >= MOB_BAR_H &&
+                         e->y < lh - MOB_EDGE;
+        if (finger.program)
+            to_program(WEV_PRESS, e->x, e->y);
         return;
     }
     if (!finger.on)
         return;
+    if (finger.program)
+        to_program(e->kind == TOUCH_UP ? WEV_RELEASE : WEV_DRAG, e->x, e->y);
     if (screen == APP_DRAW && finger.y0 > MOB_TITLE_Y + 12 &&
         finger.y0 < lh - MOB_EDGE) {
         gfx_line16_s(&canvas, last_x * 16, last_y * 16, e->x * 16,
@@ -386,16 +457,21 @@ static void touch(const struct touch_event *e)
     if (dy < -80 && adx < ady) {
         /* Up: on the lock screen from anywhere in its lower half, in an
            app only from the bottom edge, as a phone's home gesture */
-        if (screen == LOCK && finger.y0 > lh / 2)
-            go(HOME, "swipe up");
+        if (screen == LOCK && finger.y0 > lh / 2) {
+            if (winmob_exists(pending))
+                show(pending, "opened while locked");
+            else
+                go(HOME, "swipe up");
+            pending = -1;
+        }
         else if (screen >= APP_ABOUT && finger.y0 >= lh - MOB_EDGE)
             go(HOME, "swipe up from the edge");
-    } else if (adx <= 12 && ady <= 12) {
+    } else if (adx <= 12 && ady <= 12 && !finger.program) {
         tap(finger.x0, finger.y0);
     }
 }
 
-void mobile_main(void *arg)
+int mobile_init(const struct mobile_info *arg)
 {
     info = arg;
     lw = video_w();
@@ -406,29 +482,52 @@ void mobile_main(void *arg)
     canvas.px = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(pages);
     if (!bg || !canvas.px) {
         printk("[mobile] no memory for the screens\n");
-        return;
+        return -1;
     }
     canvas.w = video_pw();
     canvas.h = video_ph();
     canvas.stride = video_pw();
     canvas.k = video_k();
     clear_canvas();
+    winmob_init(video_pw(), MOB_BAR_H * video_k() / 16, video_ph());
     aurora_draw(bg, video_pw(), video_ph(), video_pw(), 1);
     printk("[mobile] %dx%d logical, %dx%d on the panel\n", lw, lh,
            video_pw(), video_ph());
+    return 0;
+}
+
+void mobile_main(void *arg)
+{
+    (void)arg;
     go(LOCK, "start");
 
-    uint32_t shown = 0;
+    uint32_t ticked = 0, changes = winmob_changes();
     for (;;) {
         struct touch_event e;
         while (touch_next(&e))
             touch(&e);
+        /* Programs: a window made is shown (once the phone is open), one
+           drawn into is drawn again, one whose program ended is left */
+        int fresh = winmob_take_new();
+        if (fresh >= 0) {
+            if (screen == LOCK)
+                pending = fresh;
+            else
+                show(fresh, "opened");
+        }
+        if (screen == APP_WINDOW && !winmob_exists(shown))
+            go(HOME, "its program ended");
+        if (winmob_changes() != changes) {
+            changes = winmob_changes();
+            if (screen == APP_WINDOW || screen == HOME)
+                dirty = 1;
+        }
         /* The clock: every second where seconds show, every minute
            everywhere else */
         uint32_t now = rtc_seconds();
         uint32_t step = screen == APP_CLOCK ? now : now / 60;
-        if (step != shown) {
-            shown = step;
+        if (step != ticked) {
+            ticked = step;
             dirty = 1;
         }
         if (dirty) {

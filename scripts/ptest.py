@@ -3857,7 +3857,7 @@ class Phone(Qemu):
     LOGICAL = (360, 640)          # kernelarm64/mobile.c's screen
     RANGE = 32767                 # the tablet's axes
 
-    def __init__(self, cores=4, mib=1024, cpu="cortex-a72"):
+    def __init__(self, cores=4, mib=1024, cpu="cortex-a72", append=None):
         self.qmp_path = tempfile.mktemp(suffix=".qmp")
         self.dump_path = tempfile.mktemp(suffix=".ppm")
         self.serial_path = tempfile.mktemp(suffix=".log")
@@ -3873,7 +3873,8 @@ class Phone(Qemu):
                      "-fw_cfg", "name=opt/threados/initrd,file=" + ARM64_INITRD,
                      "-rtc", "base=" + RTC_BASE,
                      "-qmp", "unix:%s,server,nowait" % self.qmp_path,
-                     "-kernel", ARM64_IMAGE])
+                     "-kernel", ARM64_IMAGE] +
+                    (["-append", append] if append else []))
 
     def _abs(self, x, y):
         w, h = self.LOGICAL
