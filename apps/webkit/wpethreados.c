@@ -540,7 +540,7 @@ static void handle(WPEToplevelThreadOS *self, WPEView *view,
                    const struct win_event *ev)
 {
     if (tracing) {
-        printf("[webview] event %d at %d,%d val %d\n", ev->type, ev->x,
+        printf("[weft] event %d at %d,%d val %d\n", ev->type, ev->x,
                ev->y, ev->val);
         fflush(stdout);
     }
@@ -616,7 +616,7 @@ static gboolean poll_window(gpointer data)
             continue;
         if (ev.type == WEV_CLOSE) {
             /* WebKit hears the window went; the program decides what
-               that means (apps/webkit/webview.c quits) */
+               that means (apps/webkit/weft.c quits) */
             self->poll_source = 0;
             wpe_toplevel_closed(WPE_TOPLEVEL(self));
             return G_SOURCE_REMOVE;

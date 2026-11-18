@@ -5,7 +5,7 @@
 # built by WebKit's own macros, as its WPEWebProcess and MiniBrowser
 # are, so they link what those link:
 #
-#   webview     the UI process: a window (apps/webkit/webview.c and
+#   weft        the UI process: a window (apps/webkit/weft.c and
 #               the ThreadOS platform, wpethreados.c)
 #   wpewebproc  the web process, WebKit's own entry point
 #   wpenetproc  the network process, with HTTPS registered first
@@ -25,11 +25,11 @@ foreach (_threados_program IN ITEMS wpewebproc wpenetproc)
     WEBKIT_EXECUTABLE(${_threados_program})
 endforeach ()
 
-set(webview_SOURCES
-    ${_threados_dir}/webview.c
+set(weft_SOURCES
+    ${_threados_dir}/weft.c
     ${_threados_dir}/wpethreados.c
 )
-set(webview_PRIVATE_INCLUDE_DIRECTORIES
+set(weft_PRIVATE_INCLUDE_DIRECTORIES
     ${CMAKE_BINARY_DIR}
     ${DERIVED_SOURCES_WPE_API_DIR}
     ${FORWARDING_HEADERS_WPE_DIR}
@@ -40,9 +40,9 @@ set(webview_PRIVATE_INCLUDE_DIRECTORIES
     ${THREADOS_REPO}/user
     ${THREADOS_REPO}/user64
 )
-set(webview_PRIVATE_LIBRARIES
+set(weft_PRIVATE_LIBRARIES
     ${JavaScriptCore_LIBRARY_NAME}
     WebKit::WebKit
 )
-WEBKIT_EXECUTABLE_DECLARE(webview)
-WEBKIT_EXECUTABLE(webview)
+WEBKIT_EXECUTABLE_DECLARE(weft)
+WEBKIT_EXECUTABLE(weft)

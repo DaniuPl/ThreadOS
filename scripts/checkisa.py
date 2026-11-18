@@ -72,7 +72,7 @@ ASKS_FIRST = {
 # The same for the applications' image (apps64.img, make webkit), which
 # a build has only when WebKit was built
 APPS_ASKS_FIRST = {
-    "webview": ("WebKit's simdutf (CPUID and XGETBV) and Skia's SkOpts "
+    "weft": ("WebKit's simdutf (CPUID and XGETBV) and Skia's SkOpts "
                 "(SkCpu::Supports) pick their SSSE3, AVX2 and AVX-512 "
                 "kernels at run time", None),
     "wpewebproc": ("WebKit's simdutf (CPUID and XGETBV) and Skia's SkOpts "

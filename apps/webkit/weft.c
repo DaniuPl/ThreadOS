@@ -1,12 +1,12 @@
-/* webview: the web browser on WebKit (WPE WebKit on ThreadOS)
+/* Weft: the web browser on WebKit (WPE WebKit on ThreadOS)
  *
- *   webview [URL]
- *   webview --eval SCRIPT URL
- *   webview --trace URL       (every event from the desktop said too)
- *   webview --proxy http://HOST:PORT URL
- *                             (every page through that proxy: an
- *                              https:// page by CONNECT, the rest asked
- *                              of it by their whole address)
+ *   weft [URL]
+ *   weft --eval SCRIPT URL
+ *   weft --trace URL    (every event from the desktop said too)
+ *   weft --proxy http://HOST:PORT URL
+ *                       (every page through that proxy: an https://
+ *                        page by CONNECT, the rest asked of it by
+ *                        their whole address)
  *
  * The UI process of WebKit's three: it opens a window through the
  * ThreadOS platform (apps/webkit/wpethreados.c), and WebKit starts the
@@ -27,15 +27,15 @@
  * What happens is said on standard output, a line each, so that the
  * tests can follow it (scripts/tests/t_webkit.py):
  *
- *   [webview] load committed <uri>
- *   [webview] load finished <uri>
- *   [webview] title <title>
- *   [webview] frame shown            (the first frame in the window)
- *   [webview] eval <result>          (--eval: the script's value, as a
- *                                     string, once the page has loaded)
- *   [webview] load failed <uri>: <why>
- *   [webview] go <uri>               (from the address field)
- *   [webview] tab <n> of <count>     (the tab in front changed)
+ *   [weft] load committed <uri>
+ *   [weft] load finished <uri>
+ *   [weft] title <title>
+ *   [weft] frame shown         (the first frame in the window)
+ *   [weft] eval <result>       (--eval: the script's value, as a
+ *                               string, once the page has loaded)
+ *   [weft] load failed <uri>: <why>
+ *   [weft] go <uri>            (from the address field)
+ *   [weft] tab <n> of <count>  (the tab in front changed)
  */
 
 #include <stdio.h>
@@ -111,11 +111,11 @@ static void evaluated(GObject *object, GAsyncResult *result, gpointer data)
     JSCValue *value = webkit_web_view_evaluate_javascript_finish(
         WEBKIT_WEB_VIEW(object), result, &error);
     if (!value) {
-        say("[webview] eval failed: %s%s\n", error->message, NULL);
+        say("[weft] eval failed: %s%s\n", error->message, NULL);
         g_error_free(error);
     } else {
         char *s = jsc_value_to_string(value);
-        say("[webview] eval %s%s\n", s, NULL);
+        say("[weft] eval %s%s\n", s, NULL);
         g_free(s);
         g_object_unref(value);
     }
@@ -128,7 +128,7 @@ static gboolean watch_frames(gpointer data)
     (void)data;
     if (!frame_said && wpe_threados_frames_shown() > 0) {
         frame_said = 1;
-        say("[webview] frame shown%s%s\n", NULL, NULL);
+        say("[weft] frame shown%s%s\n", NULL, NULL);
         return G_SOURCE_REMOVE;
     }
     return G_SOURCE_CONTINUE;
@@ -161,9 +161,9 @@ static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
     const char *uri = webkit_web_view_get_uri(view);
     t->loading = event != WEBKIT_LOAD_FINISHED;
     if (event == WEBKIT_LOAD_COMMITTED) {
-        say("[webview] load committed %s%s\n", uri, NULL);
+        say("[weft] load committed %s%s\n", uri, NULL);
     } else if (event == WEBKIT_LOAD_FINISHED) {
-        say("[webview] load finished %s%s\n", uri, NULL);
+        say("[weft] load finished %s%s\n", uri, NULL);
         if (eval_script && index_of(view) == 0)
             webkit_web_view_evaluate_javascript(view, eval_script, -1, NULL,
                                                 NULL, NULL, evaluated, NULL);
@@ -177,7 +177,7 @@ static gboolean load_failed(WebKitWebView *view, WebKitLoadEvent event,
     (void)view;
     (void)event;
     (void)data;
-    say("[webview] load failed %s: %s\n", uri, error->message);
+    say("[weft] load failed %s: %s\n", uri, error->message);
     return FALSE;                    /* WebKit shows its error page */
 }
 
@@ -189,9 +189,9 @@ static void title_changed(WebKitWebView *view, GParamSpec *pspec,
     const char *title = webkit_web_view_get_title(view);
     g_strlcpy(t->title, title && *title ? title : "", sizeof(t->title));
     if (title && *title)
-        say("[webview] title %s%s\n", title, NULL);
+        say("[weft] title %s%s\n", title, NULL);
     if (index_of(view) == front)
-        wpe_toplevel_set_title(toplevel, *t->title ? t->title : "Web");
+        wpe_toplevel_set_title(toplevel, *t->title ? t->title : "Weft");
     draw_band();
 }
 
@@ -253,7 +253,7 @@ static const char start_page[] =
     "justify-content:center;font-family:sans-serif;color:#555;"
     "background:#f4f4f6}h1{font-weight:normal;font-size:28px;margin:0}"
     "p{margin:8px 0 0;font-size:13px;text-align:center}</style></head>"
-    "<body><div><h1>ThreadOS</h1><p>Type an address or words above</p>"
+    "<body><div><h1>Weft</h1><p>Type an address or words above</p>"
     "</div></body></html>";
 
 static struct tab *tab_new(const char *uri, WebKitWebView *related)
@@ -295,12 +295,12 @@ static void tab_front(int i)
     front = i;
     wpe_view_set_toplevel(webkit_web_view_get_wpe_view(tabs[i]->view),
                           toplevel);
-    wpe_toplevel_set_title(toplevel, *tabs[i]->title ? tabs[i]->title : "Web");
+    wpe_toplevel_set_title(toplevel, *tabs[i]->title ? tabs[i]->title : "Weft");
     editing = FALSE;
     char n[16], count[16];
     g_snprintf(n, sizeof(n), "%d", i + 1);
     g_snprintf(count, sizeof(count), "%d", ntabs);
-    say("[webview] tab %s of %s\n", n, count);
+    say("[weft] tab %s of %s\n", n, count);
     draw_band();
 }
 
@@ -359,7 +359,7 @@ static void address_go(void)
     char *uri = address_of(typed);
     editing = FALSE;
     if (uri) {
-        say("[webview] go %s%s\n", uri, NULL);
+        say("[weft] go %s%s\n", uri, NULL);
         webkit_web_view_load_uri(tabs[front]->view, uri);
         g_free(uri);
     }
@@ -645,9 +645,9 @@ int main(int argc, char **argv)
             uri = argv[i];
     }
 
-    display = wpe_display_threados_new(WIDTH, HEIGHT + CHROME_H, "Web");
+    display = wpe_display_threados_new(WIDTH, HEIGHT + CHROME_H, "Weft");
     if (!display) {
-        fprintf(stderr, "webview: no display\n");
+        fprintf(stderr, "weft: no display\n");
         return 1;
     }
     /* One window for all the tabs: WebKit is not to make one for each
@@ -657,7 +657,7 @@ int main(int argc, char **argv)
                              WPE_SETTINGS_SOURCE_APPLICATION, NULL);
     toplevel = wpe_display_create_toplevel(display, 1);
     if (!toplevel || wpe_threados_toplevel_window(toplevel) < 0) {
-        fprintf(stderr, "webview: no window\n");
+        fprintf(stderr, "weft: no window\n");
         return 1;
     }
     wpe_threados_toplevel_set_chrome(toplevel, CHROME_H, band_event, NULL);

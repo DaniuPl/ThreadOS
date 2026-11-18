@@ -388,11 +388,13 @@ what bringing one in involves.
   - TLS 1.3 with X.509 validation
   - AES-GCM/CCM, ChaCha20-Poly1305, X25519, ECDSA, RSA, SHA-1/2
   - WPA2 key derivation
-- **WebKit:** WPE WebKit 2.54 runs in a desktop window (`make webkit`
+- **Weft, the browser on WebKit:** WPE WebKit 2.54 with tabs, back and
+  forward, an address field and the dock's Web tile (`make webkit`
   builds it into `apps64.img`, which the loader brings beside the
-  initrd): pages fetched by libsoup, laid out by WebCore exactly as
-  Chromium lays them out, scripts in JavaScriptCore, painted by Skia on
-  the processor, with the mouse and the keyboard (Polish letters too).
+  initrd and the installer writes onto the installed system): pages
+  fetched by libsoup, laid out by WebCore exactly as Chromium lays them
+  out, scripts in JavaScriptCore, painted by Skia on the processor,
+  with the mouse and the keyboard (Polish letters too).
   Under it, built from source and tested on ThreadOS against other
   implementations: GLib, libsoup, OpenSSL, ICU, FreeType, fontconfig,
   HarfBuzz, libxml2, libpng, libjpeg-turbo, libwebp, libgcrypt,
@@ -402,8 +404,11 @@ what bringing one in involves.
 
 - Wi-Fi: joining a network with the Intel 3160 (it scans already) and
   an 802.11 layer. The WPA2 cryptography is already done.
-- WebKit as the browser: an address bar, tabs and the dock's Web tile
-  on WPE, and apps64.img written by the installer.
+- Applications as `.tapp` packages: a manifest, an icon, the programs
+  and a signature in one file, installed with a double click; Weft
+  becomes the first of them.
+- Weft on ARM64: programs in user mode, the network, and WebKit built
+  for aarch64.
 - Drivers for what laptops still list without one: the SD card reader,
   the SMBus.
 - Images and external style sheets in the browser.

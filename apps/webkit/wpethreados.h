@@ -49,7 +49,7 @@ void wpe_threados_view_show_last(WPEView *view);
 /* How many frames views of this display have put on the screen */
 guint64 wpe_threados_frames_shown(void);
 
-/* Say every event the desktop sends on standard output (webview
+/* Say every event the desktop sends on standard output (weft
    --trace) */
 void wpe_threados_trace(gboolean on);
 

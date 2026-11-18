@@ -1485,7 +1485,7 @@ USER64_ELFS += $(BUILD)/user64/jsc.elf
 # --- WebKit: the WPE port ---------------------------------------------
 # WebCore and WebKit from the same release, through the WPE port: the
 # browser engine itself, in three programs (apps/webkit/programs.cmake)
-# - webview, the window; wpewebproc, which lays out, runs the scripts
+# - weft, the window; wpewebproc, which lays out, runs the scripts
 # of and paints a page; wpenetproc, which fetches. It paints with Skia
 # on the processor into shared memory, which apps/webkit/wpethreados.c
 # copies into a window: there is no EGL, no GPU, no GStreamer (so no
@@ -1503,7 +1503,7 @@ USER64_ELFS += $(BUILD)/user64/jsc.elf
 WPE_DIR      := $(WEBKIT_DIR)/wpe
 WPE_PATCHES  := $(sort $(wildcard apps/webkit/patches/*.patch))
 WPE_PATCHED  := $(WEBKIT_DIR)/patched.stamp
-WPE_PROGRAMS := webview wpewebproc wpenetproc
+WPE_PROGRAMS := weft wpewebproc wpenetproc
 WPE_ELFS     := $(WPE_PROGRAMS:%=$(BUILD)/user64/%.elf)
 WPE_PC       := glib-2.0 gio-2.0 gio-unix-2.0 gobject-2.0 gmodule-2.0 \
                 gthread-2.0 libsoup-3.0 libxml-2.0 sqlite3 libpng16 libjpeg \
@@ -1573,7 +1573,7 @@ $(WPE_DIR)/build.ninja: $(WPE_PATCHED) apps/webkit/threados.cmake \
 # As with jsc, ninja knows which of WebKit's files changed, and the
 # programs are linked again every time this runs
 $(WPE_ELFS) &: $(WPE_DIR)/build.ninja $(LIBC64) $(BUILD)/libc64/cxxrt.o \
-               libc/cxx/compat.h apps/webkit/webview.c \
+               libc/cxx/compat.h apps/webkit/weft.c \
                apps/webkit/wpethreados.c apps/webkit/wpethreados.h \
                apps/webkit/wpewebproc.cpp apps/webkit/wpenetproc.cpp \
                user64/usys64.h | $(BUILD)/user64

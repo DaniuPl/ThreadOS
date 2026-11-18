@@ -1,7 +1,7 @@
 // wpenetproc: WebKit's network process on ThreadOS
 //
 // The process that fetches what pages ask for, through libsoup, for
-// the UI process (apps/webkit/webview.c) and the web processes. HTTPS
+// the UI process (apps/webkit/weft.c) and the web processes. HTTPS
 // is glib-networking's OpenSSL backend, which GIO loads as a module
 // elsewhere; a ThreadOS program has no modules to load, so it is
 // registered here before WebKit's own entry point starts asking.

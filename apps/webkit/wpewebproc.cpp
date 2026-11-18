@@ -1,7 +1,7 @@
 // wpewebproc: WebKit's web process on ThreadOS
 //
 // The process that parses, lays out, runs the scripts of and paints a
-// page, started by the UI process (apps/webkit/webview.c) with its
+// page, started by the UI process (apps/webkit/weft.c) with its
 // socket's number in its arguments. WebKit's own entry point does all
 // of it; this is the program around it, named as ThreadOS names
 // programs (apps/webkit/patches/process-names.patch).

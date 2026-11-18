@@ -110,7 +110,7 @@ struct icon {
    Where the system has WebKit (apps64.img), the Web tile starts its
    browser instead (desktop_spawn_app). */
 #define WEB_APP "web"
-#define WEBKIT_APP "webview"
+#define WEBKIT_APP "weft"
 #define ART_N      22
 #define ART_LETTER 14
 #define ART_TRASH  15
@@ -2794,7 +2794,7 @@ static int desktop_spawn_app(const char *command)
         command_append(line, sizeof(line), &n, " /");
         return exec_spawn(line);
     }
-    /* The browser is WebKit's (webview) where the system has it - the
+    /* The browser is WebKit's (weft) where the system has it - the
        loader brought apps64.img (kernel/initrd.c) - and litehtml's
        otherwise */
     if (!strcmp(command, WEB_APP) && prog_exists(WEBKIT_APP))

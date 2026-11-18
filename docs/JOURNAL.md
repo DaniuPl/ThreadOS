@@ -9327,3 +9327,17 @@ works and is checked by `make test`.
       from the second page, an offset refused - line for line as glibc's
       build prints it; t_webkit's page has a bulleted and a numbered list
       and finds their markers drawn, which before had no pixels at all.
+
+- [x] **The browser is called Weft**
+      (apps/webkit/weft.c, programs.cmake, Makefile, kernel/desktop.c,
+      scripts/checkisa.py, scripts/tests/t_webkit.py, README.md)
+      webview was a name for what a program is, not for the program.
+      The browser is Weft - the thread a loom carries across, as the
+      browser goes across the web, and in Polish the same word as a
+      thread of a program. The program is weft (apps/webkit/weft.c),
+      its window and its start page say Weft, and what it says on the
+      serial port starts with [weft]. t_webkit now also waits for the
+      browser started from the dock to end before typing at the shell,
+      and clicks the bare desktop first: a window goes from the screen a
+      frame after its program ends, and the first key typed in between
+      was the closing window's.

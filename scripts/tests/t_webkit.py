@@ -2,7 +2,7 @@
 """ThreadOS smoke test: WebKit in a desktop window (64-bit kernel).
 
 WPE WebKit's three processes on ThreadOS (Makefile, `make webkit`):
-webview opens a window through the ThreadOS platform
+weft opens a window through the ThreadOS platform
 (apps/webkit/wpethreados.c) and WebKit starts wpenetproc, which fetches
 the page with libsoup, and wpewebproc, which parses it, runs its script
 in JavaScriptCore, lays it out and paints it with Skia on the processor
@@ -12,7 +12,7 @@ applications' image (apps64.img) the disc hands over beside the initrd.
 A page served from the host is loaded, and from outside:
 
   the page's script puts what it measured into its title, which
-  webview prints: the boxes' places and sizes - absolutely placed ones,
+  weft prints: the boxes' places and sizes - absolutely placed ones,
   and three flex items sharing a row with a gap - and a number written
   the Polish way by Intl (ICU). The same page in Chromium (Playwright,
   on this machine) and Node's Intl have to say the same
@@ -27,7 +27,7 @@ A page served from the host is loaded, and from outside:
   a click into the text field, letters typed and a click on the button
   run the page's handler, which puts what was typed into the title
 
-and then the browser around the page (apps/webkit/webview.c), driven
+and then the browser around the page (apps/webkit/weft.c), driven
 the way a person drives it and read off the screen:
 
   an address typed into the address field loads that page, and the
@@ -65,7 +65,7 @@ from ptest import _kernel_define as define
 
 BUILD = os.path.dirname(os.path.abspath(KERNEL64 or "build/x"))
 APPS = os.path.join(BUILD, "apps64.img")
-SRC = "apps/webkit/webview.c"
+SRC = "apps/webkit/weft.c"
 RED, BLUE = (0xC0, 0x30, 0x30), (0x33, 0x66, 0xCC)
 GREEN, BROWN = (0x22, 0xAA, 0x44), (0x80, 0x60, 0x40)
 PURPLE, TEAL = (0x80, 0x40, 0xC0), (0x20, 0x80, 0x80)
@@ -211,7 +211,7 @@ def tell(q, seen):
     did not happen: the lines worth reading, the last forty of them"""
     out = q.serial()[seen:].encode("latin1").decode("utf-8", "replace")
     keep = [l for l in out.replace("\r", "").split("\n")
-            if re.search(r"webview|wpe|WebKit|GLib|Gtk|kernel\]|!!|"
+            if re.search(r"weft|wpe|WebKit|GLib|Gtk|kernel\]|!!|thread64|"
                          r"error|ERROR|CRITICAL|WARNING|failed", l)]
     for line in keep[-40:]:
         print("   | " + line[:200])
@@ -233,7 +233,7 @@ def wait_colour(q, x, y, colour, timeout=60):
 
 class Band:
     """Where the browser's band is, from the page's origin on the screen
-    and webview.c's own layout numbers"""
+    and weft.c's own layout numbers"""
 
     def __init__(self, ox, oy):
         d = lambda n: define(SRC, n)
@@ -308,10 +308,10 @@ def browse(q, port, ox, oy):
     q.click(*band.field())
     time.sleep(1)
     q.type_line(f"10.0.2.2:{port}/two.html")
-    go = wait_line(q, seen, "[webview] go ", 30)
+    go = wait_line(q, seen, "[weft] go ", 30)
     check(f"an address typed into the field is taken as a web address "
-          f"({go})", go == f"[webview] go {base}/two.html")
-    done = wait_line(q, seen, f"[webview] load finished {base}/two.html", 120)
+          f"({go})", go == f"[weft] go {base}/two.html")
+    done = wait_line(q, seen, f"[weft] load finished {base}/two.html", 120)
     ok, got = wait_colour(q, *mid, PURPLE)
     check(f"and that page loads into the window ({got})",
           done is not None and ok)
@@ -333,13 +333,13 @@ def browse(q, port, ox, oy):
     ok, got = wait_colour(q, ox + 100, oy + 60, TEAL)
     seen = len(q.serial())
     q.click(ox + 100, oy + 60)
-    tab = wait_line(q, seen, "[webview] tab ", 30)
-    done = wait_line(q, seen, f"[webview] load finished {base}/three.html",
+    tab = wait_line(q, seen, "[weft] tab ", 30)
+    done = wait_line(q, seen, f"[weft] load finished {base}/three.html",
                      120)
     ok, got = wait_colour(q, *mid, ORANGE)
     check(f"a link to a new window opens a second tab, in front, with its "
           f"page ({tab}; {got})",
-          tab == "[webview] tab 2 of 2" and done is not None and ok)
+          tab == "[weft] tab 2 of 2" and done is not None and ok)
     time.sleep(1)
     names = [band.title(q, 0, 2), band.title(q, 1, 2)]
     check(f"the tabs are named after their pages ({names})",
@@ -347,44 +347,44 @@ def browse(q, port, ox, oy):
 
     seen = len(q.serial())
     q.click(*band.plus(2))
-    tab = wait_line(q, seen, "[webview] tab ", 30)
+    tab = wait_line(q, seen, "[weft] tab ", 30)
     ok, got = wait_colour(q, *mid, START)
     check(f"'+' opens a third tab with the start page ({tab}; {got})",
-          tab == "[webview] tab 3 of 3" and ok)
+          tab == "[weft] tab 3 of 3" and ok)
 
     seen = len(q.serial())
     q.click(*band.tab(0, 3))
-    tab = wait_line(q, seen, "[webview] tab ", 30)
+    tab = wait_line(q, seen, "[weft] tab ", 30)
     ok, got = wait_colour(q, *mid, PURPLE)
     check(f"a click on the first tab brings its page back ({tab}; {got})",
-          tab == "[webview] tab 1 of 3" and ok)
+          tab == "[weft] tab 1 of 3" and ok)
 
     seen = len(q.serial())
     q.click(*band.close(2, 3))
-    tab = wait_line(q, seen, "[webview] tab ", 30)
+    tab = wait_line(q, seen, "[weft] tab ", 30)
     check(f"the close button of the last tab closes it; the first stays "
-          f"in front ({tab})", tab == "[webview] tab 1 of 2")
+          f"in front ({tab})", tab == "[weft] tab 1 of 2")
     seen = len(q.serial())
     q.sendkey("ctrl-w")
-    tab = wait_line(q, seen, "[webview] tab ", 30)
+    tab = wait_line(q, seen, "[weft] tab ", 30)
     ok, got = wait_colour(q, *mid, ORANGE)
     check(f"Ctrl+W closes the tab in front, and the other comes forward "
-          f"({tab}; {got})", tab == "[webview] tab 1 of 1" and ok)
+          f"({tab}; {got})", tab == "[weft] tab 1 of 1" and ok)
     seen = len(q.serial())
     q.sendkey("ctrl-w")
-    end = wait_line(q, seen, "[webview] done, exit code", 60)
+    end = wait_line(q, seen, "[weft] done, exit code", 60)
     check(f"closing the last tab ends the program, cleanly ({end})",
           end is not None
-          and re.match(r"\[webview\] done, exit code 0\b", end))
+          and re.match(r"\[weft\] done, exit code 0\b", end))
 
 
 def from_dock(q, port):
     """The dock's Web tile: this browser, waiting for an address"""
     seen = len(q.serial())
     q.launch_dock("web", n_w=0)
-    tab = wait_line(q, seen, "[webview] tab ", 120)
+    tab = wait_line(q, seen, "[weft] tab ", 120)
     check(f"the dock's Web tile starts the WebKit browser ({tab})",
-          tab == "[webview] tab 1 of 1")
+          tab == "[weft] tab 1 of 1")
     page = None
     end = time.time() + 120
     while page is None and time.time() < end:
@@ -396,14 +396,20 @@ def from_dock(q, port):
     check(f"with the start page in its window ({page})", page is not None)
     seen = len(q.serial())
     q.type_line(f"10.0.2.2:{port}/two.html")
-    done = wait_line(q, seen, "[webview] load finished http", 120)
+    done = wait_line(q, seen, "[weft] load finished http", 120)
     ok = page is not None and wait_colour(
         q, page[0] + 320, page[1] + 300, PURPLE)[0]
     check(f"and the cursor in the address field: an address typed there "
           f"loads ({done})",
-          done == f"[webview] load finished http://10.0.2.2:{port}/two.html"
+          done == f"[weft] load finished http://10.0.2.2:{port}/two.html"
           and ok)
+    # Its only tab closed, it ends - and until it has, the keys typed
+    # next would still be its window's, not the shell's
+    seen = len(q.serial())
     q.sendkey("ctrl-w")
+    end = wait_line(q, seen, "[kernel] process 'weft' has ended", 60)
+    check(f"Ctrl+W on its only tab ends it ({end})",
+          end == "[kernel] process 'weft' has ended (code 0)")
 
 
 def start_proxy():
@@ -437,11 +443,17 @@ def via_proxy(q):
     pport, asked, stop = start_proxy()
     try:
         page = "http://threados.invalid/through-the-proxy"
+        # The keys to the shell: the window of the browser just closed
+        # goes from the screen a frame after its program ends
+        q.click_desktop()
+        time.sleep(1)
         seen = len(q.serial())
-        q.type_line(f"run webview --proxy http://10.0.2.2:{pport} {page}")
-        title = wait_line(q, seen, "[webview] title ", 180)
+        q.type_line(f"run weft --proxy http://10.0.2.2:{pport} {page}")
+        title = wait_line(q, seen, "[weft] title ", 180)
         check(f"with --proxy the page comes from the proxy ({title})",
-              title == "[webview] title proxied")
+              title == "[weft] title proxied")
+        if title != "[weft] title proxied":
+            tell(q, seen)
         check(f"which was asked for it by its whole address ({asked})",
               page in asked)
         page_box = None
@@ -454,7 +466,7 @@ def via_proxy(q):
         check(f"and it is on the screen ({page_box})",
               page_box is not None and page_box[2] - page_box[0] >= 600)
         q.sendkey("ctrl-w")
-        wait_line(q, seen, "[webview] done, exit code", 60)
+        wait_line(q, seen, "[weft] done, exit code", 60)
     finally:
         stop()
 
@@ -504,22 +516,22 @@ def main():
             check("the desktop comes up", q.wait_desktop())
             q.mouse_home()
             seen = len(q.serial())
-            q.type_line(f"run webview http://10.0.2.2:{port}/page.html")
+            q.type_line(f"run weft http://10.0.2.2:{port}/page.html")
 
-            done = wait_line(q, seen, "[webview] load finished", 300)
+            done = wait_line(q, seen, "[weft] load finished", 300)
             check(f"WebKit fetches and loads the page ({done})",
                   done is not None and "/page.html" in done)
             if done is None or "/page.html" not in done:
                 time.sleep(5)
                 tell(q, seen)
-            title = wait_line(q, seen, "[webview] title ready", 120)
-            got = title[len("[webview] title "):] if title else None
+            title = wait_line(q, seen, "[weft] title ready", 120)
+            got = title[len("[weft] title "):] if title else None
             check(f"the page's script ran and measured the page: ThreadOS "
                   f"{got!r}, Chromium {want!r}", got == want)
             check(f"Intl wrote the number the Polish way, as Node's ICU does "
                   f"({num!r})", got is not None and num is not None and
                   got.endswith("num=" + num))
-            frame = wait_line(q, seen, "[webview] frame shown", 120)
+            frame = wait_line(q, seen, "[weft] frame shown", 120)
             check("a frame of the page reaches the window", frame is not None)
 
             time.sleep(2)
@@ -565,10 +577,10 @@ def main():
             q.type_line("abc", enter=False)
             time.sleep(1)
             q.click(ox + 310, oy + 255)                # the button
-            clicked = wait_line(q, seen, "[webview] title clicked", 60)
+            clicked = wait_line(q, seen, "[weft] title clicked", 60)
             check(f"a click, letters typed and a click on the button reach "
                   f"the page's handler ({clicked})",
-                  clicked == "[webview] title clicked abc")
+                  clicked == "[weft] title clicked abc")
 
             browse(q, port, ox, oy)
             from_dock(q, port)
