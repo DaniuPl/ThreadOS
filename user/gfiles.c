@@ -523,11 +523,15 @@ static void open_chosen(void)
             suffix_is(nm, ln, ".m4v") || suffix_is(nm, ln, ".mov") ||
             suffix_is(nm, ln, ".mkv") || suffix_is(nm, ln, ".avi") ||
             suffix_is(nm, ln, ".webm");
-    const char *prog = picture ? "gimg" : media ? "gmedia" : "gedit";
+    /* An application package opens in the window that installs it */
+    int package = suffix_is(nm, ln, ".tapp");
+    const char *prog = package ? "gtapp" : picture ? "gimg" :
+                       media ? "gmedia" : "gedit";
 
     char cmd[NAME_LEN + 10];
     int n = 0;
-    const char *pre = picture ? "gimg " : media ? "gmedia " : "gedit ";
+    const char *pre = package ? "gtapp " : picture ? "gimg " :
+                      media ? "gmedia " : "gedit ";
     for (int i = 0; pre[i]; i++)
         cmd[n++] = pre[i];
     ecopy(cmd + n, items[chosen].name, (int)sizeof(cmd) - n);
@@ -540,7 +544,8 @@ static void open_chosen(void)
         sys_exec(prog, args);
         sys_exit(127);
     }
-    ecopy(note, media ? "opened in the media player" :
+    ecopy(note, package ? "opened as a package" :
+               media ? "opened in the media player" :
                picture ? "opened in the viewer" : "opened in the editor",
           sizeof(note));
 }

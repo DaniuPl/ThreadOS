@@ -9416,3 +9416,25 @@ works and is checked by `make test`.
       dock and its program runs; the same version again is refused; the
       package is on the disk byte for byte as mtools reads it, and the
       next start takes it from there.
+
+- [x] **A package opens in a window that installs it: gtapp**
+      (user/gtapp.c, user/utapp.h, user/tapp.c, user/gfiles.c,
+      kernel/desktop.c, Makefile, scripts/tests/t_appsinst.py, t_tapp.py)
+      A .tapp double-clicked in the Files app, on the Desktop or among
+      the search's results opens gtapp: the package's name and version,
+      the program it runs and its size, and whether the system's key
+      signed it. A signed one has an Install button; one that is not
+      has only Close and the window says why. When the kernel says the
+      session has no right to install, the window asks for the
+      administrator's password, as the installer's does, and gives the
+      right back when it closes. Reading and checking a package moved
+      into user/utapp.h, which tapp and gtapp share, so the window and
+      'tapp verify' cannot disagree.
+      t_appsinst puts a signed package on the installed system's Desktop
+      and double-clicks it: gtapp's window, read off the screen, says
+      what it is and that it is signed, Install installs it, and the
+      program runs; t_tapp opens the same window on a system started
+      from a disc, where Install says that only an installed system
+      takes packages. (The password is not asked in either - both
+      sessions have the right - so that path is the installer's code,
+      tested there, and not tested here.)

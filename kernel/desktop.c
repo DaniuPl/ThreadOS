@@ -5452,8 +5452,13 @@ static void search_go(int i)
                     ends_with_ci(f.name, ".mkv") ||
                     ends_with_ci(f.name, ".avi") ||
                     ends_with_ci(f.name, ".webm");
-        const char *app = picture ? "gimg" : media ? "gmedia" : "gedit";
-        const char *with = picture ? "gimg " : media ? "gmedia " : "gedit ";
+        /* and a package with the window that installs it, as the
+           Files app opens it (user/gfiles.c) */
+        int package = ends_with_ci(f.name, ".tapp");
+        const char *app = package ? "gtapp" : picture ? "gimg" :
+                          media ? "gmedia" : "gedit";
+        const char *with = package ? "gtapp " : picture ? "gimg " :
+                           media ? "gmedia " : "gedit ";
         char where[64], path[160], cmd[192];
         search_files_dir(where, sizeof(where));
         if (!path_append(path, sizeof(path), where, f.name))

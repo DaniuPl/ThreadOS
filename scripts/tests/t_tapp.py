@@ -41,6 +41,8 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import check, summary, make_iso64, no64, DOCK_N, dock_tile
+from ptest import (cascade, TITLE_H, CONTENT_DY, UD_PX, ui_font_baseline_in,
+                   _kernel_define)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))
@@ -48,6 +50,13 @@ BUILD = os.path.dirname(os.path.abspath(KERNEL64 or "build/x"))
 ECHO = os.path.join(BUILD, "user64", "uecho64.elf")
 MKTAPP = os.path.join(ROOT, "scripts", "mktapp.py")
 PROMPT = "thread64>"
+GT_W = _kernel_define("user/gtapp.c", "W0")
+GT_H = _kernel_define("user/gtapp.c", "H0")
+GT_ROW_H = _kernel_define("user/gtapp.c", "ROW_H")
+GT_ROW_Y0 = _kernel_define("user/gtapp.c", "ROW_Y0")
+GT_BTN_W = _kernel_define("user/gtapp.c", "BTN_W")
+GT_BTN_H = _kernel_define("user/gtapp.c", "BTN_H")
+GT_GAP = _kernel_define("user/gtapp.c", "BTN_GAP")
 
 
 def mktapp(out, *args):
@@ -202,12 +211,13 @@ def main():
                       f"says ({host['bad']!r})",
                       "bad.tapp: NOT signed by the system's key" in out and
                       host["bad"] == "NOT signed by that key")
-                run(q, "run httpget 10.0.2.2 %d /hello.tapp hello.tapp"
+                run(q, "run httpget 10.0.2.2 %d /hello.tapp /hello.tapp"
                     % port, "[httpget] done")
-                out = run(q, "run tapp verify hello.tapp", "[tapp] done", 120)
+                out = run(q, "run tapp verify /hello.tapp", "[tapp] done",
+                          120)
                 check("the same package as a file on the disk is signed too",
-                      "hello.tapp: signed by the system's key" in out)
-                out = run(q, "run tapp info hello.tapp", "[tapp] done")
+                      "/hello.tapp: signed by the system's key" in out)
+                out = run(q, "run tapp info /hello.tapp", "[tapp] done")
                 check("'tapp info' prints the manifest and the entries",
                       "ThreadOS app" in out and "id hello" in out and
                       "exec tapphi" in out and "dock yes" in out and
@@ -234,6 +244,54 @@ def main():
                 check("and a click on it starts hello's program",
                       "process 'tapphi' has ended (code 0)"
                       in q.serial()[seen:])
+
+                # --- the window a package opens in: on a system that was
+                # not started from its disk, Install is told what the
+                # kernel says of one
+                q.click_desktop()
+                time.sleep(1)
+                q.type_line("run gtapp /hello.tapp")
+                sw, sh = q.size()
+                where = None
+                end = time.time() + 40
+                while time.time() < end and where is None:
+                    time.sleep(0.5)
+                    for slot in range(8):
+                        x, y = cascade(slot, GT_W + 2, GT_H + TITLE_H + 2,
+                                       w=sw, h=sh)
+                        if q.window_title(x, y, GT_W + 2) == "Package":
+                            where = (x + 1, y + CONTENT_DY)
+                            break
+                check("gtapp opens a window for the package", where is not None)
+                if where is not None:
+                    cx, cy = where
+
+                    def rows(n=11):
+                        return q.read_ui_lines(
+                            cx + 10, cx + GT_W - 4,
+                            [cy + ui_font_baseline_in(
+                                UD_PX, GT_ROW_Y0 + r * GT_ROW_H, GT_ROW_H)
+                             for r in range(n)], px=UD_PX)
+
+                    q.mouse_goto(sw - 4, sh - 4)
+                    time.sleep(1)
+                    text = rows()
+                    check(f"which says what the package is and that the "
+                          f"system's key signed it ({text!r})",
+                          "Hello, version 2" in text and
+                          "Signed by the system's key" in text)
+                    span = 2 * GT_BTN_W + GT_GAP
+                    q.click(cx + (GT_W - span) // 2 + GT_BTN_W // 2,
+                            cy + GT_H - GT_BTN_H - 12 + GT_BTN_H // 2)
+                    q.mouse_goto(sw - 4, sh - 4)
+                    end = time.time() + 30
+                    text = rows()
+                    while time.time() < end and "Only" not in text:
+                        time.sleep(1)
+                        text = rows()
+                    check(f"and Install says that only an installed system "
+                          f"takes packages ({text!r})",
+                          "Only an installed system takes packages" in text)
             finally:
                 q.close()
         finally:

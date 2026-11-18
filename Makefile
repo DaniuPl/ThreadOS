@@ -715,7 +715,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/randtest.elf \
                $(BUILD)/user64/curl.elf $(BUILD)/user64/fonttest.elf \
                $(BUILD)/user64/update.elf $(BUILD)/user64/wpedeps.elf \
-               $(BUILD)/user64/tapp.elf
+               $(BUILD)/user64/tapp.elf $(BUILD)/user64/gtapp.elf
 
 # --- C++, and litehtml ------------------------------------------------
 #
@@ -1772,7 +1772,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    mbedtest=$(BUILD)/user64/mbedtest.elf \
 	    js=$(BUILD)/user64/js.elf \
 	    jsc=$(BUILD)/user64/jsc.elf \
-	    update=$(BUILD)/user64/update.elf tapp=$(BUILD)/user64/tapp.elf \
+	    update=$(BUILD)/user64/update.elf tapp=$(BUILD)/user64/tapp.elf gtapp=$(BUILD)/user64/gtapp.elf \
 	    iwl3160.ucode=third_party/iwlwifi/iwlwifi-3160-17.ucode \
 	    cacert.pem=third_party/cacert/cacert.pem \
 	    version=$(VERSION_FILE) version-code=$(VERSION_CODE_FILE)

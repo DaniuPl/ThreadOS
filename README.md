@@ -349,7 +349,11 @@ installer copies them to `\EFI\ThreadOS\apps`. `tapp` lists them,
 checks a package - one the system has, or a file - against the system's
 key, and `sudo run tapp install FILE` puts a package signed by that key
 onto the installed system: into `\EFI\ThreadOS\apps`, its programs
-running at once and its tile in the dock. The EFI partition is as trusted as the kernel on it, so packages a
+running at once and its tile in the dock. A double click on a `.tapp`
+in the Files app, on the Desktop or in the search opens `gtapp`, a
+window that says what the package is and whether it is signed, and
+installs it with one button (asking for the administrator's password
+when the session does not have the right). The EFI partition is as trusted as the kernel on it, so packages a
 loader finds there are not checked at boot.
 
 ```sh

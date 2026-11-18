@@ -20,12 +20,16 @@ says so before anything is written. Three disks, one for each answer:
     and the installed system, started on its own, its loader finding
     the package in its directory and running a program out of it.
 
-And a package installed on that system while it runs ('tapp install'):
-refused while it is signed by a key the system does not trust, and an
-unsigned one always; once update.key holds the test's key, written into
+And a package installed on that system while it runs: 'tapp install'
+refuses it while it is signed by a key the system does not trust, and
+an unsigned one always; once update.key holds the test's key, a double
+click on it in the Files app opens gtapp, whose window - read off the
+screen - says what it is and that it is signed, and whose Install asks
+for the administrator's password and then installs it: written into
 /EFI/ThreadOS/apps, its program running at once and its tile in the
-dock, refused a second time as the version it has, read back off the
-disk by mtools, and there again - from the disk - at the next start.
+dock. 'tapp install' refuses it a second time as the version it has;
+mtools reads it back off the disk, and the next start takes it from
+there.
 
 What is on the disks afterwards is read by mtools, not asked of the
 system that wrote it. The case of a whole disk too small for the
@@ -47,7 +51,8 @@ from ptest import *          # noqa: F401,F403
 from ptest import _kernel_define, _at, MTOOLS_ENV
 from ptest import (check, summary, no64, make_gpt_disk, mtools_ok,
                    fat_format, fat_put, fat_get, gpt_read, stick_starts_live,
-                   SERVED, start_http_server)
+                   SERVED, start_http_server, cascade, TITLE_H, CONTENT_DY,
+                   UD_PX, ui_font_baseline_in, BAR_H)
 from mkblob import blob as pattern
 
 ESP_MIB_APPS = _kernel_define("kernel/install.c", "ESP_MIB_APPS")
@@ -142,6 +147,84 @@ def beside(work, esp, apps, esp_mib, fill_to=None):
 
 
 HELLO = {}
+GT_W = _kernel_define("user/gtapp.c", "W0")
+GT_H = _kernel_define("user/gtapp.c", "H0")
+GT_ROW_H = _kernel_define("user/gtapp.c", "ROW_H")
+GT_ROW_Y0 = _kernel_define("user/gtapp.c", "ROW_Y0")
+GT_BTN_W = _kernel_define("user/gtapp.c", "BTN_W")
+GT_BTN_H = _kernel_define("user/gtapp.c", "BTN_H")
+GT_GAP = _kernel_define("user/gtapp.c", "BTN_GAP")
+
+
+def installed_from_files(q, port):
+    """hello.tapp on the Desktop, double-clicked: the desktop has the
+    Files app open it (gfiles --open-index), which opens a package in
+    the window that installs it"""
+    q.command("run httpget 10.0.2.2 %d /hello.tapp Desktop/hello.tapp"
+              % port, "[httpget] done", timeout=60)
+    # The first file on the Desktop, after the three shortcuts, where a
+    # desktop nobody rearranged lays it out (t_desktop64)
+    time.sleep(4)
+    q.mouse_goto(10 + 3 * 88 + 38, BAR_H + 8 + 34)
+    time.sleep(0.4)
+    q.double_click()
+    # Out of the way: the window opens where the pointer is, and a
+    # pointer over its title is a title nobody can read
+    sw, sh = q.size()
+    time.sleep(0.5)
+    q.mouse_goto(sw - 4, sh - 4)
+    where = None
+    end = time.time() + 40
+    while time.time() < end and where is None:
+        time.sleep(0.5)
+        for slot in range(8):
+            x, y = cascade(slot, GT_W + 2, GT_H + TITLE_H + 2, w=sw, h=sh)
+            if q.window_title(x, y, GT_W + 2) == "Package":
+                where = (x + 1, y + CONTENT_DY)
+                break
+    check("a double click on the package on the Desktop opens the window "
+          "that installs it", where is not None)
+    if where is None:
+        return
+    cx, cy = where
+
+    def rows(n=11):
+        return q.read_ui_lines(cx + 10, cx + GT_W - 4,
+                               [cy + ui_font_baseline_in(
+                                   UD_PX, GT_ROW_Y0 + r * GT_ROW_H, GT_ROW_H)
+                                for r in range(n)], px=UD_PX)
+
+    q.mouse_goto(sw - 4, sh - 4)
+    time.sleep(1)
+    text = rows()
+    check(f"it says what the package is and that the system's key signed "
+          f"it ({text!r})",
+          "Hello, version 1" in text and "hello - runs tapphi" in text and
+          "Signed by the system's key" in text and
+          "It goes into /EFI/ThreadOS/apps" in text)
+    span = 2 * GT_BTN_W + GT_GAP
+    install = (cx + (GT_W - span) // 2 + GT_BTN_W // 2,
+               cy + GT_H - GT_BTN_H - 12 + GT_BTN_H // 2)
+    # The shell behind an administrator's desktop is the administrator's,
+    # and so is what it starts: no password is asked here (t_tapp asks
+    # for one, in a session that is not an administrator's)
+    seen = len(q.serial())
+    q.click(*install)
+    end = time.time() + 60
+    text = rows()
+    while time.time() < end and "Installed" not in text:
+        time.sleep(1)
+        text = rows()
+    check(f"Install installs it ({text!r})",
+          "Installed - it runs now" in text and
+          "Package hello 1 installed" in q.serial()[seen:])
+    # Close, and the keys back to the shell
+    q.click(cx + GT_W // 2, cy + GT_H - GT_BTN_H - 12 + GT_BTN_H // 2)
+    end = time.time() + 20
+    while time.time() < end and "'gtapp' has ended" not in q.serial()[seen:]:
+        time.sleep(0.5)
+    q.click_desktop()
+    time.sleep(1)
 
 
 def installed_while_running(q, work):
@@ -188,12 +271,10 @@ def installed_while_running(q, work):
               "plain.tapp: has no signature" in out and
               "not installed" in out)
         seen = len(q.serial())
-        out = q.sudo("run tapp install hello.tapp", "[tapp] done",
-                     timeout=120)
+        installed_from_files(q, port)
         check("one signed by the key in update.key is: written, and its "
               "programs run now",
-              "hello.tapp: installed - its programs run now" in out and
-              "Package hello 1 installed: Hello" in out)
+              "Package hello 1 installed: Hello" in q.serial()[seen:])
         end = time.time() + 20
         while time.time() < end and "a tile for the package hello" not in \
                 q.serial()[seen:]:
@@ -206,6 +287,9 @@ def installed_while_running(q, work):
         check("and its program runs",
               "installed-just-now" in out and
               "[tapphi] done, exit code 0" in out)
+        if "[tapphi] done" not in out:
+            print("   | " + "\n   | ".join(
+                q.serial()[-1500:].replace("\r", "").split("\n")))
         out = q.sudo("run tapp install hello.tapp", "[tapp] done",
                      timeout=120)
         check("the same version a second time is refused",
