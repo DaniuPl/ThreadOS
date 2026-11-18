@@ -10297,3 +10297,29 @@ works and is checked by `make test`.
       around the card as the wallpaper dimmed, and the glint brighter
       at the corner facing the light than across from it or along the
       top edge.
+- [x] **The shade as an iPhone's Control Center; the status bar's battery
+      and bars as an iPhone's** (kernelarm64/mobile.c,
+      scripts/tests/t_arm64apps.py, t_arm64weft.py, t_arm64tablet.py)
+      Asked for from screenshots of iOS 26. The shade was a clock and six
+      wide tiles with a slider across; it is now a grid of four columns
+      (CC_*): a square of four round buttons - airplane mode, the network
+      (which opens its settings), dark mode, battery saver - two sliders
+      standing up, brightness and volume, filled from the foot inside
+      the pill's round ends, a Focus pill (do not disturb), round buttons
+      to turn the phone on its side and for the flashlight, and a row
+      that opens the Calculator, the Recorder, Notes and Settings. All of
+      it is the same glass as the rest, a control that is on filled in
+      its colour. A slider follows the finger, and a drag that began on
+      one is not the swipe up that closes the shade. Wider than high -
+      a phone on its side, a tablet - the grid is as tall as the screen
+      lets it be and the notifications go beside it, not below. The
+      status bar's battery is a pill with a faint outline and nub, its
+      fill rounded; the network's bars are rounded, those not lit
+      fainter. t_arm64apps finds every control where cc_box puts it
+      (worked out again from the same constants), sets the volume a
+      quarter up the slider (24%), drags the brightness down to 13% and
+      up past its top to 100% with the shade still open, turns the phone
+      on its side and back from it, and opens the Calculator from it;
+      the notifications are read where notes_area puts them. Two old
+      checks read the serial port from its start and took this run's
+      new lines for theirs: they read from a mark now.

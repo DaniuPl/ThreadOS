@@ -86,10 +86,12 @@ def home(q, lw, lh, size):
           f"to {dx + dw} ({inside} inside, {outside} out)",
           inside[0] != outside[0] and inside[1] != outside[1])
     bx = lw - m("MOB_BATT_RIGHT") - m("MOB_BATT_W")
-    white = (255, 255, 255)
-    check("the battery against the status bar's right edge",
-          at(bx * K, 8 * K) == white and
-          at((bx + m("MOB_BATT_W") - 1) * K, 12 * K) == white)
+    full = ((255, 255, 255), (0x30, 0xD1, 0x58))    # its fill, or charging
+    fill = at((bx + 3) * K, 14 * K)
+    past = at((bx + m("MOB_BATT_W") + 6) * K, 14 * K)
+    check(f"the battery against the status bar's right edge: filled at "
+          f"its left ({fill}), nothing past its nub ({past})",
+          fill in full and past not in full)
 
 
 def shell():

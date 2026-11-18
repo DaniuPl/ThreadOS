@@ -35,10 +35,15 @@ against FreeType, colours pixel by pixel - and the serial port:
   screen 480 x 853, the grid's tile where that scale puts it, and a tap
   at the new size's places reaching the dock)
 
-  the shade: pulled down from the status bar; the flashlight's tile
-  switches it on and off; with do not disturb on,
-  the program's notification makes no banner but is first in the list,
-  the network's after it; off, it makes a banner; Clear empties the list
+  the shade, as an iPhone's Control Center: pulled down from the status
+  bar; the flashlight's round button switches it on and off; the volume
+  slider takes the value where it is touched, the brightness slider
+  follows a finger down and up past its top without the shade taking
+  that for a swipe that closes it; the turn button lays the phone on
+  its side and back; with Focus (do not disturb) on, the program's
+  notification makes no banner but is first in the list, the network's
+  after it; off, it makes a banner; Clear empties the list; the
+  calculator's round button opens the Calculator
 """
 
 import decimal
@@ -450,20 +455,122 @@ def array_accent(i):
 
 # --- the shade and notifications -------------------------------------------
 
+# mobile.c's Control Center: its controls in order, and the grid cells of
+# those past the square of four round buttons
+CC_ORDER = ["airplane", "network", "dark", "saver", "bright", "volume",
+            "dnd", "turn", "torch", "calc", "rec", "notes", "settings"]
+CC_CELLS = {"bright": (2, 0, 1, 2), "volume": (3, 0, 1, 2),
+            "dnd": (0, 2, 2, 1), "turn": (2, 2, 1, 1), "torch": (3, 2, 1, 1),
+            "calc": (0, 3, 1, 1), "rec": (1, 3, 1, 1), "notes": (2, 3, 1, 1),
+            "settings": (3, 3, 1, 1)}
+
+
+def cc_unit(lw=LW, lh=LH):
+    gap = m("CC_GAP")
+    across = (min(lw - 2 * m("CC_SIDE"), m("CC_MAXW")) - 3 * gap) // 4
+    down = (lh - m("CC_TOP") - m("CC_FOOT") - 3 * gap) // 4
+    return min(across, down)
+
+
+def cc_left(lw=LW, lh=LH):
+    width = 4 * cc_unit(lw, lh) + 3 * m("CC_GAP")
+    return m("CC_SIDE") if lw > lh else (lw - width) // 2
+
+
+def cc_box(name, lw=LW, lh=LH):
+    """mobile.c's cc_box: x, y, w, h of a control, logical pixels"""
+    u, gap, top, pad = cc_unit(lw, lh), m("CC_GAP"), m("CC_TOP"), m("CC_PAD")
+    left, i = cc_left(lw, lh), CC_ORDER.index(name)
+    if i < 4:
+        d = (2 * u + gap - 3 * pad) // 2
+        return (left + pad + (i % 2) * (d + pad),
+                top + pad + (i // 2) * (d + pad), d, d)
+    col, row, cols, rows = CC_CELLS[name]
+    return (left + col * (u + gap), top + row * (u + gap),
+            cols * u + (cols - 1) * gap, rows * u + (rows - 1) * gap)
+
+
+def said_after(q, seen, text, timeout=20):
+    """The serial port's text since 'seen', once 'text' is in it (or as
+    it is when the time is up)"""
+    end = time.time() + timeout
+    while time.time() < end:
+        out = q.serial()[seen:]
+        if text in out:
+            return out
+        time.sleep(0.3)
+    return q.serial()[seen:]
+
+
+def cc_xy(name, lw=LW, lh=LH):
+    x, y, w, h = cc_box(name, lw, lh)
+    return x + w // 2, y + h // 2
+
+
+def notes_area(lw=LW, lh=LH):
+    """mobile.c's notes_area, upright: the heading's baseline, the cards'
+    left and the first one's top"""
+    width = 4 * cc_unit(lw, lh) + 3 * m("CC_GAP")
+    w = min(lw - 24, width + 24)
+    head = m("CC_TOP") + width + m("CC_NOTES_DOWN")
+    return head, (lw - w) // 2, head + m("CC_CARDS_DOWN")
+
+
 def shade(app):
     q = app.q
     app.home()
     q.touch([(180, 8), (180, 150), (180, 300)])
     app.said("[mobile] shade (opened)")
-    tile = m("MOB_SHADE_TILE_Y") + m("MOB_SHADE_TILE_STEP") + 20
-    dnd_x = 12 + (LW - 36) // 2 + 12 + 40           # MOB_SHADE_TILE_W
-    q.tap(dnd_x, tile)                               # do not disturb
+    q.tap(*cc_xy("dnd"))                             # Focus: do not disturb
     app.said("[mobile] do not disturb on")
-    torch = m("MOB_SHADE_TILE_Y") + 2 * m("MOB_SHADE_TILE_STEP") + 20
-    q.tap(40, torch)
+    q.tap(*cc_xy("torch"))
     app.said("[mobile] flashlight on")
-    q.tap(40, torch)
+    q.tap(*cc_xy("torch"))
     app.said("[mobile] flashlight off")
+    # the volume where the finger touches its slider, a quarter up
+    x, y, w, h = cc_box("volume")
+    tap_y = y + h - h // 4
+    seen = len(q.serial())
+    q.tap(x + w // 2, tap_y)
+    vol = (y + h - tap_y) * 100 // h
+    out = said_after(q, seen, "[mobile] volume ")
+    check(f"the shade's volume slider: a quarter of the way up is "
+          f"{vol}% ({said_line(out, '[mobile] volume')})",
+          f"[mobile] volume {vol}%" in out)
+    # the brightness dragged down and back up past its top: the finger
+    # goes up, as a swipe that closes the shade would, but began on the
+    # slider; the screen as bright as it was for what follows
+    x, y, w, h = cc_box("bright")
+    seen = len(q.serial())
+    q.touch([(x + w // 2, y + 20 + i * (h - 40) // 6) for i in range(7)])
+    low_y = y + 20 + 6 * (h - 40) // 6
+    low = max(10, (y + h - low_y) * 100 // h)
+    out = said_after(q, seen, f"[mobile] brightness {low}%")
+    seen2 = len(q.serial())
+    q.touch([(x + w // 2, low_y - i * (h - 20) // 6) for i in range(7)])
+    full = said_after(q, seen2, "[mobile] brightness 100%")
+    check(f"the brightness slider follows the finger, down to {low}% and "
+          f"up to 100%, the shade still open",
+          f"[mobile] brightness {low}%" in out and
+          "[mobile] brightness 100%" in full and
+          "shade (closed)" not in q.serial()[seen:])
+    # the phone turned on its side from the shade, its controls laid
+    # out for that, and turned back
+    seen = len(q.serial())
+    q.tap(*cc_xy("turn"))
+    out = said_after(q, seen, "[mobile] landscape")
+    q.LOGICAL = (LH, LW)
+    time.sleep(1)
+    seen = len(q.serial())
+    q.tap(*cc_xy("turn", LH, LW))
+    back_up = said_after(q, seen, "[mobile] portrait")
+    q.LOGICAL = (LW, LH)
+    time.sleep(1)
+    check(f"the shade's phone turns it on its side "
+          f"({said_line(out, '[mobile] landscape')}) and back upright "
+          f"({said_line(back_up, '[mobile] portrait')})",
+          f"[mobile] landscape, {LH}x{LW}" in out and
+          f"[mobile] portrait, {LW}x{LH}" in back_up)
     q.touch([(180, 500), (180, 350), (180, 200)])
     app.said("[mobile] shade (closed)")
 
@@ -476,16 +583,17 @@ def shade(app):
           f"({quiet!r})", quiet != "Test")
     q.touch([(180, 8), (180, 150), (180, 300)])
     app.said("[mobile] shade (opened)")
-    cy, step = m("MOB_SHADE_CARD_Y"), m("MOB_SHADE_CARD_STEP")
+    head, cx, cy = notes_area()
+    step = m("MOB_SHADE_CARD_STEP")
     scr = app.screen()
-    cards = [(app.read(28, LW - 60, cy + i * step + 24, 15, face="bold",
+    cards = [(app.read(cx + 16, LW - 60, cy + i * step + 24, 15, face="bold",
                        scr=scr),
-              app.read(28, LW - 20, cy + i * step + 44, 13, fg=MUTED,
+              app.read(cx + 16, LW - 20, cy + i * step + 44, 13, fg=MUTED,
                        scr=scr)) for i in range(2)]
     check(f"but the shade lists it first, the network's after it "
           f"({cards})", cards == [("Test", "Hello from a program"),
                                   ("Network", "Connected, 10.0.2.15")])
-    q.tap(dnd_x, tile)
+    q.tap(*cc_xy("dnd"))
     app.said("[mobile] do not disturb off")
     q.touch([(180, 500), (180, 350), (180, 200)])
     app.said("[mobile] shade (closed)")
@@ -499,12 +607,17 @@ def shade(app):
           banner == "Test")
     q.touch([(180, 8), (180, 150), (180, 300)])
     app.said("[mobile] shade (opened)")
-    q.tap(LW - 40, m("MOB_SHADE_NOTE_Y") - 6)
+    q.tap(LW - 40, head - 6)
     app.said("[mobile] notifications cleared")
     empty = app.read(0, LW, cy + 34, 15, fg=MUTED)
     check(f"Clear empties the list ({empty!r})", empty == "No notifications")
-    q.touch([(180, 500), (180, 350), (180, 200)])
-    app.said("[mobile] shade (closed)")
+    # an app from the shade's round buttons
+    seen = len(q.serial())
+    q.tap(*cc_xy("calc"))
+    out = said_after(q, seen, "[mobile] Calculator (the shade)")
+    check("the shade's calculator button opens the Calculator",
+          "[mobile] Calculator (the shade)" in out)
+    app.home()
 
 
 def navigation(app):
@@ -677,7 +790,7 @@ def glass(app):
     q.touch([(180, 8), (180, 150), (180, 300)])
     app.said("[mobile] shade (opened)")
     w, h, at = app.screen()
-    px, py = 180 * K, 520 * K
+    px, py = 6 * K, 520 * K                 # beside the controls and cards
     got = at(px, py)
     want = backdrop(home, px, py)
     q.touch([(180, 500), (180, 350), (180, 200)])
@@ -748,9 +861,9 @@ def display_size(app):
     page(app, "display")
     q.tap(180, row_y(DISPLAY["size"]))
     app.said("[settings] Display size")
-    out = None
+    seen = len(q.serial())
     q.tap(180, row_y(2))
-    out = app.said("[mobile] display size")
+    out = said_after(q, seen, "[mobile] display size")
     m_ = re.search(r"display size (\d+)% \((\d+)x(\d+)\)", out)
     size = tuple(int(g) for g in m_.groups()) if m_ else None
     check(f"the display size Small is 150%, the screen 480 x 853 logical "

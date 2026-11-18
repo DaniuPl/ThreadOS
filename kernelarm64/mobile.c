@@ -101,6 +101,7 @@
 #define MOB_STATUS_PX  12       /* the battery's per cent */
 #define MOB_BATT_W     24       /* the battery, 12 high, its right edge */
 #define MOB_BATT_RIGHT 20       /* this far from the screen's */
+#define MOB_BATT_FAINT 110      /* its outline and nub, of 255 */
 #define MOB_BAR_PITCH  5        /* the network's four bars, 3 wide */
 #define MOB_DOCK_PCT   85       /* the dock's panel: this much of the
                                    width, centred */
@@ -108,15 +109,18 @@
 #define MOB_DOCK_H     80
 #define MOB_DOCK_R     40       /* a pill, as Weft's toolbar */
 #define MOB_DOCK_TILE  56
-#define MOB_SHADE_TIME_Y 70     /* the shade: the time's baseline */
-#define MOB_SHADE_TILE_Y 116    /* its quick settings: two rows of two */
-#define MOB_SHADE_TILE_H 64
-#define MOB_SHADE_TILE_STEP 76  /* across and down */
-#define MOB_SHADE_TILES 6       /* in rows of two */
-#define MOB_SHADE_BRIGHT_Y 360  /* the brightness slider's middle */
-#define MOB_SHADE_BRIGHT_X 24
-#define MOB_SHADE_NOTE_Y 406    /* "Notifications" */
-#define MOB_SHADE_CARD_Y 420    /* the first card's top */
+/* The shade's controls, as an iPhone's Control Center: a grid of four
+   columns of squares CC_GAP apart, CC_SIDE from the screen's sides (no
+   wider than CC_MAXW, on a tablet), from CC_TOP down - a square of
+   four round buttons, two tall sliders, a pill and round buttons */
+#define CC_TOP          48
+#define CC_SIDE         22
+#define CC_GAP          14
+#define CC_MAXW         380
+#define CC_PAD          10      /* the square's buttons, from its edge */
+#define CC_FOOT         30      /* room kept below the grid, at least */
+#define CC_NOTES_DOWN   38      /* "Notifications", below the grid */
+#define CC_CARDS_DOWN   14      /* ... and its first card, below that */
 #define MOB_SHADE_CARD_H 58
 #define MOB_SHADE_CARD_STEP 66
 #define MOB_SHADE_CARDS 3
@@ -170,8 +174,6 @@ static const struct app dock[] = {
 #define MOB_DOCK_Y     (lh - MOB_DOCK_UP)
 #define MOB_DOCK_W     (lw * MOB_DOCK_PCT / 100)
 #define MOB_DOCK_X     ((lw - MOB_DOCK_W) / 2)
-#define MOB_SHADE_TILE_W ((lw - 36) / 2)
-#define MOB_SHADE_BRIGHT_W (lw - 2 * MOB_SHADE_BRIGHT_X)
 #define MOB_NAV_Y      (lh - MOB_NAV_UP)
 #define MOB_NAV_BACK_X (lw / 4)
 #define MOB_NAV_HOME_X (lw / 2)
@@ -519,10 +521,12 @@ static void network_icon(int x, uint32_t c)
         gfx_line16((x + 2) * 16, 14 * 16, x * 16, 18 * 16, 32, c, 255);
         return;
     }
+    /* rounded, as an iPhone's, those not lit faint */
     int lit = st == 2 ? 4 : st == 1 ? 1 : 0;
     for (int i = 0; i < 4; i++) {
         int h = 4 + i * 2;
-        gfx_fill(x + i * MOB_BAR_PITCH, 19 - h, 3, h, c, i < lit ? 255 : 80);
+        gfx_rrect16((x + i * MOB_BAR_PITCH) * 16, (19 - h) * 16, 3 * 16,
+                    h * 16, 24, c, i < lit ? 255 : 70);
     }
 }
 
@@ -534,18 +538,19 @@ static void status_bar(uint32_t c)
     clock_text(s, &t, 0);
     ui_font_text(UI_BOLD, 14, 22, 19, s, c);
 
-    /* The battery: its outline, its nub, as full as it is */
+    /* The battery, as an iPhone's: a pill with a faint outline and nub,
+       filled as far as it is full */
     int bx = lw - MOB_BATT_RIGHT - MOB_BATT_W, by = 8;
     int pct = battery < 0 ? 100 : battery;
-    gfx_fill(bx, by, MOB_BATT_W, 1, c, 255);
-    gfx_fill(bx, by + 11, MOB_BATT_W, 1, c, 255);
-    gfx_fill(bx, by, 1, 12, c, 255);
-    gfx_fill(bx + MOB_BATT_W - 1, by, 1, 12, c, 255);
-    gfx_fill(bx + MOB_BATT_W + 1, by + 4, 2, 4, c, 255);
+    gfx_rring16(bx * 16, by * 16, MOB_BATT_W * 16, 12 * 16, 4 * 16, 20, c,
+                MOB_BATT_FAINT);
+    gfx_rrect16((bx + MOB_BATT_W + 1) * 16, (by + 4) * 16, 24, 4 * 16, 12, c,
+                MOB_BATT_FAINT);
     uint32_t fill = mob_prefs.saver ? 0xFFD60A :
                     battery >= 0 && battery <= 20 && !charging ? 0xFF453A :
                     (battery < 0 || charging) ? 0x30D158 : c;
-    gfx_fill(bx + 2, by + 2, (MOB_BATT_W - 4) * pct / 100, 8, fill, 255);
+    gfx_rrect16((bx + 2) * 16, (by + 2) * 16, (MOB_BATT_W - 4) * pct / 100 * 16,
+                8 * 16, 2 * 16 + 8, fill, 255);
     char *p = put_num(s, (uint32_t)pct);
     put(p, "%");
     if (!mob_prefs.show_pct)
@@ -1350,15 +1355,96 @@ static void draw_recents(void)
 
 /* --- the shade and banners ------------------------------------------------ */
 
-static const char *const shade_tiles[MOB_SHADE_TILES] = {
-    "Network", "Airplane mode", "Dark mode", "Do not disturb", "Flashlight",
-    "Battery saver"
-};
 
-static void shade_tile_xy(int i, int *x, int *y)
+/* The controls, and where each is: the square's four buttons, the two
+   sliders, the pill, two buttons beside it, and a row of four that
+   open apps */
+enum { CC_AIRPLANE, CC_NETWORK, CC_DARK, CC_SAVER, CC_BRIGHT, CC_VOLUME,
+       CC_DND, CC_TURN, CC_TORCH, CC_CALC, CC_REC, CC_NOTES, CC_SETTINGS,
+       CC_COUNT };
+
+static int cc_unit(void)
 {
-    *x = 12 + (i % 2) * (MOB_SHADE_TILE_W + 12);
-    *y = MOB_SHADE_TILE_Y + (i / 2) * MOB_SHADE_TILE_STEP;
+    int w = lw - 2 * CC_SIDE < CC_MAXW ? lw - 2 * CC_SIDE : CC_MAXW;
+    int across = (w - 3 * CC_GAP) / 4;
+    /* on its side the height is what limits it */
+    int down = (lh - CC_TOP - CC_FOOT - 3 * CC_GAP) / 4;
+    return across < down ? across : down;
+}
+
+/* Wider than high: the notifications beside the controls, not below */
+static int cc_wide(void)
+{
+    return lw > lh;
+}
+
+static int cc_width(void)
+{
+    return 4 * cc_unit() + 3 * CC_GAP;
+}
+
+static int cc_left(void)
+{
+    return cc_wide() ? CC_SIDE : (lw - cc_width()) / 2;
+}
+
+/* Where the notifications go: their heading's baseline, their cards'
+   left, width and first top */
+static void notes_area(int *head, int *x, int *w, int *top)
+{
+    if (cc_wide()) {
+        *x = cc_left() + cc_width() + 2 * CC_GAP;
+        *w = lw - *x - CC_SIDE;
+        *head = CC_TOP + 16;
+    } else {
+        *w = lw - 24 < cc_width() + 24 ? lw - 24 : cc_width() + 24;
+        *x = (lw - *w) / 2;
+        *head = CC_TOP + cc_width() + CC_NOTES_DOWN;
+    }
+    *top = *head + CC_CARDS_DOWN;
+}
+
+/* The square's corner, and its side */
+static void cc_square(int *x, int *y, int *side)
+{
+    *x = cc_left();
+    *y = CC_TOP;
+    *side = 2 * cc_unit() + CC_GAP;
+}
+
+static void cc_box(int i, int *x, int *y, int *w, int *h)
+{
+    int u = cc_unit(), step = u + CC_GAP, l = cc_left();
+    if (i <= CC_SAVER) {
+        int sx, sy, side;
+        cc_square(&sx, &sy, &side);
+        int d = (side - 3 * CC_PAD) / 2;
+        *x = sx + CC_PAD + (i % 2) * (d + CC_PAD);
+        *y = sy + CC_PAD + (i / 2) * (d + CC_PAD);
+        *w = *h = d;
+        return;
+    }
+    static const signed char cell[][4] = {   /* column, row, columns, rows */
+        { 2, 0, 1, 2 }, { 3, 0, 1, 2 },      /* the sliders */
+        { 0, 2, 2, 1 }, { 2, 2, 1, 1 }, { 3, 2, 1, 1 },
+        { 0, 3, 1, 1 }, { 1, 3, 1, 1 }, { 2, 3, 1, 1 }, { 3, 3, 1, 1 },
+    };
+    const signed char *c = cell[i - CC_BRIGHT];
+    *x = l + c[0] * step;
+    *y = CC_TOP + c[1] * step;
+    *w = c[2] * u + (c[2] - 1) * CC_GAP;
+    *h = c[3] * u + (c[3] - 1) * CC_GAP;
+}
+
+static int cc_at(int x, int y)
+{
+    for (int i = 0; i < CC_COUNT; i++) {
+        int bx, by, bw, bh;
+        cc_box(i, &bx, &by, &bw, &bh);
+        if (x >= bx && x < bx + bw && y >= by && y < by + bh)
+            return i;
+    }
+    return -1;
 }
 
 static void when_text(char *out, uint32_t at)
@@ -1373,6 +1459,243 @@ static void when_text(char *out, uint32_t at)
     clock_text(out, &t, 0);
 }
 
+/* --- the Control Center's controls --------------------------------- */
+
+static struct gfx_surface screen_surface(void)
+{
+    struct gfx_surface scr = { video_prow32(0), video_pw(), video_ph(),
+                               video_pw(), video_k() };
+    return scr;
+}
+
+/* The left half of a disc, and its outline: light and dark at once */
+static void half_disc(int cx, int cy, int r, uint32_t c)
+{
+    struct gfx_surface scr = screen_surface();
+    int k = video_k();
+    gfx_circle16(cx * 16, cy * 16, r * 16, 24, c, 255);
+    for (int py = (cy - r) * k / 16; py <= (cy + r) * k / 16; py++)
+        for (int px = (cx - r) * k / 16; px < cx * k / 16; px++) {
+            int a = gfx_cov_rrect16(px, py, (cx - r) * k, (cy - r) * k,
+                                    2 * r * k, 2 * r * k, r * k);
+            if (a)
+                gfx_pblend_s(&scr, px, py, c, a);
+        }
+}
+
+/* A crescent: a disc, and the same disc moved up and right in the
+   colour behind it */
+static void moon(int cx, int cy, int r, uint32_t c, uint32_t behind)
+{
+    gfx_disc16(cx * 16, cy * 16, r * 16, c, 255);
+    gfx_disc16((cx + r / 2) * 16 + 8, (cy - r / 2) * 16, r * 13, behind,
+               255);
+}
+
+static void plane(int cx, int cy, uint32_t c)
+{
+    int x = cx - 11, y = cy;
+    gfx_line16(x * 16, y * 16, (x + 22) * 16, y * 16, 48, c, 255);
+    gfx_line16((x + 12) * 16, y * 16, (x + 6) * 16, (y - 11) * 16, 48, c,
+               255);
+    gfx_line16((x + 12) * 16, y * 16, (x + 6) * 16, (y + 11) * 16, 48, c,
+               255);
+    gfx_line16((x + 3) * 16, y * 16, x * 16, (y - 5) * 16, 40, c, 255);
+    gfx_line16((x + 3) * 16, y * 16, x * 16, (y + 5) * 16, 40, c, 255);
+}
+
+/* Wi-Fi's fan: three arcs over a dot, each a few straight pieces */
+static void fan(int cx, int cy, uint32_t c)
+{
+    static const short sn[7] = { -181, -128, -66, 0, 66, 128, 181 };
+    static const short cs[7] = { 181, 222, 247, 256, 247, 222, 181 };
+    int oy = cy + 8;
+    for (int r = 6; r <= 18; r += 6)
+        for (int i = 0; i < 6; i++)
+            gfx_line16(cx * 16 + r * sn[i] / 16, oy * 16 - r * cs[i] / 16,
+                       cx * 16 + r * sn[i + 1] / 16,
+                       oy * 16 - r * cs[i + 1] / 16, 40, c, 255);
+    gfx_disc16(cx * 16, oy * 16, 40, c, 255);
+}
+
+static void small_battery(int cx, int cy, uint32_t c)
+{
+    gfx_rring16((cx - 11) * 16, (cy - 6) * 16, 20 * 16, 12 * 16, 4 * 16, 24,
+                c, 255);
+    gfx_rrect16((cx + 10) * 16, (cy - 2) * 16, 24, 4 * 16, 12, c, 255);
+    gfx_rrect16((cx - 9) * 16, (cy - 4) * 16, 7 * 16, 8 * 16, 2 * 16, c, 255);
+}
+
+/* The phone, upright or on its side */
+static void phone_shape(int cx, int cy, int side, uint32_t c)
+{
+    int w = side ? 22 : 13, h = side ? 13 : 22;
+    gfx_rring16((cx - w / 2) * 16, (cy - h / 2) * 16, w * 16, h * 16, 3 * 16,
+                28, c, 255);
+}
+
+static void torch(int cx, int cy, uint32_t c)
+{
+    gfx_rrect16((cx - 4) * 16, (cy - 3) * 16, 8 * 16, 15 * 16, 2 * 16, c, 255);
+    gfx_line16((cx - 6) * 16, (cy - 9) * 16, (cx + 6) * 16, (cy - 9) * 16,
+               40, c, 255);
+    gfx_line16((cx - 6) * 16, (cy - 9) * 16, (cx - 4) * 16, (cy - 3) * 16,
+               32, c, 255);
+    gfx_line16((cx + 6) * 16, (cy - 9) * 16, (cx + 4) * 16, (cy - 3) * 16,
+               32, c, 255);
+}
+
+static void glyph(int i, int cx, int cy, uint32_t c, uint32_t behind)
+{
+    switch (i) {
+    case CC_AIRPLANE: plane(cx, cy, c); break;
+    case CC_NETWORK:  fan(cx, cy, c); break;
+    case CC_DARK:     half_disc(cx, cy, 11, c); break;
+    case CC_SAVER:    small_battery(cx, cy, c); break;
+    case CC_TURN:     phone_shape(cx, cy, mob_prefs.landscape, c); break;
+    case CC_TORCH:    torch(cx, cy, c); break;
+    case CC_CALC:                                /* + - x = */
+        gfx_line16((cx - 11) * 16, (cy - 6) * 16, (cx - 3) * 16,
+                   (cy - 6) * 16, 32, c, 255);
+        gfx_line16((cx - 7) * 16, (cy - 10) * 16, (cx - 7) * 16,
+                   (cy - 2) * 16, 32, c, 255);
+        gfx_line16((cx + 3) * 16, (cy - 6) * 16, (cx + 11) * 16,
+                   (cy - 6) * 16, 32, c, 255);
+        gfx_line16((cx - 10) * 16, (cy + 3) * 16, (cx - 4) * 16,
+                   (cy + 9) * 16, 32, c, 255);
+        gfx_line16((cx - 4) * 16, (cy + 3) * 16, (cx - 10) * 16,
+                   (cy + 9) * 16, 32, c, 255);
+        gfx_line16((cx + 3) * 16, (cy + 4) * 16, (cx + 11) * 16,
+                   (cy + 4) * 16, 32, c, 255);
+        gfx_line16((cx + 3) * 16, (cy + 8) * 16, (cx + 11) * 16,
+                   (cy + 8) * 16, 32, c, 255);
+        break;
+    case CC_REC:                                 /* a waveform */
+        for (int k = -2; k <= 2; k++) {
+            int h = k == 0 ? 11 : (k == -1 || k == 1) ? 7 : 4;
+            gfx_line16((cx + k * 5) * 16, (cy - h) * 16, (cx + k * 5) * 16,
+                       (cy + h) * 16, 40, c, 255);
+        }
+        break;
+    case CC_NOTES:                               /* a page's lines */
+        gfx_rring16((cx - 9) * 16, (cy - 11) * 16, 18 * 16, 22 * 16, 3 * 16,
+                    24, c, 255);
+        for (int k = 0; k < 3; k++)
+            gfx_line16((cx - 5) * 16, (cy - 5 + k * 5) * 16,
+                       (cx + (k == 2 ? 1 : 5)) * 16, (cy - 5 + k * 5) * 16,
+                       28, c, 255);
+        break;
+    case CC_SETTINGS: {                          /* a gear */
+        static const short sn[8] = { 0, 181, 256, 181, 0, -181, -256, -181 };
+        for (int k = 0; k < 8; k++)
+            gfx_disc16(cx * 16 + 10 * sn[k] / 16,
+                       cy * 16 - 10 * sn[(k + 2) % 8] / 16, 40, c, 255);
+        gfx_circle16(cx * 16, cy * 16, 8 * 16, 48, c, 255);
+        break;
+    }
+    }
+    (void)behind;
+}
+
+/* Is the control on, and the colour it is filled with then */
+static int cc_on(int i, uint32_t *fill, uint32_t *ink)
+{
+    char addr[20];
+    *ink = WHITE;
+    *fill = mob_accent();
+    switch (i) {
+    case CC_AIRPLANE: *fill = 0xFF9F0A; return mob_prefs.airplane;
+    case CC_NETWORK:  return mob_network(addr, sizeof(addr)) == 2;
+    case CC_DARK:     return mob_prefs.dark;
+    case CC_SAVER:    *fill = 0xFFD60A; *ink = 0x1C1C1E;
+                      return mob_prefs.saver;
+    case CC_TURN:     *fill = WHITE; *ink = 0xFF453A;
+                      return mob_prefs.landscape;
+    case CC_TORCH:    *fill = WHITE; *ink = 0x1C1C1E;
+                      return mob_prefs.flashlight;
+    }
+    return 0;
+}
+
+/* A slider standing up: glass, filled from its foot as far as its value,
+   the fill held inside the pill's round ends */
+static void cc_slider(int i)
+{
+    int x, y, w, h;
+    cc_box(i, &x, &y, &w, &h);
+    panel(x, y, w, h, w / 2, 0x2C2C2E, 240);
+    int v = i == CC_BRIGHT ? mob_prefs.brightness : mob_prefs.volume;
+    int top = y + h - h * v / 100;
+    struct gfx_surface scr = screen_surface();
+    int k = video_k();
+    for (int py = top * k / 16; py < (y + h) * k / 16; py++)
+        for (int px = x * k / 16; px < (x + w) * k / 16; px++) {
+            int a = gfx_cov_rrect16(px, py, x * k, y * k, w * k, h * k,
+                                    w / 2 * k);
+            if (a)
+                gfx_pblend_s(&scr, px, py, WHITE, a * 235 / 255);
+        }
+    int cx = x + w / 2, cy = y + h - w / 2;
+    uint32_t c = v >= 100 * (y + h - (cy - 12)) / h ? 0x8E8E93 : WHITE;
+    if (i == CC_BRIGHT) {                        /* a sun */
+        uint32_t sun = 0xFFB800;
+        static const short sn[8] = { 0, 181, 256, 181, 0, -181, -256, -181 };
+        gfx_disc16(cx * 16, cy * 16, 5 * 16, sun, 255);
+        for (int r = 0; r < 8; r++)
+            gfx_line16(cx * 16 + 8 * sn[r] / 16,
+                       cy * 16 - 8 * sn[(r + 2) % 8] / 16,
+                       cx * 16 + 11 * sn[r] / 16,
+                       cy * 16 - 11 * sn[(r + 2) % 8] / 16, 28, sun, 255);
+    } else {                                     /* a speaker */
+        gfx_rrect16((cx - 8) * 16, (cy - 4) * 16, 5 * 16, 8 * 16, 16, c, 255);
+        gfx_line16((cx - 4) * 16, (cy - 4) * 16, (cx + 2) * 16, (cy - 9) * 16,
+                   40, c, 255);
+        gfx_line16((cx - 4) * 16, (cy + 4) * 16, (cx + 2) * 16, (cy + 9) * 16,
+                   40, c, 255);
+        gfx_line16((cx + 2) * 16, (cy - 9) * 16, (cx + 2) * 16, (cy + 9) * 16,
+                   40, c, 255);
+        gfx_line16((cx + 6) * 16, (cy - 4) * 16, (cx + 7) * 16, (cy + 4) * 16,
+                   32, c, 255);
+    }
+}
+
+static void cc_draw(int i)
+{
+    int x, y, w, h;
+    if (i == CC_AIRPLANE) {
+        /* the square the first four stand in */
+        int sx, sy, side;
+        cc_square(&sx, &sy, &side);
+        panel(sx, sy, side, side, cc_unit() / 2, 0x2C2C2E, 240);
+    }
+    if (i == CC_BRIGHT || i == CC_VOLUME) {
+        cc_slider(i);
+        return;
+    }
+    cc_box(i, &x, &y, &w, &h);
+    if (i == CC_DND) {
+        /* a pill: a moon in a disc of its own, and what it is */
+        panel(x, y, w, h, h / 2, 0x2C2C2E, 240);
+        int d = h - 16, mx = x + 8 + d / 2, my = y + h / 2;
+        uint32_t disc = mob_prefs.dnd ? 0x5E5CE6 : 0x48484E;
+        gfx_disc16(mx * 16, my * 16, d * 8, disc, 255);
+        moon(mx - 1, my + 1, 9, WHITE, disc);
+        /* Focus, as an iPhone names it: the pill is not wide enough for
+           "Do not disturb" beside its moon */
+        ui_font_text(UI_BOLD, 15, x + d + 18, my - 2, "Focus", WHITE);
+        ui_font_text(UI_SANS, 13, x + d + 18, my + 16,
+                     mob_prefs.dnd ? "Do not disturb" : "Off", MUTED);
+        return;
+    }
+    uint32_t fill, ink;
+    int on = cc_on(i, &fill, &ink);
+    if (on)
+        gfx_rrect(x, y, w, h, w / 2, fill, 255);
+    else
+        panel(x, y, w, h, w / 2, 0x2C2C2E, 240);
+    glyph(i, x + w / 2, y + h / 2, on ? ink : WHITE, on ? fill : 0x2C2C2E);
+}
+
 static void draw_shade(void)
 {
     if (glassy())
@@ -1382,57 +1705,13 @@ static void draw_shade(void)
     else
         gfx_fill(0, 0, lw, lh, 0x000000, 190);
     status_bar(WHITE);
-    struct rtc_time t;
     char s[80];
-    rtc_split(rtc_seconds(), &t);
-    clock_text(s, &t, 0);
-    ui_font_text(UI_BOLD, 40, 16, MOB_SHADE_TIME_Y, s, WHITE);
-    date_text(s, &t);
-    ui_font_text(UI_SANS, 15, 16, MOB_SHADE_TIME_Y + 26, s, MUTED);
+    for (int i = 0; i < CC_COUNT; i++)
+        cc_draw(i);
 
-    for (int i = 0; i < MOB_SHADE_TILES; i++) {
-        int x, y, on = 0;
-        char addr[20];
-        const char *state = 0;
-        shade_tile_xy(i, &x, &y);
-        switch (i) {
-        case 0: {
-            int st = mob_network(addr, sizeof(addr));
-            on = st == 2;
-            state = st == 2 ? addr : st == 3 ? "Off" : st == 1 ?
-                    "Connecting" : "No network";
-            break;
-        }
-        case 1: on = mob_prefs.airplane; break;
-        case 2: on = mob_prefs.dark; break;
-        case 3: on = mob_prefs.dnd; break;
-        case 4: on = mob_prefs.flashlight; break;
-        case 5: on = mob_prefs.saver; break;
-        }
-        if (!state)
-            state = on ? "On" : "Off";
-        /* pills, as the dock and Weft's toolbar */
-        int tr = MOB_SHADE_TILE_H / 2;
-        if (on)
-            gfx_rrect(x, y, MOB_SHADE_TILE_W, MOB_SHADE_TILE_H, tr,
-                      mob_accent(), 240);
-        else
-            panel(x, y, MOB_SHADE_TILE_W, MOB_SHADE_TILE_H, tr, 0x2C2C2E,
-                  240);
-        ui_font_text(UI_BOLD, 15, x + 24, y + 28, shade_tiles[i], WHITE);
-        ui_font_text(UI_SANS, 13, x + 24, y + 48, state,
-                     on ? WHITE : MUTED);
-    }
-
-    int bx = MOB_SHADE_BRIGHT_X, bw = MOB_SHADE_BRIGHT_W;
-    int fill = bw * mob_prefs.brightness / 100;
-    panel(bx, MOB_SHADE_BRIGHT_Y - 16, bw, 32, 16, 0x2C2C2E, 240);
-    gfx_rrect(bx, MOB_SHADE_BRIGHT_Y - 16, fill, 32, 16, WHITE, 230);
-    /* a sun at the slider's start */
-    gfx_disc16((bx + 18) * 16, MOB_SHADE_BRIGHT_Y * 16, 5 * 16, 0x8E8E93,
-               255);
-
-    ui_font_text(UI_BOLD, 15, 16, MOB_SHADE_NOTE_Y, "Notifications", WHITE);
+    int head, cx, cw, top;
+    notes_area(&head, &cx, &cw, &top);
+    ui_font_text(UI_BOLD, 15, cx + 4, head, "Notifications", WHITE);
     irqflags_t f = spin_lock_irq(&notif_lock);
     int n = notif_count;
     struct notif copy[MOB_SHADE_CARDS];
@@ -1440,20 +1719,20 @@ static void draw_shade(void)
         copy[i] = notifs[i];
     spin_unlock_irq(&notif_lock, f);
     if (n) {
-        ui_font_text(UI_SANS, 15, lw - 16 - ui_font_width(UI_SANS, 15,
-                     "Clear"), MOB_SHADE_NOTE_Y, "Clear", mob_accent());
+        ui_font_text(UI_SANS, 15, cx + cw - 4 - ui_font_width(UI_SANS, 15,
+                     "Clear"), head, "Clear", mob_accent());
     } else {
-        centred(UI_SANS, 15, lw / 2, MOB_SHADE_CARD_Y + 34,
-                "No notifications", MUTED);
+        centred(UI_SANS, 15, cx + cw / 2, top + 34, "No notifications",
+                MUTED);
     }
     for (int i = 0; i < n && i < MOB_SHADE_CARDS; i++) {
-        int y = MOB_SHADE_CARD_Y + i * MOB_SHADE_CARD_STEP;
-        panel(12, y, lw - 24, MOB_SHADE_CARD_H, 14, 0x2C2C2E, 240);
-        ui_font_text(UI_BOLD, 15, 28, y + 24, copy[i].title, WHITE);
-        ui_font_text(UI_SANS, 13, 28, y + 44, copy[i].body, MUTED);
+        int y = top + i * MOB_SHADE_CARD_STEP;
+        panel(cx, y, cw, MOB_SHADE_CARD_H, 20, 0x2C2C2E, 240);
+        ui_font_text(UI_BOLD, 15, cx + 16, y + 24, copy[i].title, WHITE);
+        ui_font_text(UI_SANS, 13, cx + 16, y + 44, copy[i].body, MUTED);
         when_text(s, copy[i].at);
-        ui_font_text(UI_SANS, 12, lw - 28 - ui_font_width(UI_SANS, 12, s),
-                     y + 24, s, MUTED);
+        ui_font_text(UI_SANS, 12, cx + cw - 16 - ui_font_width(UI_SANS, 12,
+                     s), y + 24, s, MUTED);
     }
     pill(WHITE);
 }
@@ -1541,54 +1820,77 @@ static void show(int win, const char *why)
 }
 
 /* A tap on the pulled-down shade */
+/* A slider set where the finger is: its foot 0, its top 100 */
+static void cc_slide(int i, int fy)
+{
+    int x, y, w, h;
+    cc_box(i, &x, &y, &w, &h);
+    int v = (y + h - fy) * 100 / h;
+    v = v < 0 ? 0 : v > 100 ? 100 : v;
+    if (i == CC_BRIGHT) {
+        mob_set_brightness(v);
+    } else {
+        mob_prefs.volume = v;
+        vsnd_volume(v, -1);
+        printk("[mobile] volume %d%%\n", v);
+    }
+    dirty = 1;
+}
+
 static void shade_tap(int x, int y)
 {
-    for (int i = 0; i < MOB_SHADE_TILES; i++) {
-        int tx, ty;
-        shade_tile_xy(i, &tx, &ty);
-        if (x < tx || x >= tx + MOB_SHADE_TILE_W || y < ty ||
-            y >= ty + MOB_SHADE_TILE_H)
-            continue;
-        switch (i) {
-        case 0:
-            shade = 0;
-            go(APP_SETTINGS, "the shade's network");
-            return;
-        case 1:
-            mob_set_airplane(!mob_prefs.airplane);
-            break;
-        case 2:
-            mob_prefs.dark = !mob_prefs.dark;
-            printk("[mobile] dark mode %s\n", mob_prefs.dark ? "on" : "off");
-            break;
-        case 3:
-            mob_prefs.dnd = !mob_prefs.dnd;
-            printk("[mobile] do not disturb %s\n",
-                   mob_prefs.dnd ? "on" : "off");
-            break;
-        case 4:
-            mob_prefs.flashlight = !mob_prefs.flashlight;
-            printk("[mobile] flashlight %s\n",
-                   mob_prefs.flashlight ? "on" : "off");
-            break;
-        case 5:
-            mob_prefs.saver = !mob_prefs.saver;
-            mob_apply_saver();
-            printk("[mobile] battery saver %s\n",
-                   mob_prefs.saver ? "on" : "off");
-            break;
-        }
+    int i = cc_at(x, y);
+    switch (i) {
+    case CC_NETWORK:
+        shade = 0;
+        go(APP_SETTINGS, "the shade's network");
+        return;
+    case CC_AIRPLANE:
+        mob_set_airplane(!mob_prefs.airplane);
+        break;
+    case CC_DARK:
+        mob_prefs.dark = !mob_prefs.dark;
+        printk("[mobile] dark mode %s\n", mob_prefs.dark ? "on" : "off");
+        break;
+    case CC_SAVER:
+        mob_prefs.saver = !mob_prefs.saver;
+        mob_apply_saver();
+        printk("[mobile] battery saver %s\n", mob_prefs.saver ? "on" : "off");
+        break;
+    case CC_BRIGHT:
+    case CC_VOLUME:
+        cc_slide(i, y);
+        return;
+    case CC_DND:
+        mob_prefs.dnd = !mob_prefs.dnd;
+        printk("[mobile] do not disturb %s\n", mob_prefs.dnd ? "on" : "off");
+        break;
+    case CC_TURN:
+        mob_set_orientation(!mob_prefs.landscape);
+        break;
+    case CC_TORCH:
+        mob_prefs.flashlight = !mob_prefs.flashlight;
+        printk("[mobile] flashlight %s\n",
+               mob_prefs.flashlight ? "on" : "off");
+        break;
+    case CC_CALC:
+    case CC_REC:
+    case CC_NOTES:
+    case CC_SETTINGS: {
+        static const int app[4] = { APP_CALC, APP_RECORDER, APP_NOTES,
+                                    APP_SETTINGS };
+        shade = 0;
+        go(app[i - CC_CALC], "the shade");
+        return;
+    }
+    }
+    if (i >= 0) {
         dirty = 1;
         return;
     }
-    if (y >= MOB_SHADE_BRIGHT_Y - 16 && y < MOB_SHADE_BRIGHT_Y + 16) {
-        mob_set_brightness((x - MOB_SHADE_BRIGHT_X) * 100 /
-                           MOB_SHADE_BRIGHT_W);
-        dirty = 1;
-        return;
-    }
-    if (y >= MOB_SHADE_NOTE_Y - 20 && y < MOB_SHADE_NOTE_Y + 8 &&
-        x > lw - 90) {
+    int head, nx, nw, top;
+    notes_area(&head, &nx, &nw, &top);
+    if (y >= head - 20 && y < head + 8 && x > nx + nw - 90 && x < nx + nw) {
         irqflags_t f = spin_lock_irq(&notif_lock);
         notif_count = 0;
         spin_unlock_irq(&notif_lock, f);
@@ -1596,11 +1898,12 @@ static void shade_tap(int x, int y)
         dirty = 1;
         return;
     }
-    for (int i = 0; i < MOB_SHADE_CARDS; i++) {
-        int cy = MOB_SHADE_CARD_Y + i * MOB_SHADE_CARD_STEP;
-        if (y >= cy && y < cy + MOB_SHADE_CARD_H && i < notif_count) {
-            notif_drop(i);
-            printk("[mobile] notification %d dismissed\n", i + 1);
+    for (int n = 0; n < MOB_SHADE_CARDS; n++) {
+        int cy = top + n * MOB_SHADE_CARD_STEP;
+        if (y >= cy && y < cy + MOB_SHADE_CARD_H && n < notif_count &&
+            x >= nx && x < nx + nw) {
+            notif_drop(n);
+            printk("[mobile] notification %d dismissed\n", n + 1);
             dirty = 1;
             return;
         }
@@ -1790,6 +2093,12 @@ static void touch(const struct touch_event *e)
     }
     last_x = e->x;
     last_y = e->y;
+    if (shade && e->kind != TOUCH_UP) {
+        /* a slider follows the finger */
+        int s = cc_at(finger.x0, finger.y0);
+        if (s == CC_BRIGHT || s == CC_VOLUME)
+            cc_slide(s, e->y);
+    }
     if (e->kind != TOUCH_UP)
         return;
     finger.on = 0;
@@ -1802,15 +2111,15 @@ static void touch(const struct touch_event *e)
         return;
     }
     if (shade) {
-        if (dy < -80 && adx < ady) {
+        int s = cc_at(finger.x0, finger.y0);
+        if (adx <= 12 && ady <= 12) {
+            tap(finger.x0, finger.y0);
+        } else if (s == CC_BRIGHT || s == CC_VOLUME) {
+            cc_slide(s, e->y);       /* a slider, dragged: not a close */
+        } else if (dy < -80 && adx < ady) {
             shade = 0;
             dirty = 1;
             printk("[mobile] shade (closed)\n");
-        } else if (adx <= 12 && ady <= 12) {
-            tap(finger.x0, finger.y0);
-        } else if (finger.y0 >= MOB_SHADE_BRIGHT_Y - 16 &&
-                   finger.y0 < MOB_SHADE_BRIGHT_Y + 16) {
-            shade_tap(e->x, MOB_SHADE_BRIGHT_Y);  /* the slider, dragged */
         }
         return;
     }

@@ -512,8 +512,8 @@ def look_changes(q, spot, lift, tint_a):
     and dark again: Weft hears it each time - the toolbar's glass tinted
     towards the look's surface, the page told (prefers-color-scheme)
     without being loaded again"""
-    tile = (12 + 40, define(MOB, "MOB_SHADE_TILE_Y") +
-            define(MOB, "MOB_SHADE_TILE_STEP") + 20)      # Dark mode
+    from t_arm64apps import cc_xy
+    tile = cc_xy("dark")                                # Dark mode
     for dark, surface in ((False, (0xFF, 0xFF, 0xFF)),
                           (True, (0x1C, 0x1C, 0x1E))):
         word = "dark" if dark else "light"
