@@ -1,0 +1,28 @@
+GStreamer's GL and MPEG-TS libraries only where they are used
+
+With video on, WebKit asks pkg-config for every GStreamer library it
+might use, GL and MPEG-TS among them, and stops if one is missing - yet
+it uses GL only with USE_GSTREAMER_GL and MPEG-TS only with
+USE_GSTREAMER_MPEGTS, which ThreadOS's build turns off: there is no GL,
+and pages' MPEG-TS needs no library of its own here. Each is asked for
+with the option that uses it; the checks after this one already say so.
+
+--- a/Source/cmake/GStreamerChecks.cmake
++++ b/Source/cmake/GStreamerChecks.cmake
+@@ -9,7 +9,15 @@
+       else ()
+           set(GSTREAMER_COMPONENTS app pbutils)
+           if (ENABLE_VIDEO)
+-              list(APPEND GSTREAMER_COMPONENTS video mpegts tag gl)
++              list(APPEND GSTREAMER_COMPONENTS video tag)
++              # (only asked for where they are used: a system without GL
++              # or MPEG-TS can still play video)
++              if (USE_GSTREAMER_MPEGTS)
++                  list(APPEND GSTREAMER_COMPONENTS mpegts)
++              endif ()
++              if (USE_GSTREAMER_GL)
++                  list(APPEND GSTREAMER_COMPONENTS gl)
++              endif ()
+           endif ()
+ 
+           if (ENABLE_WEB_AUDIO)

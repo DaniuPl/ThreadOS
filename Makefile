@@ -1711,9 +1711,11 @@ USER64_ELFS += $(BUILD)/user64/jsc.elf
 # - weft, the window; wpewebproc, which lays out, runs the scripts
 # of and paints a page; wpenetproc, which fetches. It paints with Skia
 # on the processor into shared memory, which apps/webkit/wpethreados.c
-# copies into a window: there is no EGL, no GPU, no GStreamer (so no
-# video or audio yet), no Wayland or DRM, no accessibility bus, no
-# spelling, and no JIT.
+# copies into a window: there is no EGL, no GPU, no Wayland or DRM, no
+# accessibility bus, no spelling, and no JIT. Pages' video and audio,
+# Media Source Extensions (what YouTube streams through) and Web Audio
+# are played by GStreamer (above), its frames painted by Skia like the
+# rest of the page, its sound through threadosaudiosink.
 #
 # What ThreadOS needs changed in WebKit is in apps/webkit/patches, each
 # patch saying why. They are applied to the files they touch, taken
@@ -1732,12 +1734,12 @@ WPE_PC       := glib-2.0 gio-2.0 gio-unix-2.0 gobject-2.0 gmodule-2.0 \
                 gthread-2.0 libsoup-3.0 libxml-2.0 sqlite3 libpng16 libjpeg \
                 harfbuzz harfbuzz-icu epoxy libgcrypt libtasn1 xkbcommon \
                 libwebp libwebpdemux freetype2 fontconfig zlib icu-uc \
-                icu-i18n gioopenssl openssl
+                icu-i18n gioopenssl openssl $(GST_THREADOS_PC)
 WPE_PKGPATH  := $(abspath $(LIBS64))/lib/pkgconfig:$(abspath $(LIBS64))/lib/gio/modules/pkgconfig
 WPE_LIBS     := $(GLIB_A) $(LIBSOUP_A) $(GIONET_A) $(LIBXML2_A) \
                 $(LIBS64_SQLITE) $(LIBPNG_A) $(LIBJPEG_A) $(FONTCONFIG_A) \
                 $(WEBP_A) $(TASN1_A) $(GCRYPT_A) $(EPOXY_A) $(XKB_A) \
-                $(HB64_A) $(ICU_PC)
+                $(HB64_A) $(ICU_PC) $(GST_THREADOS_A)
 WPE_OPTIONS  := -DPORT=WPE -DENABLE_JIT=OFF -DENABLE_C_LOOP=ON \
                 -DENABLE_DFG_JIT=OFF -DENABLE_FTL_JIT=OFF \
                 -DENABLE_WEBASSEMBLY=OFF -DENABLE_SAMPLING_PROFILER=OFF \
@@ -1754,16 +1756,16 @@ WPE_OPTIONS  := -DPORT=WPE -DENABLE_JIT=OFF -DENABLE_C_LOOP=ON \
                 -DENABLE_SPELLCHECK=OFF -DENABLE_XSLT=OFF \
                 -DENABLE_SPEECH_SYNTHESIS=OFF -DENABLE_PDFJS=OFF \
                 -DENABLE_WEBDRIVER=OFF -DENABLE_ENCRYPTED_MEDIA=OFF \
-                -DENABLE_VIDEO=OFF -DENABLE_WEB_AUDIO=OFF \
+                -DENABLE_VIDEO=ON -DENABLE_WEB_AUDIO=ON \
                 -DENABLE_MEDIA_STREAM=OFF -DENABLE_MEDIA_RECORDER=OFF \
                 -DENABLE_WEB_CODECS=OFF -DENABLE_MEDIA_SESSION=OFF \
-                -DENABLE_MEDIA_SOURCE=OFF -DENABLE_WEB_RTC=OFF \
+                -DENABLE_MEDIA_SOURCE=ON -DENABLE_WEB_RTC=OFF \
                 -DENABLE_WEBGL=OFF -DENABLE_GAMEPAD=OFF \
                 -DENABLE_BUBBLEWRAP_SANDBOX=OFF -DENABLE_GPU_PROCESS=OFF \
                 -DENABLE_WEBXR=OFF -DENABLE_MEMORY_SAMPLER=OFF \
                 -DENABLE_RESOURCE_USAGE=OFF -DUSE_SKIA_OPENTYPE_SVG=OFF \
-                -DUSE_GSTREAMER=OFF -DUSE_GSTREAMER_GL=OFF \
-                -DUSE_GSTREAMER_WEBRTC=OFF
+                -DUSE_GSTREAMER=ON -DUSE_GSTREAMER_GL=OFF \
+                -DUSE_GSTREAMER_MPEGTS=OFF -DUSE_GSTREAMER_WEBRTC=OFF
 
 $(WPE_PATCHED): $(WEBKIT_SRC)/CMakeLists.txt $(WPE_PATCHES)
 	cd $(WEBKIT_DIR) && tar -xf $(abspath $(WEBKIT_TAR)) \
