@@ -54,7 +54,8 @@ of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
 `arm64mobile`, `arm64user`, `arm64libc`, `arm64net`, `arm64win`,
 `arm64rand`, `arm64libs`, `arm64soup`, `arm64apps`, `arm64sound`,
-`arm64weft` (Weft on the phone) and `arm64tablet` (a tablet's screen,
+`arm64weft` (Weft on the phone), `arm64gst` (GStreamer, which plays
+Weft's media) and `arm64tablet` (a tablet's screen,
 turned). The libraries above musl - and WebKit -
 build for aarch64 by the PC's own rules: `TARGET=aarch64` switches the
 compilers, flags, `--host`, cross files and linker script, into a build

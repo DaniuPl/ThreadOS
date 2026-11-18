@@ -10400,3 +10400,21 @@ works and is checked by `make test`.
       two seconds. The fuzz run builds GStreamer for the host under ASan
       and UBSan and feeds mutated MP4 and WebM files through qtdemux and
       matroskademux.
+- [x] **GStreamer on the phone** (Makefile, apps/webkit/media/include/,
+      libc/tests/gsttest.c, scripts/tests/t_arm64gst.py)
+      The same FFmpeg and GStreamer built for aarch64 by the PC's rules
+      (make TARGET=aarch64 BUILD=<build>/aarch64 gstreamer), for Weft on
+      the phone. One thing stood in the way: on ARM Linux GStreamer's
+      core includes the kernel's <asm/hwcap.h> to ask whether there is
+      NEON, and musl has no kernel headers; musl's <sys/auxv.h> names the
+      same bits, so apps/webkit/media/include/asm/hwcap.h is that, and
+      only the core's build looks there (GStreamer stays unmodified, and
+      musl's headers - which the libraries are rebuilt after - are not
+      touched). gsttest takes several steps in one run now, because the
+      phone's kernel starts one program from its initrd per boot.
+      t_arm64gst runs it from the initrd: every element there; H.264 and
+      VP9 decoded by FFmpeg's aarch64 code to frames bit for bit the
+      host's (50 each); FLAC to the host's PCM exactly, Opus to as many
+      samples; and the tone played through threadosaudiosink comes out
+      of the virtio-sound speaker (SDL's disk driver) as 1000 Hz for its
+      two seconds.

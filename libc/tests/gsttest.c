@@ -14,6 +14,10 @@
  *   pcm FILE          the sound decoded to 16-bit stereo: "pcm FRAMES
  *                     md5" over all of it
  *   play FILE         the sound played through autoaudiosink to its end
+ *
+ * Several may follow each other in one run (the phone's kernel starts
+ * one program from its initrd per boot): each is announced as
+ * "gsttest: <what> <file>" before what it prints.
  */
 
 #include <stdio.h>
@@ -175,17 +179,28 @@ static int elements(void)
 int main(int argc, char **argv)
 {
     gst_init(&argc, &argv);
-    int r = 2;
-    if (argc == 2 && !strcmp(argv[1], "elements"))
-        r = elements();
-    else if (argc == 3 && !strcmp(argv[1], "frames"))
-        r = frames(argv[2]);
-    else if (argc == 3 && !strcmp(argv[1], "pcm"))
-        r = pcm(argv[2]);
-    else if (argc == 3 && !strcmp(argv[1], "play"))
-        r = play(argv[2]);
-    else
-        printf("gsttest: elements | frames FILE | pcm FILE | play FILE\n");
+    int r = argc > 1 ? 0 : 2;
+    for (int i = 1; i < argc && r != 2; i++) {
+        int got;
+        if (!strcmp(argv[i], "elements")) {
+            printf("gsttest: elements\n");
+            got = elements();
+        } else if (i + 1 < argc && (!strcmp(argv[i], "frames") ||
+                                    !strcmp(argv[i], "pcm") ||
+                                    !strcmp(argv[i], "play"))) {
+            const char *what = argv[i], *file = argv[++i];
+            printf("gsttest: %s %s\n", what, file);
+            got = !strcmp(what, "frames") ? frames(file) :
+                  !strcmp(what, "pcm") ? pcm(file) : play(file);
+        } else {
+            got = 2;
+        }
+        if (got > r)
+            r = got;
+    }
+    if (r == 2)
+        printf("gsttest: elements | frames FILE | pcm FILE | play FILE, "
+               "one or more\n");
     printf("gsttest: done\n");
     return r;
 }

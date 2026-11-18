@@ -1499,8 +1499,9 @@ endef
 # debug log - WebKit's categories compile to nothing - and no tools
 GST_A := $(LIBS64)/lib/libgstreamer-1.0.a
 $(GST_A): $(GST_DIR)/gstreamer-$(GST_VER).tar.xz $(MESON_CROSS) $(TOS_CC) \
-          $(GLIB_A)
+          $(GLIB_A) apps/webkit/media/include/asm/hwcap.h
 	$(call GST_BUILD,gstreamer,$(GST_PLAIN) $(GST_NO_GIR) \
+	    -Dc_args=-I$(abspath apps/webkit/media/include) \
 	    -Dgstreamer-static-full=true \
 	    -Dgst_debug=false -Dregistry=false -Dptp-helper=disabled \
 	    -Dtools=disabled -Dbenchmarks=disabled -Dcheck=disabled \
