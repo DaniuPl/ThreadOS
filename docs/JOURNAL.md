@@ -9885,3 +9885,27 @@ works and is checked by `make test`.
       run in four on the old kernel and the new alike (80 runs each):
       a thread that never sleeps moves only if another core's tick
       comes while the boot core has briefly put it aside.
+- [x] **t_pthread's copy-on-write check, reliable** (libc/tests/pthreadtest.c)
+      The check that the kernel's write into a page still shared after a
+      fork - read() into a buffer - happens on a core other than the
+      first missed about one run in four, on the kernel before the PC's
+      signals as on the one after (80 runs of each). Its one reader
+      thread spun on the boot core waiting to be moved; an idle core
+      takes a thread that is ready to run, never one that is running,
+      so it moved only when another core's tick came in the moment the
+      boot core had put it aside, and otherwise read there after three
+      seconds. Now there is a reader for each core and the first that
+      finds itself off the boot core does the read: while one spins on
+      core 0 the others wait their turn there, and an idle core takes
+      one of them at its next tick. On one core nothing waits. 60 runs
+      of the check on four cores all left core 0 within 40 ms, ten
+      t_pthread runs in a row pass, and glibc's build prints the same
+      lines as before.
+      What the check guards has changed since it was written: read()
+      checks its buffer with paging64_user_writable, which splits a
+      copy-on-write page before the kernel writes (since the 16th), so
+      a secondary core without CR0.WP no longer shows through read() on
+      its own. With the split taken out as well the check fails on four
+      cores - the child sees the parent's data - and passes on one,
+      where the boot core's WP still catches the write: it is the
+      secondary core's write that it holds to the right page.
