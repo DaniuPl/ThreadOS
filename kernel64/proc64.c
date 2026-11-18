@@ -183,6 +183,9 @@ int64_t proc64_fork(struct regs *r)
         task64_inherit_fds(child);   /* open files go with the memory */
         task64_inherit_brk(child);
         task64_mmap_inherit(child);  /* and mapped files too */
+        /* and the signal handler, which is code in that memory, with
+           the forking thread's mask - as on Linux */
+        task64_inherit_signals(child);
     }
     if (!child) {
         kfree(fa);
@@ -270,6 +273,9 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
     prog_close(&prog);
     task64_set_brk_base(brk_base);   /* new image, new heap */
     task64_rename(kname);
+    /* The handler was the old image's code; what is held back stays
+       held back, as on Linux */
+    task64_set_sighandler(0, 0);
 
     uint64_t argv_va = 0;
     rsp = build_args(rsp, &args, &argv_va);

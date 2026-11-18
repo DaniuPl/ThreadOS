@@ -16,9 +16,11 @@ int pipe64_new(int *reader, int *writer);   /* 0, or -1 when there is no room */
 void pipe64_ref(int end);
 void pipe64_unref(int end);
 
-/* They block, but can be interrupted by a signal (-1). A read returns
-   0 when there is nobody left to write - that is end of data, not an
-   error. A write with nobody left to read is -1. */
+/* They block, but can be interrupted by a signal (PIPE64_EINTR, made
+   again after the handler). A read returns 0 when there is nobody left
+   to write - that is end of data, not an error. A write with nobody
+   left to read is -1. */
+#define PIPE64_EINTR (-2)
 int pipe64_read(int end, char *buf, uint32_t len);
 int pipe64_write(int end, const char *buf, uint32_t len);
 

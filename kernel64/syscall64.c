@@ -263,6 +263,18 @@ struct udp_info {
 
 static void handle(struct regs *r);
 
+/* A wait cut short by a signal is made again after the handler, as
+   Linux does for a handler with SA_RESTART - the only kind a program
+   here has: the frame goes back onto the syscall instruction (0F 05,
+   two bytes) with the call's number, its arguments still where they
+   were. Should no handler run after all, the call is simply made
+   again. */
+static void again(struct regs *r, uint64_t nr)
+{
+    r->rip -= 2;
+    r->rax = nr;
+}
+
 /* Sockets belong to a program, not to one of its threads: a C library
    opens a connection in one thread and reads it in another. The kernel
    closes those of a program that has ended. */
@@ -380,12 +392,18 @@ static void handle(struct regs *r)
         }
         if (kind == FDK_POTOK_W) {
             int n = pipe64_write(task64_fd_slot((int)a1), buf, (uint32_t)a3);
-            r->rax = (uint64_t)(int64_t)n;
+            if (n == PIPE64_EINTR)
+                again(r, nr);
+            else
+                r->rax = (uint64_t)(int64_t)n;
             return;
         }
         if (kind == FDK_USOCK) {
             long n = usock64_write(task64_fd_slot((int)a1), buf, (uint32_t)a3);
-            r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
+            if (n == -IPC_EINTR)
+                again(r, nr);
+            else
+                r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
             return;
         }
         if (kind == FDK_NULL) {
@@ -436,10 +454,21 @@ static void handle(struct regs *r)
         user_ran = 1;
         r->rax = 0;
         return;
-    case SYS64_SLEEP:
-        task64_sleep((uint32_t)a1);
+    case SYS64_SLEEP: {
+        if (!a1) {
+            task64_yield();          /* a sleep of nothing gives up the turn */
+            r->rax = 0;
+            return;
+        }
+        uint32_t left = task64_sleep_signal((uint32_t)a1);
+        if (left) {
+            r->rdi = left;           /* the rest of it, after the handler */
+            again(r, nr);
+            return;
+        }
         r->rax = 0;
         return;
+    }
     case SYS64_TICKS:
         r->rax = pit_ticks();
         return;
@@ -456,6 +485,10 @@ static void handle(struct regs *r)
     case SYS64_WAIT: {
         int code = 0;
         int id = task64_wait(&code);
+        if (id == -2) {
+            again(r, nr);
+            return;
+        }
         /* A bad pointer loses the exit code and nothing else: the child
            has been collected by now, so the caller still gets its id -
            returning here without one left the call's own number in rax,
@@ -487,13 +520,19 @@ static void handle(struct regs *r)
         if (kind == FDK_POTOK_R) {
             int n = pipe64_read(task64_fd_slot((int)a1),
                                 (char *)(uintptr_t)a2, (uint32_t)a3);
-            r->rax = (uint64_t)(int64_t)n;
+            if (n == PIPE64_EINTR)
+                again(r, nr);
+            else
+                r->rax = (uint64_t)(int64_t)n;
             return;
         }
         if (kind == FDK_USOCK) {
             long n = usock64_read(task64_fd_slot((int)a1),
                                   (void *)(uintptr_t)a2, (uint32_t)a3);
-            r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
+            if (n == -IPC_EINTR)
+                again(r, nr);
+            else
+                r->rax = (uint64_t)(int64_t)(n < 0 ? -1 : n);
             return;
         }
         if (kind == FDK_NULL) {
@@ -910,15 +949,35 @@ static void handle(struct regs *r)
         return;
     case SYS64_SIGRETURN:
         if (signal64_return(r) < 0) {
-            printk("[kernel] sigreturn: the frame is outside the program's memory\n");
+            printk("[kernel] sigreturn: no signal frame the program could "
+                   "go back to\n");
             task64_kill_current("a broken sigreturn");
         }
         return;                      /* the frame already describes the interrupted spot */
-    case SYS64_SIGMASK:
+    case SYS64_SIGMASK: {
+        /* (how: 0 block, 1 unblock, 2 set, 3 only ask; the bits; where
+           the old mask goes, or 0) */
+        if (a1 > 3 || (a3 && !paging64_user_writable(a3, 8))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        uint64_t was = task64_sigmask();
+        if (a1 == 0)
+            task64_set_sigmask(was | a2);
+        else if (a1 == 1)
+            task64_set_sigmask(was & ~a2);
+        else if (a1 == 2)
+            task64_set_sigmask(a2);
+        if (a3)
+            *(uint64_t *)(uintptr_t)a3 = was;
+        r->rax = 0;
+        return;                      /* a signal let through goes now */
+    }
     case SYS64_SIGSUSPEND:
-        /* The ARM64 kernel's (kernelarm64/proc.c). Here a task has one
-           signal waiting and no mask yet: the C library, told so, keeps
-           none, as before */
+        /* Until a signal the mask lets through has its handler run -
+           which is on the way out of here: the frame gets the mask from
+           before. Always "interrupted". */
+        task64_sigsuspend(a1);
         r->rax = (uint64_t)-1;
         return;
     case SYS64_KILL:
@@ -931,7 +990,13 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-2;
             return;
         }
-        r->rax = task64_signal((int)a1, (int)a2) ? 0 : (uint64_t)-1;
+        /* (the third argument: 1 says the number is a thread's, tkill;
+           0 a program's, kill) */
+        if ((int64_t)a2 < 0 || a2 > 64) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        r->rax = task64_kill((int)a1, (int)a2, a3 == 1) ? 0 : (uint64_t)-1;
         return;
 
     /* --- who is at the machine: up by a password, down for free --- */
@@ -1108,9 +1173,14 @@ static void handle(struct regs *r)
     case SYS64_MMAP:
         r->rax = proc64_mmap(a1);
         return;
-    case SYS64_IPC:
-        r->rax = (uint64_t)ipc64_call(a1, a2, a3, a4);
+    case SYS64_IPC: {
+        long n = ipc64_call(a1, a2, a3, a4);
+        if (n == -IPC_EINTR)
+            again(r, nr);
+        else
+            r->rax = (uint64_t)n;
         return;
+    }
     case SYS64_FDCTL:
         r->rax = (uint64_t)(int64_t)task64_fd_cloexec((int)a1, (int)a2);
         return;
@@ -1154,10 +1224,16 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_FUTEX:
-        if (a2 == FUTEX64_OP_WAIT)
-            r->rax = (uint64_t)(int64_t)futex64_wait(a1, (uint32_t)a3,
-                                                     (uint32_t)a4);
-        else if (a2 == FUTEX64_OP_WAKE)
+        if (a2 == FUTEX64_OP_WAIT) {
+            uint32_t ms = (uint32_t)a4;
+            int got = futex64_wait(a1, (uint32_t)a3, &ms);
+            if (got == -FUTEX64_EINTR) {
+                r->r10 = ms;         /* the time that is left */
+                again(r, nr);
+            } else {
+                r->rax = (uint64_t)(int64_t)got;
+            }
+        } else if (a2 == FUTEX64_OP_WAKE)
             r->rax = (uint64_t)(int64_t)futex64_wake(
                 paging64_current_space(), a1, (int)(a3 > 0x7FFFFFFF ? 0x7FFFFFFF : a3));
         else if (a2 == FUTEX64_OP_REQUEUE)

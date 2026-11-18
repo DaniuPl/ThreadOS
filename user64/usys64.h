@@ -557,9 +557,12 @@ static inline void sys_signal(int sig, void (*handler)(int))
                 (int64_t)(uintptr_t)threados_sigreturn);
 }
 
+/* To a program: one of its threads that does not hold the signal back
+   takes it. (The third argument 1 would name one thread, tkill - and
+   left unset it is whatever RDX held.) */
 static inline int64_t sys_kill(int64_t id, int sig)
 {
-    return syscall64(SYS64_KILL, id, sig);
+    return syscall64_3(SYS64_KILL, id, sig, 0);
 }
 
 /* A hexadecimal number - addresses are read no other way */
