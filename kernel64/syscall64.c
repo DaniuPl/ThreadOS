@@ -914,6 +914,13 @@ static void handle(struct regs *r)
             task64_kill_current("a broken sigreturn");
         }
         return;                      /* the frame already describes the interrupted spot */
+    case SYS64_SIGMASK:
+    case SYS64_SIGSUSPEND:
+        /* The ARM64 kernel's (kernelarm64/proc.c). Here a task has one
+           signal waiting and no mask yet: the C library, told so, keeps
+           none, as before */
+        r->rax = (uint64_t)-1;
+        return;
     case SYS64_KILL:
         /* A plain user may signal only their own processes: the same
            level and the same user - two people signed in at the same

@@ -9728,3 +9728,72 @@ works and is checked by `make test`.
       for x86_64. The kernel takes the first and passes over the second
       (its programs are for another processor); home has the first's
       tile, and a tap on it starts the program, whose window opens.
+- [x] **Signals on the ARM64 kernel, and sysinfo**
+      (kernelarm64/proc.c, proc.h, thread.c, thread.h, exceptions.c,
+      ipchost.h, kernel64/syscall64.h, kernel64/syscall64.c,
+      libc/overlay/src/threados/syscall.c, libc/tests/sigtest.c,
+      libc/tests/libctest.c, Makefile, scripts/tests/t_arm64libc.py)
+      WebKit's garbage collector stops a thread to scan its stack the
+      way WTF does it on Linux: pthread_kill, a handler that saves where
+      the thread's registers are (in the ucontext_t it was given), posts
+      a semaphore and waits in sigsuspend, and a second signal to let it
+      go on. The ARM64 kernel ended a program on any signal, and the
+      main thread's number is its program's: the first collection run
+      from the collector's thread would have killed the web process.
+      Turning the concurrent collector off would not have been enough -
+      the collector's thread still collects while the main thread waits
+      outside the VM, and a thread it fails to stop is a stack it does
+      not scan.
+      The kernel now delivers signals as Linux does on AArch64. Each
+      thread has the signals sent to it and those it holds back, as
+      bits; kill goes to a program (the first thread not holding the
+      signal back), tkill to a thread by its number. On the thread's
+      next way back to EL0 - a system call, an interrupt (so a thread
+      computing takes it at the next tick), a page made on first touch
+      - its frame becomes a call of the C library's handler on its own
+      stack, in Linux's struct rt_sigframe: siginfo_t (signal, SI_USER
+      or SI_TKILL, the sender), then ucontext_t with every general
+      register, sp, pc and pstate, and the FP/SIMD registers in Linux's
+      fpsimd_context record; x0-x2 are the handler's three arguments
+      and x30 the library's restorer, whose SYS64_SIGRETURN puts the
+      frame back (the program decides its registers, not its exception
+      level). SYS64_SIGMASK and SYS64_SIGSUSPEND are new; the handler
+      runs with its signal held back and the mask from before comes
+      back with the frame. A wait in a system call - a futex, a pipe or
+      socket pair, poll, waitpid, a sleep - ends for a signal, and the
+      thread is put back on its SVC with its arguments (a futex's and a
+      sleep's time left), so the call is made again after the handler,
+      as Linux does with SA_RESTART; sigsuspend is the wait a signal
+      ends for good. The kernel's own pauses (the network stack's,
+      getrandom's) are not cut short. Fork keeps the handler and the
+      mask, exec forgets the handler, a new thread has its creator's
+      mask. The C library passes siginfo_t and ucontext_t on to
+      SA_SIGINFO handlers, applies sa_mask, SA_RESETHAND and SA_NODEFER,
+      and keeps the mask in the kernel; on the PC, whose kernel has one
+      signal waiting per task and no mask yet, the two new calls answer
+      -1 quietly and the library keeps none, as before.
+      kernel/ipc.c reads the ARM64 kernel's ipchost.h, which reads
+      struct thread, and its object did not depend on it: an edit there
+      left a stale ipc.o (a wait that a signal never ended). Shared
+      objects now depend on their kernel's own headers on both machines.
+      SYS64_SYSINFO is the ARM64 kernel's too: WTF sizes the JavaScript
+      heap by the memory there is, and guessed 512 MiB without it.
+      sigtest (libc/tests/sigtest.c) is built against musl for ARM64 and
+      against this machine's glibc, and t_arm64libc runs it on one core
+      and four: every line is the same. raise and kill with SA_SIGINFO
+      (signal, si_code, si_pid), the signal and sa_mask held back in the
+      handler and not after; a signal held back waits and is handled
+      once let through; a thread computing in a loop of its own takes a
+      handler whose ucontext_t has the value it keeps in x19 (rbx on the
+      PC's glibc build) and its stack pointer, in its stack, and the FP
+      register the handler zeroed is as it was after; WebKit's suspend
+      and resume fifty times - the thread's count stands still while it
+      is suspended and moves after each resume; a thread in read on a
+      pipe and one on a condition variable take a handler and go on
+      waiting; sigsuspend returns EINTR with the old mask back; kill to
+      the program goes to the thread that does not hold it back; a
+      handler interrupted by another; SA_RESETHAND; a forked child keeps
+      the handler; waitpid goes on after a handler. libctest prints
+      sysinfo's memory, which t_arm64libc holds to the 512 MiB QEMU was
+      given. All ARM64 groups pass; on the PC libc, pthread, signals,
+      glib, ipc, socket, k64proc and random do.

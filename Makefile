@@ -1844,7 +1844,9 @@ KERNEL64_HEADERS := $(wildcard kernel64/*.h)
 $(BUILD)/64/%.o: kernel64/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) $(USERCTL_HEADER) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
 
-$(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) $(USERCTL_HEADER) | $(BUILD)/64
+# (the shared code reaches this kernel's own headers too: ipc.c its
+# ipchost64.h)
+$(BUILD)/64/%.o: kernel/%.c $(KERNEL_HEADERS) $(KERNEL64_HEADERS) $(USERCTL_HEADER) | $(BUILD)/64
 	$(CC) $(CFLAGS64) -c $< -o $@
 
 # The system's mark (kernel/mark.c): art/threados-mark.svg as coverage,
@@ -2069,7 +2071,9 @@ $(BUILD)/arm64/%.o: bootarm64/%.S | $(BUILD)/arm64
 $(BUILD)/arm64/%.o: kernelarm64/%.c $(wildcard kernelarm64/*.h) | $(BUILD)/arm64
 	clang $(CFLAGSARM) -c $< -o $@
 
-$(BUILD)/arm64/%.o: kernel/%.c $(KERNEL_HEADERS) | $(BUILD)/arm64
+# (the shared code reaches this kernel's own headers too - ipc.c its
+# ipchost.h, which reads struct thread)
+$(BUILD)/arm64/%.o: kernel/%.c $(KERNEL_HEADERS) $(wildcard kernelarm64/*.h) | $(BUILD)/arm64
 	clang $(CFLAGSARM) -c $< -o $@
 
 $(BUILD)/arm64/mark.o: $(LOGO_HDR)
@@ -2150,7 +2154,8 @@ libcarm64: $(LIBCARM)
 # Programs against it: libc/libcarm64.ld is libc/libc64.ld at the ARM64
 # kernel's program address. The test programs of libc/tests are the
 # PC's, unchanged - the point of them is that they print the same.
-MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest randtest
+MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest randtest \
+                 sigtest
 MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
 LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
                   -fno-stack-protector -fno-pic \

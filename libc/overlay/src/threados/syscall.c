@@ -118,6 +118,8 @@ long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
 #define T_DISCARD  104
 #define T_IPC      105
 #define T_FDCTL    106               /* FD_CLOEXEC: (fd, -1 ask / 0 / 1) */
+#define T_SIGMASK  110               /* (how, bits, &old): the ARM64 kernel */
+#define T_SIGSUSPEND 111
 
 /* SYS64_IPC's operations (kernel/include/ipc.h) used here */
 #define IPC_MEMFD 6
@@ -1273,9 +1275,34 @@ static struct k_sigaction { void (*handler)(int); unsigned long flags;
 	void (*restorer)(void); unsigned mask[2]; } actions[65];
 static int handler_installed;
 
-static void on_signal(int sig)
+/* A thread's signal mask is the kernel's where it keeps one (the ARM64
+   kernel, SYS64_SIGMASK): -1 from a kernel without it, and then there
+   is no mask, as before - and no more asking */
+static int no_kernel_mask;
+
+static long kernel_mask(int how, unsigned long set, unsigned long *old)
 {
-	void (*h)(int) = sig > 0 && sig < 65 ? actions[sig].handler : 0;
+	if (no_kernel_mask)
+		return -1;
+	long r = tos(T_SIGMASK, how, (long)set, (long)old, 0);
+	if (r < 0)
+		no_kernel_mask = 1;
+	return r;
+}
+
+/* The ARM64 kernel calls it as Linux calls a handler - the signal, its
+   siginfo_t and the ucontext_t of the frame it was interrupted in - so
+   an SA_SIGINFO handler gets what it asks for. The PC's kernel passes
+   the signal alone. */
+#if defined(__aarch64__)
+static void on_signal(int sig, siginfo_t *info, void *uc)
+#else
+static void on_signal(int sig)
+#endif
+{
+	struct k_sigaction a = sig > 0 && sig < 65 ? actions[sig] :
+	                       (struct k_sigaction){ 0 };
+	void (*h)(int) = a.handler;
 	if (h == SIG_IGN)
 		return;
 	if (h == SIG_DFL || !h) {
@@ -1285,6 +1312,21 @@ static void on_signal(int sig)
 			return;
 		tos(T_EXIT_GROUP, 128 + sig, 0, 0, 0);
 	}
+	if (a.flags & SA_RESETHAND)
+		actions[sig].handler = SIG_DFL;
+	/* sa_mask on top of the signal itself, which the kernel holds back;
+	   the mask from before comes back with the frame */
+	unsigned long more = a.mask[0] | (unsigned long)a.mask[1] << 32;
+	if (more)
+		kernel_mask(SIG_BLOCK, more, 0);
+	if (a.flags & SA_NODEFER)
+		kernel_mask(SIG_UNBLOCK, 1UL << (sig - 1), 0);
+#if defined(__aarch64__)
+	if (a.flags & SA_SIGINFO) {
+		((void (*)(int, siginfo_t *, void *))h)(sig, info, uc);
+		return;
+	}
+#endif
 	h(sig);
 }
 
@@ -1631,22 +1673,35 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_wait4:      return do_wait4(a, (int *)b, c);
 	case SYS_kill:
 	case SYS_tkill: {
-		long r = tos(T_KILL, a, b, 0, 0);
+		/* (the third argument: a thread's number, not a program's) */
+		long r = tos(T_KILL, a, b, n == SYS_tkill, 0);
 		return r == -2 ? -EPERM : r < 0 ? -ESRCH : 0;
 	}
 	case SYS_tgkill: {
-		long r = tos(T_KILL, b, c, 0, 0);
+		long r = tos(T_KILL, b, c, 1, 0);
 		return r == -2 ? -EPERM : r < 0 ? -ESRCH : 0;
 	}
 	case SYS_rt_sigaction:
 		return do_sigaction(a, (const struct k_sigaction *)b,
 		                    (struct k_sigaction *)c);
-	case SYS_rt_sigprocmask:
+	case SYS_rt_sigprocmask: {
+		unsigned long old = 0;
+		int how = b ? (int)a : 3;              /* 3: only asking */
+		if (how < 0 || how > 3)
+			return -EINVAL;
+		if (kernel_mask(how, b ? *(const unsigned long *)b : 0,
+		                c ? &old : 0) < 0)
+			old = 0;                       /* no mask kept */
 		if (c) {
 			touch((void *)c, 8);
-			*(unsigned long *)c = 0;
+			*(unsigned long *)c = old;
 		}
 		return 0;
+	}
+	case SYS_rt_sigsuspend:
+		/* Ends once a handler has run: always "interrupted" */
+		tos(T_SIGSUSPEND, *(const unsigned long *)a, 0, 0, 0);
+		return -EINTR;
 	case SYS_sigaltstack:
 		return 0;
 

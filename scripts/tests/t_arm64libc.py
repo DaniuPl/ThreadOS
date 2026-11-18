@@ -18,8 +18,8 @@ the machine's own and are read on their own terms):
   one that is not there, fork and waitpid, the program started again
   by posix_spawn - an exec - with its output through a pipe, and a
   program that is not there, nanosleep against the monotonic clock,
-  gmtime, atexit and main's return value; and the date from the PL031
-  clock
+  gmtime, atexit and main's return value; the date from the PL031
+  clock, and sysinfo's memory - the machine's
 
   pthreadtest with every test that needs neither a disk to write nor a
   second process: a mutex and atomics under contention, joins, thread-
@@ -32,6 +32,13 @@ the machine's own and are read on their own terms):
   pthreadtest endall: exit(5) in a thread ends the whole program - with
   one thread computing at EL0 and one asleep - with code 5, as glibc's
   build does; and "exit", the same in a forked child
+
+  sigtest, on one core and on four: signals - handlers with siginfo_t
+  and the interrupted registers in their ucontext_t, masks, a thread
+  computing or waiting (read, a condition variable, waitpid) taking a
+  handler and going on, sigsuspend, kill to a program whose thread
+  holds the signal back, and WebKit's way of stopping a thread to scan
+  its stack: the thread stands still and its frame has its stack
 
   ipctest, on one core and on four: the PC's test of processes talking
   (kernel/ipc.c, which the ARM64 kernel now builds too) - socket pairs,
@@ -184,6 +191,14 @@ def main():
               tags.get("date") in days)
         check(f"uname says what it runs on ({tags.get('uname')})",
               tags.get("uname") == "ThreadOS aarch64")
+        # sysinfo: what WebKit sizes its heap by - the 512 MiB QEMU was
+        # given, some of it in use, and the seconds since the boot
+        ram = re.match(r"(\d+) KiB, (\d+) free, up (\d+) s$",
+                       tags.get("ram", ""))
+        total, free, up = map(int, ram.groups()) if ram else (0, 0, -1)
+        check(f"sysinfo has the machine's memory and its time up "
+              f"({tags.get('ram')})",
+              total == 512 * 1024 and 0 < free < total and 0 <= up < 240)
         check(f"every page it had is free again ({pages})", back and ready)
 
         # --- threads, on one core and on four
@@ -217,6 +232,26 @@ def main():
                 ok, where = in_order(want, got)
                 check(f"{cores} core(s): ipctest prints exactly what "
                       f"glibc's build prints ({where})", ok)
+                check(f"{cores} core(s): and ends with 0, every page free "
+                      f"again ({pages})",
+                      code == want_code == 0 and back and ready)
+
+        # --- signals
+        sigtest = host_build(work, "sigtest", "-pthread")
+        check("sigtest builds against glibc too", sigtest is not None)
+        if sigtest:
+            want, want_code = host_run(sigtest, [], run_dir)
+            for cores in (1, 4):
+                got, code, pages, back, ready = arm_run("sigtest", [], cores)
+                ok, where = same(want, got)
+                check(f"{cores} core(s): sigtest prints exactly what "
+                      f"glibc's build prints ({where})", ok)
+                check(f"{cores} core(s): WebKit's way of stopping a thread "
+                      f"works: it stood still, its frame had its stack",
+                      any(l.startswith("WebKit's suspend and resume") and
+                          l.endswith("suspended 1, the stack pointer in its "
+                                     "frame in its stack 1, it ran on after "
+                                     "each 1") for l in got))
                 check(f"{cores} core(s): and ends with 0, every page free "
                       f"again ({pages})",
                       code == want_code == 0 and back and ready)

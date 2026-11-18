@@ -112,6 +112,7 @@ static void from_program(struct trap_frame *f, uint32_t ec, uint32_t iss)
     }
     if (ec == EC_DATA_ABORT_LOWER && program_page(iss)) {
         proc_return();
+        proc_signals(f);
         return;
     }
     if (ec == EC_DATA_ABORT_LOWER)
@@ -137,8 +138,12 @@ void arm64_exception(struct trap_frame *f, uint64_t slot)
         /* A program whose other thread ended it ends this thread too,
            even one that never calls the kernel: the timer brings it
            here */
-        if (FROM_EL0(slot))
+        if (FROM_EL0(slot)) {
             proc_return();
+            /* and a thread computing at EL0 takes a signal sent to it
+               at the next tick at the latest */
+            proc_signals(f);
+        }
         return;
     }
     if (kind != KIND_SYNC) {

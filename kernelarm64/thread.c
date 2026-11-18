@@ -118,13 +118,14 @@ static struct thread *pick(struct thread *old)
    one runs, if there is one that may - unless it was to sleep and
    'unless' says it need not (thread_wait), which is looked at here,
    under the lock that thread_wake takes too. */
-static void reschedule_unless(const volatile int *unless, int state,
-                              uint64_t wake_at)
+static void reschedule_unless(const volatile int *unless, int signals,
+                              int state, uint64_t wake_at)
 {
     struct cpu *c = cpu_this();
     spin_lock(&rq);
     struct thread *old = c->current;
-    if (state == T_SLEEPING && ((unless && *unless) || old->interrupted)) {
+    if (state == T_SLEEPING && ((unless && *unless) || old->interrupted ||
+                                (signals && thread_signalled(old)))) {
         spin_unlock(&rq);
         return;
     }
@@ -150,7 +151,7 @@ static void reschedule_unless(const volatile int *unless, int state,
 
 static void reschedule(int state, uint64_t wake_at)
 {
-    reschedule_unless(0, state, wake_at);
+    reschedule_unless(0, 0, state, wake_at);
 }
 
 /* Where a new thread's first switch returns to */
@@ -208,6 +209,11 @@ static struct thread *new_thread(const char *name, void (*fn)(void *),
     t->ended = 0;
     t->interrupted = 0;
     t->woken = 0;
+    t->sig_pending = 0;
+    t->sig_blocked = 0;
+    t->sig_saved = 0;
+    t->sig_suspended = 0;
+    t->sig_bythread = 0;
     return t;
 }
 
@@ -308,7 +314,7 @@ void thread_join(struct thread *t)
 void thread_wait(const volatile int *flag, uint64_t until)
 {
     irqflags_t f = irq_save();
-    reschedule_unless(flag, T_SLEEPING, until);
+    reschedule_unless(flag, 1, T_SLEEPING, until);
     irq_restore(f);
 }
 

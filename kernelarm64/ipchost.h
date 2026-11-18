@@ -49,10 +49,12 @@ static inline void ipc_wake(struct thread *t)
     thread_wake(t);
 }
 
-/* No signals here yet: a wait ends early only for its program's end */
+/* A wait ends early for its program's end, or for a signal to take -
+   then the call is made again after the handler (proc.c) */
 static inline int ipc_interrupted(void)
 {
-    return thread_current()->interrupted;
+    struct thread *t = thread_current();
+    return t->interrupted || thread_signalled(t);
 }
 
 int ipc_fd_new(int kind, int slot);

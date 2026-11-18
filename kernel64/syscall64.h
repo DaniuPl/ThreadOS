@@ -190,6 +190,15 @@
    installed system and taken (kernel/install.c install_package) - an
    administrator's only: -2 for anybody else */
 #define SYS64_PACKAGE_INSTALL 109
+/* A thread's signal mask (bit n-1 for signal n), on the ARM64 kernel:
+   SYS64_SIGMASK (how: 0 block, 1 unblock, 2 set, 3 only ask; the bits;
+   where to put the old mask, or 0) -> 0, -1. SYS64_SIGSUSPEND (mask):
+   that mask until a signal it lets through is handled, then the old one
+   again; -1 when it was. The PC has neither yet: its C library then
+   keeps no mask, as before. SYS64_KILL takes a third argument there: 1
+   says the number is a thread's (tkill), 0 a program's (kill). */
+#define SYS64_SIGMASK    110
+#define SYS64_SIGSUSPEND 111
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

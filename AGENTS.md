@@ -29,7 +29,9 @@ in address spaces of their own (`kernelarm64/proc.c`, the PC's system
 call numbers) - freestanding ones in `userarm64/`, and musl programs:
 the same `libc/` and overlay built for aarch64 by the cross gcc
 (`gcc-aarch64-linux-gnu`), with threads, futexes, memory made on first
-touch, fork (copy-on-write), exec and wait, and pipes, Unix socket
+touch, fork (copy-on-write), exec and wait, signals (Linux's frame, so
+`ucontext_t` has the interrupted registers; masks, `sigsuspend`, a
+wait cut short is made again), and pipes, Unix socket
 pairs and shared memory from `kernel/ipc.c`, which both kernels build
 (each gives it what it needs through `kernel/include/ipchost.h`), and
 the PC's network stack (`kernel/net.c`, `tcp.c`, `dhcp.c`) on a

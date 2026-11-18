@@ -78,6 +78,9 @@ struct uproc {
     volatile int done;
     int reaping;                 /* being collected: by nobody else */
     int code;                    /* what it ended with; -1 killed */
+    /* SYS64_SIGNAL: the C library's one handler for every signal, and
+       the code the handler returns to, which calls SYS64_SIGRETURN */
+    uint64_t sig_handler, sig_restorer;
 };
 
 /* A program from the initrd, with its arguments (the name first, then
@@ -105,6 +108,9 @@ int proc_cow(uint64_t addr);
 /* On every way back to EL0: a program that is ending ends its threads
    here, whatever they were doing */
 void proc_return(void);
+/* And then: a signal for this thread that it does not hold back is
+   delivered - the frame becomes a call of the program's handler */
+void proc_signals(struct trap_frame *f);
 void proc_fault(struct trap_frame *f, const char *what, uint64_t addr,
                 const char *why) __attribute__((noreturn));
 

@@ -26,6 +26,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/sysinfo.h>
 #include <sys/utsname.h>
 #include <spawn.h>
 #include <sys/wait.h>
@@ -514,6 +515,14 @@ static void timing(void)
 	struct utsname u;
 	uname(&u);
 	printf("~uname: %s %s\n", u.sysname, u.machine);
+	struct sysinfo si;
+	if (sysinfo(&si))
+		printf("~ram: none\n");
+	else
+		printf("~ram: %llu KiB, %llu free, up %ld s\n",
+		       (unsigned long long)si.totalram * si.mem_unit / 1024,
+		       (unsigned long long)si.freeram * si.mem_unit / 1024,
+		       (long)si.uptime);
 }
 
 int main(int argc, char **argv)

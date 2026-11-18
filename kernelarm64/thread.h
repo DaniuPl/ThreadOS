@@ -34,7 +34,26 @@ struct thread {
     volatile int ended;          /* it is past its last instruction */
     volatile int interrupted;    /* to stop waiting: its program ends */
     volatile int woken;          /* thread_wait's flag for IPC waits */
+    /* Signals (proc.c), as bits - signal n is bit n-1: those sent to
+       it and not yet delivered, those it holds back (sigprocmask), and
+       while it waits in sigsuspend, the mask it had before */
+    volatile uint64_t sig_pending;
+    volatile uint64_t sig_blocked;
+    uint64_t sig_saved;
+    int sig_suspended;
+    /* who sent each (its program's number), and which were sent to
+       this thread by name (tkill) rather than to its program (kill) -
+       what the handler's siginfo_t says */
+    int32_t sig_sender[64];
+    uint64_t sig_bythread;
 };
+
+/* A signal it does not hold back waits for it: a system call's wait
+   ends for that, to be taken up again after the handler (proc.c) */
+static inline int thread_signalled(const struct thread *t)
+{
+    return (t->sig_pending & ~t->sig_blocked) != 0;
+}
 
 /* The boot context of the first core becomes the thread "main" */
 void sched_init(void);
@@ -59,10 +78,12 @@ void thread_join(struct thread *t);
 int thread_try_join(struct thread *t);
 
 /* Sleeps until the counter reaches 'until' (~0: no limit) or the
-   thread is woken - and not at all if *flag is set already, or the
-   thread was interrupted. *flag is looked at under the scheduler's
-   lock, as thread_wake changes a thread's state: whoever sets it and
-   then wakes the thread cannot be missed. */
+   thread is woken - and not at all if *flag is set already, the thread
+   was interrupted or has a signal to take (thread_signalled). *flag
+   and the signals are looked at under the scheduler's lock, as
+   thread_wake changes a thread's state: whoever sets them and then
+   wakes the thread cannot be missed. thread_sleep_ms, the kernel's own
+   pause, is not cut short by a signal. */
 void thread_wait(const volatile int *flag, uint64_t until);
 /* A sleeping thread is ready again; one that is not, stays as it is */
 void thread_wake(struct thread *t);

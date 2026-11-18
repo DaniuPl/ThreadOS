@@ -78,6 +78,10 @@
 #define EINVAL    22
 #define ETIMEDOUT 110
 
+/* A system call's wait cut short by a signal: the call is made again
+   after the handler (proc_signals) */
+#define RESTART_CALL (-512)
+
 void enter_el0(uint64_t entry, uint64_t sp, uint64_t x0, uint64_t x1)
     __attribute__((noreturn));
 void enter_el0_stack(uint64_t entry, uint64_t sp, uint64_t x0, uint64_t x1,
@@ -829,8 +833,9 @@ static struct waiter *waiters;
 static struct spinlock futex_lock = SPINLOCK_FREE;
 
 static int64_t futex_wait(struct uproc *p, uint64_t addr, uint32_t val,
-                          uint32_t ms)
+                          uint64_t *ms_left)
 {
+    uint32_t ms = (uint32_t)*ms_left;
     if ((addr & 3) || !user_range(p, addr, 4, 0))
         return -EFAULT;
     struct thread *me = thread_current();
@@ -846,7 +851,8 @@ static int64_t futex_wait(struct uproc *p, uint64_t addr, uint32_t val,
 
     uint64_t until = ms ? counter_now() + (uint64_t)ms * timer_freq() / 1000
                         : ~0UL;
-    while (!w.woken && !me->interrupted && counter_now() < until)
+    while (!w.woken && !me->interrupted && !thread_signalled(me) &&
+           counter_now() < until)
         thread_wait(&w.woken, until);
 
     f = spin_lock_irq(&futex_lock);
@@ -858,7 +864,18 @@ static int64_t futex_wait(struct uproc *p, uint64_t addr, uint32_t val,
                 break;
             }
     spin_unlock_irq(&futex_lock, f);
-    return woken ? 0 : me->interrupted ? -EINTR : -ETIMEDOUT;
+    if (woken)
+        return 0;
+    uint64_t now = counter_now();
+    if (now >= until)
+        return -ETIMEDOUT;
+    /* Cut short: made again after the handler, for the time that is
+       left (at least a millisecond - 0 would be no limit) */
+    if (ms) {
+        uint64_t left = (until - now) * 1000 / timer_freq();
+        *ms_left = left ? left : 1;
+    }
+    return RESTART_CALL;
 }
 
 /* Wakes up to n of those waiting on addr; those after them, up to
@@ -895,20 +912,20 @@ static int futex_wake(struct uproc *p, uint64_t addr, int n, int move,
 }
 
 static int64_t sys_futex(struct uproc *p, uint64_t addr, uint64_t op,
-                         uint64_t a3, uint64_t a4)
+                         uint64_t a3, uint64_t *a4)
 {
     if (op == FUTEX64_OP_WAIT)
-        return futex_wait(p, addr, (uint32_t)a3, (uint32_t)a4);
+        return futex_wait(p, addr, (uint32_t)a3, a4);
     if (addr & 3)
         return -EINVAL;
     if (op == FUTEX64_OP_WAKE)
         return futex_wake(p, addr, a3 > 0x7FFFFFFF ? 0x7FFFFFFF : (int)a3,
                           0, 0);
     if (op == FUTEX64_OP_REQUEUE) {
-        if (a4 & 3)
+        if (*a4 & 3)
             return -EINVAL;
         return futex_wake(p, addr, (int)(a3 & 0x7FFFFFFF),
-                          (int)((a3 >> 32) & 0x7FFFFFFF), a4);
+                          (int)((a3 >> 32) & 0x7FFFFFFF), *a4);
     }
     return -EINVAL;
 }
@@ -1047,6 +1064,9 @@ static int64_t sys_clone(struct uproc *p, uint64_t a)
     if (t) {
         t->tid = tid;
         t->clear_tid = c.clear_tid;
+        /* As on Linux, the creator's signal mask (a C library blocks
+           everything around clone, and the thread sets its own) */
+        t->sig_blocked = thread_current()->sig_blocked;
         p->threads[slot] = t;
         p->live++;
     }
@@ -1100,6 +1120,8 @@ static int64_t sys_fork(struct uproc *p, struct trap_frame *f)
     c->brk_start = p->brk_start;
     c->brk = p->brk;
     c->mmap_next = p->mmap_next;
+    c->sig_handler = p->sig_handler;
+    c->sig_restorer = p->sig_restorer;
     for (int i = 0; i < FD_MAX; i++) {
         c->fds[i] = p->fds[i];
         hold(&c->fds[i]);
@@ -1120,6 +1142,7 @@ static int64_t sys_fork(struct uproc *p, struct trap_frame *f)
        uses none */
     fp_save(t->fpstate);
     t->tid = c->pid;
+    t->sig_blocked = thread_current()->sig_blocked;
     c->threads[0] = t;
     c->live = 1;
     thread_wake(t);
@@ -1177,6 +1200,7 @@ static int64_t sys_exec(struct uproc *p, uint64_t uname, uint64_t len,
     p->table = im.table;
     p->brk_start = p->brk = im.brk_start;
     p->mmap_next = MMAP_BASE;
+    p->sig_handler = p->sig_restorer = 0;   /* the old program's code */
     set_name(p, name);
     me->ttbr0 = (uint64_t)(uintptr_t)im.table;
     me->tpidr_el0 = 0;
@@ -1223,6 +1247,8 @@ static int64_t sys_wait(struct uproc *p, uint64_t ucode)
         }
         if (!children || me->interrupted)
             return -1;
+        if (thread_signalled(me))
+            return RESTART_CALL;
         thread_wait(0, counter_now() + timer_freq() / 200);
     }
 }
@@ -1258,19 +1284,327 @@ static int64_t sys_trywait(struct uproc *p, int64_t id, uint64_t ucode)
     return r;
 }
 
-/* No signal handlers here yet: any signal but 0 ends the program, as an
-   unhandled one would, with the code that says "killed" */
-static int64_t sys_kill(int64_t pid, int64_t sig)
+/* --- signals --------------------------------------------------------------
+ *
+ * The C library keeps the table of what each signal does
+ * (libc/overlay/src/threados/syscall.c) and gives the kernel one handler
+ * for all of them and the code that handler returns to, as on the PC
+ * (SYS64_SIGNAL). A signal is sent to a thread by its number (tkill) or
+ * to a program (kill: the first of its threads that does not hold it
+ * back), and waits there as a bit until the thread's next way back to
+ * EL0 - from a system call, an interrupt, a page made on first touch.
+ * There its frame becomes a call of the handler, on the program's own
+ * stack, in Linux's frame for AArch64 (struct rt_sigframe): the
+ * signal's siginfo_t, then a ucontext_t with every register - the
+ * FP/SIMD ones in the record Linux keeps them in. What reads a thread's
+ * registers from its signal frame finds them where it looks: WebKit's
+ * garbage collector stops a thread with a signal and scans its stack
+ * from the stack pointer it finds there. The handler returns to the
+ * library's restorer, whose SYS64_SIGRETURN puts the frame back.
+ *
+ * A wait in a system call ends for a signal (thread_signalled), and the
+ * call is made again after the handler - the thread is put back on its
+ * SVC with its arguments - as Linux does for a handler with SA_RESTART,
+ * the only kind a program here has. sigsuspend is the wait a signal
+ * ends for good.
+ */
+
+#define SIGNAL_KILL  9
+#define SIGNAL_CHLD  17
+#define SIGNAL_CONT  18
+#define SIGNAL_STOP  19
+#define SIGNAL_URG   23
+#define SIGNAL_WINCH 28
+#define SIG_BIT(n)   (1UL << ((n) - 1))
+/* What no mask holds back */
+#define SIG_ALWAYS   (SIG_BIT(SIGNAL_KILL) | SIG_BIT(SIGNAL_STOP))
+
+#define SI_USER  0               /* siginfo_t's si_code: kill */
+#define SI_TKILL (-6)            /* tkill */
+
+
+void fp_restore(const uint64_t *state);
+
+/* Linux's frame for a handler on AArch64 (arch/arm64/kernel/signal.c):
+   siginfo_t, ucontext_t, and a frame record for unwinders */
+struct sig_info {
+    int32_t signo, err, code, pad;
+    int32_t pid;                 /* the sender's program */
+    uint32_t uid;
+    uint8_t rest[128 - 24];
+};
+
+#define FPSIMD_MAGIC 0x46508001  /* Linux's struct fpsimd_context */
+struct fpsimd_record {
+    uint32_t magic, size;
+    uint32_t fpsr, fpcr;
+    uint64_t v[64];              /* q0-q31 */
+};
+
+struct sig_mcontext {            /* Linux's struct sigcontext */
+    uint64_t fault_address;
+    uint64_t regs[31];
+    uint64_t sp, pc, pstate;
+    uint8_t reserved[4096] __attribute__((aligned(16)));
+};
+
+struct sig_ucontext {
+    uint64_t flags, link;
+    uint64_t ss_sp;
+    int32_t ss_flags, ss_pad;
+    uint64_t ss_size;
+    uint64_t sigmask;            /* a C library's sigset_t is 128 bytes:
+                                    the rest stays zero */
+    uint8_t unused[128 - 8];
+    struct sig_mcontext mc;
+};
+
+struct sig_frame {
+    struct sig_info info;
+    struct sig_ucontext uc;
+    uint64_t fp, lr;
+};
+
+_Static_assert(__builtin_offsetof(struct sig_ucontext, mc) == 176,
+               "uc_mcontext where a C library looks for it");
+_Static_assert(__builtin_offsetof(struct sig_mcontext, reserved) == 288,
+               "the FP/SIMD record where Linux puts it");
+_Static_assert(__builtin_offsetof(struct sig_frame, uc) == 128,
+               "the ucontext_t after the siginfo_t");
+
+/* What a signal does without a handler: these are let go, the rest end
+   the program */
+static int ignored_by_default(int sig)
 {
-    irqflags_t f = spin_lock_irq(&lock);
-    struct uproc *t = pid > 0 ? proc_of((int)pid) : 0;
-    if (t && t->done)
-        t = 0;
-    spin_unlock_irq(&lock, f);
-    if (!t)
+    return sig == SIGNAL_CHLD || sig == SIGNAL_CONT || sig == SIGNAL_URG ||
+           sig == SIGNAL_WINCH;
+}
+
+/* The thread a signal for the whole program goes to: the first that
+   does not hold it back, else the first. Under p->lock. */
+static struct thread *taker(struct uproc *p, int sig)
+{
+    struct thread *first = 0;
+    for (int i = 0; i < PROC_THREADS; i++) {
+        struct thread *t = p->threads[i];
+        if (!t || t->ended)
+            continue;
+        if (!(t->sig_blocked & SIG_BIT(sig)))
+            return t;
+        if (!first)
+            first = t;
+    }
+    return first;
+}
+
+/* SYS64_KILL (id, signal, to a thread): signal 0 only asks whether
+   there is such a program or thread */
+static int64_t sys_kill(int64_t id, int64_t sig, uint64_t to_thread)
+{
+    if (sig < 0 || sig > 64 || id <= 0)
         return -1;
-    if (sig)
-        stop_program(t, -1);
+    struct uproc *from = self();
+    irqflags_t f = spin_lock_irq(&lock);
+    struct uproc *t = 0;
+    struct thread *th = 0;
+    for (int i = 0; i < PROC_MAX && !t; i++) {
+        struct uproc *c = &procs[i];
+        if (!c->pid || c->done)
+            continue;
+        if (!to_thread) {
+            if (c->pid == id)
+                t = c;
+            continue;
+        }
+        spin_lock(&c->lock);
+        for (int k = 0; k < PROC_THREADS && !th; k++)
+            if (c->threads[k] && c->threads[k]->tid == id &&
+                !c->threads[k]->ended)
+                th = c->threads[k];
+        spin_unlock(&c->lock);
+        if (th)
+            t = c;
+    }
+    if (!t || !sig) {
+        spin_unlock_irq(&lock, f);
+        return t ? 0 : -1;
+    }
+    if (sig == SIGNAL_KILL || sig == SIGNAL_STOP || !t->sig_handler) {
+        spin_unlock_irq(&lock, f);
+        /* No handler: what the signal does by itself - and SIGKILL has
+           nothing else, so ends it with the code that says "killed" */
+        if (t->sig_handler || !ignored_by_default((int)sig))
+            stop_program(t, -1);
+        return 0;
+    }
+    spin_lock(&t->lock);
+    if (!th)
+        th = taker(t, (int)sig);
+    if (th) {
+        th->sig_sender[sig - 1] = from ? from->pid : 0;
+        if (to_thread)
+            __atomic_fetch_or(&th->sig_bythread, SIG_BIT(sig),
+                              __ATOMIC_RELAXED);
+        else
+            __atomic_fetch_and(&th->sig_bythread, ~SIG_BIT(sig),
+                               __ATOMIC_RELAXED);
+        __atomic_fetch_or(&th->sig_pending, SIG_BIT(sig), __ATOMIC_SEQ_CST);
+        /* A wait it is in ends now (thread.c looks at its signals under
+           the lock thread_wake takes) */
+        thread_wake(th);
+    }
+    spin_unlock(&t->lock);
+    spin_unlock_irq(&lock, f);
+    return 0;
+}
+
+void proc_signals(struct trap_frame *f)
+{
+    struct thread *me = thread_current();
+    struct uproc *p = me->proc;
+    if (!p || !thread_signalled(me))
+        return;
+    uint64_t ready = me->sig_pending & ~me->sig_blocked;
+    int sig = __builtin_ctzl(ready) + 1;
+    __atomic_fetch_and(&me->sig_pending, ~SIG_BIT(sig), __ATOMIC_SEQ_CST);
+    uint64_t mask = me->sig_suspended ? me->sig_saved : me->sig_blocked;
+    if (!p->sig_handler) {
+        /* (a program that exec'd since it was sent) */
+        me->sig_blocked = mask;
+        me->sig_suspended = 0;
+        if (ignored_by_default(sig))
+            return;
+        printk("[proc] %s (pid %d): signal %d, no handler - ended\n",
+               p->name, p->pid, sig);
+        end_program(p, -1);
+    }
+
+    uint64_t at = (f->sp_el0 - sizeof(struct sig_frame)) & ~15UL;
+    if (f->sp_el0 < USER_BASE + sizeof(struct sig_frame) ||
+        !user_range(p, at, sizeof(struct sig_frame), 1)) {
+        printk("[proc] %s (pid %d): no room on its stack for signal %d "
+               "- ended\n", p->name, p->pid, sig);
+        end_program(p, PROC_KILLED);
+    }
+    struct sig_frame *sf = (struct sig_frame *)(uintptr_t)at;
+    memset(&sf->info, 0, sizeof(sf->info));
+    sf->info.signo = sig;
+    sf->info.code = (me->sig_bythread & SIG_BIT(sig)) ? SI_TKILL : SI_USER;
+    sf->info.pid = me->sig_sender[sig - 1];
+    struct sig_ucontext *uc = &sf->uc;
+    memset(uc, 0, __builtin_offsetof(struct sig_ucontext, mc));
+    uc->sigmask = mask;
+    struct sig_mcontext *mc = &uc->mc;
+    mc->fault_address = 0;
+    memcpy(mc->regs, f->x, sizeof(mc->regs));
+    mc->sp = f->sp_el0;
+    mc->pc = f->elr;
+    mc->pstate = f->spsr;
+    /* This core's FP/SIMD registers are the thread's: the kernel uses
+       none, and a switch puts them back before it runs again */
+    uint64_t fp[FPSTATE_WORDS];
+    fp_save(fp);
+    struct fpsimd_record *r = (struct fpsimd_record *)mc->reserved;
+    r->magic = FPSIMD_MAGIC;
+    r->size = sizeof(*r);
+    r->fpcr = (uint32_t)fp[64];
+    r->fpsr = (uint32_t)fp[65];
+    memcpy(r->v, fp, sizeof(r->v));
+    memset(mc->reserved + sizeof(*r), 0, 8);   /* the list's end */
+    sf->fp = f->x[29];
+    sf->lr = f->elr;
+
+    /* The handler runs with the signal held back, as without SA_NODEFER;
+       the mask before it comes back with SYS64_SIGRETURN */
+    me->sig_blocked = (me->sig_blocked | SIG_BIT(sig)) & ~SIG_ALWAYS;
+    me->sig_suspended = 0;
+    f->x[0] = (uint64_t)sig;
+    f->x[1] = at + __builtin_offsetof(struct sig_frame, info);
+    f->x[2] = at + __builtin_offsetof(struct sig_frame, uc);
+    f->x[29] = at + __builtin_offsetof(struct sig_frame, fp);
+    f->x[30] = p->sig_restorer;
+    f->sp_el0 = at;
+    f->elr = p->sig_handler;
+}
+
+/* The handler has returned to the restorer: the stack is where the
+   frame was put. Its registers are the program's to have changed -
+   the state it goes back to EL0 in is not, beyond the flags. */
+static void sys_sigreturn(struct uproc *p, struct trap_frame *f)
+{
+    struct thread *me = thread_current();
+    uint64_t at = f->sp_el0;
+    if ((at & 15) || !user_range(p, at, sizeof(struct sig_frame), 0)) {
+        printk("[proc] %s (pid %d): sigreturn with no frame at 0x%lx "
+               "- ended\n", p->name, p->pid, at);
+        end_program(p, PROC_KILLED);
+    }
+    const struct sig_frame *sf = (const struct sig_frame *)(uintptr_t)at;
+    const struct sig_mcontext *mc = &sf->uc.mc;
+    memcpy(f->x, mc->regs, sizeof(f->x));
+    f->sp_el0 = mc->sp;
+    f->elr = mc->pc;
+    f->spsr = mc->pstate & 0xF0000000UL;       /* NZCV, EL0t */
+    me->sig_blocked = sf->uc.sigmask & ~SIG_ALWAYS;
+    const struct fpsimd_record *r =
+        (const struct fpsimd_record *)mc->reserved;
+    if (r->magic == FPSIMD_MAGIC && r->size == sizeof(*r)) {
+        uint64_t fp[FPSTATE_WORDS];
+        memcpy(fp, r->v, sizeof(r->v));
+        fp[64] = r->fpcr;
+        fp[65] = r->fpsr;
+        fp_restore(fp);
+    }
+}
+
+static int64_t sys_sigmask(struct uproc *p, uint64_t how, uint64_t set,
+                           uint64_t old)
+{
+    struct thread *me = thread_current();
+    if (how > 3 || (old && !user_range(p, old, 8, 1)))
+        return -1;
+    uint64_t was = me->sig_blocked;
+    if (how == 0)
+        me->sig_blocked = (was | set) & ~SIG_ALWAYS;
+    else if (how == 1)
+        me->sig_blocked = was & ~set;
+    else if (how == 2)
+        me->sig_blocked = set & ~SIG_ALWAYS;
+    if (old)
+        *(uint64_t *)(uintptr_t)old = was;
+    return 0;
+}
+
+/* Until a signal the mask lets through has its handler run - which is
+   on the way out of here: the frame gets the mask from before */
+static int64_t sys_sigsuspend(uint64_t mask)
+{
+    struct thread *me = thread_current();
+    me->sig_saved = me->sig_blocked;
+    me->sig_blocked = mask & ~SIG_ALWAYS;
+    me->sig_suspended = 1;
+    while (!thread_signalled(me) && !me->interrupted)
+        thread_wait(0, ~0UL);
+    return -1;
+}
+
+/* What the PC's SYS64_SYSINFO answers: the machine's memory and how
+   long it has been up. A web engine sizes its JavaScript heap and its
+   caches by the memory there is (WTF's ramSize, through sysinfo), and
+   without an answer guesses 512 MiB - a quarter of what the phone has */
+static int64_t sys_sysinfo(struct uproc *p, uint64_t to)
+{
+    struct {
+        uint32_t ram_kib;
+        uint32_t used_kib;
+        uint32_t uptime_s;
+    } info;
+    if (!user_range(p, to, sizeof(info), 1))
+        return -1;
+    info.ram_kib = pmm_ram_kib();
+    info.used_kib = pmm_used_frames() * (PAGE_SIZE / 1024);
+    info.uptime_s = (uint32_t)(timer_ticks() / HZ);
+    memcpy((void *)(uintptr_t)to, &info, sizeof(info));
     return 0;
 }
 
@@ -1336,7 +1670,7 @@ static int64_t sys_read(struct uproc *p, int64_t fd, uint64_t buf,
     void *to = (void *)(uintptr_t)buf;
     if (kind == FDK_POTOK_R || kind == FDK_USOCK) {
         long n = usock64_read(slot, to, (uint32_t)len);
-        return n < 0 ? -1 : n;
+        return n == -IPC_EINTR ? RESTART_CALL : n < 0 ? -1 : n;
     }
     if (kind == FDK_MEMFD) {
         long n = memfd64_rw(slot, fd_pos(p, fd), to, (uint32_t)len, 0);
@@ -1383,7 +1717,7 @@ static int64_t sys_write(struct uproc *p, int64_t fd, uint64_t buf,
     int slot = ipc_fd_slot((int)fd);
     if (kind == FDK_POTOK_W || kind == FDK_USOCK) {
         long n = usock64_write(slot, from, (uint32_t)len);
-        return n < 0 ? -1 : n;
+        return n == -IPC_EINTR ? RESTART_CALL : n < 0 ? -1 : n;
     }
     if (kind == FDK_NULL)
         return (int64_t)len;           /* taken, and gone */
@@ -1509,16 +1843,24 @@ static int64_t sys_time(struct uproc *p, uint64_t at)
     return 0;
 }
 
-static void sys_sleep(uint64_t ms)
+static int64_t sys_sleep(uint64_t *ms)
 {
-    if (!ms) {
+    if (!*ms) {
         thread_yield();          /* "give up my turn" */
-        return;
+        return 0;
     }
     struct thread *me = thread_current();
-    uint64_t until = counter_now() + ms * timer_freq() / 1000;
-    while (counter_now() < until && !me->interrupted)
+    uint64_t until = counter_now() + *ms * timer_freq() / 1000;
+    while (counter_now() < until && !me->interrupted &&
+           !thread_signalled(me))
         thread_wait(0, until);
+    uint64_t now = counter_now();
+    if (now >= until || me->interrupted)
+        return 0;
+    /* A signal: the rest of the sleep after its handler */
+    uint64_t left = (until - now) * 1000 / timer_freq();
+    *ms = left ? left : 1;
+    return RESTART_CALL;
 }
 
 /* --- the network -----------------------------------------------------------
@@ -1765,6 +2107,7 @@ void proc_syscall(struct trap_frame *f)
     struct thread *me = thread_current();
     struct uproc *p = me->proc;
     uint64_t *x = f->x;
+    uint64_t first = x[0];       /* for a call made again (RESTART_CALL) */
     int64_t r;
     switch (x[8]) {
     case SYS64_WRITE:
@@ -1806,6 +2149,8 @@ void proc_syscall(struct trap_frame *f)
         break;
     case SYS64_IPC:
         r = ipc64_call(x[0], x[1], x[2], x[3]);
+        if (r == -IPC_EINTR)
+            r = RESTART_CALL;
         break;
     case SYS64_GETCWD:
         if (x[1] < 2 || !user_range(p, x[0], 2, 1)) {
@@ -1839,14 +2184,16 @@ void proc_syscall(struct trap_frame *f)
         r = sys_trywait(p, (int64_t)x[0], x[1]);
         break;
     case SYS64_KILL:
-        r = sys_kill((int64_t)x[0], (int64_t)x[1]);
+        r = sys_kill((int64_t)x[0], (int64_t)x[1], x[2]);
         break;
     case SYS64_SLEEP:
-        sys_sleep(x[0]);
-        r = 0;
+        r = sys_sleep(&first);
         break;
     case SYS64_TICKS:
         r = (int64_t)timer_ticks();
+        break;
+    case SYS64_SYSINFO:
+        r = sys_sysinfo(p, x[0]);
         break;
     case SYS64_TIME:
         r = sys_time(p, x[0]);
@@ -1872,8 +2219,34 @@ void proc_syscall(struct trap_frame *f)
     case SYS64_LEVEL:
         r = 1;                   /* a user, not the administrator */
         break;
-    case SYS64_SIGNAL:
-        r = 0;                   /* kept, though none is sent here yet */
+    case SYS64_SIGNAL: {
+        /* The handler and the code it returns to are the program's own
+           code - what the kernel later sends a thread to - as on the
+           PC; 0 is none: a signal then does what it does by itself */
+        int fl1 = 0, fl2 = 0;
+        if (x[1] && (!uspace_lookup(p->table, x[1], &fl1) ||
+                     !(fl1 & UMAP_EXEC) ||
+                     !uspace_lookup(p->table, x[2], &fl2) ||
+                     !(fl2 & UMAP_EXEC))) {
+            r = -1;
+            break;
+        }
+        p->sig_handler = x[1];
+        p->sig_restorer = x[1] ? x[2] : 0;
+        r = 0;
+        break;
+    }
+    case SYS64_SIGRETURN:
+        /* The frame is the registers to go back with: x0 too */
+        sys_sigreturn(p, f);
+        proc_return();
+        proc_signals(f);
+        return;
+    case SYS64_SIGMASK:
+        r = sys_sigmask(p, x[0], x[1], x[2]);
+        break;
+    case SYS64_SIGSUSPEND:
+        r = sys_sigsuspend(x[0]);
         break;
     case SYS64_SBRK:
         r = sys_sbrk(p, (int64_t)x[0]);
@@ -1885,7 +2258,7 @@ void proc_syscall(struct trap_frame *f)
         r = sys_discard(p, x[0], x[1]);
         break;
     case SYS64_FUTEX:
-        r = sys_futex(p, x[0], x[1], x[2], x[3]);
+        r = sys_futex(p, x[0], x[1], x[2], &x[3]);
         break;
     case SYS64_CLONE:
         r = sys_clone(p, x[0]);
@@ -1921,8 +2294,17 @@ void proc_syscall(struct trap_frame *f)
         r = -1;                          /* not on this kernel yet */
         break;
     }
-    x[0] = (uint64_t)r;
+    if (r == RESTART_CALL) {
+        /* Back onto the SVC, its arguments as they were (the time left
+           of a sleep or a futex wait): after the handler, the call is
+           made again */
+        x[0] = first;
+        f->elr -= 4;
+    } else {
+        x[0] = (uint64_t)r;
+    }
     proc_return();
+    proc_signals(f);
 }
 
 void proc_fault(struct trap_frame *f, const char *what, uint64_t addr,
