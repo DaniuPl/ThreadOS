@@ -15,19 +15,32 @@
 #                   them, as `pkg-config --static --libs` says: CMake's
 #                   find modules name a library, not the static ones
 #                   under it
+#   THREADOS_CC, THREADOS_CXX, THREADOS_FLAGS, THREADOS_LD, THREADOS_CPU
+#                   the machine (the Makefile's TARGET): the compilers,
+#                   their flags, the linker script - the PC's when not
+#                   given
 #
 # The system is Linux as far as WebKit is concerned: musl answers the
 # Linux system calls (libc/overlay/), so WebKit's Linux code paths are
 # the right ones; what differs is in apps/webkit/patches/.
 
+if (NOT THREADOS_CC)
+    set(THREADOS_CC gcc)
+    set(THREADOS_CXX g++)
+    set(THREADOS_FLAGS "-m64 -march=x86-64 -mtune=generic -mno-red-zone")
+    set(THREADOS_LD libc/libc64.ld)
+    set(THREADOS_CPU x86_64)
+endif ()
+
 set(CMAKE_SYSTEM_NAME Linux)
-set(CMAKE_SYSTEM_PROCESSOR x86_64)
-set(CMAKE_C_COMPILER gcc)
-set(CMAKE_CXX_COMPILER g++)
+set(CMAKE_SYSTEM_PROCESSOR ${THREADOS_CPU})
+set(CMAKE_C_COMPILER ${THREADOS_CC})
+set(CMAKE_CXX_COMPILER ${THREADOS_CXX})
 
 # The variables reach try_compile() projects too
 set(CMAKE_TRY_COMPILE_PLATFORM_VARIABLES
-    THREADOS_MUSL THREADOS_REPO THREADOS_CXXRT THREADOS_LIBS THREADOS_LINK)
+    THREADOS_MUSL THREADOS_REPO THREADOS_CXXRT THREADOS_LIBS THREADOS_LINK
+    THREADOS_CC THREADOS_CXX THREADOS_FLAGS THREADOS_LD THREADOS_CPU)
 
 execute_process(COMMAND ${CMAKE_C_COMPILER} -print-file-name=include
                 OUTPUT_VARIABLE _gcc_include OUTPUT_STRIP_TRAILING_WHITESPACE)
@@ -39,7 +52,7 @@ execute_process(COMMAND ${CMAKE_CXX_COMPILER} -print-file-name=libstdc++.a
 execute_process(COMMAND sh -c "echo | ${CMAKE_CXX_COMPILER} -xc++ -E -v - 2>&1 | sed -n 's/^ \\(.*c++.*\\)$/-isystem \\1/p' | tr '\\n' ' '"
                 OUTPUT_VARIABLE _cxx_includes OUTPUT_STRIP_TRAILING_WHITESPACE)
 
-set(_common "-m64 -march=x86-64 -mtune=generic -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
+set(_common "${THREADOS_FLAGS} -fno-stack-protector -fno-pic -fno-plt \
 -fno-asynchronous-unwind-tables -ffunction-sections -fdata-sections \
 -DTHREADOS_LIBC")
 set(CMAKE_C_FLAGS_INIT "${_common} -nostdinc -isystem ${THREADOS_MUSL}/include \
@@ -71,7 +84,7 @@ endif ()
 set(_start "-static -no-pie -nostdlib -Wl,--build-id=none \
 -Wl,-z,max-page-size=0x1000 -Wl,--gc-sections \
 -Wl,--allow-multiple-definition ${_search} \
--T ${THREADOS_REPO}/libc/libc64.ld \
+-T ${THREADOS_REPO}/${THREADOS_LD} \
 ${THREADOS_MUSL}/lib/crt1.o ${THREADOS_MUSL}/lib/crti.o")
 set(_end "${THREADOS_CXXRT} ${_libstdcxx} ${THREADOS_MUSL}/lib/libc.a \
 ${_libgcc} ${THREADOS_MUSL}/lib/crtn.o")

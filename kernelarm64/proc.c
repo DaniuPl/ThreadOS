@@ -56,6 +56,7 @@
 #include "uart.h"
 #include "../kernel/include/ipc.h"
 #include "../kernel/include/net.h"
+#include "../kernel/include/random.h"
 #include "../kernel/include/tcp.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/heap.h"
@@ -1295,6 +1296,30 @@ static int64_t sys_open(struct uproc *p, uint64_t path, uint64_t len,
     return slot < 0 ? -1 : ipc_fd_new(FDK_FILE, slot);
 }
 
+/* A file of the initrd whole, into the program's buffer: how the C
+   library serves the fonts and the CA bundle as files of their own
+   (libc/overlay/src/threados/socket.c). Only what will be written is
+   checked - checking makes the pages, and a buffer said to be large
+   would get all of them for a small file. */
+static int64_t sys_initrd_read(struct uproc *p, uint64_t path, uint64_t len,
+                               uint64_t buf, uint64_t cap)
+{
+    char name[NAME_MAX + 1];
+    if (!len || len > NAME_MAX || !user_range(p, path, len, 0))
+        return -1;
+    memcpy(name, (const void *)(uintptr_t)path, len);
+    name[len] = 0;
+    uint32_t size;
+    const uint8_t *data = initrd_find(name, &size);
+    if (!data)
+        return -1;
+    uint64_t n = size < cap ? size : cap;
+    if (n && !user_range(p, buf, n, 1))
+        return -1;
+    memcpy((void *)(uintptr_t)buf, data, n);
+    return (int64_t)n;
+}
+
 static int64_t sys_read(struct uproc *p, int64_t fd, uint64_t buf,
                         uint64_t len)
 {
@@ -1428,6 +1453,35 @@ static int64_t sys_seek(struct uproc *p, int64_t fd, uint64_t pos)
         e->pos = (uint32_t)pos;
     spin_unlock_irq(&p->lock, f);
     return ok ? 0 : -1;
+}
+
+/* --- random numbers ------------------------------------------------------- */
+
+/* The PC's call: up to a page from the kernel's pool, once it can be
+   trusted - waiting for that, or -2 when asked not to wait */
+static int64_t sys_getrandom(struct uproc *p, uint64_t buf, uint64_t len,
+                             uint64_t flags)
+{
+    if (len > 4096 || !user_range(p, buf, len, 1))
+        return -1;
+    struct thread *me = thread_current();
+    while (!random_ready()) {
+        if (flags & GETRANDOM_NOWAIT)
+            return -2;
+        if (me->interrupted)
+            return -1;
+        thread_sleep_ms(10);
+    }
+    vrng_stir();
+    uint8_t piece[256];
+    for (uint64_t done = 0; done < len; ) {
+        uint64_t n = len - done > sizeof(piece) ? sizeof(piece) : len - done;
+        random_bytes(piece, (uint32_t)n);
+        memcpy((void *)(uintptr_t)(buf + done), piece, n);
+        done += n;
+    }
+    memset(piece, 0, sizeof(piece));
+    return (int64_t)len;
 }
 
 /* --- the clocks --------------------------------------------------------- */
@@ -1796,6 +1850,12 @@ void proc_syscall(struct trap_frame *f)
         break;
     case SYS64_TIME:
         r = sys_time(p, x[0]);
+        break;
+    case SYS64_GETRANDOM:
+        r = sys_getrandom(p, x[0], x[1], x[2]);
+        break;
+    case SYS64_INITRD_READ:
+        r = sys_initrd_read(p, x[0], x[1], x[2], x[3]);
         break;
     case SYS64_GETPID:
         r = me->tid;

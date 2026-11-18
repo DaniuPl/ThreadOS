@@ -274,9 +274,9 @@ def one_boot(work, tag, cpu_model):
     return banner, got, code, img.read("/rand.bin"), img.read("/dev.bin")
 
 
-def judge(tag, data, size):
+def judge(tag, data, size, where="the file is on the disk"):
     n = len(data)
-    check(f"{tag}: the file is on the disk, {size} bytes", n == size)
+    check(f"{tag}: {where}, {size} bytes", n == size)
     if n != size:
         return
     bits = n * 8
@@ -357,4 +357,5 @@ def main():
     return summary()
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

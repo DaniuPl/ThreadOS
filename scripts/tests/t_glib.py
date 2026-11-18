@@ -52,7 +52,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 PROMPTS = ("thread64>", "thread64#")
 
 
-def host_glibtest(work):
+def host_glibtest(work, args=()):
     """glibtest built against this machine's GLib and run: its lines"""
     flags = subprocess.run(["pkg-config", "--cflags", "--libs", "gio-2.0",
                             "gio-unix-2.0"], capture_output=True, text=True)
@@ -63,8 +63,8 @@ def host_glibtest(work):
     if subprocess.run(["gcc", "-O2", "-w", "-o", exe, src,
                        *flags.stdout.split()]).returncode:
         return None
-    p = subprocess.run([exe], cwd=work, capture_output=True, text=True,
-                       timeout=120)
+    p = subprocess.run([exe, *args], cwd=work, capture_output=True,
+                       text=True, timeout=120)
     return [l for l in p.stdout.splitlines() if l], p.returncode
 
 
@@ -158,4 +158,5 @@ def main():
     return summary()
 
 
-sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

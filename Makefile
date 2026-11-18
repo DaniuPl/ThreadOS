@@ -25,7 +25,7 @@ FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
 
 .PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone webkit \
-        libcarm64
+        libcarm64 webkit-libs arm64-libs weft-arm64
 
 all: kernel64
 
@@ -104,6 +104,46 @@ USER_DYN := cryptotest certtest httpget gweb nslookup dynlib
 # an Invalid Opcode, and on a processor without BMI2 the kernel itself
 # does not start. scripts/checkisa.py holds a build to this.
 ARCH64 := -march=x86-64 -mtune=generic
+
+# The machine the C library, its libraries and the programs on them are
+# built for: x86_64, the PC (the default), or aarch64 - the ARM64
+# kernel, which takes the PC's system calls (kernelarm64/proc.c), so
+# that libc/overlay is one layer for both. Weft for the phone is
+#   make TARGET=aarch64 BUILD=<its own directory> webkit
+# Only that side follows TARGET: the kernels are built as they always
+# are, and one build directory holds one machine's libraries.
+TARGET ?= x86_64
+ifeq ($(TARGET),aarch64)
+CC      := aarch64-linux-gnu-gcc
+CXX     := aarch64-linux-gnu-g++
+AR      := aarch64-linux-gnu-ar
+RANLIB  := aarch64-linux-gnu-ranlib
+STRIP   := aarch64-linux-gnu-strip
+# no fused multiply-add: what the C library computes is what it does
+# on the PC, where the tests compare it with glibc
+TFLAGS  := -march=armv8-a -mno-outline-atomics -ffp-contract=off
+THOST   := aarch64-pc-linux-musl
+TLD     := libc/libcarm64.ld
+TCPU    := aarch64
+OPENSSL_TARGET := linux-aarch64
+else ifeq ($(TARGET),x86_64)
+AR      := ar
+RANLIB  := ranlib
+STRIP   := strip
+TFLAGS  := -m64 $(ARCH64) -mno-red-zone
+THOST   := x86_64-pc-linux-musl
+TLD     := libc/libc64.ld
+TCPU    := x86_64
+OPENSSL_TARGET := linux-x86_64
+else
+$(error TARGET is x86_64 or aarch64)
+endif
+# Not handed down to the libraries' own makefiles, in which TARGET means
+# something else (ICU's is the library it builds) - neither in the
+# flags a sub-make reads nor in its environment
+MAKEOVERRIDES := $(filter-out TARGET=%,$(MAKEOVERRIDES))
+unexport TARGET
+
 KERNEL64 := $(BUILD)/threados64.bin
 CFLAGS64 := -m64 $(ARCH64) -std=gnu11 -ffreestanding -fno-stack-protector -fno-pic \
             -mno-red-zone -mno-mmx -mno-sse -mno-sse2 -Wall -Wextra -Wshadow -O2 -g
@@ -270,7 +310,7 @@ $(USER64_DYN_ELFS): $(BUILD)/user64/%.elf: $(BUILD)/dyn/%.c $(LIB_DECL64) \
 # what little of a C library they need with them. Software written
 # elsewhere - a JavaScript engine, later an HTML engine - is written
 # against C and POSIX, and needs the real thing. That is musl
-# (third_party/musl, unchanged upstream 1.2.5), built for x86_64 with a
+# (third_party/musl, unchanged upstream 1.2.5), built for TARGET with a
 # handful of its files replaced (libc/overlay): the ones that issued
 # the syscall instruction with Linux's numbers now call one function,
 # which translates every Linux call into ThreadOS's own
@@ -284,7 +324,7 @@ MUSL_TREE    := $(BUILD)/musl/tree
 MUSL_ROOT    := $(BUILD)/musl/root
 MUSL_OVERLAY := $(shell find libc/overlay -type f)
 LIBC64       := $(MUSL_ROOT)/lib/libc.a
-MUSL_CFLAGS  := -O2 $(ARCH64) -mno-red-zone -fno-stack-protector -fno-pic \
+MUSL_CFLAGS  := -O2 $(TFLAGS) -fno-stack-protector -fno-pic \
                 -fno-asynchronous-unwind-tables
 
 # A header of the overlay is included all over musl, and musl's
@@ -293,7 +333,7 @@ MUSL_CFLAGS  := -O2 $(ARCH64) -mno-red-zone -fno-stack-protector -fno-pic \
 $(MUSL_TREE)/config.mak: Makefile third_party/musl/VERSION \
                          third_party/musl/tools/mkalltypes.sed \
                          $(wildcard third_party/musl/tools/*.sh) \
-                         third_party/musl/arch/x86_64/bits/alltypes.h.in \
+                         third_party/musl/arch/$(TARGET)/bits/alltypes.h.in \
                          third_party/musl/include/alltypes.h.in \
                          $(filter %.h,$(MUSL_OVERLAY))
 	rm -rf $(MUSL_TREE) && mkdir -p $(MUSL_TREE)
@@ -302,10 +342,10 @@ $(MUSL_TREE)/config.mak: Makefile third_party/musl/VERSION \
 	    $(MUSL_TREE)/VERSION \
 	    $(MUSL_TREE)/tools/mkalltypes.sed \
 	    $(MUSL_TREE)/tools/*.sh \
-	    $(MUSL_TREE)/arch/x86_64/bits/alltypes.h.in \
+	    $(MUSL_TREE)/arch/$(TARGET)/bits/alltypes.h.in \
 	    $(MUSL_TREE)/include/alltypes.h.in
-	cd $(MUSL_TREE) && CC="$(CC)" AR=ar RANLIB=ranlib CFLAGS="$(MUSL_CFLAGS)" ./configure \
-	    --target=x86_64 --prefix=/ --disable-shared >/dev/null
+	cd $(MUSL_TREE) && CC="$(CC)" AR=$(AR) RANLIB=$(RANLIB) CFLAGS="$(MUSL_CFLAGS)" ./configure \
+	    --target=$(TARGET) --prefix=/ --disable-shared >/dev/null
 
 # The library and its headers are installed only where their contents
 # changed (install -C leaves an identical file, and its time, alone),
@@ -423,7 +463,7 @@ $(BUILD)/user64/gmedia.elf: user64/gmedia.c user/uapi.h user/udraw.h \
 # them (for what a C library does not carry - stdatomic.h, the vector
 # intrinsics), musl's start files around the objects, libgcc for the
 # arithmetic the processor has no instruction for.
-LIBC64_CFLAGS := -m64 $(ARCH64) -std=gnu11 -O2 -mno-red-zone -fno-stack-protector \
+LIBC64_CFLAGS := $(TFLAGS) -std=gnu11 -O2 -fno-stack-protector \
                  -fno-pic -fno-asynchronous-unwind-tables \
                  -nostdinc -isystem $(MUSL_ROOT)/include \
                  -isystem $(shell $(CC) -print-file-name=include)
@@ -431,9 +471,9 @@ LIBC64_CFLAGS := -m64 $(ARCH64) -std=gnu11 -O2 -mno-red-zone -fno-stack-protecto
 # scripts, upstream makefiles), where a relative BUILD would point
 # nowhere
 LIBC64_CFLAGS_ABS := $(subst -isystem $(MUSL_ROOT)/include,-isystem $(abspath $(MUSL_ROOT))/include,$(LIBC64_CFLAGS))
-LIBC64_LINK = $(CC) -m64 -static -no-pie -nostdlib -s \
+LIBC64_LINK = $(CC) $(TFLAGS) -static -no-pie -nostdlib -s \
               -Wl,--build-id=none -Wl,-z,max-page-size=0x1000 \
-              -T libc/libc64.ld $(MUSL_ROOT)/lib/crt1.o \
+              -T $(TLD) $(MUSL_ROOT)/lib/crt1.o \
               $(MUSL_ROOT)/lib/crti.o $(1) $(LIBC64) \
               $(shell $(CC) -print-libgcc-file-name) $(MUSL_ROOT)/lib/crtn.o
 
@@ -500,7 +540,7 @@ $(ZLIB_TREE)/%.o: $(ZLIB_TREE)/zlib.h $(MUSL_HEADERS)
 	    -c $(ZLIB_TREE)/$*.c -o $@
 
 $(ZLIB_A): $(patsubst %,$(ZLIB_TREE)/%.o,$(ZLIB_SRC))
-	rm -f $@ && ar rcs $@ $^
+	rm -f $@ && $(AR) rcs $@ $^
 
 $(BUILD)/user64/zlibtest.elf: libc/tests/zlibtest.c $(ZLIB_A) $(LIBC64) \
                               libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
@@ -572,7 +612,7 @@ CURL_LIBS  := $(abspath $(ZLIB_A)) $(abspath $(LIBC64)) \
 $(CURL_TREE)/Makefile: $(CURL_TAR) Makefile $(LIBC64) $(ZLIB_A) $(MBEDTLS_STAMP)
 	rm -rf $(CURL_TREE) && mkdir -p $(CURL_TREE)
 	tar -xf $< -C $(CURL_TREE) --strip-components=1
-	cd $(CURL_TREE) && ./configure --host=x86_64-pc-linux-musl \
+	cd $(CURL_TREE) && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC="$(CC)" \
 	    CFLAGS="$(LIBC64_CFLAGS_ABS) -D_GNU_SOURCE" \
 	    CPPFLAGS="-I$(abspath $(ZLIB_TREE))" \
@@ -594,7 +634,7 @@ $(CURL_TOOL): $(CURL_TREE)/Makefile
 	$(MAKE) -s -C $(CURL_TREE)/src curl
 
 $(BUILD)/user64/curl.elf: $(CURL_TOOL) | $(BUILD)/user64
-	strip -o $@ $<
+	$(STRIP) -o $@ $<
 
 # --- FreeType and HarfBuzz ----------------------------------------------
 # FreeType draws glyphs (TrueType and CFF outlines, hinted or not) and
@@ -628,7 +668,7 @@ $(FT_TREE)/%.o: $(FT_TREE)/include/ft2build.h apps/fonts/ftmodule.h \
 	$(CC) $(LIBC64_CFLAGS) -w $(FT_CFLAGS) -c $(FT_TREE)/src/$*.c -o $@
 
 $(FT_A): $(patsubst %,$(FT_TREE)/%.o,$(FT_SRC))
-	rm -f $@ && ar rcs $@ $^
+	rm -f $@ && $(AR) rcs $@ $^
 
 $(HB_O): $(wildcard $(HB_DIR)/src/*.cc $(HB_DIR)/src/*.hh $(HB_DIR)/src/*.h) \
          $(FT_TREE)/include/ft2build.h $(MUSL_HEADERS)
@@ -731,8 +771,8 @@ CXX64_INCS := $(shell echo | $(CXX) -xc++ -E -v - 2>&1 | sed -n 's/^ \(.*c++.*\)
 LIBSTDCXX  := $(shell $(CXX) -print-file-name=libstdc++.a)
 # -Os and a section per function: whatever is in the initrd is memory
 # the machine never gets back, and the swap test runs in 16 MiB
-CXX64_FLAGS := -m64 $(ARCH64) -std=gnu++17 -Os -ffunction-sections -fdata-sections \
-               -mno-red-zone -fno-stack-protector \
+CXX64_FLAGS := $(TFLAGS) -std=gnu++17 -Os -ffunction-sections -fdata-sections \
+               -fno-stack-protector \
                -fno-pic -fno-asynchronous-unwind-tables -fno-exceptions \
                -fno-threadsafe-statics -nostdinc -nostdinc++ $(CXX64_INCS) \
                -isystem $(MUSL_ROOT)/include \
@@ -876,16 +916,23 @@ TOS_CC      := $(TOOLCHAIN64)/threados-cc
 MESON_CROSS := $(TOOLCHAIN64)/cross.ini
 LIBS64_PC   := PKG_CONFIG_LIBDIR=$(abspath $(LIBS64))/lib/pkgconfig
 
-$(TOS_CC): libc/threados-cc.in $(MUSL_HEADERS)
+# The Makefile says the machine (TARGET) these are written for. A copy
+# that came out the same is not written again, and keeps its time: an
+# edit of the Makefile does not cost every library its build.
+$(TOS_CC): libc/threados-cc.in $(MUSL_HEADERS) Makefile
 	mkdir -p $(TOOLCHAIN64)
 	sed -e 's|@MUSL@|$(abspath $(MUSL_ROOT))|' -e 's|@REPO@|$(CURDIR)|' \
-	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
-	chmod +x $@
+	    -e 's|@LIBS@|$(abspath $(LIBS64))|' -e 's|@CC@|$(CC)|' \
+	    -e 's|@FLAGS@|$(TFLAGS)|' -e 's|@LDSCRIPT@|$(TLD)|' $< > $@.new
+	chmod +x $@.new
+	cmp -s $@.new $@ && rm -f $@.new || mv $@.new $@
 
-$(MESON_CROSS): libc/meson-cross.ini.in
+$(MESON_CROSS): libc/meson-cross.ini.in Makefile
 	mkdir -p $(TOOLCHAIN64)
 	sed -e 's|@TOOLCHAIN@|$(abspath $(TOOLCHAIN64))|' \
-	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
+	    -e 's|@LIBS@|$(abspath $(LIBS64))|' -e 's|@CPU@|$(TCPU)|' \
+	    -e 's|@AR@|$(AR)|' -e 's|@STRIP@|$(STRIP)|' $< > $@.new
+	cmp -s $@.new $@ && rm -f $@.new || mv $@.new $@
 
 # GLib asks for -latomic. On x86-64 the compiler does every atomic
 # operation itself, so ThreadOS's libatomic is empty - and being first
@@ -895,7 +942,7 @@ $(LIBS64_ATOMIC): $(TOS_CC)
 	mkdir -p $(LIBS64)/lib
 	echo > $(BUILD)/libatomic-empty.c
 	$(TOS_CC) -c $(BUILD)/libatomic-empty.c -o $(BUILD)/libatomic-empty.o
-	rm -f $@ && ar rcs $@ $(BUILD)/libatomic-empty.o
+	rm -f $@ && $(AR) rcs $@ $(BUILD)/libatomic-empty.o
 
 # (install -C: zlib is compiled again whenever libc.a changes, into the
 # same library, and a copy that came out the same keeps its time - so
@@ -919,7 +966,7 @@ LIBFFI_A   := $(LIBS64)/lib/libffi.a
 $(LIBFFI_A): $(LIBFFI_TAR) $(TOS_CC)
 	rm -rf $(BUILD)/libffi && mkdir -p $(BUILD)/libffi
 	tar -xf $< -C $(BUILD)/libffi --strip-components=1
-	cd $(BUILD)/libffi && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/libffi && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
 	    --disable-docs --disable-multi-os-directory \
@@ -935,7 +982,7 @@ PCRE2_A   := $(LIBS64)/lib/libpcre2-8.a
 $(PCRE2_A): $(PCRE2_TAR) $(TOS_CC)
 	rm -rf $(BUILD)/pcre2 && mkdir -p $(BUILD)/pcre2
 	tar -xf $< -C $(BUILD)/pcre2 --strip-components=1
-	cd $(BUILD)/pcre2 && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/pcre2 && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
 	    --disable-jit --enable-pcre2-8 --disable-pcre2-16 \
@@ -979,10 +1026,11 @@ $(BUILD)/user64/glibtest.elf: libc/tests/glibtest.c $(GLIB_A) $(TOS_CC) $(LIBC64
 
 # CMake gets libc/cmake-cross.cmake.in the way meson gets its cross file
 CMAKE_CROSS := $(TOOLCHAIN64)/cross.cmake
-$(CMAKE_CROSS): libc/cmake-cross.cmake.in
+$(CMAKE_CROSS): libc/cmake-cross.cmake.in Makefile
 	mkdir -p $(TOOLCHAIN64)
 	sed -e 's|@TOOLCHAIN@|$(abspath $(TOOLCHAIN64))|' \
-	    -e 's|@LIBS@|$(abspath $(LIBS64))|' $< > $@
+	    -e 's|@LIBS@|$(abspath $(LIBS64))|' -e 's|@CPU@|$(TCPU)|' $< > $@.new
+	cmp -s $@.new $@ && rm -f $@.new || mv $@.new $@
 
 # libpng: PNG pictures
 LIBPNG_TAR := third_party/libpng-1.6.59.tar.xz
@@ -990,7 +1038,7 @@ LIBPNG_A   := $(LIBS64)/lib/libpng16.a
 $(LIBPNG_A): $(LIBPNG_TAR) $(TOS_CC) $(LIBS64_ZLIB)
 	rm -rf $(BUILD)/libpng && mkdir -p $(BUILD)/libpng
 	tar -xf $< -C $(BUILD)/libpng --strip-components=1
-	cd $(BUILD)/libpng && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/libpng && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    CPPFLAGS=-I$(abspath $(LIBS64))/include \
 	    LDFLAGS=-L$(abspath $(LIBS64))/lib \
@@ -1050,7 +1098,7 @@ $(LIBS64_FT_A): $(FT_TAR) $(TOS_CC) $(LIBS64_ZLIB) $(LIBPNG_A)
 	rm -rf $(BUILD)/freetype64 && mkdir -p $(BUILD)/freetype64
 	tar -xf $< -C $(BUILD)/freetype64 --strip-components=1
 	cd $(BUILD)/freetype64 && $(LIBS64_PC) ./configure \
-	    --host=x86_64-pc-linux-musl --build=x86_64-pc-linux-gnu \
+	    --host=$(THOST) --build=x86_64-pc-linux-gnu \
 	    CC=$(abspath $(TOS_CC)) CFLAGS=-O2 --prefix=$(abspath $(LIBS64)) \
 	    --disable-shared --enable-static --with-zlib=yes --with-png=yes \
 	    --with-harfbuzz=no --with-brotli=no --with-bzip2=no \
@@ -1113,7 +1161,7 @@ OPENSSL_A   := $(LIBS64)/lib/libssl.a
 $(OPENSSL_A): $(OPENSSL_TAR) $(TOS_CC)
 	rm -rf $(BUILD)/openssl && mkdir -p $(BUILD)/openssl
 	tar -xf $< -C $(BUILD)/openssl --strip-components=1
-	cd $(BUILD)/openssl && ./Configure linux-x86_64 no-shared no-dso \
+	cd $(BUILD)/openssl && ./Configure $(OPENSSL_TARGET) no-shared no-dso \
 	    no-engine no-async no-afalgeng no-secure-memory no-tests no-docs \
 	    no-apps --prefix=$(abspath $(LIBS64)) --libdir=lib \
 	    --openssldir=/etc/ssl CC=$(abspath $(TOS_CC)) \
@@ -1129,7 +1177,7 @@ NGHTTP2_A   := $(LIBS64)/lib/libnghttp2.a
 $(NGHTTP2_A): $(NGHTTP2_TAR) $(TOS_CC)
 	rm -rf $(BUILD)/nghttp2 && mkdir -p $(BUILD)/nghttp2
 	tar -xf $< -C $(BUILD)/nghttp2 --strip-components=1
-	cd $(BUILD)/nghttp2 && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/nghttp2 && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
 	    --enable-lib-only > configure.log 2>&1 \
@@ -1163,7 +1211,7 @@ LIBS64_SQLITE := $(LIBS64)/lib/libsqlite3.a
 $(LIBS64_SQLITE): $(BUILD)/libc64/sqlite3.o $(SQLITE_SRC)/sqlite3.c
 	mkdir -p $(LIBS64)/include $(LIBS64)/lib/pkgconfig
 	rm -f $(BUILD)/libc64/libsqlite3.a
-	ar rcs $(BUILD)/libc64/libsqlite3.a $(BUILD)/libc64/sqlite3.o
+	$(AR) rcs $(BUILD)/libc64/libsqlite3.a $(BUILD)/libc64/sqlite3.o
 	install -C -m 644 $(BUILD)/libc64/libsqlite3.a $@
 	install -C -m 644 $(SQLITE_SRC)/sqlite3.h $(SQLITE_SRC)/sqlite3ext.h \
 	    $(LIBS64)/include/
@@ -1246,7 +1294,7 @@ WEBP_A   := $(LIBS64)/lib/libwebp.a
 $(WEBP_A): $(WEBP_TAR) $(TOS_CC)
 	rm -rf $(BUILD)/libwebp && mkdir -p $(BUILD)/libwebp
 	tar -xf $< -C $(BUILD)/libwebp --strip-components=1
-	cd $(BUILD)/libwebp && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/libwebp && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
 	    --disable-sse4.1 --disable-avx2 --disable-gl --disable-sdl \
@@ -1266,7 +1314,7 @@ TASN1_A   := $(LIBS64)/lib/libtasn1.a
 $(TASN1_A): $(TASN1_TAR) $(TOS_CC)
 	rm -rf $(BUILD)/libtasn1 && mkdir -p $(BUILD)/libtasn1
 	tar -xf $< -C $(BUILD)/libtasn1 --strip-components=1
-	cd $(BUILD)/libtasn1 && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/libtasn1 && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
 	    --disable-doc --disable-valgrind-tests \
@@ -1284,7 +1332,7 @@ GPGERR_A   := $(LIBS64)/lib/libgpg-error.a
 $(GPGERR_A): $(GPGERR_TAR) $(TOS_CC)
 	rm -rf $(BUILD)/libgpg-error && mkdir -p $(BUILD)/libgpg-error
 	tar -xf $< -C $(BUILD)/libgpg-error --strip-components=1
-	cd $(BUILD)/libgpg-error && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/libgpg-error && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
 	    --disable-doc --disable-tests --disable-languages --disable-nls \
@@ -1298,7 +1346,7 @@ GCRYPT_A   := $(LIBS64)/lib/libgcrypt.a
 $(GCRYPT_A): $(GCRYPT_TAR) $(TOS_CC) $(GPGERR_A)
 	rm -rf $(BUILD)/libgcrypt && mkdir -p $(BUILD)/libgcrypt
 	tar -xf $< -C $(BUILD)/libgcrypt --strip-components=1
-	cd $(BUILD)/libgcrypt && ./configure --host=x86_64-pc-linux-musl \
+	cd $(BUILD)/libgcrypt && ./configure --host=$(THOST) \
 	    --build=x86_64-pc-linux-gnu CC=$(abspath $(TOS_CC)) CFLAGS=-O2 \
 	    --prefix=$(abspath $(LIBS64)) --disable-shared --enable-static \
 	    --disable-doc --disable-asm --disable-jent-support \
@@ -1391,8 +1439,8 @@ $(HB64_A): $(wildcard $(HB_DIR)/src/*.cc $(HB_DIR)/src/*.hh $(HB_DIR)/src/*.h) \
 	$(CXX) $(CXX64_FLAGS) -w -fno-rtti -DHAVE_ICU=1 -I$(ICU_ROOT)/include \
 	    -c $(HB_DIR)/src/hb-icu.cc -o $(BUILD)/hb64/hb-icu.o
 	rm -f $(HB64_A) $(HB64_ICU_A)
-	ar rcs $(HB64_A) $(BUILD)/hb64/harfbuzz.o
-	ar rcs $(HB64_ICU_A) $(BUILD)/hb64/hb-icu.o
+	$(AR) rcs $(HB64_A) $(BUILD)/hb64/harfbuzz.o
+	$(AR) rcs $(HB64_ICU_A) $(BUILD)/hb64/hb-icu.o
 	cp $(HB_DIR)/src/hb*.h $(LIBS64)/include/harfbuzz/
 	sed -e 's/^#mesondefine \(HB_HAS_FREETYPE\|HB_HAS_ICU\)$$/#define \1 1/' \
 	    -e 's/^#mesondefine \(.*\)$$/\/* #undef \1 *\//' \
@@ -1463,6 +1511,9 @@ $(JSC_DIR)/build.ninja: $(WEBKIT_SRC)/CMakeLists.txt apps/webkit/threados.cmake 
 	    -DCMAKE_TOOLCHAIN_FILE=$(abspath apps/webkit/threados.cmake) \
 	    -DTHREADOS_MUSL=$(abspath $(MUSL_ROOT)) -DTHREADOS_REPO=$(CURDIR) \
 	    -DTHREADOS_CXXRT=$(abspath $(BUILD)/libc64/cxxrt.o) \
+	    -DTHREADOS_CC=$(CC) -DTHREADOS_CXX=$(CXX) \
+	    "-DTHREADOS_FLAGS=$(TFLAGS)" -DTHREADOS_LD=$(TLD) \
+	    -DTHREADOS_CPU=$(TCPU) \
 	    -DICU_ROOT=$(abspath $(ICU_ROOT)) -DPORT=JSCOnly \
 	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-Os -DNDEBUG" \
 	    -DCMAKE_CXX_FLAGS_RELEASE="-Os -DNDEBUG" \
@@ -1480,7 +1531,7 @@ $(BUILD)/user64/jsc.elf: $(JSC_DIR)/build.ninja $(LIBC64) \
 	rm -f $(JSC_DIR)/bin/jsc
 	ninja -C $(JSC_DIR) jsc > $(JSC_DIR)/ninja.log || \
 	    { tail -40 $(JSC_DIR)/ninja.log; exit 1; }
-	strip -o $@ $(JSC_DIR)/bin/jsc
+	$(STRIP) -o $@ $(JSC_DIR)/bin/jsc
 
 USER64_ELFS += $(BUILD)/user64/jsc.elf
 
@@ -1564,6 +1615,9 @@ $(WPE_DIR)/build.ninja: $(WPE_PATCHED) apps/webkit/threados.cmake \
 	    -DTHREADOS_PROGRAMS=$(abspath apps/webkit/programs.cmake) \
 	    -DTHREADOS_MUSL=$(abspath $(MUSL_ROOT)) -DTHREADOS_REPO=$(CURDIR) \
 	    -DTHREADOS_CXXRT=$(abspath $(BUILD)/libc64/cxxrt.o) \
+	    -DTHREADOS_CC=$(CC) -DTHREADOS_CXX=$(CXX) \
+	    "-DTHREADOS_FLAGS=$(TFLAGS)" -DTHREADOS_LD=$(TLD) \
+	    -DTHREADOS_CPU=$(TCPU) \
 	    -DTHREADOS_LIBS=$(abspath $(LIBS64)) \
 	    "-DTHREADOS_LINK=$$(PKG_CONFIG_LIBDIR=$(WPE_PKGPATH) pkg-config --static --libs $(WPE_PC))" \
 	    -DICU_ROOT=$(abspath $(ICU_ROOT)) \
@@ -1583,7 +1637,7 @@ $(WPE_ELFS) &: $(WPE_DIR)/build.ninja $(LIBC64) $(BUILD)/libc64/cxxrt.o \
 	ninja -C $(WPE_DIR) $(WPE_PROGRAMS:%=bin/%) > $(WPE_DIR)/ninja.log || \
 	    { grep -A20 FAILED $(WPE_DIR)/ninja.log | head -60; exit 1; }
 	for p in $(WPE_PROGRAMS); do \
-	    strip -o $(BUILD)/user64/$$p.elf $(WPE_DIR)/bin/$$p || exit 1; done
+	    $(STRIP) -o $(BUILD)/user64/$$p.elf $(WPE_DIR)/bin/$$p || exit 1; done
 
 # Weft as an application package (scripts/mktapp.py): the three programs
 # and a manifest, a module beside the initrd which the loader brings
@@ -1597,11 +1651,15 @@ TAPPS = $(wildcard $(BUILD)/*.tapp)
 
 $(WEFT_TAPP): $(WPE_ELFS) scripts/mktapp.py scripts/mkupdate.py
 	python3 scripts/mktapp.py $@ --id weft --name Weft --art 5 \
-	    --version $(VERSION) --arch x86_64 --exec weft \
+	    --version $(VERSION) --arch $(TARGET) --exec weft \
 	    $(if $(TAPP_KEY),--key $(TAPP_KEY)) \
 	    $(foreach p,$(WPE_PROGRAMS),$(p)=$(BUILD)/user64/$(p).elf)
 
 webkit: $(WEFT_TAPP)
+
+# Everything WebKit is built on, without WebKit: the libraries a new
+# machine's build is checked with before the hours WebKit takes
+webkit-libs: $(WPE_LIBS) $(ICU_STAMP) $(BUILD)/libc64/cxxrt.o
 
 # layouttest lays pages out with a font of known sizes and prints every
 # box; scripts/tests/t_browser.py holds what it prints on ThreadOS
@@ -1840,7 +1898,7 @@ $(ACPICA_LIB): $(ACPICA_STAMP) kernel/acpica/acthreados.h
 	    grep -v -e '/rsdump\.c$$' | \
 	    xargs -P 8 -I{} sh -c '$(CC) $(ACPICA_FLAGS) -w -c {} \
 	        -o $(ACPICA_DIR)/obj/$$(basename {} .c).o'
-	ar rcs $@ $(ACPICA_DIR)/obj/*.o
+	$(AR) rcs $@ $(ACPICA_DIR)/obj/*.o
 
 $(BUILD)/64/acpios.o $(BUILD)/64/power.o: \
 $(BUILD)/64/%.o: kernel/%.c $(ACPICA_STAMP) kernel/acpica/acthreados.h \
@@ -1986,7 +2044,7 @@ CFLAGSARM := --target=aarch64-none-elf -std=gnu11 -ffreestanding \
 # What of kernel/ the phone's screens are drawn with - the PC's own
 # graphics, fonts and mark - and the initrd that brings the fonts
 SHAREDARM := gfx ttf uitext fonts mark aurora initrd locale bootsplash ipc \
-             net tcp dhcp
+             net tcp dhcp random
 OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/uart.o $(BUILD)/arm64/fdt.o \
              $(BUILD)/arm64/string.o $(BUILD)/arm64/vectors.o \
@@ -1999,7 +2057,7 @@ OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/virtio.o $(BUILD)/arm64/touch.o \
              $(BUILD)/arm64/mobile.o $(BUILD)/arm64/proc.o \
              $(BUILD)/arm64/netglue.o $(BUILD)/arm64/vnet.o \
-             $(BUILD)/arm64/winmob.o \
+             $(BUILD)/arm64/winmob.o $(BUILD)/arm64/vrng.o \
              $(patsubst %,$(BUILD)/arm64/%.o,$(SHAREDARM))
 
 $(BUILD)/arm64:
@@ -2092,7 +2150,7 @@ libcarm64: $(LIBCARM)
 # Programs against it: libc/libcarm64.ld is libc/libc64.ld at the ARM64
 # kernel's program address. The test programs of libc/tests are the
 # PC's, unchanged - the point of them is that they print the same.
-MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest
+MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest randtest
 MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
 LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
                   -fno-stack-protector -fno-pic \
@@ -2121,14 +2179,28 @@ $(BUILD)/arm64/libc/%.elf: libc/tests/%.c $(MUSLARM_STAMP) libc/libcarm64.ld \
 # through fw_cfg (-fw_cfg name=opt/threados/initrd,file=...).
 INITRDARM := $(BUILD)/initrd-arm64.img
 $(INITRDARM): scripts/mkinitrd.py fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf \
-              $(USERARM_ELFS) $(MUSLARM_ELFS)
+              third_party/cacert/cacert.pem $(USERARM_ELFS) $(MUSLARM_ELFS)
 	python3 scripts/mkinitrd.py $@ sans.ttf=fonts/sans.ttf \
 	    bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
+	    cacert.pem=third_party/cacert/cacert.pem \
 	    $(foreach p,$(USERARM),$(p)=$(BUILD)/arm64/user/$(p).elf) \
 	    $(foreach p,$(MUSLARM_PROGS),$(p)=$(BUILD)/arm64/libc/$(p).elf)
 
 kernelarm64: $(KERNELARM) $(INITRDARM)
 	@echo "Done: $(KERNELARM) (AArch64, QEMU virt), $(INITRDARM)"
+
+# The ARM64 kernel's programs that stand on the libraries - and Weft -
+# are the PC's rules built for aarch64 (TARGET, above), into a build
+# directory of their own beside this one, where the ARM64 tests look
+# for them (scripts/tests/t_arm64libs.py)
+ARM64_USER := $(BUILD)/aarch64
+
+arm64-libs:
+	$(MAKE) TARGET=aarch64 BUILD=$(ARM64_USER) webkit-libs \
+	    $(ARM64_USER)/user64/glibtest.elf $(ARM64_USER)/user64/wpedeps.elf
+
+weft-arm64:
+	$(MAKE) TARGET=aarch64 BUILD=$(ARM64_USER) webkit
 
 # The serial port alone; Ctrl-A X leaves QEMU
 run-arm64: $(KERNELARM)
@@ -2139,6 +2211,7 @@ run-arm64: $(KERNELARM)
 # touchscreen (the mouse is the finger) and the initrd; the serial
 # console stays on the terminal
 PHONE_DEVICES = -device ramfb -device virtio-tablet-device \
+                -device virtio-rng-device \
                 -global virtio-mmio.force-legacy=false \
                 -fw_cfg name=opt/threados/initrd,file=$(INITRDARM)
 run-phone: $(KERNELARM) $(INITRDARM)

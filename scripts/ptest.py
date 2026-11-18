@@ -3806,7 +3806,7 @@ def noarm64():
 
 
 def arm64_boot(machine="virt", cpu="cortex-a72", mib=256, cores=1,
-               append=None, timeout=30, initrd=None):
+               append=None, timeout=30, initrd=None, extra=()):
     """Runs the ARM64 kernel until it says it is ready or that it is
     stopping (or the time is up) and returns everything it said, with
     the carriage returns taken out. 'initrd' is handed over through
@@ -3820,6 +3820,7 @@ def arm64_boot(machine="virt", cpu="cortex-a72", mib=256, cores=1,
         cmd += ["-append", append]
     if initrd:
         cmd += ["-fw_cfg", "name=opt/threados/initrd,file=" + initrd]
+    cmd += list(extra)
     p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                          stderr=subprocess.PIPE)
     text = ""

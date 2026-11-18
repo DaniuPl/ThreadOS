@@ -9,8 +9,8 @@
 
 [binaries]
 c = '@TOOLCHAIN@/threados-cc'
-ar = 'ar'
-strip = 'strip'
+ar = '@AR@'
+strip = '@STRIP@'
 pkg-config = 'pkg-config'
 
 [built-in options]
@@ -25,6 +25,6 @@ needs_exe_wrapper = true
 
 [host_machine]
 system = 'linux'
-cpu_family = 'x86_64'
-cpu = 'x86_64'
+cpu_family = '@CPU@'
+cpu = '@CPU@'
 endian = 'little'

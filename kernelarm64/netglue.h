@@ -12,4 +12,9 @@ void net_leave(void);
    its receiving thread - 0, or -1 when there is none */
 int vnet_init(struct virtio_dev *devs, int n);
 
+/* vrng.c: the virtio entropy device, if there is one, into the pool
+   (kernel/random.c) - at once, and again at each vrng_stir */
+int vrng_init(struct virtio_dev *devs, int n);
+void vrng_stir(void);
+
 #endif

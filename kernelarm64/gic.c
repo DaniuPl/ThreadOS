@@ -15,6 +15,7 @@
  * left for later; on one, this says so and takes no interrupts.
  */
 
+#include "../kernel/include/random.h"
 #include <stdint.h>
 #include "arm64.h"
 #include "uart.h"
@@ -95,6 +96,8 @@ void gic_irq(void)
     uint32_t id = iar & 0x3FF;
     if (id == SPURIOUS)
         return;              /* gone by the time it was asked for */
+    /* When it came is the pool's (kernel/random.c), as on the PC */
+    random_add_interrupt((int)id);
     if (id < HANDLED_IDS && handlers[id])
         handlers[id]();
     else

@@ -9,6 +9,10 @@
  *
  *   randtest <getrandom's megabyte> <256 KiB of /dev/urandom>
  *
+ * With "-" for both, on a system with no disk to write (the ARM64
+ * kernel, scripts/tests/t_arm64rand.py), the first 64 KiB of each are
+ * printed instead, in hex, on lines starting "=rand " and "=dev ".
+ *
  * Lines starting with '~' differ from run to run.
  */
 
@@ -51,6 +55,26 @@ static int cmp16(const void *a, const void *b)
     return memcmp(a, b, 16);
 }
 
+#define SHOWN (64 * 1024)
+
+/* The bytes into the file named, or - with "-" - the first SHOWN of
+   them onto the console, 64 a line */
+static int keep(const char *name, const char *tag, const unsigned char *p,
+                size_t n)
+{
+    if (strcmp(name, "-")) {
+        FILE *f = fopen(name, "wb");
+        return f && fwrite(p, 1, n, f) == n && !fclose(f) ? 0 : -1;
+    }
+    for (size_t at = 0; at < n && at < SHOWN; at += 64) {
+        printf("=%s ", tag);
+        for (size_t i = at; i < at + 64 && i < n; i++)
+            printf("%02x", p[i]);
+        printf("\n");
+    }
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 3) {
@@ -76,8 +100,7 @@ int main(int argc, char **argv)
         have += want;
         calls++;
     }
-    FILE *f = fopen(argv[1], "wb");
-    if (!f || fwrite(mb, 1, have, f) != have || fclose(f)) {
+    if (keep(argv[1], "rand", mb, have)) {
         printf("could not write %s\n", argv[1]);
         return 1;
     }
@@ -91,19 +114,17 @@ int main(int argc, char **argv)
                                        : strerror(errno));
         bad = 1;
     } else {
-        FILE *out = fopen(argv[2], "wb");
         size_t moved = 0;
-        while (out && moved < DEVBYTES) {
-            size_t n = fread(mb, 1, 9000, u);
+        while (moved < DEVBYTES) {
+            size_t n = fread(mb + moved, 1, 9000, u);
             if (n != 9000)
                 break;
             n = n > DEVBYTES - moved ? DEVBYTES - moved : n;
-            fwrite(mb, 1, n, out);
             moved += n;
         }
-        if (out)
-            fclose(out);
         fclose(u);
+        if (keep(argv[2], "dev", mb, moved))
+            printf("could not write %s\n", argv[2]);
         printf("/dev/urandom: a character device, %zu bytes read into %s\n",
                moved, argv[2]);
     }

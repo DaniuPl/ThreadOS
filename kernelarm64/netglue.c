@@ -13,9 +13,9 @@
  * only for code that does not wait.
  *
  * And what else the stack asks of a kernel (kernel/include/task.h,
- * pit.h, random.h): threads, the hundredths of a second since boot,
- * whether a socket's program is still there, numbers to start a TCP
- * connection's sequence at.
+ * pit.h): threads, the hundredths of a second since boot, whether a
+ * socket's program is still there. Its random numbers are the PC's own
+ * pool (kernel/random.c), built here too.
  */
 
 #include <stdint.h>
@@ -25,7 +25,6 @@
 #include "thread.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pit.h"
-#include "../kernel/include/random.h"
 #include "../kernel/include/spinlock.h"
 #include "../kernel/include/task.h"
 
@@ -106,31 +105,4 @@ int task_alive(int id)
 uint32_t pit_ticks(void)
 {
     return (uint32_t)timer_ticks();
-}
-
-/* --- kernel/include/random.h ---------------------------------------------
- *
- * Numbers for TCP's initial sequence: unguessable enough that a stray
- * segment of an old connection does not land in a new one. The counter
- * runs at tens of megahertz, its low bits are the jitter of whatever
- * the machine was doing, and SplitMix64 spreads them over every bit.
- * Not keys: the kernel has no source fit for those here yet, and
- * SYS64_GETRANDOM says so by answering -1.
- */
-
-static uint64_t state;
-
-void random_bytes(void *out, uint32_t n)
-{
-    uint8_t *p = out;
-    for (uint32_t i = 0; i < n; i++) {
-        if (i % 8 == 0) {
-            state += counter_now() + 0x9E3779B97F4A7C15UL;
-            uint64_t z = state;
-            z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9UL;
-            z = (z ^ (z >> 27)) * 0x94D049BB133111EBUL;
-            state ^= z ^ (z >> 31);
-        }
-        p[i] = (uint8_t)(state >> (8 * (i % 8)));
-    }
 }

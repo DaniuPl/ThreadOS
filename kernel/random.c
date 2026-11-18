@@ -20,6 +20,11 @@
  *
  * Interrupts only add a word to a small array (cheap enough for every
  * one); the array is folded into the pool on the way out.
+ *
+ * The ARM64 kernel builds this file too: its counter is the generic
+ * timer's, its chip's generator RNDR (ARMv8.5's, which QEMU's "max"
+ * processor has), and it adds what a virtio entropy device gives
+ * through random_add (kernelarm64/vrng.c).
  */
 
 #include <stdint.h>
@@ -27,7 +32,11 @@
 #include "include/string.h"
 #include "include/spinlock.h"
 #include "include/printk.h"
+#if defined(__aarch64__)
+uint32_t rtc_seconds(void);         /* kernelarm64/rtc.c: the PL031 */
+#else
 #include "include/rtc.h"
+#endif
 
 /* --- BLAKE2s-256 ----------------------------------------------------- */
 
@@ -190,6 +199,39 @@ static uint32_t fast[16];
 static uint32_t fast_count;
 static uint32_t interrupts_seen;
 
+#if defined(__aarch64__)
+/* The generic timer's counter: tens of megahertz rather than the cycle,
+   but its low bits at an interrupt are as much the machine's own */
+static uint64_t rdtsc(void)
+{
+    uint64_t v;
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(v));
+    return v;
+}
+
+/* RNDR (S3_3_C2_C4_0): a word, and the flags say whether it is one -
+   Z set is "none this time" */
+static int hw_random(uint64_t *v)
+{
+    for (int tries = 0; tries < 10 && have_rdrand; tries++) {
+        uint64_t nzcv;
+        __asm__ volatile("mrs %0, s3_3_c2_c4_0; mrs %1, nzcv"
+                         : "=r"(*v), "=r"(nzcv));
+        if (!(nzcv & (1UL << 30)))
+            return 1;
+    }
+    return 0;
+}
+
+/* ID_AA64ISAR0_EL1.RNDR, bits 63-60 */
+static void find_generators(void)
+{
+    uint64_t isar0;
+    __asm__ volatile("mrs %0, id_aa64isar0_el1" : "=r"(isar0));
+    have_rdrand = (isar0 >> 60) != 0;
+    have_rdseed = 0;
+}
+#else
 static uint64_t rdtsc(void)
 {
     uint32_t lo, hi;
@@ -208,6 +250,16 @@ static int hw_random(uint64_t *v)
     }
     return ok;
 }
+
+static void find_generators(void)
+{
+    uint32_t a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0));
+    have_rdrand = (c >> 30) & 1;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(7), "c"(0));
+    have_rdseed = (b >> 18) & 1;
+}
+#endif
 
 void random_add_interrupt(int irq)
 {
@@ -317,16 +369,15 @@ static int self_test(void)
 
 void random_init(void)
 {
-    uint32_t a, b, c, d;
-    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0));
-    have_rdrand = (c >> 30) & 1;
-    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(7), "c"(0));
-    have_rdseed = (b >> 18) & 1;
-
+    find_generators();
     int t = self_test();
     b2s_init(&pool);
+#if defined(__aarch64__)
+    uint32_t rt = rtc_seconds();
+#else
     struct rtc_time rt;
     rtc_read(&rt);
+#endif
     uint64_t now = rdtsc();
     b2s_update(&pool, &rt, sizeof(rt));
     b2s_update(&pool, &now, sizeof(now));
@@ -337,5 +388,10 @@ void random_init(void)
     else
         printk("[ OK ] Random numbers: BLAKE2s and ChaCha20 match RFC 7693 "
                "and 8439; sources: %s%sinterrupt timing\n",
-               have_rdseed ? "RDSEED, " : "", have_rdrand ? "RDRAND, " : "");
+               have_rdseed ? "RDSEED, " : "",
+#if defined(__aarch64__)
+               have_rdrand ? "RNDR, " : "");
+#else
+               have_rdrand ? "RDRAND, " : "");
+#endif
 }

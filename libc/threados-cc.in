@@ -5,18 +5,21 @@
 # configure scripts, meson, CMake - and each asks "the C compiler" to
 # compile and to link. This one answers for ThreadOS: musl's headers in
 # place of the host's, and, when it links, a static program at the
-# address libc/libc64.ld gives it, between musl's start files, with the
-# libraries already built for ThreadOS (BUILD/libs64) and musl after
+# address the linker script gives it, between musl's start files, with
+# the libraries already built for ThreadOS (BUILD/libs64) and musl after
 # the objects. The Makefile writes the paths in (@MUSL@, @REPO@,
-# @LIBS@) when it makes the copy in BUILD/toolchain.
+# @LIBS@) when it makes the copy in BUILD/toolchain, and the machine:
+# the compiler (@CC@ - the host's gcc for the PC, the cross gcc for
+# ARM64), its flags (@FLAGS@) and the linker script (@LDSCRIPT@).
 
 MUSL=@MUSL@
 REPO=@REPO@
 LIBS=@LIBS@
+CC=@CC@
 
-FLAGS="-m64 -march=x86-64 -mtune=generic -mno-red-zone -fno-stack-protector -fno-pic -fno-plt \
+FLAGS="@FLAGS@ -fno-stack-protector -fno-pic -fno-plt \
 -fno-asynchronous-unwind-tables -nostdinc -isystem $LIBS/include \
--isystem $MUSL/include -isystem $(gcc -print-file-name=include)"
+-isystem $MUSL/include -isystem $($CC -print-file-name=include)"
 
 # A question about the compiler itself is the host gcc's to answer -
 # except where libraries are looked for, which a build system (meson)
@@ -26,17 +29,17 @@ link=1
 for a in "$@"; do
     case "$a" in
     -print-search-dirs|--print-search-dirs)
-        gcc -print-search-dirs |
+        $CC -print-search-dirs |
             sed "s|^libraries: =|libraries: =$LIBS/lib:$MUSL/lib:|"
         exit 0 ;;
     -c|-S|-E|-M|-MM) link=0 ;;
     --version|-v|-dumpversion|-dumpmachine|-dumpfullversion|-print-*|--print-*)
-        exec gcc "$@" ;;
+        exec $CC "$@" ;;
     esac
 done
 
 if [ $link = 0 ]; then
-    exec gcc $FLAGS "$@"
+    exec $CC $FLAGS "$@"
 fi
 
 # A shared library or module: nothing on ThreadOS can load one (a musl
@@ -57,8 +60,8 @@ for a in "$@"; do
         exit 0 ;;
     esac
 done
-exec gcc $FLAGS -static -no-pie -nostdlib -Wl,--build-id=none \
-    -Wl,-z,max-page-size=0x1000 -T "$REPO/libc/libc64.ld" \
+exec $CC $FLAGS -static -no-pie -nostdlib -Wl,--build-id=none \
+    -Wl,-z,max-page-size=0x1000 -T "$REPO/@LDSCRIPT@" \
     -L"$LIBS/lib" -L"$MUSL/lib" "$MUSL/lib/crt1.o" "$MUSL/lib/crti.o" \
-    "$@" -Wl,--start-group "$MUSL/lib/libc.a" "$(gcc -print-libgcc-file-name)" \
+    "$@" -Wl,--start-group "$MUSL/lib/libc.a" "$($CC -print-libgcc-file-name)" \
     -Wl,--end-group "$MUSL/lib/crtn.o"

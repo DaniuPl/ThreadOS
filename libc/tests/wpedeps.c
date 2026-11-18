@@ -569,11 +569,14 @@ static int asn_ready(void)
 {
     if (asn_defs)
         return 1;
+    /* libtasn1 reads its definitions from a file. A system with no disk
+       to write (the ARM64 kernel so far) has the file already, in its
+       initrd beside the questions (scripts/tests/t_arm64libs.py) */
     FILE *f = fopen("wpedeps.asn", "w");
-    if (!f)
-        return 0;
-    fputs(ASN_DEFS, f);
-    fclose(f);
+    if (f) {
+        fputs(ASN_DEFS, f);
+        fclose(f);
+    }
     char why[ASN1_MAX_ERROR_DESCRIPTION_SIZE];
     int r = asn1_parser2tree("wpedeps.asn", &asn_defs, why);
     if (r != ASN1_SUCCESS)

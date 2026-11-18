@@ -42,11 +42,16 @@ a window is the screen below the status bar, the finger the program's
 mouse; `user64/usys64.h` builds for AArch64 too). Of `kernel/` it
 builds `string.c`, `heap.c`, `gfx.c`, `ttf.c`, `uitext.c`, `mark.c`,
 `aurora.c`, `fonts.c`, `initrd.c`, `locale.c`, `ipc.c`, `net.c`,
-`tcp.c` and `dhcp.c` (`SHAREDARM` in the `Makefile`), on `kernel/include/io.h` and `spinlock.h`, which have an
+`tcp.c`, `dhcp.c` and `random.c` (`SHAREDARM` in the `Makefile`), on `kernel/include/io.h` and `spinlock.h`, which have an
 AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
-`arm64mobile`, `arm64user`, `arm64libc`, `arm64net` and `arm64win`. The overlay's C
+`arm64mobile`, `arm64user`, `arm64libc`, `arm64net`, `arm64win`,
+`arm64rand` and `arm64libs`. The libraries above musl - and WebKit -
+build for aarch64 by the PC's own rules: `TARGET=aarch64` switches the
+compilers, flags, `--host`, cross files and linker script, into a build
+directory of its own (`$(BUILD)/aarch64`, `make arm64-libs`,
+`make weft-arm64`). The overlay's C
 layer (`libc/overlay/src/threados/`) is one file for both machines: a change
 there is built and tested on both.
 
@@ -56,6 +61,8 @@ there is built and tested on both.
 make -j8                      # kernel + initrd (build/threados64.bin, build/initrd64.img)
 make efi                      # threadboot, the UEFI loader (build/BOOTX64.EFI; clang + lld)
 make kernelarm64              # ARM64 kernel for QEMU virt (build/threados-arm64.elf; clang + lld; musl by aarch64-linux-gnu-gcc)
+make arm64-libs               # WebKit's libraries for aarch64, into build/aarch64 (an hour; g++-aarch64-linux-gnu)
+make weft-arm64               # Weft for aarch64: build/aarch64/weft.tapp (hours)
 make webkit                   # Weft on WebKit's WPE port: build/weft.tapp (hours; not in the default build)
 make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
 make run-phone                # ThreadOS mobile: the ARM64 kernel with a screen and touch

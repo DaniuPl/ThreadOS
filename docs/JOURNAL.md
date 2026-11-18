@@ -9661,3 +9661,53 @@ works and is checked by `make test`.
       window back as it was; a tap in the corner ends the program, the
       phone goes home, the tile goes, and every page - the window's
       buffer too - is free again.
+- [x] **WebKit's libraries for aarch64, and random numbers on ARM64**
+      (Makefile, libc/threados-cc.in, meson-cross.ini.in,
+      cmake-cross.cmake.in, apps/webkit/threados.cmake, kernel/random.c,
+      kernelarm64/vrng.c, gic.c, kmain.c, proc.c, netglue.c,
+      libc/tests/glibtest.c, wpedeps.c, randtest.c,
+      scripts/tests/t_arm64libs.py, t_arm64rand.py, t_glib.py,
+      t_wpedeps.py, t_random.py, scripts/ptest.py)
+      The fifth stage of Weft on ARM64, its first half: the twenty-odd
+      libraries WebKit stands on, for aarch64, by the same rules that
+      build them for the PC. TARGET=aarch64 switches what is the
+      machine's in those rules - the compilers (the cross gcc and g++,
+      whose libstdc++ and libgcc come along), the flags, configure's
+      --host, OpenSSL's target, the cpu meson and CMake are told, the
+      linker script, ar and strip - and nothing else; the toolchain
+      files are written from templates and kept as they were when they
+      come out the same, so an edit of the Makefile does not rebuild
+      every library. TARGET is kept out of the libraries' own makefiles,
+      where it means something else (ICU's). One build directory holds
+      one machine: `make arm64-libs` and `make weft-arm64` build into
+      BUILD/aarch64, where the ARM64 tests look. GLib, libsoup with
+      glib-networking and OpenSSL, libxml2, SQLite, PNG, JPEG, WebP,
+      FreeType, fontconfig, HarfBuzz, ICU, libgcrypt, libtasn1, epoxy and
+      xkbcommon all built for aarch64 at the first run with the switch.
+      Random numbers: SYS64_GETRANDOM answered -1 on ARM64, and HTTPS
+      needs keys. kernel/random.c, the PC's pool (BLAKE2s, ChaCha20 with
+      fast key erasure), now builds for ARM64 too: the generic timer's
+      counter where the PC reads the cycle counter, RNDR where it reads
+      RDRAND (found in ID_AA64ISAR0_EL1), the PL031's seconds at boot,
+      every interrupt's time from the GIC. A virtio entropy device, when
+      the machine has one, adds its bytes at boot and at every request
+      (kernelarm64/vrng.c); the phone has one. getrandom waits for the
+      pool as on the PC. SYS64_INITRD_READ, how the C library serves the
+      fonts and the CA bundle as files, is the ARM64 kernel's too, and
+      the CA bundle is in its initrd.
+      glibtest takes --no-disk and randtest "-" for its files, leaving
+      out or printing what they would write - the ARM64 kernel has no
+      disk to write yet; wpedeps reads libtasn1's definitions from a
+      file that may already be there. On the PC they run as before.
+      t_arm64rand boots twice - a Cortex-A72 with a virtio entropy
+      device, QEMU's "max" with RNDR - and judges randtest's samples as
+      t_random judges the PC's: ones and zeros, bytes and pairs by
+      chi-square, no block twice, zlib unable to shrink them; fork and
+      threads never share bytes; the two boots share nothing; the
+      kernel names RNDR on "max" and takes the device's bytes on the
+      other. t_arm64libs runs glibtest on one core and four - its 38
+      lines are exactly what it prints against this machine's GLib - and
+      wpedeps' 208 questions, every answer as the cryptography package,
+      Pillow's libwebp, the keymap's and the font's own definitions have
+      it. glib, wpedeps, random, libc, pthread, socket and ipc pass on
+      the PC with the switch in the rules.

@@ -48,6 +48,7 @@
 #include "../kernel/include/net.h"
 #include "../kernel/include/dhcp.h"
 #include "../kernel/include/tcp.h"
+#include "../kernel/include/random.h"
 #include "touch.h"
 #include "mobile.h"
 #include "proc.h"
@@ -463,6 +464,10 @@ void kmain(uint64_t x0)
     }
     int nv = virtio_probe(fi.virtio_base, fi.virtio_irq, fi.virtio_n, vdevs,
                           FDT_MAX_VIRTIO);
+    /* The PC's pool of random numbers, and the entropy device's bytes in
+       it when the machine has one */
+    random_init();
+    vrng_init(vdevs, nv);
     if (screen && touch_init(vdevs, nv, video_w(), video_h()) == 0)
         mi.touch = touch_name();
     static char cpu_text[32];

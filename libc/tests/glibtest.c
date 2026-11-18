@@ -28,6 +28,10 @@
  *   loop; and through GSubprocess with a socket pair's end given to the
  *   child as descriptor 3 - spawning has to return at once, not when
  *   the child ends, which needs descriptors closed on exec
+ *
+ * "glibtest --no-disk" leaves out the one part that writes a file, for
+ * a system with no disk to write (the ARM64 kernel so far,
+ * scripts/tests/t_arm64libs.py).
  */
 
 #include <errno.h>
@@ -38,6 +42,8 @@
 #include <unistd.h>
 #include <glib.h>
 #include <glib-object.h>
+
+static int no_disk;
 #include <glib-unix.h>
 #include <gio/gio.h>
 
@@ -531,6 +537,8 @@ static void gio(void)
     g_object_unref(d);
     g_object_unref(out);
 
+    if (no_disk)
+        return;
     GError *err = NULL;
     const char *body = "written with g_file_set_contents\n";
     gboolean ok = g_file_set_contents("glibtest.txt", body, -1, &err);
@@ -684,6 +692,7 @@ int main(int argc, char **argv)
         return child();
     if (argc > 1 && !strcmp(argv[1], "--socket-child"))
         return socket_child();
+    no_disk = argc > 1 && !strcmp(argv[1], "--no-disk");
     setvbuf(stdout, NULL, _IOLBF, 0);
     printf("~GLib %u.%u.%u\n", glib_major_version, glib_minor_version,
            glib_micro_version);
