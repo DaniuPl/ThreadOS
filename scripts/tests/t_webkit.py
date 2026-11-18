@@ -43,6 +43,10 @@ the way a person drives it and read off the screen:
   one when the applications' image is there, with the cursor in the
   address field
 
+  the mouse's wheel over a page taller than the window: two notches
+  towards the person go down the page, and the screen shows it exactly
+  as far as its script reads in scrollY; two away go back to the top
+
   with --proxy, a page is asked of the proxy: one on a host that does
   not exist arrives from the test's own proxy, which saw the request
 
@@ -88,6 +92,28 @@ PROXY_GREEN = (0x30, 0xA0, 0x50)
 THREE = (b'<!doctype html><html><head><meta charset="utf-8"><title>three'
          b'</title><style>html,body{margin:0;height:100%;'
          b'background:#c08020}</style></head><body></body></html>')
+# A page to scroll: a blue box to tap at the top, a green bar a little
+# way down and a red band far below the first screen; the title says
+# what was done to it - once the page has stood still for half a
+# second, how far it scrolled
+TALL = (b'<!doctype html><html><head><meta charset="utf-8"><title>tall'
+        b'</title><style>html,body{margin:0;background:#ffffff}'
+        b'body{height:6000px}#tap{position:absolute;left:20px;top:20px;'
+        b'width:200px;height:100px;background:#3366cc}'
+        b'#bar{position:absolute;left:0;top:300px;width:100%;'
+        b'height:100px;background:#22aa44}'
+        b'#band{position:absolute;left:0;top:1600px;width:100%;'
+        b'height:200px;background:#c03030}</style></head><body>'
+        b'<div id="tap"></div><div id="bar"></div><div id="band"></div>'
+        b"<script>document.getElementById('tap').onclick = () => {"
+        b"  document.title = 'tapped'; };"
+        b"let still;"
+        b"addEventListener('scroll', () => { clearTimeout(still);"
+        b"  still = setTimeout(() => {"
+        b"    document.title = 'scrolled ' + Math.round(scrollY); }, 500); });"
+        b'</script></body></html>')
+BAR_TOP, BAR_H = 300, 100
+BAND_TOP, BAND_H = 1600, 200
 
 SCRIPT = r"""
 const r = id => { const b = document.getElementById(id)
@@ -379,6 +405,45 @@ def browse(q, port, ox, oy):
           and re.match(r"\[weft\] done, exit code 0\b", end))
 
 
+def wheel(q, port, ox, oy):
+    """The mouse's wheel over a page taller than the window: towards the
+    person it goes down the page, and the screen shows the page where
+    its script says it is; away from the person, back up"""
+    band = Band(ox, oy)
+    seen = len(q.serial())
+    q.click(*band.field())
+    time.sleep(1)
+    q.type_line(f"10.0.2.2:{port}/tall.html")
+    done = wait_line(q, seen,
+                     f"[weft] load finished http://10.0.2.2:{port}/tall.html",
+                     120)
+    ok, _ = wait_colour(q, ox + 20, oy + BAR_TOP + 20, GREEN)
+    check(f"the tall page loads, its green bar {BAR_TOP} pixels down",
+          done is not None and ok)
+    q.mouse_goto(ox + 300, oy + 300)
+    seen = len(q.serial())
+    q.mouse_wheel(-2)
+    line = wait_line(q, seen, "[weft] title scrolled ", 60)
+    moved = int(line.split()[-1]) if line else 0
+    check(f"two notches towards the person scroll down the page ({line})",
+          0 < moved < BAR_TOP)
+    want = (ox, oy + BAR_TOP - moved)
+    got = None
+    end = time.time() + 30
+    while got != want and time.time() < end:
+        sw, sh, at = q.screen_raw()
+        bar = find_box(at, sw, sh, GREEN)
+        got = bar[:2] if bar else None
+        time.sleep(0.5)
+    check(f"and the screen shows it {moved} pixels up: the bar at {got}, "
+          f"where the page puts it {want}", got == want)
+    seen = len(q.serial())
+    q.mouse_wheel(2)
+    line = wait_line(q, seen, "[weft] title scrolled ", 60)
+    check(f"two away from the person, back to the top ({line})",
+          line == "[weft] title scrolled 0")
+
+
 def from_dock(q, port):
     """The dock's Web tile: this browser, waiting for an address"""
     seen = len(q.serial())
@@ -404,6 +469,8 @@ def from_dock(q, port):
           f"loads ({done})",
           done == f"[weft] load finished http://10.0.2.2:{port}/two.html"
           and ok)
+    if page is not None:
+        wheel(q, port, page[0], page[1])
     # Its only tab closed, it ends - and until it has, the keys typed
     # next would still be its window's, not the shell's
     seen = len(q.serial())
@@ -494,7 +561,7 @@ def main():
     # As a web server says it - a page served as bytes of no known type
     # is a download, which a browser does not show
     for path, body in (("/page.html", PAGE), ("/two.html", TWO),
-                       ("/three.html", THREE)):
+                       ("/three.html", THREE), ("/tall.html", TALL)):
         ROUTES[path] = (lambda b: lambda h, body: (
             200, [("Content-Type", "text/html; charset=utf-8")], b))(body)
     port, stop = start_http_server()

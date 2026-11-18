@@ -40,7 +40,9 @@ phone's devices, is ThreadOS mobile: a ramfb screen set up through
 fw_cfg, the initrd through fw_cfg, a PL031 clock, a virtio-input
 touchscreen over virtio-mmio, the shell in `kernelarm64/mobile.c` (a
 dock, the pulled-down shade, notifications) with its apps and Settings
-in `kernelarm64/mobapps.c`, and
+in `kernelarm64/mobapps.c`, a speaker and microphone through
+virtio-sound (`kernelarm64/vsnd.c`: the PC's sound calls; the shell's
+notification chime and Recorder in `kernelarm64/mobsound.c`), and
 programs' windows through the PC's window calls (`kernelarm64/winmob.c`:
 a window is the screen below the status bar, the finger the program's
 mouse; `user64/usys64.h` builds for AArch64 too). Of `kernel/` it
@@ -51,7 +53,8 @@ AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
 `arm64mobile`, `arm64user`, `arm64libc`, `arm64net`, `arm64win`,
-`arm64rand`, `arm64libs`, `arm64soup` and `arm64apps`. The libraries above musl - and WebKit -
+`arm64rand`, `arm64libs`, `arm64soup`, `arm64apps`, `arm64sound` and
+`arm64weft` (Weft on the phone). The libraries above musl - and WebKit -
 build for aarch64 by the PC's own rules: `TARGET=aarch64` switches the
 compilers, flags, `--host`, cross files and linker script, into a build
 directory of its own (`$(BUILD)/aarch64`, `make arm64-libs`,
@@ -70,6 +73,7 @@ make weft-arm64               # Weft for aarch64: build/aarch64/weft.tapp (hours
 make webkit                   # Weft on WebKit's WPE port: build/weft.tapp (hours; not in the default build)
 make run-arm64                # boot it (needs qemu-system-aarch64; serial console)
 make run-phone                # ThreadOS mobile: the ARM64 kernel with a screen and touch
+                              # (PHONE_AUDIO=pa, alsa or sdl for its speaker and microphone)
 make iso64 stick              # hybrid disc and USB image
 make run                      # boot the desktop in QEMU
 make test                     # full suite: 100+ QEMU groups, ~20-30 min with -j4

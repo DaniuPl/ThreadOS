@@ -172,6 +172,23 @@ int virtio_offer(struct virtio_dev *d, unsigned index, struct virtq *q,
     return (int)desc;
 }
 
+int virtio_chain(struct virtq *q, unsigned desc, const struct virtio_buf *b,
+                 int n)
+{
+    for (int i = 0; i < n; i++) {
+        unsigned k = desc + (unsigned)i;
+        q->desc[k].addr = (uint64_t)(uintptr_t)b[i].addr;
+        q->desc[k].len = b[i].len;
+        q->desc[k].flags = (b[i].device_writes ? VQ_DESC_WRITE : 0) |
+                           (i + 1 < n ? VQ_DESC_NEXT : 0);
+        q->desc[k].next = (uint16_t)(k + 1);
+    }
+    q->avail->ring[q->avail->idx % q->size] = (uint16_t)desc;
+    __asm__ volatile("dmb ish" ::: "memory");
+    q->avail->idx++;
+    return (int)desc;
+}
+
 void virtio_notify(struct virtio_dev *d, unsigned index)
 {
     __asm__ volatile("dsb sy" ::: "memory");

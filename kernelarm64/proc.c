@@ -52,6 +52,8 @@
 #include "netglue.h"
 #include "winmob.h"
 #include "mobile.h"
+#include "vsnd.h"
+#include "../kernel/include/mic_info.h"
 #include "rtc.h"
 #include "thread.h"
 #include "uart.h"
@@ -971,6 +973,11 @@ static void end_thread(struct uproc *p, int code)
            is collected; its children are the kernel's from now on */
         close_fds(p, 0);
         winmob_drop(p->pid);
+        /* its playing and its recording end with it */
+        if (vsnd_owner() == p->pid)
+            vsnd_end();
+        if (vsnd_mic_who() == p->pid)
+            vsnd_mic_stop();
         f = spin_lock_irq(&lock);
         for (int i = 0; i < PROC_MAX; i++)
             if (procs[i].pid && procs[i].parent == p->pid)
@@ -2275,6 +2282,80 @@ void proc_syscall(struct trap_frame *f)
         return;
     case SYS64_SIGMASK:
         r = sys_sigmask(p, x[0], x[1], x[2]);
+        break;
+    case SYS64_SND_GET: {
+        /* struct snd_info, kernel/include/hda.h's: present, volume,
+           muted, steps */
+        uint32_t info[4];
+        int vol, mute;
+        if (!user_range(p, x[0], sizeof(info), 1)) {
+            r = -1;
+            break;
+        }
+        vsnd_get(&vol, &mute);
+        info[0] = (uint32_t)vsnd_present();
+        info[1] = (uint32_t)vol;
+        info[2] = (uint32_t)mute;
+        info[3] = 101;
+        memcpy((void *)(uintptr_t)x[0], info, sizeof(info));
+        r = 0;
+        break;
+    }
+    case SYS64_SND_SET:
+        /* the phone's Settings hear of it */
+        mobile_sound((int)(int64_t)x[0], (int)(int64_t)x[1]);
+        r = 0;
+        break;
+    case SYS64_SND_STREAM:
+        /* The PC's call: begin, frames (16-bit stereo, 48 kHz), end -
+           one program plays at a time, and its end ends its playing */
+        if ((int64_t)x[0] == 0) {
+            r = vsnd_begin(p->pid);
+        } else if ((int64_t)x[0] == 1) {
+            if (vsnd_owner() != p->pid || x[2] > 48000 ||
+                (x[2] && !user_range(p, x[1], x[2] * 4, 0)))
+                r = -1;
+            else
+                r = vsnd_write((const int16_t *)(uintptr_t)x[1],
+                               (uint32_t)x[2]);
+        } else if ((int64_t)x[0] == 2) {
+            r = vsnd_owner() == p->pid ? vsnd_end() : -1;
+        } else {
+            r = -1;
+        }
+        break;
+    case SYS64_MIC:
+        if (x[0] == MIC_INFO) {
+            struct mic_info mi;
+            if (!user_range(p, x[1], sizeof(mi), 1)) {
+                r = -1;
+                break;
+            }
+            memset(&mi, 0, sizeof(mi));
+            mi.present = vsnd_mic_present();
+            mi.recording = vsnd_mic_who() >= 0;
+            mi.owner = vsnd_mic_who();
+            mi.rate = 48000;
+            mi.channels = 2;
+            memcpy(mi.name, "virtio-sound, input", 20);
+            memcpy((void *)(uintptr_t)x[1], &mi, sizeof(mi));
+            r = 0;
+        } else if (x[0] == MIC_OPEN) {
+            r = vsnd_mic_start(p->pid);
+        } else if (x[0] == MIC_READ) {
+            if (vsnd_mic_who() != p->pid || x[2] > 48000 ||
+                !user_range(p, x[1], x[2] * 4, 1))
+                r = -1;
+            else
+                r = vsnd_mic_read((int16_t *)(uintptr_t)x[1],
+                                  (uint32_t)x[2]);
+        } else if (x[0] == MIC_CLOSE) {
+            if (vsnd_mic_who() == p->pid)
+                vsnd_mic_stop();
+            r = 0;
+        } else {
+            r = -1;
+        }
         break;
     case SYS64_NOTIFY: {
         /* The PC's call (title, body): on the phone, the shade's list

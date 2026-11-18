@@ -2063,7 +2063,7 @@ OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/mobile.o $(BUILD)/arm64/proc.o \
              $(BUILD)/arm64/netglue.o $(BUILD)/arm64/vnet.o \
              $(BUILD)/arm64/winmob.o $(BUILD)/arm64/vrng.o \
-             $(BUILD)/arm64/mobapps.o \
+             $(BUILD)/arm64/mobapps.o $(BUILD)/arm64/mobsound.o $(BUILD)/arm64/vsnd.o \
              $(patsubst %,$(BUILD)/arm64/%.o,$(SHAREDARM))
 
 $(BUILD)/arm64:
@@ -2159,7 +2159,7 @@ libcarm64: $(LIBCARM)
 # kernel's program address. The test programs of libc/tests are the
 # PC's, unchanged - the point of them is that they print the same.
 MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest randtest \
-                 sigtest notetest
+                 sigtest notetest sndtest
 MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
 LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
                   -fno-stack-protector -fno-pic \
@@ -2175,10 +2175,9 @@ $(BUILD)/arm64/libc:
 	mkdir -p $@
 
 # ThreadOS's own calls, the PC's library of them (its AArch64 branch)
-$(BUILD)/arm64/libc/wintest.elf $(BUILD)/arm64/libc/notetest.elf: \
-    LIBCARM_CFLAGS += -Iuser64
-$(BUILD)/arm64/libc/wintest.elf $(BUILD)/arm64/libc/notetest.elf: \
-    user64/usys64.h
+USYSARM_ELFS := $(patsubst %,$(BUILD)/arm64/libc/%.elf,wintest notetest sndtest)
+$(USYSARM_ELFS): LIBCARM_CFLAGS += -Iuser64
+$(USYSARM_ELFS): user64/usys64.h
 
 $(BUILD)/arm64/libc/%.elf: libc/tests/%.c $(MUSLARM_STAMP) libc/libcarm64.ld \
                            | $(BUILD)/arm64/libc
@@ -2220,10 +2219,14 @@ run-arm64: $(KERNELARM)
 	    -nographic -kernel $(KERNELARM)
 
 # ThreadOS mobile: the same kernel as a phone - a screen (ramfb), a
-# touchscreen (the mouse is the finger) and the initrd; the serial
-# console stays on the terminal
+# touchscreen (the mouse is the finger), a speaker and a microphone
+# (virtio-sound, through PHONE_AUDIO: pa, alsa or sdl on a desktop) and
+# the initrd; the serial console stays on the terminal
+PHONE_AUDIO ?= none
 PHONE_DEVICES = -device ramfb -device virtio-tablet-device \
                 -device virtio-rng-device \
+                -audiodev $(PHONE_AUDIO),id=snd0 \
+                -device virtio-sound-device,audiodev=snd0 \
                 -global virtio-mmio.force-legacy=false \
                 -fw_cfg name=opt/threados/initrd,file=$(INITRDARM)
 # The Moto G34 5G's panel (720 x 1600), and of its four gigabytes the

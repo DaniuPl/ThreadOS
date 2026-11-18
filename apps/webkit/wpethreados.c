@@ -571,13 +571,15 @@ static int handle_touch(WPEToplevelThreadOS *self, WPEView *view,
             self->scrolling = 1;
         if (self->scrolling) {
             /* The page goes with the finger: up the screen is down the
-               page. The deltas are pixels (precise, as a touchpad's) */
+               page, which in WPE's deltas is negative, as the finger's
+               own move up is. A touchscreen's deltas are pixels taken
+               as they are; a touchpad's WebKit makes 2.5 times longer */
             double dx = ev->x - self->last_x, dy = ev->y - self->last_y;
             int stop = ev->type == WEV_RELEASE;
             if (dx || dy || stop)
                 send(view, wpe_event_scroll_new(
-                               view, WPE_INPUT_SOURCE_TOUCHPAD, now_ms(),
-                               self->keys, -dx, -dy, TRUE, stop,
+                               view, WPE_INPUT_SOURCE_TOUCHSCREEN, now_ms(),
+                               self->keys, dx, dy, TRUE, stop,
                                self->touch_x, self->touch_y));
             self->last_x = ev->x;
             self->last_y = ev->y;
@@ -648,12 +650,14 @@ static void handle(WPEToplevelThreadOS *self, WPEView *view,
         break;
     }
     case WEV_SCROLL:
-        /* A notch is three lines of 40 pixels, as GTK's wheel goes;
-           away from the person (positive) is up the page */
+        /* Notches, not pixels, as WPE's own libinput seat sends them:
+           WebKit makes each the step it takes for a line at the view's
+           height. Away from the person (positive) is up the page -
+           positive in WPE's deltas too, which are Wayland's turned
+           round */
         send(view, wpe_event_scroll_new(view, WPE_INPUT_SOURCE_MOUSE,
-                                        now_ms(), self->keys, 0,
-                                        -ev->val * 120.0, TRUE, FALSE,
-                                        ev->x, ev->y));
+                                        now_ms(), self->keys, 0, ev->val,
+                                        FALSE, FALSE, ev->x, ev->y));
         break;
     case WEV_KEY:
         self->keys = keys_of(ev->x);

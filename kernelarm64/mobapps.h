@@ -83,6 +83,15 @@ int settings_tap(int x, int y);
 int settings_back(void);
 void settings_reset(void);
 
+/* mobsound.c: the shell's sound - the notification chime (unless the
+   phone is silent or not to be disturbed) and the Recorder; what the
+   Recorder shows has moved on when rec_changes() has */
+void mobsound_init(void);
+void mob_chime(void);
+int rec_changes(void);
+void recorder_draw(void);
+int recorder_tap(int x, int y);
+
 /* Text helpers both use */
 char *mob_put(char *p, const char *s);
 char *mob_put_num(char *p, uint32_t v);

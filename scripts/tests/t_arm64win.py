@@ -59,7 +59,20 @@ GRID_X = _kernel_define(MOB, "MOB_GRID_X")
 GRID_STEP = _kernel_define(MOB, "MOB_GRID_STEP")
 GRID_Y = _kernel_define(MOB, "MOB_GRID_Y")
 EDGE = _kernel_define(MOB, "MOB_EDGE")
-APPS = 3                      # About, Clock, Draw before the programs
+ROW_STEP = _kernel_define(MOB, "MOB_ROW_STEP")
+LW = Phone.LOGICAL[0]
+
+
+def after_apps():
+    """The top left of the first tile after mobile.c's own apps: in
+    rows of as many as the width takes (its grid_cols)"""
+    src = open(os.path.join(ROOT, MOB)).read()
+    body = re.search(r"apps\[\] = \{(.*?)\n\};", src, re.S).group(1)
+    k = len(re.findall(r'\{\s*"\w+",\s*APP_\w+', body))
+    cols = (LW - GRID_X + GRID_STEP - TILE) // GRID_STEP
+    return GRID_X + k % cols * GRID_STEP, GRID_Y + k // cols * ROW_STEP
+
+
 WIN = "libc/tests/wintest.c"
 SQUARE = _kernel_define(WIN, "SQUARE")
 CORNER = _kernel_define(WIN, "CORNER")
@@ -116,11 +129,11 @@ def from_package():
               "processor" in out)
         q.touch([(180, 560), (180, 420), (180, 300)])
         q.wait_serial("[mobile] home (swipe up)", timeout=20)
-        tx = GRID_X + APPS * GRID_STEP
-        tile = (tx * K + 8, (GRID_Y + TILE // 2) * K)
+        tx, ty = after_apps()
+        tile = (tx * K + 8, (ty + TILE // 2) * K)
         check("home has the package's tile after the apps",
               poll_screen(q, lambda at: at(*tile) == PKG_COLOUR))
-        q.tap(tx + TILE // 2, GRID_Y + TILE // 2)
+        q.tap(tx + TILE // 2, ty + TILE // 2)
         out = q.wait_serial('[mobile] window "Win test" (opened)',
                             timeout=60)
         check("a tap on it starts the package's program, and its window "
@@ -215,15 +228,15 @@ def main():
         q.touch([(180, 640 - EDGE // 3), (180, 500), (180, 380)])
         q.wait_serial("[mobile] home (swipe up from the edge)", timeout=20)
         said = q.serial()[seen:]
-        tx = GRID_X + APPS * GRID_STEP
+        tx, ty = after_apps()
         # (the middle of its left side: clear of the rounded corners and
         # of the letter in the middle)
-        tile = (tx * K + 8, (GRID_Y + TILE // 2) * K)
+        tile = (tx * K + 8, (ty + TILE // 2) * K)
         check("the swipe from the bottom edge goes home and is not the "
               "program's", "[wintest]" not in said)
         check("home, the window is a tile after the apps",
               poll_screen(q, lambda at: at(*tile) == TILE_COLOUR))
-        q.tap(tx + TILE // 2, GRID_Y + TILE // 2)
+        q.tap(tx + TILE // 2, ty + TILE // 2)
         q.wait_serial('[mobile] window "Win test" (its tile)', timeout=20)
         check("and a tap on the tile brings it back as it was",
               poll_screen(q, drawn(YELLOW)))

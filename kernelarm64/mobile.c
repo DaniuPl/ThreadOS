@@ -55,7 +55,9 @@
 #include "fwcfg.h"
 #include "netglue.h"
 #include "video64.h"
+#include "vsnd.h"
 #include "../kernel/include/initrd.h"
+#include "../kernel/include/look.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/netdev.h"
 #include "../kernel/include/spinlock.h"
@@ -136,7 +138,7 @@
                                    (mobapps.c's first) */
 
 enum { LOCK, HOME, APP_ABOUT, APP_CLOCK, APP_DRAW, APP_WINDOW, APP_NOTES,
-       APP_CALC, APP_SETTINGS, APP_RECENTS };
+       APP_CALC, APP_SETTINGS, APP_RECENTS, APP_RECORDER };
 
 static const struct app {
     const char *name;
@@ -146,6 +148,7 @@ static const struct app {
     { "About", APP_ABOUT, 0x2F6BFF },
     { "Clock", APP_CLOCK, 0x1C1C1E },
     { "Draw",  APP_DRAW,  0x30B45A },
+    { "Recorder", APP_RECORDER, 0xFF3B30 },
 };
 #define APPS ((int)(sizeof(apps) / sizeof(apps[0])))
 
@@ -323,6 +326,16 @@ void mob_apply_saver(void)
     video_set_brightness(pct * 256 / 100);
 }
 
+void mobile_sound(int volume, int mute)
+{
+    if (volume >= 0)
+        mob_prefs.volume = volume > 100 ? 100 : volume;
+    vsnd_volume(volume, mute);
+    printk("[mobile] sound: volume %d%s\n", mob_prefs.volume,
+           mute > 0 ? ", muted" : "");
+    dirty = 1;
+}
+
 void mob_set_brightness(int pct)
 {
     if (pct < 10)
@@ -419,6 +432,7 @@ void mobile_notify(const char *title, const char *body)
     notif_seq++;
     spin_unlock_irq(&notif_lock, f);
     printk("[notify] %s: %s\n", title, body);
+    mob_chime();
 }
 
 static void notif_drop(int i)
@@ -522,6 +536,11 @@ static void status_bar(uint32_t c)
     }
     int nx = tx - 8 - 4 * MOB_BAR_PITCH;
     network_icon(nx, c);
+    if (vsnd_mic_who() >= 0) {
+        /* the microphone records: an orange dot, as the PC's bar has */
+        nx -= 12;
+        gfx_disc16((nx + 3) * 16, 14 * 16, 4 * 16, MIC_DOT_RGB, 255);
+    }
     if (mob_prefs.silent) {
         /* a bell, crossed out */
         int x = nx - 20;
@@ -569,6 +588,14 @@ static void icon(int k, int x, int y)
                    0x1C1C1E, 255);
         gfx_disc16(cx * 16, cy * 16, 40, 0xFF9F0A, 255);
         break;
+    case APP_RECORDER: {
+        /* a sound's wave, as bars */
+        static const int bar[7] = { 8, 18, 30, 22, 34, 16, 10 };
+        for (int i = 0; i < 7; i++)
+            gfx_rrect(cx - 19 + i * 6, cy - bar[i] / 2, 3, bar[i], 1, WHITE,
+                      255);
+        break;
+    }
     case APP_DRAW:
         gfx_line16((x + 14) * 16, (y + 40) * 16, (x + 26) * 16,
                    (y + 22) * 16, 64, WHITE, 255);
@@ -1170,6 +1197,7 @@ static void draw(void)
     case APP_CALC:     calc_draw(); break;
     case APP_SETTINGS: settings_draw(); break;
     case APP_RECENTS:  draw_recents(); break;
+    case APP_RECORDER: recorder_draw(); break;
     }
     if (shade)
         draw_shade();
@@ -1192,6 +1220,7 @@ static const char *screen_name(int s)
     case APP_CALC:   return "Calculator";
     case APP_SETTINGS: return "Settings";
     case APP_RECENTS: return "recent apps";
+    case APP_RECORDER: return "Recorder";
     default:         return "Draw";
     }
 }
@@ -1362,6 +1391,10 @@ static void tap(int x, int y)
     }
     if (screen == APP_CALC) {
         dirty |= calc_tap(x, y);
+        return;
+    }
+    if (screen == APP_RECORDER) {
+        dirty |= recorder_tap(x, y);
         return;
     }
     if (screen == APP_SETTINGS) {
@@ -1563,6 +1596,8 @@ int mobile_init(const struct mobile_info *arg)
     paint_wallpaper();
     printk("[mobile] %dx%d logical, %dx%d on the panel\n", lw, lh,
            video_pw(), video_ph());
+    vsnd_volume(mob_prefs.volume, 0);
+    mobsound_init();
     /* The display size the command line asks for (scale=150, 175) */
     for (int i = 1; i < MOB_SIZES; i++)
         if (info->scale == size_k16[i] * 100 / 16)
@@ -1576,7 +1611,7 @@ void mobile_main(void *arg)
     go(LOCK, "start");
 
     uint32_t ticked = 0, changes = winmob_changes(), seq = notif_seq;
-    int net = -1;
+    int net = -1, sound = rec_changes(), mic = 0;
     for (;;) {
         struct touch_event e;
         while (touch_next(&e))
@@ -1611,6 +1646,16 @@ void mobile_main(void *arg)
         }
         if (banner_until && rtc_seconds() >= banner_until) {
             banner_until = 0;
+            dirty = 1;
+        }
+        /* The Recorder's time and list; the microphone's dot */
+        if (rec_changes() != sound) {
+            sound = rec_changes();
+            if (screen == APP_RECORDER)
+                dirty = 1;
+        }
+        if ((vsnd_mic_who() >= 0) != mic) {
+            mic = vsnd_mic_who() >= 0;
             dirty = 1;
         }
         /* The status bar's network */

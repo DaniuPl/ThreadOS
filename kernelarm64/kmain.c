@@ -45,6 +45,7 @@
 #include "rtc.h"
 #include "virtio.h"
 #include "netglue.h"
+#include "vsnd.h"
 #include "../kernel/include/net.h"
 #include "../kernel/include/dhcp.h"
 #include "../kernel/include/tcp.h"
@@ -537,6 +538,7 @@ void kmain(uint64_t x0)
        it when the machine has one */
     random_init();
     vrng_init(vdevs, nv);
+    vsnd_init(vdevs, nv);
     if (screen && touch_init(vdevs, nv, video_w(), video_h()) == 0)
         mi.touch = touch_name();
     static char cpu_text[32];

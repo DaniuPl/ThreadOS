@@ -23,6 +23,7 @@ struct virtq {
     uint16_t last_used;          /* how far this side has read the used ring */
 };
 
+#define VQ_DESC_NEXT  1          /* another descriptor follows */
 #define VQ_DESC_WRITE 2          /* the device writes the buffer */
 
 struct virtio_dev {
@@ -53,6 +54,16 @@ int virtio_give(struct virtio_dev *d, unsigned index, struct virtq *q,
    device only reads (a frame to send) has device_writes 0 */
 int virtio_offer(struct virtio_dev *d, unsigned index, struct virtq *q,
                  unsigned desc, void *buf, uint32_t len, int device_writes);
+/* A chain of buffers as one request: descriptors desc, desc+1, ...,
+   one per buffer, those the device writes after those it reads (a
+   request, then its answer) */
+struct virtio_buf {
+    void *addr;
+    uint32_t len;
+    int device_writes;
+};
+int virtio_chain(struct virtq *q, unsigned desc, const struct virtio_buf *b,
+                 int n);
 void virtio_notify(struct virtio_dev *d, unsigned index);
 /* An interrupt of the device's answered: it may raise the next */
 void virtio_ack(struct virtio_dev *d);

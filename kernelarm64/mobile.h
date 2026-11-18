@@ -24,5 +24,8 @@ void mobile_main(void *arg);
 /* A notification: kept for the shade, and a banner for a few seconds -
    any thread may post one, before the shell runs too */
 void mobile_notify(const char *title, const char *body);
+/* The loudness a program set (SYS64_SND_SET): volume 0..100, muted;
+   -1 keeps either - Settings show it */
+void mobile_sound(int volume, int mute);
 
 #endif

@@ -25,6 +25,7 @@
 
 #include <stdint.h>
 #include "mobapps.h"
+#include "vsnd.h"
 #include "../kernel/include/gfx.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
@@ -911,7 +912,7 @@ static void value_text(int which, char *s)
                    charging ? "Charging" : "On battery");
         break;
     case V_SPEAKER:
-        mob_put(s, "None found yet");
+        mob_put(s, vsnd_present() ? "virtio-sound" : "None found");
         break;
     case V_ZONE:
         mob_put(s, "UTC, as the clock");
@@ -1015,6 +1016,8 @@ static void changed(const struct srow *r, int value)
         mob_wallpaper_changed();
     if (r->pref == P(size))
         mob_set_size(value);
+    if (r->pref == P(volume))
+        vsnd_volume(value, -1);
     if (r->kind == R_CHOICE && r->pref == P(theme))
         printk("[settings] theme %s\n", r->label);
     else if (r->kind == R_CHOICE && r->pref == P(wallpaper))

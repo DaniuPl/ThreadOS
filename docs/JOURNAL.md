@@ -9903,3 +9903,74 @@ works and is checked by `make test`.
       480 x 853, a tile where 1.5 to one puts it, a tap at the new
       size's places opening Calculator. t_arm64mobile and t_arm64win pass
       as before.
+- [x] **Weft on the phone: WebKit for aarch64, and the finger scrolls**
+      (apps/webkit/wpethreados.c, scripts/tests/t_arm64weft.py,
+      t_webkit.py)
+      WPE WebKit's three programs built for aarch64 by the PC's rules
+      (make weft-arm64; WEBKIT_JOBS=3 kept the compilers inside the
+      memory there is) and handed to the phone as weft.tapp: on QEMU's
+      virt as a phone, Weft fetches t_webkit's page through libsoup and
+      the PC's TCP/IP stack, JavaScriptCore runs its script, Skia paints
+      it, and the boxes, the rounded corners, the flex row and a number
+      formatted the Polish way by ICU are what Chromium and Node make of
+      the same page at the same size. The finger: a tap was already a
+      click where it went down, but a drag did not scroll at all. WPE's
+      scroll deltas are Wayland's turned round - positive is towards the
+      top - so a drag up, sent as positive, asked a page already at its
+      top to go further up; and a touchpad's deltas WebKit stretches 2.5
+      times. A drag is now a touchscreen's scroll, by the finger's own
+      move: the page goes with it, and flicked, keeps going a little.
+      The mouse's wheel on the PC had the same sign the wrong way round
+      (away from the person went down the page) and sent pixels that
+      WebKit stretched to 300 a notch; it sends notches now, as WPE's
+      own libinput seat does, and WebKit makes each a line's step.
+      t_arm64weft reads the page's line as UTF-8 (the number's
+      no-break spaces), and boots a second phone with a tall page: a
+      tap on its box is a click, a drag up from above the home
+      gesture's edge scrolls it, and the red band 1600 pixels down
+      stands on the screen exactly where the page's scrollY puts it.
+      t_webkit turns the wheel two notches towards the person and back
+      over the same page: down, with the green bar where scrollY says,
+      and back to 0.
+- [x] **The phone's speaker and microphone, the chime and the Recorder**
+      (kernelarm64/vsnd.c, vsnd.h, virtio.c, virtio.h, mobsound.c,
+      mobile.c, mobile.h, mobapps.c, mobapps.h, kmain.c, proc.c,
+      libc/tests/sndtest.c, Makefile, scripts/tests/t_arm64sound.py,
+      run_tests.py, .github/workflows/build.yml)
+      QEMU's virtio-sound-device on the ARM64 kernel: the control queue
+      asks for the streams (PCM_INFO), sets one up each way at the PC's
+      format - 48 kHz, 16-bit, two channels - and starts and stops it;
+      a buffer is a descriptor chain (which stream, the samples, the
+      device's status; virtio_chain), four of 1024 frames in flight each
+      way. The PC's calls work unchanged - SYS64_SND_GET/SET, the
+      SND_STREAM a program plays through, SYS64_MIC - one player and one
+      recorder at a time, both let go when their program ends; the
+      loudness Settings set is applied to the samples. A buffer comes
+      back once the device has taken it, not once it has sounded, so
+      the end of a stream waits the device's buffer out: without it the
+      last 24 ms were cut off and sounded at the next start. The control
+      queue is taken in turns, as a program and the shell may both start
+      a stream. The shell (mobsound.c): a notification sounds a chime -
+      A5 then E6, fading, from a quarter-sine table, there being no
+      floating point in the kernel - unless silent mode or do not
+      disturb is on; the Recorder records into pages of its own, up to a
+      minute, with its time counting up and an orange dot on the status
+      bar while the microphone is in use, lists the recordings with
+      their lengths and plays one back on a tap. Its threads are woken
+      with atomic bits: with plain stores another core may see the
+      request before its details and sleep through it - before, the
+      chime went missing in some runs. Settings name the speaker; make run-phone takes
+      PHONE_AUDIO (pa, alsa, sdl).
+      t_arm64sound runs QEMU with SDL's disk driver - what the phone
+      plays goes to a file at the pace it sounds, the microphone reads
+      a pseudo-random file - and the mixing engine off: sndtest's three
+      plays come out sample for sample (the second exactly halved at 50,
+      the muted one silence as long as it lasted), two seconds recorded
+      are a stretch of the input by CRC-32, a second player is turned
+      away and an ending one lets go; on the phone the chime is 300 ms,
+      879.9 and 1319.0 Hz against mobsound.c's 880 and 1319, the same
+      on both channels, Settings say "virtio-sound", silent mode keeps
+      the next notification quiet, and the Recorder's recording -
+      dot, counting time, its row and length - plays back as the very
+      samples the microphone was given. Home has four apps now, so
+      t_arm64win finds the tile after them by the grid's columns.
