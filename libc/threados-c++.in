@@ -1,0 +1,33 @@
+#!/bin/sh
+# The host's g++, aimed at ThreadOS (libc/threados-c++.in)
+#
+# For the meson projects that name C++ among their languages although
+# what ThreadOS builds of them is C (gst-plugins-bad, whose video
+# parsers are): meson wants a C++ compiler that answers, and this is it,
+# compiling as WebKit's C++ is compiled - musl's headers under the
+# compiler's own C++ ones, libc/cxx/compat.h first. A link it hands to
+# threados-cc, which links C: enough for meson's look at the compiler,
+# not for a program that needs libstdc++ (WebKit's are linked by the
+# Makefile). The Makefile writes the paths in (@CXX@, @CXXINCS@,
+# @TOOLCHAIN@, @MUSL@, @LIBS@, @REPO@), and the machine's flags
+# (@FLAGS@).
+
+CXX=@CXX@
+MUSL=@MUSL@
+LIBS=@LIBS@
+REPO=@REPO@
+
+FLAGS="@FLAGS@ -fno-stack-protector -fno-pic -fno-plt \
+-fno-asynchronous-unwind-tables -nostdinc -nostdinc++ @CXXINCS@ \
+-isystem $LIBS/include -isystem $MUSL/include \
+-isystem $($CXX -print-file-name=include) \
+-include $REPO/libc/cxx/compat.h -DTHREADOS_LIBC"
+
+for a in "$@"; do
+    case "$a" in
+    -c|-S|-E|-M|-MM) exec $CXX $FLAGS "$@" ;;
+    --version|-v|-dumpversion|-dumpmachine|-dumpfullversion|-print-*|--print-*)
+        exec $CXX "$@" ;;
+    esac
+done
+exec @TOOLCHAIN@/threados-cc "$@"

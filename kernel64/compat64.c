@@ -59,6 +59,11 @@ int task_current_id(void)
     return task64_id_current();
 }
 
+int task_current_group(void)
+{
+    return task64_tgid();
+}
+
 struct task *task_create(const char *name, void (*entry)(void *), void *arg)
 {
     return (struct task *)task64_create(name, entry, arg);

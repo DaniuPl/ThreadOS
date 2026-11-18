@@ -40,8 +40,9 @@ int hda_play(const int16_t *samples, uint32_t frames);
 
 /* A stream is filled one DMA half at a time. begin starts silence;
    write waits for the safe half and copies up to HDA_STREAM_MAX_FRAMES;
-   end drains the last half before stopping. Only the task that began
-   the stream may write or end it. */
+   end drains the last half before stopping. Only the program that
+   began the stream - any of its threads - may write or end it; it is
+   let go when the program's first thread ends (hda_stream_abort). */
 int hda_stream_begin(void);
 int hda_stream_owned(void);
 int hda_stream_write(const int16_t *samples, uint32_t frames);

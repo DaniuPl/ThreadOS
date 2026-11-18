@@ -943,6 +943,22 @@ $(MESON_CROSS): libc/meson-cross.ini.in Makefile
 	    -e 's|@AR@|$(AR)|' -e 's|@STRIP@|$(STRIP)|' $< > $@.new
 	cmp -s $@.new $@ && rm -f $@.new || mv $@.new $@
 
+# A C++ compiler for meson projects that declare the language but whose
+# parts built here are C (gst-plugins-bad): its own cross file, given
+# after the first, so that the C libraries' cross file - which every
+# meson library's build depends on - stays as it is
+TOS_CXX         := $(TOOLCHAIN64)/threados-c++
+MESON_CROSS_CXX := $(TOOLCHAIN64)/cross-cxx.ini
+$(TOS_CXX): libc/threados-c++.in $(TOS_CC) Makefile
+	sed -e 's|@CXX@|$(CXX)|' -e 's|@CXXINCS@|$(CXX64_INCS)|' \
+	    -e 's|@TOOLCHAIN@|$(abspath $(TOOLCHAIN64))|' \
+	    -e 's|@MUSL@|$(abspath $(MUSL_ROOT))|' -e 's|@LIBS@|$(abspath $(LIBS64))|' \
+	    -e 's|@REPO@|$(CURDIR)|' -e 's|@FLAGS@|$(TFLAGS)|' $< > $@.new
+	chmod +x $@.new
+	cmp -s $@.new $@ && rm -f $@.new || mv $@.new $@
+$(MESON_CROSS_CXX): $(TOS_CXX)
+	printf "[binaries]\ncpp = '%s'\n" $(abspath $(TOS_CXX)) > $@
+
 # GLib asks for -latomic. On x86-64 the compiler does every atomic
 # operation itself, so ThreadOS's libatomic is empty - and being first
 # in the search, it is the one found, never the host's (a glibc build).
@@ -1420,6 +1436,150 @@ $(XKB_A): $(XKB_TAR) $(MESON_CROSS) $(TOS_CC)
 	meson install -C $(BUILD)/libxkbcommon/build --no-rebuild --tags devel \
 	    > $(BUILD)/libxkbcommon/install.log 2>&1 \
 	    || { tail -20 $(BUILD)/libxkbcommon/install.log; exit 1; }
+
+# --- Media for WebKit: FFmpeg and GStreamer ------------------------------
+# A page's video and audio are played by GStreamer, as on every WPE
+# system, and decoded by FFmpeg through gst-libav. This FFmpeg is the
+# media player's archive built again, for WebKit's processes and for
+# either machine: the decoders pages' media comes in - H.264, VP8, VP9,
+# AAC, Opus, Vorbis, MP3, FLAC - with the parsers in front of them, and
+# libavfilter and libswresample, which gst-libav asks for. Its threads
+# are musl's; its hand-written SIMD is nasm's on the PC and the
+# assembler's NEON on ARM, as FFmpeg's own build has them.
+FFMPEG_MEDIA_TAR := third_party/ffmpeg-9.0.tar.xz
+FFMPEG_MEDIA_A   := $(LIBS64)/lib/libavcodec.a
+$(FFMPEG_MEDIA_A): $(FFMPEG_MEDIA_TAR) $(TOS_CC)
+	rm -rf $(BUILD)/ffmpeg-media && mkdir -p $(BUILD)/ffmpeg-media
+	tar -xf $< -C $(BUILD)/ffmpeg-media --strip-components=1
+	cd $(BUILD)/ffmpeg-media && ./configure \
+	    --prefix=$(abspath $(LIBS64)) --enable-cross-compile \
+	    --arch=$(TCPU) --target-os=linux --cc=$(abspath $(TOS_CC)) \
+	    --ar=$(AR) --ranlib=$(RANLIB) --pkg-config=pkg-config \
+	    --pkg-config-flags=--static --disable-programs --disable-doc \
+	    --disable-network --disable-everything --disable-autodetect \
+	    --disable-debug --disable-gpl --disable-version3 --enable-static \
+	    --disable-shared --enable-pthreads --enable-avfilter \
+	    --enable-swresample \
+	    --enable-decoder=h264,vp8,vp9,aac,mp3,opus,vorbis,flac \
+	    --enable-parser=h264,vp8,vp9,aac,opus,vorbis,mpegaudio,flac \
+	    --enable-filter=aresample,format,scale,null,anull \
+	    > configure.log 2>&1 || { tail -40 configure.log; exit 1; }
+	$(MAKE) -C $(BUILD)/ffmpeg-media install \
+	    > $(BUILD)/ffmpeg-media/make.log 2>&1 \
+	    || { tail -40 $(BUILD)/ffmpeg-media/make.log; exit 1; }
+
+# GStreamer: the core, and of its plugins only what WebKit plays media
+# with - everything else is off (auto_features=disabled), each module
+# built static by meson into BUILD/libs64. The plugins are static too:
+# no registry, nothing loaded at run time; gst_init calls
+# gst_init_static_plugins (the core built with gstreamer-static-full),
+# which apps/webkit/media/gststatic.c gives, registering each by name.
+GST_VER   := 1.28.9
+GST_DIR   := third_party/gstreamer
+GST_MESON  = meson setup build --cross-file $(abspath $(MESON_CROSS)) \
+                 --wrap-mode=nodownload --prefix=$(abspath $(LIBS64)) \
+                 --libdir=lib --buildtype=release -Ddefault_library=static \
+                 -Dauto_features=disabled -Dtests=disabled -Ddoc=disabled
+# (and what all but gst-libav have, and what all but it and good have)
+GST_PLAIN := -Dexamples=disabled -Dnls=disabled
+GST_NO_GIR := -Dintrospection=disabled
+# (a module's build: unpacked afresh, set up with the options after it,
+# built and installed; $(1) the archive's name, $(2) the options)
+define GST_BUILD
+	rm -rf $(BUILD)/$(1) && mkdir -p $(BUILD)/$(1)
+	tar -xf $(GST_DIR)/$(1)-$(GST_VER).tar.xz -C $(BUILD)/$(1) \
+	    --strip-components=1
+	cd $(BUILD)/$(1) && $(GST_MESON) $(2) > setup.log 2>&1 \
+	    || { tail -40 setup.log; exit 1; }
+	ninja -C $(BUILD)/$(1)/build install > $(BUILD)/$(1)/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(BUILD)/$(1)/ninja.log | head -60; exit 1; }
+endef
+
+# The core and its own elements (queue, tee, typefind, filesrc...); no
+# debug log - WebKit's categories compile to nothing - and no tools
+GST_A := $(LIBS64)/lib/libgstreamer-1.0.a
+$(GST_A): $(GST_DIR)/gstreamer-$(GST_VER).tar.xz $(MESON_CROSS) $(TOS_CC) \
+          $(GLIB_A)
+	$(call GST_BUILD,gstreamer,$(GST_PLAIN) $(GST_NO_GIR) \
+	    -Dgstreamer-static-full=true \
+	    -Dgst_debug=false -Dregistry=false -Dptp-helper=disabled \
+	    -Dtools=disabled -Dbenchmarks=disabled -Dcheck=disabled \
+	    -Dlibunwind=disabled -Dlibdw=disabled -Dcoretracers=disabled \
+	    -Dbash-completion=disabled)
+
+# Base: its libraries (audio, video, pbutils, tag, app, fft...) and the
+# plugins playback is made of - playbin and the decodebins, typefind,
+# conversion and resampling, volume - but no GL: there is none
+GST_BASE_A := $(LIBS64)/lib/libgstvideo-1.0.a
+$(GST_BASE_A): $(GST_DIR)/gst-plugins-base-$(GST_VER).tar.xz $(GST_A) \
+               $(LIBS64_ZLIB)
+	$(call GST_BUILD,gst-plugins-base,$(GST_PLAIN) $(GST_NO_GIR) \
+	    -Dapp=enabled \
+	    -Daudioconvert=enabled -Daudioresample=enabled \
+	    -Dplayback=enabled -Dtypefind=enabled -Dvideoconvertscale=enabled \
+	    -Dvolume=enabled -Dpbtypes=enabled -Dgl=disabled -Dorc=disabled \
+	    -Dtools=disabled)
+
+# Good: the containers pages' media comes in - MP4 (isomp4) and WebM
+# (matroska) - the audio parsers, autoaudiosink, and audiofx, whose
+# scaletempo keeps the pitch when a video plays faster
+GST_GOOD_A := $(LIBS64)/lib/gstreamer-1.0/libgstisomp4.a
+$(GST_GOOD_A): $(GST_DIR)/gst-plugins-good-$(GST_VER).tar.xz $(GST_BASE_A)
+	$(call GST_BUILD,gst-plugins-good,$(GST_PLAIN) -Disomp4=enabled \
+	    -Dmatroska=enabled -Daudioparsers=enabled -Dautodetect=enabled \
+	    -Daudiofx=enabled -Dorc=disabled -Dasm=disabled)
+
+# Bad: the video parsers (H.264, VP9, AV1...) in front of the decoders,
+# and the codec parsers library they are built on
+GST_BAD_A := $(LIBS64)/lib/gstreamer-1.0/libgstvideoparsersbad.a
+$(GST_BAD_A): $(GST_DIR)/gst-plugins-bad-$(GST_VER).tar.xz $(GST_BASE_A) \
+              $(MESON_CROSS_CXX)
+	$(call GST_BUILD,gst-plugins-bad,$(GST_PLAIN) $(GST_NO_GIR) \
+	    --cross-file $(abspath $(MESON_CROSS_CXX)) \
+	    -Dvideoparsers=enabled \
+	    -Dgpl=disabled -Dorc=disabled -Dtools=disabled)
+
+# gst-libav: FFmpeg's decoders as GStreamer elements (avdec_h264...)
+GST_LIBAV_A := $(LIBS64)/lib/gstreamer-1.0/libgstlibav.a
+$(GST_LIBAV_A): $(GST_DIR)/gst-libav-$(GST_VER).tar.xz $(GST_BASE_A) \
+                $(FFMPEG_MEDIA_A)
+	$(call GST_BUILD,gst-libav,)
+
+# ThreadOS's own: the plugins' registration (gst_init_static_plugins)
+# and the sound sink, as one library, and a pkg-config file naming it,
+# every plugin and what they are built on - in the order a static link
+# wants them - for WebKit's processes and gsttest. (The core calls the
+# registration, and comes after it in a link: the registration is asked
+# for by name, -u, before its library is reached.)
+GST_PLUGINS := coreelements app audioconvert audioresample playback \
+               typefindfunctions videoconvertscale volume pbtypes isomp4 \
+               matroska audioparsers autodetect audiofx videoparsersbad libav
+GST_THREADOS_A := $(LIBS64)/lib/libgstthreados.a
+GST_THREADOS_PC := gstreamer-threados-1.0
+$(GST_THREADOS_A): apps/webkit/media/gststatic.c \
+                   apps/webkit/media/gstthreadossink.c user64/usys64.h \
+                   $(GST_LIBAV_A) $(GST_GOOD_A) $(GST_BAD_A)
+	mkdir -p $(BUILD)/gstthreados
+	for f in gststatic gstthreadossink; do \
+	    $(TOS_CC) -O2 -Wall -Wextra -DGST_PLUGIN_BUILD_STATIC -Iuser64 \
+	        $$($(LIBS64_PC) pkg-config --cflags gstreamer-audio-1.0) \
+	        -c apps/webkit/media/$$f.c -o $(BUILD)/gstthreados/$$f.o \
+	        || exit 1; done
+	rm -f $@ && $(AR) rcs $@ $(BUILD)/gstthreados/gststatic.o \
+	    $(BUILD)/gstthreados/gstthreadossink.o
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nplugindir=$${libdir}/gstreamer-1.0\n\nName: %s\nDescription: GStreamer and its plugins, built in, for ThreadOS\nVersion: %s\nRequires: gstreamer-1.0 gstreamer-base-1.0 gstreamer-app-1.0 gstreamer-audio-1.0 gstreamer-video-1.0 gstreamer-pbutils-1.0 gstreamer-tag-1.0 gstreamer-riff-1.0 gstreamer-rtp-1.0 gstreamer-fft-1.0 gstreamer-codecparsers-1.0 libavfilter libavformat libavcodec libswresample libswscale libavutil zlib\nLibs: -Wl,-u,gst_init_static_plugins -L$${libdir} -lgstthreados -L$${plugindir} %s\n' \
+	    $(abspath $(LIBS64)) $(GST_THREADOS_PC) $(GST_VER) \
+	    "$(foreach p,$(GST_PLUGINS),-lgst$(p))" \
+	    > $(LIBS64)/lib/pkgconfig/$(GST_THREADOS_PC).pc
+
+gstreamer: $(GST_THREADOS_A)
+
+# gsttest: media decoded and played through GStreamer on ThreadOS, held
+# by t_gstreamer to what FFmpeg on the host makes of the same files
+$(BUILD)/user64/gsttest.elf: libc/tests/gsttest.c $(GST_THREADOS_A) $(TOS_CC) \
+                             $(LIBC64) | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $< \
+	    $$($(LIBS64_PC) pkg-config --cflags --static --libs $(GST_THREADOS_PC))
 
 # ICU itself (built for WebKit above) as pkg-config knows it: icu-uc and
 # icu-i18n, pointing at BUILD/icu/root, as ICU's own build would write

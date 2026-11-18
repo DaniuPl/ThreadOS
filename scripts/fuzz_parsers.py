@@ -440,6 +440,89 @@ def build_media(workdir):
     return binaries
 
 
+def gst_tarball(module):
+    """A GStreamer module's archive, as the Makefile names its version"""
+    with open(os.path.join(ROOT, "Makefile")) as f:
+        ver = next(l.split(":=")[1].strip() for l in f
+                   if l.startswith("GST_VER "))
+    return os.path.join(ROOT, "third_party", "gstreamer",
+                        "%s-%s.tar.xz" % (module, ver))
+
+
+def build_gst(workdir):
+    """GStreamer's core, base and good (third_party/gstreamer) built for
+    the host by meson under the sanitizers - static, with only the
+    plugins a page's containers go through - and the harness
+    (tests/fuzz/gst_demux_harness.c) linked once for each demuxer: MP4
+    and WebM/Matroska"""
+    prefix = os.path.join(workdir, "gst-root")
+    env = dict(os.environ,
+               PKG_CONFIG_PATH=os.path.join(prefix, "lib", "pkgconfig"))
+    plain = ["-Dexamples=disabled", "-Dnls=disabled"]
+    for module, opts in (
+            ("gstreamer", plain + ["-Dintrospection=disabled",
+                                   "-Dtools=disabled", "-Dbenchmarks=disabled",
+                                   "-Dcheck=disabled",
+                                   "-Dptp-helper=disabled"]),
+            ("gst-plugins-base", plain + ["-Dintrospection=disabled",
+                                          "-Dapp=enabled", "-Dgl=disabled",
+                                          "-Dtools=disabled"]),
+            ("gst-plugins-good", plain + ["-Disomp4=enabled",
+                                          "-Dmatroska=enabled"])):
+        src = os.path.join(workdir, module)
+        os.makedirs(src)
+        subprocess.run(["tar", "-xf", gst_tarball(module), "-C", src,
+                        "--strip-components=1"], check=True)
+        must(["meson", "setup", "build", "--wrap-mode=nodownload",
+              "--prefix=" + prefix, "--libdir=lib",
+              "--buildtype=debugoptimized", "-Ddefault_library=static",
+              "-Db_sanitize=address,undefined", "-Dauto_features=disabled",
+              "-Dtests=disabled", "-Ddoc=disabled", *opts],
+             module, cwd=src, env=env)
+        must(["ninja", "-C", "build", "install"], module, cwd=src, env=env)
+    flags = subprocess.run(
+        ["pkg-config", "--static", "--cflags", "--libs", "gstreamer-app-1.0",
+         "gstreamer-riff-1.0", "gstreamer-tag-1.0", "gstreamer-audio-1.0",
+         "gstreamer-video-1.0", "gstreamer-pbutils-1.0", "gstreamer-rtp-1.0",
+         "zlib"], env=env, capture_output=True, text=True,
+        check=True).stdout.split()
+    plugins = os.path.join(prefix, "lib", "gstreamer-1.0")
+    binaries = {}
+    for name, demux, caps in (("gst-qtdemux", "qtdemux", "video/quicktime"),
+                              ("gst-matroska", "matroskademux",
+                               "video/x-matroska")):
+        b = os.path.join(workdir, "fz-" + name)
+        must(["gcc", *SAN, "-w", '-DDEMUX="%s"' % demux,
+              '-DCAPS="%s"' % caps, "-o", b,
+              os.path.join(ROOT, "tests", "fuzz", "gst_demux_harness.c"),
+              os.path.join(ROOT, "tests", "fuzz", "onefile.c"),
+              "-L" + plugins, "-lgstisomp4", "-lgstmatroska", "-lgstapp",
+              "-lgstcoreelements", *flags], "the GStreamer harness")
+        binaries[name] = b
+    return binaries
+
+
+def gst_seeds(workdir):
+    """MP4 and WebM files to corrupt, made by the host's FFmpeg (none
+    without one): H.264 and AAC in MP4, VP9 and Opus in WebM, short"""
+    seeds = {"gst-qtdemux": [], "gst-matroska": []}
+    if not shutil.which("ffmpeg"):
+        return seeds
+    for name, out, args in (
+            ("gst-qtdemux", "seed.mp4", ["-c:v", "libx264", "-c:a", "aac"]),
+            ("gst-matroska", "seed.webm", ["-c:v", "libvpx-vp9",
+                                           "-c:a", "libopus"])):
+        path = os.path.join(workdir, out)
+        r = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f",
+             "lavfi", "-i", "testsrc2=size=64x48:rate=10:duration=0.5",
+             "-f", "lavfi", "-i", "sine=duration=0.5", *args, path],
+            capture_output=True)
+        if r.returncode == 0:
+            seeds[name].append(open(path, "rb").read())
+    return seeds
+
+
 def media_seeds(corpus):
     """Pictures from the decoders of our own above, the XML test's
     documents in the form libxml2's fuzzers read (options, then each
@@ -1336,6 +1419,7 @@ def main():
         mbinaries.update(gbinaries)
         mbinaries.update(build_media(workdir))
         mbinaries.update(build_wpe(workdir))
+        mbinaries.update(build_gst(workdir))
         nbinaries, ndirs = build_net(workdir)
         mbinaries.update(nbinaries)
         hbinary = build_hid(workdir)
@@ -1352,6 +1436,7 @@ def main():
         corpus.update(glib_seeds(gfuzz))
         corpus.update(media_seeds(corpus))
         corpus.update(wpe_seeds(corpus))
+        corpus.update(gst_seeds(workdir))
         corpus.update(net_seeds(workdir, corpus, ndirs))
         print("the harness is built, cases per parser: %d" % CASES)
         wrong = fdt_layouts(fbinary, workdir)

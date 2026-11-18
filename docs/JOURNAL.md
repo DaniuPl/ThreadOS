@@ -10365,3 +10365,38 @@ works and is checked by `make test`.
       dark or light by the strip in the same way. t_arm64win works the
       colour out from what wintest draws in its top row (its black
       corner and the red) and finds it in the status bar.
+- [x] **GStreamer and FFmpeg for ThreadOS: the first step to video and
+      sound in Weft** (third_party/gstreamer/, Makefile, apps/webkit/media/,
+      libc/tests/gsttest.c, libc/threados-c++.in, kernel/hda.c,
+      scripts/tests/t_gstreamer.py, tests/fuzz/gst_demux_harness.c,
+      scripts/fuzz_parsers.py)
+      YouTube plays nothing in Weft because WebKit was built without media;
+      WebKit's WPE port plays it through GStreamer. GStreamer 1.28.9 -
+      the core, base, good, bad and gst-libav, pinned archives - is built
+      static by meson for ThreadOS with every feature off but those a page
+      needs: the MP4 and WebM/Matroska demuxers, the audio and video
+      parsers, decodebin and playbin, conversion and resampling, appsrc
+      and appsink (Media Source Extensions feed through them), and
+      gst-libav on a second, smaller FFmpeg build (H.264, VP8, VP9, AAC,
+      MP3, Opus, Vorbis and FLAC decoders, threads and SIMD). The core is
+      built gstreamer-static-full, so gst_init registers our list of
+      plugins (apps/webkit/media/gststatic.c) - there is no plugin
+      directory or registry to load. Sound goes out through
+      threadosaudiosink (gstthreadossink.c), a GstAudioSink on the sound
+      stream calls: 48 kHz stereo S16, written in pieces the stream takes.
+      GStreamer writes from a thread of its own, so the HDA stream now
+      belongs to the program (its thread group), not the thread that
+      opened it, as the phone's virtio-sound already did; it is still
+      given up when the program ends. gst-plugins-bad has C++ in it:
+      threados-c++ is the C++ compiler for musl programs, as threados-cc
+      is the C one. WebKit itself is not rebuilt with media yet - that is
+      the next step, and its own commit. t_gstreamer runs gsttest on
+      ThreadOS: every element a page needs exists; an H.264 MP4 and a VP9
+      WebM made by the host's ffmpeg decode to frames bit for bit the
+      same as the host's ffmpeg decodes them (50 each, MD5s of the I420
+      planes); FLAC in Matroska decodes to the host's PCM exactly; Opus
+      in WebM to the right number of samples; and a 1000 Hz tone played
+      through autoaudiosink comes out of QEMU's HDA as 1000 Hz for its
+      two seconds. The fuzz run builds GStreamer for the host under ASan
+      and UBSan and feeds mutated MP4 and WebM files through qtdemux and
+      matroskademux.

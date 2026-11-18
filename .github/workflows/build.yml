@@ -30,14 +30,16 @@ jobs:
             build-essential \
             grub-pc-bin grub-efi-amd64-bin xorriso mtools \
             clang lld python3 cmake ninja-build ruby pkg-config gperf \
-            libglib2.0-dev-bin bison gcc-aarch64-linux-gnu
+            libglib2.0-dev-bin bison flex nasm gcc-aarch64-linux-gnu
           # (cmake, ninja and ruby build WebKit's JavaScriptCore;
           # meson and pkg-config build GLib - meson from pip, since
           # GLib wants a newer one than the runner's; gperf makes
           # fontconfig's object table; libglib2.0-dev-bin has
           # glib-mkenums, which libsoup's build runs on the host; bison
-          # makes libxkbcommon's keymap parser; gcc-aarch64-linux-gnu
-          # builds musl for the ARM64 kernel, with the libgcc it needs)
+          # makes libxkbcommon's keymap parser, and with flex GStreamer's
+          # pipeline parser; nasm FFmpeg's SIMD on the PC;
+          # gcc-aarch64-linux-gnu builds musl for the ARM64 kernel, with
+          # the libgcc it needs)
           python3 -m pip install --user meson
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 

@@ -31,6 +31,8 @@ void task_sleep(uint32_t ms);       /* put the current thread to sleep */
 int  task_kill(int pid);            /* kill a process (0/-1) */
 int  task_killed(void);             /* is the current task due to die */
 int  task_current_id(void);
+/* the program the current task is a thread of: its first task's id */
+int  task_current_group(void);
 int  task_alive(int id);            /* is the task with this id still alive */
 /* how an ended program ended: its code, or -1 and why it was stopped */
 int  task_end_of(int id, int *code, const char **why, uint64_t *addr);

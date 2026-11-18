@@ -41,6 +41,7 @@ as code of our own around it (`apps/js`).
 | `libxkbcommon-1.13.1.tar.gz` | libxkbcommon, keymaps: keys to keysyms and text, the way WPE's platform layer speaks of a keyboard | 1.13.1 | MIT-style (`LICENSE`) | http://deb.debian.org/debian/pool/main/libx/libxkbcommon/libxkbcommon_1.13.1.orig.tar.gz - Debian's copy of the archive of upstream's tag xkbcommon-1.13.1 (commit 920ea79); upstream publishes no tarball of its own (SHA-256 `6802621c81b674e468d2346a8f6d9a48ba5c154b72434a1c9e1a3eaa29f36fb5`, as Debian's libxkbcommon_1.13.1-1.dsc lists it) |
 | `khronos/` | The Khronos Group's EGL headers (`EGL/egl.h`, `eglext.h`, `eglplatform.h`, `KHR/khrplatform.h`), which libepoxy builds against | EGL-Registry commit 00de6df1cc738a7a9e138680273363cde5345123 | Apache-2.0 for the EGL headers (their SPDX lines); `khrplatform.h` under its own MIT-style terms (in the file) | https://github.com/KhronosGroup/EGL-Registry, `api/` at that commit (SHA-256 `a7c24c828bf2e1a4dfe6511b4f4812b948a285eb54787074015896976d4da076` egl.h, `210064270c19924a15452287a005d59a8af8b4414d22957c04b80649c1466d33` eglext.h, `25b5391655effcf363a38fa00c3154f356a3eab3d35dc067847875513cf1e441` eglplatform.h, `7b1e01aaa7ad8f6fc34b5c7bdf79ebf5189bb09e2c4d2e79fc5d350623d11e83` khrplatform.h) |
 | `iwlwifi/` | Firmware for the Intel Wireless 3160 Wi-Fi card (`iwlwifi-3160-17.ucode`), a binary the card runs itself | 17.bfb58538.0 | Intel's firmware licence: redistribution in binary form only, unmodified (`LICENCE.iwlwifi_firmware`) | https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git (`intel/iwlwifi/`) |
+| `gstreamer/` | GStreamer, the media framework WebKit plays pages' video and audio with: the core (`gstreamer-1.28.9.tar.xz`), gst-plugins-base, -good and -bad, and gst-libav (FFmpeg's decoders as GStreamer elements) | 1.28.9 | LGPL-2.1-or-later (`COPYING` in each archive; -bad's few GPL plugins are not built, `-Dgpl=disabled`) | https://gstreamer.freedesktop.org/src/ (SHA-256 as each archive's .sha256sum lists it: core `6dbf744f583131a34845cc641e803843766a9ba80ce00378a9043fd6d8d5fb38`, base `c1fda668b520e6aef763c0eb962c032c9fe52bce322e8b00c69b4e9e847bddc1`, good `e518cd97483706a252e95e60312a22d23dec6f5e7673af6f5bde719c3a9ca7f4`, bad `4a4e0b7bf84f868378c48f143a7ac3a98923b488a5b74f1a35ba46bc3c43f6b1`, libav `4b3df21fa70972a80891d2298cf32c14a62c3db4483d545c7ac018230399186b`) |
 
 Trimmed, not modified:
 
@@ -96,6 +97,24 @@ Trimmed, not modified:
   AVI demuxers and the codecs used for those formats. GPL and version 3
   components are disabled; no FFmpeg programs or network protocols are
   built. The player and kernel audio stream interface are our own code.
+  The same archive is built a second time for WebKit's media, for
+  either machine (`FFMPEG_MEDIA_A` in the `Makefile`): only the H.264,
+  VP8, VP9, AAC, MP3, Opus, Vorbis and FLAC decoders, their parsers,
+  libavfilter (a few filters) and libswresample, with musl's threads and
+  FFmpeg's own SIMD; GPL and version 3 components still disabled.
+- **GStreamer**: the five release archives are kept intact and built by
+  meson (`GST_BUILD` in the `Makefile`), static, with every optional
+  feature off (`-Dauto_features=disabled`) and only these plugins on:
+  core's elements; base's app, audioconvert, audioresample, playback,
+  typefind, videoconvertscale, volume and pbtypes, without GL or ORC;
+  good's isomp4, matroska, audioparsers, autodetect and audiofx; bad's
+  videoparsers (with the codecparsers library), no GPL; and gst-libav.
+  No registry, no debug log, no tools. The core is built with
+  `gstreamer-static-full`, so that `gst_init` calls
+  `gst_init_static_plugins`, which is ours
+  (`apps/webkit/media/gststatic.c`), as is the sound sink
+  (`apps/webkit/media/gstthreadossink.c`). Its pipeline parser needs
+  flex on the host.
 - **ACPICA**: the archive is kept intact and unpacked into the build
   directory. One line is patched in (`kernel/acpica/patches/acenv.h.patch`):
   the name of our host header, `kernel/acpica/acthreados.h`, checked

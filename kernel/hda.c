@@ -850,7 +850,10 @@ int hda_stream_begin(void)
     for (uint32_t i = 0; i < BUF_FRAMES * 2; i++)
         buf[i] = 0;
     stream_fill = 0;
-    stream_owner = task_current_id();
+    /* the program's, not the thread's: a player begins, feeds and ends
+       its sound from threads of its own (GStreamer's ring buffer and
+       its state changes are not the same thread) */
+    stream_owner = task_current_group();
     stream_active = 1;
     wr8(out_base + SD_STS, 0x1C);
     wr8(out_base + SD_CTL, SDCTL_RUN);
@@ -860,13 +863,13 @@ int hda_stream_begin(void)
 
 int hda_stream_owned(void)
 {
-    return stream_active && stream_owner == task_current_id();
+    return stream_active && stream_owner == task_current_group();
 }
 
 int hda_stream_write(const int16_t *samples, uint32_t frames)
 {
     uint32_t half = BUF_FRAMES / 2;
-    if (!stream_active || stream_owner != task_current_id() ||
+    if (!stream_active || stream_owner != task_current_group() ||
         frames > half || (frames && !samples))
         return -1;
     if (stream_wait_half(stream_fill) < 0) {
@@ -909,7 +912,7 @@ void hda_stream_levels(uint8_t out[HDA_LEVELS])
 
 int hda_stream_end(void)
 {
-    if (!stream_active || stream_owner != task_current_id())
+    if (!stream_active || stream_owner != task_current_group())
         return -1;
     /* The empty half follows the last samples, so the output stops on
        silence rather than cutting off the final decoded block. */
