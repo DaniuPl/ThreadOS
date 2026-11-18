@@ -630,6 +630,11 @@ struct win_text_cmd {
    WEV_CLICK, so a program that knows only clicks does not take it for
    the left one. val: 2 right, 4 middle. */
 #define WEV_ALTCLICK 9
+/* The system's look changed - its theme, light or dark, its accent: a
+   program that asks for its colours (UI_LOOK) or lays the system's
+   panels in its window (WIN_DRAW's glass) draws itself again in it.
+   One that does neither may let it go. */
+#define WEV_LOOK    10
 /* What a WEV_CLICK's val holds above its buttons: the modifiers held
    with the click */
 #define WEV_MOD_SHIFT 0x100

@@ -22,6 +22,7 @@
  */
 
 #include "wpethreados.h"
+#include "udraw.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -161,6 +162,11 @@ typedef struct {
     int top;                  /* the program's own band above the page */
     int bottom;               /* ... and below it (a phone's toolbar) */
     int covered;              /* the program's own screen over the page */
+    /* What the program draws over the page, each time a frame of it is
+       shown (a phone's floating toolbar), and where */
+    WPEThreadOSOverlayFunc overlay;
+    gpointer overlay_data;
+    int ov_x, ov_y, ov_w, ov_h;
     /* The screen's pixels to one of the window's, in sixteenths (32 on
        a phone at 200%): WebKit paints at that scale, and the page is
        handed over in the screen's pixels, sharp */
@@ -235,6 +241,60 @@ static void page_resized(WPEToplevelThreadOS *t)
     wpe_toplevel_foreach_view(WPE_TOPLEVEL(t), view_to_page_size, NULL);
 }
 
+void wpe_threados_toplevel_set_overlay(WPEToplevel *toplevel,
+                                       WPEThreadOSOverlayFunc func,
+                                       gpointer data, int x, int y, int w,
+                                       int h)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    if (!t)
+        return;
+    t->overlay = func;
+    t->overlay_data = data;
+    t->ov_x = x;
+    t->ov_y = y;
+    t->ov_w = w;
+    t->ov_h = h;
+}
+
+static WPEView *first_view(WPEToplevel *toplevel);
+
+static void blit_rect(WPEViewThreadOS *self, int win, int top, int k,
+                      const guint8 *data, guint stride, int bw, int bh,
+                      int x, int y, int w, int h);
+
+void wpe_threados_toplevel_redraw_overlay(WPEToplevel *toplevel)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    if (!t || t->win < 0 || !t->overlay || t->covered)
+        return;
+    WPEView *view = first_view(toplevel);
+    WPEViewThreadOS *v = (WPEViewThreadOS *)view;
+    WPEBuffer *last = v ? (v->pending ? v->pending : v->committed) : NULL;
+    ud_hold(t->win, 1);
+    if (last && WPE_IS_BUFFER_SHM(last)) {
+        /* the page as it was under the overlay's place, then the
+           overlay over it again */
+        WPEBufferSHM *shm = WPE_BUFFER_SHM(last);
+        gsize size;
+        const guint8 *data = g_bytes_get_data(wpe_buffer_shm_get_data(shm),
+                                              &size);
+        guint stride = wpe_buffer_shm_get_stride(shm);
+        int bw = wpe_buffer_get_width(last);
+        int bh = MIN(wpe_buffer_get_height(last),
+                     (t->win_h - t->bottom) * t->k / 16 - t->top * t->k / 16);
+        if (data && bh > 0 &&
+            (gsize)stride * (gsize)wpe_buffer_get_height(last) <= size) {
+            int k = t->k;
+            blit_rect(v, t->win, t->top * k / 16, k, data, stride, bw, bh,
+                      t->ov_x * k / 16 - 1, (t->ov_y - t->top) * k / 16 - 1,
+                      t->ov_w * k / 16 + 2, t->ov_h * k / 16 + 2);
+        }
+    }
+    t->overlay(t->overlay_data);
+    ud_hold(t->win, 0);
+}
+
 void wpe_threados_toplevel_set_bottom(WPEToplevel *toplevel, int bottom)
 {
     WPEToplevelThreadOS *t = ours(toplevel);
@@ -243,8 +303,6 @@ void wpe_threados_toplevel_set_bottom(WPEToplevel *toplevel, int bottom)
     t->bottom = MAX(bottom, 0);
     page_resized(t);
 }
-
-static WPEView *first_view(WPEToplevel *toplevel);
 
 void wpe_threados_toplevel_cover(WPEToplevel *toplevel, gboolean covered)
 {
@@ -341,16 +399,29 @@ static gboolean show(WPEViewThreadOS *self, WPEBuffer *buffer,
     if (!data || bh <= 0 ||
         (gsize)stride * (gsize)wpe_buffer_get_height(buffer) > size)
         return FALSE;
+    /* With something drawn over the page, the two reach the screen
+       together: the window is held from it until both are in */
+    if (t->overlay)
+        ud_hold(t->win, 1);
     if (!n_damage)
         blit_rect(self, t->win, top, k, data, stride, bw, bh, 0, 0, bw, bh);
-    /* (the damage is the page's, in its own pixels: the screen's are
-       k/16 as many, a pixel more each way for the parts) */
+    /* (the damage is in the buffer's own pixels, as Wayland's
+       damage_buffer takes it - the screen's, whatever the scale) */
     for (guint i = 0; i < n_damage; i++)
         blit_rect(self, t->win, top, k, data, stride, bw, bh,
-                  damage[i].x * k / 16 - (k != 16),
-                  damage[i].y * k / 16 - (k != 16),
-                  damage[i].width * k / 16 + 2 * (k != 16),
-                  damage[i].height * k / 16 + 2 * (k != 16));
+                  damage[i].x, damage[i].y, damage[i].width,
+                  damage[i].height);
+    if (t->overlay) {
+        /* Under the overlay, the page again, all of it: what the damage
+           left alone there still has the overlay drawn over the frame
+           before, and glass laid over that glass would come out darker
+           and more blurred with every frame */
+        blit_rect(self, t->win, top, k, data, stride, bw, bh,
+                  t->ov_x * k / 16 - 1, (t->ov_y - t->top) * k / 16 - 1,
+                  t->ov_w * k / 16 + 2, t->ov_h * k / 16 + 2);
+        t->overlay(t->overlay_data);
+        ud_hold(t->win, 0);
+    }
     return TRUE;
 }
 

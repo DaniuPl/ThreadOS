@@ -52,11 +52,14 @@ struct mob_theme {
     uint32_t bg, fg, muted, card, line, key;
 };
 void mob_theme(struct mob_theme *t);
+void mob_theme_for(struct mob_theme *t, int dark);  /* light or dark */
 
 /* mobile.c's pieces, for the apps */
 void mob_status_bar(uint32_t colour);
 void mob_title(const char *s, uint32_t colour);
 void mob_pill(uint32_t colour);
+int mob_glass_backdrop(void);
+void mob_glass_card(int x, int y, int w, int h, int r);
 void mob_centred(int font, int px, int cx, int baseline, const char *s,
                  uint32_t colour);
 void mob_set_airplane(int on);
@@ -100,6 +103,12 @@ void mob_chime(void);
 int rec_changes(void);
 void recorder_draw(void);
 int recorder_tap(int x, int y);
+
+/* A program's panel (WIN_DRAW's WD_GLASS) in the look Settings choose,
+   on its window's pixels: how light it came out, 0..255 */
+struct gfx_surface;
+int mob_panel_on(const struct gfx_surface *t, int x, int y, int w, int h,
+                 int r);
 
 /* The keyboard on the screen, Notes' and a program's: its top, drawn
    across the bottom, and a tap on it - each key's text to 'emit', "\n"

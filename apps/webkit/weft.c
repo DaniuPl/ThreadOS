@@ -79,13 +79,8 @@
 #define TABS_MAX 8
 
 /* On a touchscreen (scripts/tests/t_arm64weft.py reads these) */
-#define M_TOP_H    56        /* the address band */
-#define M_PILL_X   12        /* the address in a rounded field */
-#define M_PILL_Y   8
-#define M_PILL_H   40
 #define M_TEXT_PX  15
-#define M_BOT_H    52        /* the toolbar: */
-#define M_BUTTONS  5         /* back, forward, home, tabs, the menu */
+#define M_BOT_H    52        /* the cards' and lists' foot */
 #define M_HEAD_H   52        /* the tabs' screen: its heading, */
 #define M_GAP      12        /* cards in columns, this far apart, */
 #define M_CARD_W   170       /* at least this wide - two on a phone, */
@@ -137,7 +132,7 @@ static gboolean pressed_on_band;
    settings - scrolled so far */
 static gboolean touch, mobile;
 enum { SHEET_NONE, SHEET_CARDS, SHEET_MENU, SHEET_HISTORY, SHEET_SETTINGS,
-       SHEET_ENGINES };
+       SHEET_ENGINES, SHEET_BOOKMARKS };
 static int sheet;
 #define cards (sheet == SHEET_CARDS)
 static int cards_scroll, press_x, press_y, press_scroll;
@@ -151,6 +146,12 @@ static struct visit {
     char uri[512];
 } history[HISTORY_MAX];
 static int nhistory;
+
+/* The pages kept to come back to, in the order they were added (in
+   memory too, for now) */
+#define BOOKMARKS_MAX 100
+static struct visit bookmarks[BOOKMARKS_MAX];
+static int nbookmarks;
 
 /* The browser's settings */
 static const struct engine {
@@ -695,11 +696,6 @@ static const char *short_uri(const char *uri, char *out, size_t room)
     return out;
 }
 
-static int button_x(int i)
-{
-    return win_w() * (2 * i + 1) / (2 * M_BUTTONS);
-}
-
 static void chevron(int win, int cx, int cy, int left, uint32_t rgb)
 {
     int d = 7;
@@ -779,8 +775,126 @@ static void draw_cards(int win, const struct ud_look *l)
             "Done", l->accent, UD_BOLD, M_TEXT_PX);
 }
 
+/* The floating toolbar: a pill at the bottom, over the page; the
+   address being typed in one at the top (t_arm64weft.py reads these) */
+#define G_BAR_H    52
+#define G_BAR_GAP  10        /* from the window's bottom */
+#define G_BAR_SIDE 12        /* ... and its sides */
+#define G_BAR_MAXW 560       /* no wider on a tablet */
+#define G_FIELD_Y  8
+#define G_FIELD_H  44
+
+static void bar_box(int *x, int *y, int *w, int *h)
+{
+    int bw = MIN(win_w() - 2 * G_BAR_SIDE, G_BAR_MAXW);
+    *x = (win_w() - bw) / 2;
+    *y = win_h() - G_BAR_GAP - G_BAR_H;
+    *w = bw;
+    *h = G_BAR_H;
+}
+
+static void field_box(int *x, int *y, int *w, int *h)
+{
+    *x = G_BAR_SIDE;
+    *y = G_FIELD_Y;
+    *w = win_w() - 2 * G_BAR_SIDE;
+    *h = G_FIELD_H;
+}
+
+/* The toolbar's buttons' middles: back and forward at its left, the
+   tabs and the menu at its right; the address between them */
+#define BTN_BACK   0
+#define BTN_FWD    1
+#define BTN_TABS   2
+#define BTN_MENU   3
+static int bar_button(int i)
+{
+    int x, y, w, h;
+    bar_box(&x, &y, &w, &h);
+    switch (i) {
+    case BTN_BACK: return x + 28;
+    case BTN_FWD:  return x + 64;
+    case BTN_TABS: return x + w - 74;
+    default:       return x + w - 30;
+    }
+}
+
+static int inside(int px, int py, int x, int y, int w, int h)
+{
+    return px >= x && px < x + w && py >= y && py < y + h;
+}
+
+/* The toolbar over the page, in the system's look (WD_GLASS: Liquid
+   Glass, matte or solid as the phone's Settings say), its ink dark or
+   light as the glass came out over what is under it */
+static void draw_overlay(gpointer data)
+{
+    (void)data;
+    int win = wpe_threados_toplevel_window(toplevel);
+    struct ud_look l;
+    ud_look(&l);
+    int x, y, w, h;
+    if (editing) {
+        field_box(&x, &y, &w, &h);
+        int lum = ud_glass(win, x, y, w, h, h / 2);
+        uint32_t ink = lum > 150 ? 0x1C1C1E : 0xFFFFFF;
+        int tx = x + 18, room = w - 36;
+        int width = ud_width(typed, UD_SANS, M_TEXT_PX);
+        if (width > room)
+            tx -= width - room;
+        ud_clip(win, x + 14, y, w - 28, h);
+        int end = ud_text(win, tx, ud_baseline(y, h, M_TEXT_PX), typed, ink,
+                          UD_SANS, M_TEXT_PX);
+        ud_fill(win, *typed ? end + 1 : tx, y + 11, 2, h - 22, l.accent);
+        ud_unclip(win);
+        return;
+    }
+    bar_box(&x, &y, &w, &h);
+    WebKitWebView *v = tabs[front]->view;
+    int lum = ud_glass(win, x, y, w, h, h / 2);
+    int light = lum > 150;
+    uint32_t ink = light ? 0x1C1C1E : 0xFFFFFF;
+    uint32_t off = light ? 0xB0B0B8 : 0x6E6E76;
+    int cy = y + h / 2;
+    chevron(win, bar_button(BTN_BACK), cy, 1,
+            webkit_web_view_can_go_back(v) ? ink : off);
+    chevron(win, bar_button(BTN_FWD), cy, 0,
+            webkit_web_view_can_go_forward(v) ? ink : off);
+    /* the address: the site alone, in the middle, as a phone's
+       browser shows it - the whole address comes when it is tapped */
+    char shown[256];
+    const char *text = short_uri(shown_uri(v), shown, sizeof(shown));
+    char *slash = strchr(shown, '/');
+    if (slash)
+        *slash = 0;
+    int ax = bar_button(BTN_FWD) + 22, aw = bar_button(BTN_TABS) - 22 - ax;
+    const char *label = *text ? text : "Search or address";
+    int tw = ud_width(label, UD_BOLD, M_TEXT_PX);
+    ud_clip(win, ax, y, aw, h);
+    ud_text(win, ax + (tw < aw ? (aw - tw) / 2 : 0),
+            ud_baseline(y, h, M_TEXT_PX), label, *text ? ink : off,
+            UD_BOLD, M_TEXT_PX);
+    ud_unclip(win);
+    /* the tabs, counted */
+    int bx = bar_button(BTN_TABS);
+    ud_ring(win, bx - 11, cy - 11, 22, 22, 6, ink);
+    ud_ring(win, bx - 10, cy - 10, 20, 20, 5, ink);
+    char count[8];
+    g_snprintf(count, sizeof(count), "%d", ntabs);
+    ud_text_mid(win, bx - 11, cy - 11, 22, 22, count, ink, UD_BOLD, 12);
+    /* the menu */
+    int mx = bar_button(BTN_MENU);
+    for (int i = -1; i <= 1; i++)
+        ud_disc(win, mx - 2, cy + i * 7 - 2, 5, ink);
+    /* how far the page has loaded, along the pill's foot */
+    if (tabs[front]->loading)
+        ud_fill(win, x + h / 2, y + h - 4,
+                (int)((w - h) * tabs[front]->progress), 2, l.accent);
+}
+
 static void draw_menu(int win, const struct ud_look *l);
 static void draw_history(int win, const struct ud_look *l);
+static void draw_bookmarks(int win, const struct ud_look *l);
 static void draw_settings(int win, const struct ud_look *l);
 static void draw_engines(int win, const struct ud_look *l);
 
@@ -801,73 +915,25 @@ static void draw_mobile(void)
     case SHEET_HISTORY:  draw_history(win, &l); return;
     case SHEET_SETTINGS: draw_settings(win, &l); return;
     case SHEET_ENGINES:  draw_engines(win, &l); return;
+    case SHEET_BOOKMARKS: draw_bookmarks(win, &l); return;
     }
-    int w = win_w(), h = win_h();
-    WebKitWebView *v = tabs[front]->view;
-
-    /* The address, in its field */
-    ud_fill(win, 0, 0, w, M_TOP_H, l.bg);
-    int pw = w - 2 * M_PILL_X;
-    ud_round(win, M_PILL_X, M_PILL_Y, pw, M_PILL_H, M_PILL_H / 2, l.field);
+    /* The page whole, and over it the floating toolbar - or, while an
+       address is typed, its field at the top, above the keyboard */
+    int x, y, w, h;
     if (editing)
-        ud_ring(win, M_PILL_X, M_PILL_Y, pw, M_PILL_H, M_PILL_H / 2,
-                l.accent);
-    char shown[256];
-    const char *text = editing ? typed
-                     : short_uri(shown_uri(v), shown, sizeof(shown));
-    int tx = M_PILL_X + 16, room = pw - 16 - 44;
-    int width = ud_width(text, UD_SANS, M_TEXT_PX);
-    if (editing && width > room)
-        tx -= width - room;
-    int base = ud_baseline(M_PILL_Y, M_PILL_H, M_TEXT_PX);
-    ud_clip(win, M_PILL_X + 12, M_PILL_Y, room + 4, M_PILL_H);
-    if (!*text && !editing)
-        ud_text(win, tx, base, "Search or type an address", l.dim, UD_SANS,
-                M_TEXT_PX);
-    int end = ud_text(win, tx, base, text, l.text, UD_SANS, M_TEXT_PX);
-    if (editing)
-        ud_fill(win, *text ? end + 1 : tx, M_PILL_Y + 10, 2, M_PILL_H - 20,
-                l.accent);
-    ud_unclip(win);
-    /* reload, or stop while it loads, at the field's end */
-    int rx = M_PILL_X + pw - 24, ry = M_PILL_Y + M_PILL_H / 2;
-    if (tabs[front]->loading) {
-        ud_line(win, rx - 6, ry - 6, rx + 6, ry + 6, 28, l.text);
-        ud_line(win, rx + 6, ry - 6, rx - 6, ry + 6, 28, l.text);
-    } else {
-        ud_ring(win, rx - 8, ry - 8, 16, 16, 8, l.text);
-        ud_fill(win, rx + 2, ry - 9, 8, 7, l.field);
-        ud_line(win, rx + 2, ry - 8, rx + 8, ry - 8, 24, l.text);
-        ud_line(win, rx + 8, ry - 8, rx + 8, ry - 2, 24, l.text);
+        field_box(&x, &y, &w, &h);
+    else
+        bar_box(&x, &y, &w, &h);
+    wpe_threados_toplevel_set_overlay(toplevel, draw_overlay, NULL, x, y, w,
+                                      h);
+    static gboolean was_editing;
+    if (editing != was_editing) {
+        /* the other one's place is the page's again */
+        was_editing = editing;
+        wpe_threados_view_show_last(
+            webkit_web_view_get_wpe_view(tabs[front]->view));
     }
-    ud_fill(win, 0, M_TOP_H - 2, w, 2, l.bg);
-    if (tabs[front]->loading)
-        ud_fill(win, 0, M_TOP_H - 2, (int)(w * tabs[front]->progress), 2,
-                l.accent);
-
-    /* The toolbar */
-    int y0 = h - M_BOT_H, cy = y0 + M_BOT_H / 2;
-    ud_fill(win, 0, y0, w, M_BOT_H, l.bg);
-    ud_fill(win, 0, y0, w, 1, l.line);
-    chevron(win, button_x(0), cy, 1,
-            webkit_web_view_can_go_back(v) ? l.text : l.line);
-    chevron(win, button_x(1), cy, 0,
-            webkit_web_view_can_go_forward(v) ? l.text : l.line);
-    int hx = button_x(2);                         /* home: a house */
-    ud_line(win, hx - 9, cy - 1, hx, cy - 9, 28, l.text);
-    ud_line(win, hx, cy - 9, hx + 9, cy - 1, 28, l.text);
-    ud_line(win, hx - 7, cy - 2, hx - 7, cy + 8, 28, l.text);
-    ud_line(win, hx + 7, cy - 2, hx + 7, cy + 8, 28, l.text);
-    ud_line(win, hx - 7, cy + 8, hx + 7, cy + 8, 28, l.text);
-    int bx = button_x(3);                         /* the tabs, counted */
-    ud_ring(win, bx - 11, cy - 11, 22, 22, 5, l.text);
-    ud_ring(win, bx - 10, cy - 10, 20, 20, 4, l.text);
-    char count[8];
-    g_snprintf(count, sizeof(count), "%d", ntabs);
-    ud_text_mid(win, bx - 11, cy - 11, 22, 22, count, l.text, UD_BOLD, 12);
-    int nx = button_x(4);                         /* the menu: three dots */
-    for (int i = -1; i <= 1; i++)
-        ud_disc(win, nx - 2, cy + i * 7 - 2, 5, l.text);
+    wpe_threados_toplevel_redraw_overlay(toplevel);
 }
 
 /* What is over the page: the page is covered - not drawn, not touched
@@ -875,7 +941,8 @@ static void draw_mobile(void)
 static void show_sheet(int which)
 {
     static const char *const names[] = { "page", "tabs", "menu", "history",
-                                         "settings", "search engines" };
+                                         "settings", "search engines",
+                                         "bookmarks" };
     if (sheet == which)
         return;
     int was = sheet;
@@ -885,10 +952,13 @@ static void show_sheet(int which)
     wpe_threados_toplevel_cover(toplevel, which != SHEET_NONE);
     if (was != SHEET_NONE)
         say("[weft] %s hidden%s\n", names[was], NULL);
-    if (which == SHEET_HISTORY) {
+    if (which == SHEET_HISTORY || which == SHEET_BOOKMARKS) {
         char n[16];
-        g_snprintf(n, sizeof(n), "%d", nhistory);
-        say("[weft] history shown, %s pages%s\n", n, NULL);
+        g_snprintf(n, sizeof(n), "%d", which == SHEET_HISTORY ? nhistory
+                                                               : nbookmarks);
+        say(which == SHEET_HISTORY ? "[weft] history shown, %s pages%s\n"
+                                   : "[weft] bookmarks shown, %s pages%s\n",
+            n, NULL);
     } else if (which != SHEET_NONE) {
         say("[weft] %s shown%s\n", names[which], NULL);
     }
@@ -902,15 +972,67 @@ static void cards_show(gboolean on)
 
 /* --- The menu, the history and the settings ------------------------- */
 
-#define MENU_ITEMS 3         /* a new tab, the history, the settings */
+#define MENU_ITEMS 5         /* a new tab, the page bookmarked or not,
+                                the bookmarks, the history, the settings */
 #define LIST_ROW   56        /* the menu's, the history's and the settings'
                                 rows, under the heading (t_arm64weft.py
                                 reads these) */
 #define SETTINGS_ROWS 5
 
 static const char *const menu_items[MENU_ITEMS] = {
-    "New tab", "History", "Settings",
+    "New tab", "Add bookmark", "Bookmarks", "History", "Settings",
 };
+
+/* Where the page is among the bookmarks, or -1 */
+static int bookmarked(const char *uri)
+{
+    for (int i = 0; uri && i < nbookmarks; i++)
+        if (!strcmp(bookmarks[i].uri, uri))
+            return i;
+    return -1;
+}
+
+static void bookmark_remove(int i)
+{
+    say("[weft] bookmark removed %s%s\n", bookmarks[i].uri, NULL);
+    memmove(&bookmarks[i], &bookmarks[i + 1],
+            (size_t)(nbookmarks - i - 1) * sizeof(bookmarks[0]));
+    nbookmarks--;
+}
+
+/* The menu's star: the page in front into the bookmarks, or out again */
+static void bookmark_toggle(void)
+{
+    const char *uri = webkit_web_view_get_uri(tabs[front]->view);
+    if (!uri || !*uri || !strcmp(uri, "about:blank"))
+        return;
+    int i = bookmarked(uri);
+    if (i >= 0) {
+        bookmark_remove(i);
+        return;
+    }
+    if (nbookmarks == BOOKMARKS_MAX)
+        return;
+    g_strlcpy(bookmarks[nbookmarks].uri, uri, sizeof(bookmarks[0].uri));
+    g_strlcpy(bookmarks[nbookmarks].title, tabs[front]->title,
+              sizeof(bookmarks[0].title));
+    nbookmarks++;
+    say("[weft] bookmark added %s%s\n", uri, NULL);
+}
+
+/* A five-pointed star, outlined: the points 10 pixels out, the dents 4 */
+static void star(int win, int cx, int cy, uint32_t c)
+{
+    static const signed char at[10][2] = {
+        { 0, -10 }, { 2, -3 }, { 10, -3 }, { 4, 1 }, { 6, 8 },
+        { 0, 4 }, { -6, 8 }, { -4, 1 }, { -10, -3 }, { -2, -3 },
+    };
+    for (int i = 0; i < 10; i++) {
+        int j = (i + 1) % 10;
+        ud_line(win, cx + at[i][0], cy + at[i][1], cx + at[j][0],
+                cy + at[j][1], 20, c);
+    }
+}
 
 static void draw_header(int win, const struct ud_look *l, const char *title)
 {
@@ -944,7 +1066,12 @@ static void draw_menu(int win, const struct ud_look *l)
         if (i == 0) {                /* a new tab: + */
             ud_line(win, ix - 8, cy, ix + 8, cy, 28, l->text);
             ud_line(win, ix, cy - 8, ix, cy + 8, 28, l->text);
-        } else if (i == 1) {         /* the history: a clock */
+        } else if (i == 1) {         /* the page bookmarked: a star */
+            star(win, ix, cy, l->text);
+        } else if (i == 2) {         /* the bookmarks: an open book */
+            ud_ring(win, ix - 11, cy - 8, 11, 16, 2, l->text);
+            ud_ring(win, ix, cy - 8, 11, 16, 2, l->text);
+        } else if (i == 3) {         /* the history: a clock */
             ud_ring(win, ix - 10, cy - 10, 20, 20, 10, l->text);
             ud_line(win, ix, cy, ix, cy - 6, 24, l->text);
             ud_line(win, ix, cy, ix + 5, cy + 3, 24, l->text);
@@ -955,7 +1082,11 @@ static void draw_menu(int win, const struct ud_look *l)
                 ud_disc(win, ix - 3 + k * 5, cy + k * 7 - 3, 6, l->text);
             }
         }
-        ud_text(win, 60, ud_baseline(y, LIST_ROW, M_TEXT_PX), menu_items[i],
+        const char *label = menu_items[i];
+        if (i == 1 && bookmarked(webkit_web_view_get_uri(
+                          tabs[front]->view)) >= 0)
+            label = "Remove bookmark";
+        ud_text(win, 60, ud_baseline(y, LIST_ROW, M_TEXT_PX), label,
                 l->text, UD_SANS, M_TEXT_PX);
         ud_line(win, w - 26, cy - 5, w - 21, cy, 24, l->dim);   /* > */
         ud_line(win, w - 21, cy, w - 26, cy + 5, 24, l->dim);
@@ -996,6 +1127,36 @@ static void draw_history(int win, const struct ud_look *l)
     ud_fill(win, 0, y0, w, 1, l->line);
     ud_text_mid(win, 0, y0, w, M_BOT_H, "Clear history", l->danger, UD_BOLD,
                 M_TEXT_PX);
+}
+
+/* The bookmarks: as the history, a page a row - and an x on each to
+   take it out */
+static void draw_bookmarks(int win, const struct ud_look *l)
+{
+    int w = win_w(), h = win_h();
+    ud_fill(win, 0, 0, w, h, l->bg);
+    for (int i = 0; i < nbookmarks; i++) {
+        int y = M_HEAD_H + i * LIST_ROW - cards_scroll;
+        if (y + LIST_ROW <= M_HEAD_H || y >= h)
+            continue;
+        char shown[256];
+        short_uri(bookmarks[i].uri, shown, sizeof(shown));
+        ud_clip(win, 0, MAX(y, M_HEAD_H), w - 52, LIST_ROW);
+        ud_text(win, 20, y + 24, *bookmarks[i].title ? bookmarks[i].title
+                                                     : shown,
+                l->text, UD_BOLD, 14);
+        ud_text(win, 20, y + 44, shown, l->dim, UD_SANS, 12);
+        ud_unclip(win);
+        int cx = w - 30, cy = y + LIST_ROW / 2;
+        ud_line(win, cx - 6, cy - 6, cx + 6, cy + 6, 24, l->dim);
+        ud_line(win, cx - 6, cy + 6, cx + 6, cy - 6, 24, l->dim);
+        ud_fill(win, 20, y + LIST_ROW - 1, w - 40, 1, l->line);
+    }
+    if (!nbookmarks)
+        ud_text_mid(win, 0, M_HEAD_H, w, 80,
+                    "No bookmarks - the menu's star adds the page", l->dim,
+                    UD_SANS, M_TEXT_PX);
+    draw_header(win, l, "Bookmarks");
 }
 
 static void draw_settings(int win, const struct ud_look *l)
@@ -1101,8 +1262,12 @@ static void sheet_tap(int x, int y)
             show_sheet(SHEET_NONE);
             if (tab_new(NULL, NULL))
                 tab_front(ntabs - 1);
+        } else if (i == 1) {
+            bookmark_toggle();
+            show_sheet(SHEET_NONE);
         } else {
-            show_sheet(i == 1 ? SHEET_HISTORY : SHEET_SETTINGS);
+            show_sheet(i == 2 ? SHEET_BOOKMARKS : i == 3 ? SHEET_HISTORY
+                                                         : SHEET_SETTINGS);
         }
         return;
     }
@@ -1129,6 +1294,22 @@ static void sheet_tap(int x, int y)
         }
         return;
     }
+    if (sheet == SHEET_BOOKMARKS) {
+        int i = (y - M_HEAD_H + cards_scroll) / LIST_ROW;
+        if (i < 0 || i >= nbookmarks)
+            return;
+        if (x >= win_w() - 52) {     /* its x */
+            bookmark_remove(i);
+            draw_band();
+            return;
+        }
+        char uri[512];
+        g_strlcpy(uri, bookmarks[i].uri, sizeof(uri));
+        show_sheet(SHEET_NONE);
+        say("[weft] go %s%s\n", uri, NULL);
+        webkit_web_view_load_uri(tabs[front]->view, uri);
+        return;
+    }
     if (sheet == SHEET_SETTINGS) {
         int i = (y - M_HEAD_H) / LIST_ROW;
         if (i >= 0 && i < SETTINGS_ROWS)
@@ -1152,6 +1333,10 @@ static int sheet_room(void)
         return cards_room();
     if (sheet == SHEET_HISTORY) {
         int all = nhistory * LIST_ROW, room = win_h() - M_HEAD_H - M_BOT_H;
+        return all > room ? all - room : 0;
+    }
+    if (sheet == SHEET_BOOKMARKS) {
+        int all = nbookmarks * LIST_ROW, room = win_h() - M_HEAD_H;
         return all > room ? all - room : 0;
     }
     return 0;
@@ -1192,26 +1377,29 @@ static void cards_tap(int x, int y)
 static void mobile_tap(int x, int y)
 {
     WebKitWebView *v = tabs[front]->view;
-    if (y < M_TOP_H) {
-        int rx = M_PILL_X + (win_w() - 2 * M_PILL_X) - 24;
-        if (x >= rx - 20) {
-            if (tabs[front]->loading)
-                webkit_web_view_stop_loading(v);
-            else
-                webkit_web_view_reload(v);
-        } else {
-            address_edit();
-        }
+    int bx, by, bw, bh;
+    bar_box(&bx, &by, &bw, &bh);
+    if (editing) {
+        int fx, fy, fw, fh;
+        field_box(&fx, &fy, &fw, &fh);
+        if (!inside(x, y, fx, fy, fw, fh))
+            editing = FALSE;         /* a tap beside the field leaves it */
+        draw_band();
         return;
     }
-    editing = FALSE;
-    int b = x * M_BUTTONS / MAX(win_w(), 1);
-    switch (b) {
-    case 0: webkit_web_view_go_back(v); break;
-    case 1: webkit_web_view_go_forward(v); break;
-    case 2: webkit_web_view_load_html(v, start_page, NULL); break;
-    case 3: cards_show(TRUE); return;
-    case 4: show_sheet(SHEET_MENU); return;
+    if (x < bar_button(BTN_BACK) + 18)
+        webkit_web_view_go_back(v);
+    else if (x < bar_button(BTN_FWD) + 18)
+        webkit_web_view_go_forward(v);
+    else if (x >= bar_button(BTN_MENU) - 22) {
+        show_sheet(SHEET_MENU);
+        return;
+    } else if (x >= bar_button(BTN_TABS) - 22) {
+        cards_show(TRUE);
+        return;
+    } else {
+        address_edit();
+        return;
     }
     draw_band();
 }
@@ -1219,8 +1407,11 @@ static void mobile_tap(int x, int y)
 /* A finger on the bands, or anywhere on the cards */
 static gboolean mobile_event(int type, int x, int y)
 {
-    int h = win_h();
-    gboolean band = sheet || y < M_TOP_H || y >= h - M_BOT_H;
+    int bx, by, bw, bh, fx, fy, fw, fh;
+    bar_box(&bx, &by, &bw, &bh);
+    field_box(&fx, &fy, &fw, &fh);
+    gboolean band = sheet || (!editing && inside(x, y, bx, by, bw, bh)) ||
+                    (editing && inside(x, y, fx, fy, fw, fh));
     switch (type) {
     case WEV_CLICK:
         if (!band && editing) {
@@ -1275,6 +1466,23 @@ static gboolean band_event(gpointer data, int type, int x, int y, int val)
     case WEV_SIZE:
         draw_band();
         return FALSE;
+    case WEV_LOOK: {
+        /* The system's look changed: pages follow its light or dark, as
+           they started with it, and the bands, sheets and the toolbar's
+           glass are drawn again in the look it has now */
+        struct ud_look look;
+        ud_look(&look);
+        if ((look.dark != 0) != prefs.dark) {
+            prefs.dark = look.dark != 0;
+            wpe_settings_set_boolean(wpe_display_get_settings(display),
+                                     WPE_SETTING_DARK_MODE, prefs.dark,
+                                     WPE_SETTINGS_SOURCE_APPLICATION, NULL);
+        }
+        draw_band();
+        say("[weft] look changed, pages %s%s\n", prefs.dark ? "dark" : "light",
+            NULL);
+        return TRUE;
+    }
     case WEV_CLOSE:
         g_main_loop_quit(loop);
         return TRUE;
@@ -1413,8 +1621,8 @@ int main(int argc, char **argv)
                              WPE_SETTING_DARK_MODE, prefs.dark,
                              WPE_SETTINGS_SOURCE_APPLICATION, NULL);
     if (mobile) {
-        wpe_threados_toplevel_set_bottom(toplevel, M_BOT_H);
-        wpe_threados_toplevel_set_chrome(toplevel, M_TOP_H, band_event, NULL);
+        /* the page the window whole, the toolbar floating over it */
+        wpe_threados_toplevel_set_chrome(toplevel, 0, band_event, NULL);
     } else {
         wpe_threados_toplevel_set_chrome(toplevel, CHROME_H, band_event, NULL);
     }

@@ -2179,15 +2179,12 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
         struct mob_theme t;
         if (!user_range(p, x[0], sizeof(look), 1))
             return -1;
-        mob_theme(&t);
+        /* (the theme asked for, worked out apart: setting the phone's
+           own for a moment would show it to the shell, which tells
+           every program the look changed) */
         int dark = (int64_t)x[1] == 1 ? 1 : (int64_t)x[1] == 2 ? 0 :
                    mob_prefs.dark;
-        if (dark != mob_prefs.dark) {
-            int was = mob_prefs.dark;
-            mob_prefs.dark = dark;
-            mob_theme(&t);
-            mob_prefs.dark = was;
-        }
+        mob_theme_for(&t, dark);
         look[0] = (uint32_t)dark;
         look[1] = t.bg;
         look[2] = t.key;

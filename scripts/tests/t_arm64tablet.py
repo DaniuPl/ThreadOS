@@ -23,7 +23,7 @@ more, Android's line - and a phone upright (kmain.c):
 and Weft on it (needs the aarch64 weft.tapp, make weft-arm64):
 
   a mobile browser as on the phone, larger: the page 1280 CSS pixels
-  wide at a devicePixelRatio of 2, under the address and above the
+  wide at a devicePixelRatio of 2, the window whole under the floating
   toolbar, and WebKit asked for pages as a tablet asks - ThreadOS 1.0,
   Android 10, Safari without "Mobile", which sites send their tablet
   pages by; a drag scrolls the page, and the screen shows it where its
@@ -42,7 +42,7 @@ from ptest import (check, summary, noarm64, Phone, ARM64_INITRD, ROUTES,
                    start_http_server, _kernel_define as define)
 from t_arm64mobile import apps as home_apps
 from t_webkit import TALL, BAND_TOP, BAND_H, find_box, RED, BLUE
-from t_arm64weft import wait_line, WEFT
+from t_arm64weft import wait_line, WEFT, bar_box
 
 PANEL = (1600, 2560)                # as the tablet is given it, upright
 SCREEN = (2560, 1600)               # as it comes up, on its side
@@ -179,32 +179,37 @@ def browser():
                        r"AppleWebKit/[\d.]+ \(KHTML, like Gecko\) "
                        r"Version/[\d.]+ Safari/[\d.]+ Weft/1\.0$", ua)
               is not None)
-        bar, chrome = m("MOB_BAR_H"), define(WEFT_SRC, "M_TOP_H")
+        bar = m("MOB_BAR_H")
         blue = None
         end = time.time() + 60
         while blue is None and time.time() < end:
             sw, sh, at = q.screen_raw()
             blue = find_box(at, sw, sh, BLUE)
             time.sleep(0 if blue else 1)
-        oy = (bar + chrome) * K
-        check(f"a mobile browser's: under the address, the page's box at "
+        oy = bar * K
+        check(f"a mobile browser's: the page the window whole, its box at "
               f"20,20 CSS pixels, 400 x 200 of the panel's ({blue})",
               blue == (20 * K, oy + 20 * K, 220 * K, oy + 120 * K))
         seen = len(q.serial())
-        q.touch([(LW // 2, LH - 120 - 25 * i) for i in range(16)])
+        # well above the floating toolbar, and far enough that the band
+        # ends above it too
+        q.touch([(LW // 2, LH - 100 - 40 * i) for i in range(16)])
         line = wait_line(q, seen, "[weft] title scrolled ", 120)
         moved = int(line.split()[-1]) if line else 0
         check(f"a drag up scrolls the page ({line})", moved >= 200)
         # (what went up past the page's top is under the band, unseen)
         top = max(oy + (BAND_TOP - moved) * K, oy)
-        page_end = (LH - m("MOB_SAFE_UP") - define(WEFT_SRC, "M_BOT_H")) * K
+        page_end = (LH - m("MOB_SAFE_UP")) * K
         bottom = min(oy + (BAND_TOP + BAND_H - moved) * K, page_end)
-        want = (0, top, SCREEN[0], bottom) if bottom > top else None
+        # measured left of the floating toolbar, which may cover the
+        # band's foot however far the finger scrolled
+        left = bar_box(LW, LH - bar - m("MOB_SAFE_UP"))[0] * K
+        want = (0, top, left, bottom) if bottom > top else None
         band = None
         end = time.time() + 60
         while time.time() < end:
             sw, sh, at = q.screen_raw()
-            band = find_box(at, sw, sh, RED)
+            band = find_box(at, left, sh, RED)
             if band == want:
                 break
             time.sleep(1)

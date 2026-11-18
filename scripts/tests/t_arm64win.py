@@ -214,8 +214,8 @@ def main():
         check(f"and its text at the panel's own resolution ({text!r})",
               text == "Hello phone")
         strip = at(ww, (640 - SAFE // 2) * K)
-        check(f"under it, in the home indicator's strip, its last row goes "
-              f"on ({strip})", strip == BLUE)
+        check(f"under it, in the home indicator's strip, the colour of its "
+              f"last row ({strip})", strip == BLUE)
 
         # A tap in the square, at its middle
         seen = len(q.serial())

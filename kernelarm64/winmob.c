@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include "arm64.h"
 #include "winmob.h"
+#include "mobapps.h"
 #include "thread.h"
 #include "../kernel/include/desktop.h"
 #include "../kernel/include/gfx.h"
@@ -53,6 +54,7 @@ struct window {
     int clip, clx, cly, clw, clh;    /* WIN_DRAW's box, logical */
     int keyboard;                /* the program waits for typing */
     int drawing;                 /* WIN_DRAWs drawing into px now */
+    int held;                    /* kept from the screen (WD_HOLD) */
     struct win_event ev[EVENTS];
     uint32_t head, tail;
 };
@@ -312,6 +314,13 @@ int64_t winmob_draw_cmd(int win, int owner, const struct win_draw *d,
                  : 0;
     irqflags_t f = spin_lock_irq(&lock);
     struct window *o = mine(win, owner);
+    if (o && d->op == WD_HOLD) {
+        o->held = d->w != 0;
+        if (!o->held)
+            changes++;               /* the picture whole, at last */
+        spin_unlock_irq(&lock, f);
+        return 0;
+    }
     if (o && d->op == WD_CLIP) {         /* w or h 0: no clip */
         o->clip = d->w > 0 && d->h > 0;
         o->clx = d->x;
@@ -374,6 +383,9 @@ static int64_t draw_into(const struct window *w, const struct win_draw *d,
     int back = snap.clip ? snap.clx : 0;
     int64_t ret = 0;
     switch (d->op) {
+    case WD_GLASS:
+        ret = mob_panel_on(&t, d->x, d->y, d->w, d->h, r);
+        break;
     case WD_FILL:
         gfx_fill_s(&t, d->x, d->y, d->w, d->h, d->rgb, a);
         break;
@@ -464,6 +476,16 @@ void winmob_rescale(void)
         if (wins[i].used)
             push(&wins[i], WEV_SIZE, L(ww), L(wh),
                  WEV_SIZE_TOUCH | video_k() << 8);
+    spin_unlock_irq(&lock, f);
+}
+
+/* The look changed: every window hears it, to draw itself again */
+void winmob_look_changed(void)
+{
+    irqflags_t f = spin_lock_irq(&lock);
+    for (int i = 0; i < WINMOB_MAX; i++)
+        if (wins[i].used)
+            push(&wins[i], WEV_LOOK, 0, 0, 0);
     spin_unlock_irq(&lock, f);
 }
 
@@ -574,20 +596,31 @@ void winmob_name(int win, char *out, int max)
 void winmob_draw(int win)
 {
     irqflags_t f = spin_lock_irq(&lock);
-    if (winmob_exists(win)) {
+    /* a window being drawn whole (WD_HOLD) keeps what the screen shows
+       of it until it is done */
+    if (winmob_exists(win) && !wins[win].held) {
         for (int y = 0; y < wh; y++) {
             uint32_t *row = video_prow32(wtop + y);
             if (row)
                 memcpy(row, wins[win].px + (long)y * ww, (size_t)ww * 4);
         }
         /* Under it, to the screen's bottom - the home indicator's strip
-           - its last row goes on, as an app on a phone goes on under
-           the indicator */
+           - the colour its last row has on the whole: a program's own
+           bar goes on under the indicator, and a picture there does not
+           smear down into streaks */
         const uint32_t *last = wins[win].px + (long)(wh - 1) * ww;
+        uint32_t sr = 0, sg = 0, sb = 0;
+        for (int x = 0; x < ww; x++) {
+            sr += (last[x] >> 16) & 0xFF;
+            sg += (last[x] >> 8) & 0xFF;
+            sb += last[x] & 0xFF;
+        }
+        uint32_t flat = ww ? (sr / (uint32_t)ww) << 16 |
+                             (sg / (uint32_t)ww) << 8 | sb / (uint32_t)ww : 0;
         for (int y = wtop + wh; y < video_ph(); y++) {
             uint32_t *row = video_prow32(y);
-            if (row)
-                memcpy(row, last, (size_t)ww * 4);
+            for (int x = 0; row && x < ww; x++)
+                row[x] = flat;
         }
     }
     spin_unlock_irq(&lock, f);

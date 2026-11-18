@@ -551,11 +551,32 @@ def matte(c):
     return tuple((255 * 60 + v * (255 - 60) + 127) // 255 for v in c)
 
 
+def glass_rim(under, j):
+    """mobile.c's glass_on, j panel rows below the top edge of a panel
+    and away from its corners: 'under(row)' is what lies under it, row
+    j + the lens's shift of the red, green or blue - each its own -
+    lifted, and lightened by the edge's bevel, which faces up towards
+    the light"""
+    lens = m("GLASS_LENS") * K
+    depth = lens - j
+    shift = m("GLASS_BEND") * depth * depth // lens
+    spread = m("GLASS_SPREAD")
+    face = 256 * 181 // 256
+    bevel = face * m("GLASS_BEVEL") * depth * depth // (256 * lens * lens)
+    out = []
+    for ch in range(3):
+        v = lift(under(j + shift * (16 + (ch - 1) * spread) // 16))[ch]
+        out.append(min(255, v + bevel))
+    return tuple(out)
+
+
 def glass(app):
     """Liquid Glass bends the wallpaper at the dock's rim: a few panel
     rows below its top edge, between two icons, shows the Ocean slope
     from further down - lens - d rows, squared over the lens - made a
-    little brighter"""
+    little brighter, its red, green and blue from rows apart, as glass
+    parts colours, and lighter for the bevel; and the rim catches the
+    light where it turns round to face it, not along an edge"""
     q = app.q
     app.home()
     q.tap(*[c + m("MOB_DOCK_TILE") // 2 for c in dock_xy(2, 4)])
@@ -578,18 +599,46 @@ def glass(app):
     page(app, "look")
     q.tap(180, row_y(LOOK["glass"]))
     app.said("[settings] theme Liquid Glass")
+    # Settings itself turns to glass: its page the wallpaper blurred as
+    # under the shade, its card glass over that - here, by a row with
+    # nothing on its right, the backdrop lifted
+    time.sleep(1)
+    w, h, at = app.screen()
+    wall = (w, h, lambda px, py: wallpaper_px(1, py, h))
+    below = (180 * K, 560 * K)
+    card = ((LW - 60) * K, row_y(LOOK["matte"]) * K)
+    got_below, got_card = at(*below), at(*card)
+    want_below = backdrop(wall, *below)
+    want_card = lift(backdrop(wall, *card))
+    check(f"with Liquid Glass Settings' page is the wallpaper blurred and "
+          f"darkened ({got_below}, {want_below} worked out), its card glass "
+          f"over it ({got_card}, {want_card} worked out)",
+          got_below == want_below and got_card == want_card)
     app.home()
     home = app.screen()
     w, h, at = home
     bent = at(x, dy * K + j)
-    lens = m("GLASS_LENS") * K
-    shift = (lens - j) ** 2 // lens
     want_flat = matte(wallpaper_px(1, dy * K + j, h))
-    want_bent = lift(wallpaper_px(1, dy * K + j + shift, h))
+    want_bent = glass_rim(lambda row: wallpaper_px(1, dy * K + row, h), j)
     check(f"matte: the dock is white over the wallpaper ({flat}, "
-          f"{want_flat} worked out); Liquid Glass: the wallpaper {shift} "
-          f"rows further in, brighter ({bent}, {want_bent} worked out)",
+          f"{want_flat} worked out); Liquid Glass: the wallpaper bent from "
+          f"further in, each colour by its own amount, brighter and lit "
+          f"by the bevel ({bent}, {want_bent} worked out)",
           flat == want_flat and bent == want_bent)
+    # The rim's glint: a panel pixel inside the rim where the top-left
+    # corner faces the light square on, and the same at the top-right
+    # corner, which faces across it, and on the straight top edge. The
+    # Ocean's red is near 0 there: only the glint makes it light.
+    pr = m("MOB_DOCK_R") * K
+    c = 42                                  # isqrt(2 * 42 * 42) = pr - 1
+    assert pr == 60
+    tl = at(dx * K + pr - c, dy * K + pr - c)
+    tr = at((dx + dw) * K - 1 - pr + c, dy * K + pr - c)
+    top = at((dx + dw // 2) * K, dy * K + 1)
+    check(f"the rim glints where the corner facing the light turns "
+          f"({tl}), not at the corner across from it ({tr}) nor along "
+          f"the top edge ({top})",
+          tl[0] >= 200 and tr[0] < 150 and top[0] < 150)
     # The shade over glass: what is under it blurred
     q.touch([(180, 8), (180, 150), (180, 300)])
     app.said("[mobile] shade (opened)")

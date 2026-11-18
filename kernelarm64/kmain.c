@@ -577,6 +577,11 @@ void kmain(uint64_t x0)
        Poland would */
     if (has_word(fi.bootargs, "lang=pl"))
         mob_prefs.language = 1;
+    /* theme=glass, matte or solid: the panels' look Settings start with */
+    if (has_word(fi.bootargs, "theme=glass"))
+        mob_prefs.theme = MOB_THEME_GLASS;
+    else if (has_word(fi.bootargs, "theme=solid"))
+        mob_prefs.theme = MOB_THEME_SOLID;
     mi.mem_mib = (uint32_t)(fi.mem_total >> 20);
     mi.screen_w = video_pw();
     mi.screen_h = video_ph();

@@ -34,7 +34,9 @@ that weft copies into its window. t_webkit.py's page, from the host:
   resolution: the page's address alone at the top, without its scheme,
   and the toolbar at the bottom, its tabs button counting one
 
-and a second page, for the finger: it is 360 CSS pixels wide at a
+and a second page, for the finger, with the phone in Liquid Glass -
+the toolbar the page under it, frosted, lifted and tinted: it is 360
+CSS pixels wide at a
 devicePixelRatio of 2; a tap on its box is a click there, and a drag
 up scrolls it - by as much as its script reads in scrollY, and the
 screen shows the band far down the page exactly that much higher,
@@ -58,7 +60,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, noarm64, Phone, ARM64_INITRD, ROUTES,
                    start_http_server, _kernel_define as define)
-from t_webkit import (PAGE, TALL, BAND_TOP, BAND_H, chromium_title,
+from t_webkit import (PAGE, TALL, TALL_BG, TICKED, BAND_TOP, BAND_H,
+                      chromium_title,
                       node_number, find_box, RED, BLUE, GREEN, BROWN)
 
 WEFT = os.path.join(os.path.dirname(ARM64_INITRD), "aarch64", "weft.tapp")
@@ -94,10 +97,9 @@ def main():
     # The page's viewport: the window - the screen below the status bar -
     # less Weft's band
     bar = define(MOB, "MOB_BAR_H")
-    top, bottom = define(WEFT_SRC, "M_TOP_H"), define(WEFT_SRC, "M_BOT_H")
     safe = define(MOB, "MOB_SAFE_UP")
     width = PANEL[0] // K
-    height = PANEL[1] // K - bar - top - bottom - safe
+    height = PANEL[1] // K - bar - safe       # the page: the window whole
     want = chromium_title(width, height)
     if want is None:
         print("NOTE: no Chromium through Playwright on this machine - "
@@ -159,8 +161,8 @@ def main():
         if red is None:
             return summary()
         ox, oy = red[0] - 20 * K, red[1] - 20 * K
-        check(f"below the status bar and Weft's address (the page starts "
-              f"at {ox},{oy})", (ox, oy) == (0, (bar + top) * K))
+        check(f"the page fills the window, from just below the status bar "
+              f"(it starts at {ox},{oy})", (ox, oy) == (0, bar * K))
         blue = find_box(at, sw, sh, BLUE,
                         (ox + 250 * K, oy + 10 * K, PANEL[0], oy + 150 * K))
         check(f"the blue box beside it, cut off by the screen's edge "
@@ -173,26 +175,32 @@ def main():
         check(f"the flex items green, brown and green, 95 and 190 CSS "
               f"pixels wide ({row})",
               row == [GREEN, GREEN, BROWN, BROWN, GREEN])
-        # Weft around it, drawn by the phone at its scale: the address,
-        # without its scheme, and the toolbar's tabs button, counting
+        # Weft over it, drawn by the phone at its scale: the floating
+        # toolbar - the site without its scheme, the tabs counted - in
+        # the phone's look, matte here: its tint over the white page
+        bx, by, bw, bh = bar_box(width)
         px = define(WEFT_SRC, "M_TEXT_PX")
-        base = bar + baseline(define(WEFT_SRC, "M_PILL_Y"),
-                              define(WEFT_SRC, "M_PILL_H"), px)
-        url = f"10.0.2.2:{port}/page.html"
-        shown = q.find_ui((define(WEFT_SRC, "M_PILL_X") + 8) * K,
-                          (width - 44) * K, base * K, px=px * K,
+        base = bar + baseline(by, bh, px)
+        url = f"10.0.2.2:{port}"
+        shown = q.find_ui((bar_button(1, width) + 22) * K,
+                          (bar_button(2, width) - 22) * K, base * K,
+                          px=px * K, face="bold",
                           charset="hmtp:/.0123456789agel",
                           screen=(sw, sh, at))
-        check(f"Weft's address at the top, without its scheme ({shown!r})",
-              shown == url)
-        bx = button_x(3, width)
-        cy = PANEL[1] // K - safe - bottom // 2
-        count = q.find_ui((bx - 8) * K, (bx + 8) * K,
-                          baseline(cy - 11, 22, 12) * K, px=12 * K,
-                          face="bold", charset="0123456789",
+        check(f"the floating toolbar has the site alone, as a phone's "
+              f"browser shows it ({shown!r})", shown == url)
+        tx = bar_button(2, width)
+        count = q.find_ui((tx - 8) * K, (tx + 8) * K,
+                          (bar + baseline(by + bh // 2 - 11, 22, 12)) * K,
+                          px=12 * K, face="bold", charset="0123456789",
                           screen=(sw, sh, at))
-        check(f"and its toolbar at the bottom, the tabs button counting one "
-              f"({count!r})", count == "1")
+        check(f"and the tabs, counted ({count!r})", count == "1")
+        a = define(MOB, "MOB_MATTE_A")
+        tint = rgb(hexdef(MOB, "MOB_MATTE_DARK"))
+        want = tuple((c * a + 255 * (255 - a) + 127) // 255 for c in tint)
+        got = at((bx + 46) * K, (bar + by + 12) * K)
+        check(f"matte, as the phone's Settings have it: its tint over the "
+              f"page, {got} ({want} worked out)", got == want)
         typing(q, port)
     finally:
         q.close()
@@ -209,10 +217,42 @@ def baseline(top, h, px):
     return top + (h + (px * 73 + 50) // 100) // 2
 
 
-def button_x(i, width):
-    """weft.c's button_x: the toolbar's buttons evenly across"""
-    n = define(WEFT_SRC, "M_BUTTONS")
-    return width * (2 * i + 1) // (2 * n)
+def rgb(v):
+    return ((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
+
+
+def hexdef(path, name):
+    """A colour's #define (0xRRGGBB), which the decimal reader misses"""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), path)).read()
+    return int(re.search(r"#define\s+%s\s+0x([0-9A-Fa-f]+)" % name,
+                         src).group(1), 16)
+
+
+WIN_H = PHONE_H_ = Phone.LOGICAL[1] - define(MOB, "MOB_BAR_H") - \
+    define(MOB, "MOB_SAFE_UP")
+
+
+def bar_box(width, win_h=None):
+    """weft.c's bar_box: the floating toolbar, in the window"""
+    win_h = win_h or WIN_H
+    bw = min(width - 2 * define(WEFT_SRC, "G_BAR_SIDE"),
+             define(WEFT_SRC, "G_BAR_MAXW"))
+    bh = define(WEFT_SRC, "G_BAR_H")
+    return (width - bw) // 2, win_h - define(WEFT_SRC, "G_BAR_GAP") - bh, bw, bh
+
+
+def bar_button(i, width):
+    """weft.c's bar_button: back, forward, the tabs, the menu"""
+    x, y, w, h = bar_box(width)
+    return [x + 28, x + 64, x + w - 74, x + w - 30][i]
+
+
+def bar_tap(q, i, width):
+    """A tap on one of the toolbar's buttons - or, i None, its address"""
+    x, y, w, h = bar_box(width)
+    q.tap(x + w // 2 if i is None else bar_button(i, width),
+          define(MOB, "MOB_BAR_H") + y + h // 2)
 
 
 def card_box(i, width):
@@ -239,7 +279,7 @@ def fingers():
     ROUTES["/tall.html"] = tall
     port, stop = start_http_server()
     q = Phone(cores=4, mib=2048,
-              append=f"run=weft,http://10.0.2.2:{port}/tall.html",
+              append=f"theme=glass run=weft,http://10.0.2.2:{port}/tall.html",
               extra=["-fw_cfg", "name=opt/threados/apps/weft,file=" + WEFT,
                      "-netdev", "user,id=n0",
                      "-device", "virtio-net-device,netdev=n0"])
@@ -270,17 +310,47 @@ def fingers():
         ox, oy = blue[0] - 20 * K, blue[1] - 20 * K
         check(f"the band, {BAND_TOP} CSS pixels down the page, is not yet",
               find_box(at, sw, sh, RED) is None)
+        # the toolbar in Liquid Glass, as the phone was started with:
+        # the page under it frosted (one colour here, so as it was),
+        # brighter, and tinted towards the dark look's surface
+        bx, by, bw, bh = bar_box(PANEL[0] // K)
+        lift = define(MOB, "GLASS_LIFT")
+        tint_a = define(MOB, "FROST_TINT")
+        surface = (0x1C, 0x1C, 0x1E)
+        want = tuple(((v + ((255 - v) * lift >> 8)) * (256 - tint_a) +
+                      s * tint_a) >> 8 for v, s in zip(TALL_BG, surface))
+        spot = ((bx + 46) * K, (define(MOB, "MOB_BAR_H") + by + bh // 2) * K)
+        got = at(*spot)
+        check(f"the toolbar in Liquid Glass: the page under it frosted, "
+              f"lifted and tinted, {got} ({want} worked out)", got == want)
 
         seen = len(q.serial())
         q.tap((blue[0] + 100) / K, (blue[1] + 50) / K)
         check("a tap on the box is a click on it",
               wait_line(q, seen, "[weft] title tapped", 60) is not None)
+        # ... which repaints a small part of the page ten times: frames
+        # that bring only that part. Under the toolbar the page is
+        # still the page, not the toolbar's glass from the frame before
+        # laid under the glass again, darker and more blurred each time
+        ticked = None
+        end = time.time() + 30
+        while ticked is None and time.time() < end:
+            time.sleep(0.5)
+            sw, sh, at = q.screen_raw()
+            ticked = find_box(at, sw, sh, TICKED)
+        got = at(*spot)
+        check(f"after ten frames that repaint a part of the page "
+              f"({ticked}), the toolbar is the glass over the page as "
+              f"before: {got} ({want} worked out)",
+              ticked is not None and got == want)
+        look_changes(q, spot, lift, tint_a)
 
-        # a drag of 450 logical pixels up - above the bottom edge, where
-        # a drag up is the phone's, the home gesture
-        edge = PHONE_H - define(MOB, "MOB_EDGE")
+        # a drag of 450 logical pixels up, on the page - above the
+        # floating toolbar, and above the bottom edge, where a drag up is
+        # the phone's, the home gesture
+        top = define(MOB, "MOB_BAR_H") + bar_box(PANEL[0] // K)[1] - 20
         seen = len(q.serial())
-        q.touch([(180, edge - 24 - 30 * i) for i in range(16)])
+        q.touch([(180, top - 30 * i) for i in range(16)])
         line = wait_line(q, seen, "[weft] title scrolled ", 120)
         moved = int(line.split()[-1]) if line else 0
         check(f"a drag up scrolls the page ({line})", moved >= 450)
@@ -297,6 +367,7 @@ def fingers():
         check(f"and the screen shows it scrolled {moved} CSS pixels: the "
               f"band at {band}, where the page puts it {want}", band == want)
         tabs(q, band)
+        bookmarks(q, port)
         history_and_settings(q, port, agents)
     finally:
         q.close()
@@ -308,9 +379,7 @@ def typing(q, port):
     on it goes there, and Enter goes to it"""
     from t_arm64apps import KB_TOP, LETTERS, PITCH, note_key, a
     seen = len(q.serial())
-    q.tap(Phone.LOGICAL[0] // 2,
-          define(MOB, "MOB_BAR_H") + define(WEFT_SRC, "M_PILL_Y") +
-          define(WEFT_SRC, "M_PILL_H") // 2)
+    bar_tap(q, None, Phone.LOGICAL[0])
     up = wait_line(q, seen, "[winmob] window ", 30)
     check(f"a tap on the address brings the keyboard up ({up})",
           up is not None and up.endswith("keyboard up"))
@@ -345,6 +414,10 @@ def typing(q, port):
           down.endswith("keyboard down"))
 
 
+# the menu's rows (weft.c's menu_items)
+MENU_NEW, MENU_STAR, MENU_BOOKMARKS, MENU_HISTORY, MENU_SETTINGS = range(5)
+
+
 def menu_row(i):
     """The middle of the menu's i-th row, on the screen: the menu is the
     whole window, its rows under its heading"""
@@ -362,9 +435,9 @@ def history_and_settings(q, port, agents):
     cy = PHONE_H - define(MOB, "MOB_SAFE_UP") - define(WEFT_SRC, "M_BOT_H") // 2
     row, head = define(WEFT_SRC, "LIST_ROW"), define(WEFT_SRC, "M_HEAD_H")
     seen = len(q.serial())
-    q.tap(button_x(4, width), cy)
+    bar_tap(q, 3, width)
     wait_line(q, seen, "[weft] menu shown", 30)
-    q.tap(width // 2, menu_row(1))
+    q.tap(width // 2, menu_row(MENU_HISTORY))
     shown = wait_line(q, seen, "[weft] history shown", 30)
     time.sleep(1.5)
     sw, sh, at = q.screen_raw()
@@ -383,9 +456,9 @@ def history_and_settings(q, port, agents):
           done is not None)
 
     seen = len(q.serial())
-    q.tap(button_x(4, width), cy)
+    bar_tap(q, 3, width)
     wait_line(q, seen, "[weft] menu shown", 30)
-    q.tap(width // 2, menu_row(2))
+    q.tap(width // 2, menu_row(MENU_SETTINGS))
     wait_line(q, seen, "[weft] settings shown", 30)
     asked = len(agents)
     q.tap(width // 2, bar + head + row + row // 2)          # Desktop site
@@ -412,9 +485,9 @@ def history_and_settings(q, port, agents):
     q.tap(width // 2, bar + head + 4 * row + row // 2)      # Clear
     cleared = wait_line(q, seen, "[weft] cleared history and cookies", 30)
     q.tap(width - 30, bar + head // 2)                      # Done
-    q.tap(button_x(4, width), cy)
+    bar_tap(q, 3, width)
     wait_line(q, seen, "[weft] menu shown", 30)
-    q.tap(width // 2, menu_row(1))
+    q.tap(width // 2, menu_row(MENU_HISTORY))
     shown = wait_line(q, seen, "[weft] history shown", 30)
     check(f"and clear the history ({cleared}; {shown})",
           cleared is not None and shown == "[weft] history shown, 0 pages")
@@ -422,8 +495,7 @@ def history_and_settings(q, port, agents):
     from t_arm64apps import LETTERS, note_key, KB_TOP, a
     q.tap(width - 30, bar + head // 2)                      # Done
     seen = len(q.serial())
-    q.tap(width // 2, bar + define(WEFT_SRC, "M_PILL_Y") +
-          define(WEFT_SRC, "M_PILL_H") // 2)
+    bar_tap(q, None, width)
     wait_line(q, seen, "[winmob] window ", 30)
     for c in "kot":
         r = next(i for i, rw in enumerate(LETTERS) if c in rw)
@@ -435,13 +507,111 @@ def history_and_settings(q, port, agents):
           go == "[weft] go https://www.google.com/search?q=kot")
 
 
+def look_changes(q, spot, lift, tint_a):
+    """The phone turns light from the shade, with Weft on the screen,
+    and dark again: Weft hears it each time - the toolbar's glass tinted
+    towards the look's surface, the page told (prefers-color-scheme)
+    without being loaded again"""
+    tile = (12 + 40, define(MOB, "MOB_SHADE_TILE_Y") +
+            define(MOB, "MOB_SHADE_TILE_STEP") + 20)      # Dark mode
+    for dark, surface in ((False, (0xFF, 0xFF, 0xFF)),
+                          (True, (0x1C, 0x1C, 0x1E))):
+        word = "dark" if dark else "light"
+        seen = len(q.serial())
+        q.touch([(180, 8), (180, 150), (180, 300)])
+        wait_line(q, seen, "[mobile] shade (opened)", 30)
+        q.tap(*tile)
+        said = wait_line(q, seen, "[mobile] dark mode ", 30)
+        heard = wait_line(q, seen, "[weft] look changed", 30)
+        told = wait_line(q, seen, "[weft] title scheme ", 30)
+        q.touch([(180, 500), (180, 350), (180, 200)])
+        wait_line(q, seen, "[mobile] shade (closed)", 30)
+        want = tuple(((v + ((255 - v) * lift >> 8)) * (256 - tint_a) +
+                      c * tint_a) >> 8 for v, c in zip(TALL_BG, surface))
+        got = None
+        end = time.time() + 30
+        while got != want and time.time() < end:
+            time.sleep(0.5)
+            sw, sh, at = q.screen_raw()
+            got = at(*spot)
+        check(f"the phone turned {word} from the shade ({said}): Weft hears "
+              f"it ({heard}), the page is told ({told}), and the toolbar's "
+              f"glass is tinted the {word} look's way, {got} ({want} worked "
+              f"out)", said == f"[mobile] dark mode {'on' if dark else 'off'}"
+              and heard == f"[weft] look changed, pages {word}" and
+              told == f"[weft] title scheme {word}" and got == want)
+
+
+def menu_label(q, i):
+    """What the menu's i-th row says, read off the screen"""
+    width = PANEL[0] // K
+    bar, row = define(MOB, "MOB_BAR_H"), define(WEFT_SRC, "LIST_ROW")
+    px = define(WEFT_SRC, "M_TEXT_PX")
+    return q.find_ui(56 * K, (width - 40) * K,
+                     (bar + baseline(menu_row(i) - bar - row // 2, row,
+                                     px)) * K, px=px * K)
+
+
+def bookmarks(q, port):
+    """The menu's star keeps the page among the bookmarks, which the
+    menu's Bookmarks lists and goes back to; on a page kept, the star
+    takes it out again"""
+    bar = define(MOB, "MOB_BAR_H")
+    width = PANEL[0] // K
+    row, head = define(WEFT_SRC, "LIST_ROW"), define(WEFT_SRC, "M_HEAD_H")
+    page = f"http://10.0.2.2:{port}/tall.html"
+    seen = len(q.serial())
+    bar_tap(q, 3, width)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(MENU_STAR))
+    added = wait_line(q, seen, "[weft] bookmark ", 30)
+    seen = len(q.serial())
+    bar_tap(q, 3, width)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    time.sleep(1)
+    label = menu_label(q, MENU_STAR)
+    check(f"the menu's star bookmarks the page ({added}), and says so on it "
+          f"after: {label!r}", added == f"[weft] bookmark added {page}" and
+          label == "Remove bookmark")
+    q.tap(width // 2, menu_row(MENU_BOOKMARKS))
+    shown = wait_line(q, seen, "[weft] bookmarks shown", 30)
+    time.sleep(1.5)
+    sw, sh, at = q.screen_raw()
+    first = q.find_ui(16 * K, (width - 60) * K, (bar + head + 44) * K,
+                      px=12 * K, screen=(sw, sh, at),
+                      charset="hmtpl:/.0123456789a")
+    check(f"the menu's Bookmarks lists it ({shown}): {first!r}",
+          shown == "[weft] bookmarks shown, 1 pages" and
+          first == f"10.0.2.2:{port}/tall.html")
+    seen = len(q.serial())
+    q.tap(width // 2, bar + head + row // 2)
+    go = wait_line(q, seen, "[weft] go ", 30)
+    done = wait_line(q, seen, "[weft] load finished", 120)
+    check(f"and a tap on it goes there ({go})",
+          go == f"[weft] go {page}" and done is not None)
+    seen = len(q.serial())
+    bar_tap(q, 3, width)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(MENU_STAR))
+    removed = wait_line(q, seen, "[weft] bookmark ", 30)
+    bar_tap(q, 3, width)
+    wait_line(q, seen, "[weft] menu shown", 30)
+    q.tap(width // 2, menu_row(MENU_BOOKMARKS))
+    shown = wait_line(q, seen, "[weft] bookmarks shown", 30)
+    check(f"on a bookmarked page the star takes it out ({removed}; {shown})",
+          removed == f"[weft] bookmark removed {page}" and
+          shown == "[weft] bookmarks shown, 0 pages")
+    q.tap(width - 30, bar + head // 2)                      # Done
+    wait_line(q, seen, "[weft] bookmarks hidden", 30)
+
+
 def tabs(q, band):
     """The toolbar's + and tabs buttons, and the cards"""
     bar = define(MOB, "MOB_BAR_H")
     width = PANEL[0] // K
     cy = PHONE_H - define(MOB, "MOB_SAFE_UP") - define(WEFT_SRC, "M_BOT_H") // 2
     seen = len(q.serial())
-    q.tap(button_x(4, width), cy)
+    bar_tap(q, 3, width)
     menu = wait_line(q, seen, "[weft] menu shown", 30)
     time.sleep(1)
     sw, sh, at = q.screen_raw()
@@ -455,16 +625,17 @@ def tabs(q, band):
                                        define(WEFT_SRC, "LIST_ROW"),
                                        define(WEFT_SRC, "M_TEXT_PX"))) * K,
                        px=define(WEFT_SRC, "M_TEXT_PX") * K,
-                       screen=(sw, sh, at)) for i in range(3)]
+                       screen=(sw, sh, at)) for i in range(5)]
     check(f"the toolbar's menu fills the window: {head!r}, {items}",
-          head == "Menu" and items == ["New tab", "History", "Settings"])
-    q.tap(width // 2, menu_row(0))
+          head == "Menu" and items == ["New tab", "Add bookmark", "Bookmarks",
+                                       "History", "Settings"])
+    q.tap(width // 2, menu_row(MENU_NEW))
     check("the toolbar's menu opens a second tab",
           menu is not None and
           wait_line(q, seen, "[weft] tab 2 of 2", 60) is not None)
     wait_line(q, seen, "[weft] title New tab", 60)
     seen = len(q.serial())
-    q.tap(button_x(3, width), cy)
+    bar_tap(q, 2, width)
     shown = wait_line(q, seen, "[weft] tabs shown", 30)
     time.sleep(2)
     sw, sh, at = q.screen_raw()
@@ -505,7 +676,7 @@ def tabs(q, band):
     check(f"a tap on the first card brings its page back, the band where "
           f"it was ({got})", back is not None and got == band)
     seen = len(q.serial())
-    q.tap(button_x(3, width), cy)
+    bar_tap(q, 2, width)
     wait_line(q, seen, "[weft] tabs shown", 30)
     x, y, cw = card_box(1, width)
     seen = len(q.serial())

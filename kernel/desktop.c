@@ -631,6 +631,9 @@ struct wevent {
    left button. What it offers there - a menu, a link in a new window -
    is its own; val says which button (2 right, 4 middle). */
 #define WEV_ALTCLICK 9
+/* The look changed - light or dark: a program that asks for its
+   colours (UI_LOOK) draws itself again in them */
+#define WEV_LOOK    10
 #define WEV_QLEN  8
 
 struct window {
@@ -4012,6 +4015,12 @@ static void look_refresh(int force)
     if (!force && !wall_changed && key == bg_key)
         return;
     bg_key = key;
+    /* Light turned dark or back: every window's program hears it - on
+       every desktop, the ones out of sight too - to draw itself again */
+    if (dark != theme_dark)
+        for (int i = 0; i < MAX_WIN; i++)
+            if (wins[i].used)
+                win_enqueue(&wins[i], WEV_LOOK, 0, 0, 0);
     theme_dark = dark;
     L = dark ? look_dark : look_light;
     desk_palette(bg);
@@ -7439,6 +7448,17 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
     int a = d->a < 0 ? 0 : d->a > 255 ? 255 : d->a;
     int r = d->r < 0 ? 0 : d->r;
     switch (d->op) {
+    case WD_HOLD:
+        return 0;               /* the compositor takes a window whole */
+    case WD_GLASS: {
+        /* the window's own background, mostly opaque: the desktop has
+           no glass of its own for programs */
+        gfx_rrect16_s(&t, d->x * 16, d->y * 16, d->w * 16, d->h * 16,
+                      r * 16, L.win_bg, 230);
+        uint32_t c = L.win_bg;
+        return (int)((((c >> 16) & 0xFF) * 77 + ((c >> 8) & 0xFF) * 150 +
+                      (c & 0xFF) * 29) >> 8);
+    }
     case WD_FILL:
         gfx_fill_s(&t, d->x, d->y, d->w, d->h, d->rgb, a);
         return 0;

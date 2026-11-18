@@ -42,6 +42,17 @@ int wpe_threados_toplevel_window(WPEToplevel *toplevel);
 /* A band across the bottom as well (a phone's toolbar): the page is
    between the two, and the band's function hears the events on it */
 void wpe_threados_toplevel_set_bottom(WPEToplevel *toplevel, int bottom);
+/* What the program draws over the page - a phone's floating toolbar -
+   in the box x, y, w, h of the window: its function is called each time
+   a frame of the page is shown, after it, and the two reach the screen
+   together. redraw_overlay draws it again over the page as it was (the
+   program's own state changed) */
+typedef void (*WPEThreadOSOverlayFunc)(gpointer data);
+void wpe_threados_toplevel_set_overlay(WPEToplevel *toplevel,
+                                       WPEThreadOSOverlayFunc func,
+                                       gpointer data, int x, int y, int w,
+                                       int h);
+void wpe_threados_toplevel_redraw_overlay(WPEToplevel *toplevel);
 /* The program's own screen over the page (a phone's tabs, side by
    side): the page is not drawn or touched until it is uncovered, and
    then its last frame is shown again */

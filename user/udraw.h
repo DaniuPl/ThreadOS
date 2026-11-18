@@ -43,6 +43,8 @@
 #define UD_OP_LTEXT   10
 #define UD_OP_LMEASURE 11
 #define UD_OP_CLIP    12
+#define UD_OP_GLASS   13
+#define UD_OP_HOLD    14
 
 /* The theme's colours, as the desktop hands them out (in this order) */
 struct ud_look {
@@ -86,6 +88,22 @@ static inline void ud_clip(int win, int x, int y, int w, int h)
           (const char *)0);
     if (w <= 0 || h <= 0)              /* (an empty box hides all) */
         ud_op(win, UD_OP_CLIP, -1, -1, 1, 1, 0, 0, 0, 0, 0, (const char *)0);
+}
+
+/* A panel in the system's look (Liquid Glass, matte or solid on a
+   phone) over what the window shows there: how light it came out,
+   0..255 - dark ink on it above the middle, light below */
+static inline int ud_glass(int win, int x, int y, int w, int h, int r)
+{
+    return ud_op(win, UD_OP_GLASS, x, y, w, h, r, 0, 0, 0, 0,
+                 (const char *)0);
+}
+
+/* The window's pixels kept from the screen while a picture and what
+   goes over it are drawn (1), and let go (0) */
+static inline void ud_hold(int win, int on)
+{
+    ud_op(win, UD_OP_HOLD, 0, 0, on, 0, 0, 0, 0, 0, 0, (const char *)0);
 }
 
 static inline void ud_unclip(int win)

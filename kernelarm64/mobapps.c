@@ -65,7 +65,12 @@ uint32_t mob_accent(void)
 
 void mob_theme(struct mob_theme *t)
 {
-    if (mob_prefs.dark) {
+    mob_theme_for(t, mob_prefs.dark);
+}
+
+void mob_theme_for(struct mob_theme *t, int dark)
+{
+    if (dark) {
         t->bg = 0x101218;
         t->fg = 0xFFFFFF;
         t->muted = 0xAEB6CC;
@@ -818,7 +823,8 @@ static const struct srow look_rows[] = {
     { "Wallpaper", R_LINK, 0, P_WALLPAPER },
     { "Accent", R_ACCENTS, P(accent), 0 },
     { "Round icons", R_SWITCH, P(round_icons), 0 },
-    { "Themes change the dock, the shade and banners.", R_NOTE, 0, 0 },
+    { "Themes change the dock, the shade, banners, Settings.", R_NOTE,
+      0, 0 },
 };
 static const struct srow size_rows[] = {
     { "Large, 200%", R_CHOICE, P(size), 0 },
@@ -960,7 +966,17 @@ void settings_draw(void)
     mob_theme(&t);
     const struct spage *pg = &pages[page];
     int lw = video_w(), lh = video_h();
-    gfx_fill(0, 0, lw, lh, t.bg, 255);
+    /* Under Liquid Glass the pages are cards of glass on the wallpaper,
+       blurred and darkened - what is written on them light, whichever
+       of the looks */
+    int glass = mob_glass_backdrop();
+    if (glass) {
+        t.fg = 0xFFFFFF;
+        t.muted = 0xAEB6CC;
+        t.line = 0x6A6E7A;
+    } else {
+        gfx_fill(0, 0, lw, lh, t.bg, 255);
+    }
     mob_status_bar(t.fg);
     if (page == P_MAIN) {
         mob_title(pg->title, t.fg);
@@ -971,7 +987,11 @@ void settings_draw(void)
     int rows = 0, notes_seen = 0;
     for (int i = 0; i < pg->count; i++)
         rows += pg->rows[i].kind != R_NOTE;
-    gfx_rrect(12, SET_CARD_Y, lw - 24, rows * SET_ROW_H, 14, t.card, 255);
+    if (glass)
+        mob_glass_card(12, SET_CARD_Y, lw - 24, rows * SET_ROW_H, 14);
+    else
+        gfx_rrect(12, SET_CARD_Y, lw - 24, rows * SET_ROW_H, 14, t.card,
+                  255);
     for (int i = 0, k = 0; i < pg->count; i++) {
         const struct srow *r = &pg->rows[i];
         if (r->kind == R_NOTE) {

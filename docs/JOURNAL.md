@@ -10224,3 +10224,56 @@ works and is checked by `make test`.
       next request a computer's, Google chosen from the list and words
       typed on the keyboard looked up there, the history empty once
       cleared.
+- [x] **Liquid Glass you can see through, on Weft's toolbar and in
+      Settings; Weft follows the system's look; bookmarks**
+      (kernelarm64/mobile.c, winmob.c, mobapps.c, proc.c,
+      kernel/desktop.c, user/udraw.h, user64/usys64.h,
+      apps/webkit/weft.c, wpethreados.c, scripts/tests/t_arm64weft.py,
+      t_arm64apps.py, t_arm64tablet.py, t_arm64win.py, t_webkit.py)
+      Weft on a touchscreen is the page the whole window with a toolbar
+      floating over it near the bottom, as a phone's browser is: back,
+      forward, the site's name, the tabs and the menu. A program asks
+      for the system's panel with WIN_DRAW's WD_GLASS (13), which draws
+      it in the look Settings choose and says how light it came out, so
+      that what goes on it is dark or light; WD_HOLD (14) keeps the
+      window off the screen until the page and the toolbar are both in
+      it. Under Liquid Glass the panel is clear glass: what is under it
+      blurred a little and lifted, bent at its rim through a lens - each
+      colour by its own amount there, as glass parts them - its edge
+      lit on the sides that face the light from the top left and shaded
+      on the others, and its rim glinting only where it turns round to
+      face the light (a streak drawn along the top edge read as a white
+      line across the glass, not as its edge). The dock, banners and
+      the shade's tiles are the same glass, unblurred; Settings' pages
+      are glass cards on the wallpaper, blurred and darkened as under
+      the shade. Two faults this showed: WebKit's damage rectangles are
+      in the buffer's own pixels, as Wayland's damage_buffer takes them,
+      and were scaled again by the screen's scale - a repainted part of
+      a page went to the wrong place, or nowhere; and the parts of a
+      frame the damage left alone under the toolbar kept the toolbar
+      from the frame before, so its glass went over its own glass,
+      darker and more blurred every frame. The page under the toolbar
+      is now put back whole before the toolbar is drawn. The strip under
+      a window, the home indicator's, takes the colour its last row has
+      on the whole, not that row repeated, which smeared a picture into
+      streaks. A change of look - the theme, light or dark, the accent -
+      is a new window event, WEV_LOOK (10), sent to every window on the
+      phone and, for light and dark, on the PC; Weft draws its toolbar
+      and sheets again in it and tells the page (prefers-color-scheme),
+      which WebKit does without loading it again. The phone's UI_LOOK no
+      longer sets the phone's own theme for a moment to work out the
+      other one's colours, which the shell would have taken for a
+      change. And bookmarks: the menu's star keeps the page in front or
+      takes it out again, and its Bookmarks lists them - a tap goes to
+      one, an x takes one out (in memory for now). Tests: t_arm64apps
+      works the dock's rim out from the wallpaper - its rows bent per
+      colour, the bevel's light - checks the glint at the corner facing
+      the light and not along the top edge, and Settings' backdrop and
+      card against the shade's blur; t_arm64weft checks the toolbar's
+      glass over the page, again after the page repaints a small part of
+      itself ten times (it failed before the fix: the toolbar went from
+      (63, 74, 97) to (61, 61, 63)), the phone turned light and dark
+      from the shade with Weft on the screen - Weft told, the page told,
+      the glass tinted the new look's way - and the star, the list and
+      the star again; t_arm64tablet measures its band left of the
+      toolbar, which can cover its foot however far a finger scrolls.

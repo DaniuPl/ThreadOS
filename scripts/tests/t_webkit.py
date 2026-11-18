@@ -97,24 +97,40 @@ THREE = (b'<!doctype html><html><head><meta charset="utf-8"><title>three'
 # what was done to it - once the page has stood still for half a
 # second, how far it scrolled
 TALL = (b'<!doctype html><html><head><meta charset="utf-8"><title>tall'
-        b'</title><style>html,body{margin:0;background:#ffffff}'
+        b'</title><style>html,body{margin:0;background:#405070}'
         b'body{height:6000px}#tap{position:absolute;left:20px;top:20px;'
         b'width:200px;height:100px;background:#3366cc}'
         b'#bar{position:absolute;left:0;top:300px;width:100%;'
         b'height:100px;background:#22aa44}'
         b'#band{position:absolute;left:0;top:800px;width:100%;'
-        b'height:200px;background:#c03030}</style></head><body>'
+        b'height:200px;background:#c03030}'
+        b'#tick{position:absolute;left:300px;top:20px;width:20px;'
+        b'height:20px;background:#405070}</style></head><body>'
         b'<div id="tap"></div><div id="bar"></div><div id="band"></div>'
+        b'<div id="tick"></div>'
+        # a tap also repaints a small part of the page ten times, the
+        # last time purple: frames that change only a part of it
         b"<script>document.getElementById('tap').onclick = () => {"
-        b"  document.title = 'tapped'; };"
+        b"  document.title = 'tapped';"
+        b"  const t = document.getElementById('tick'); let n = 0;"
+        b"  const i = setInterval(() => { n++;"
+        b"    t.style.background = n < 10 ? (n % 2 ? '#415171' : '#405070')"
+        b"                                : '#8030c0';"
+        b"    if (n == 10) clearInterval(i); }, 100); };"
         b"addEventListener('load', () => {"
         b"  document.title = 'tall ' + innerWidth + ' ' + devicePixelRatio; });"
+        # the system's light or dark, as the page is told it changed
+        b"matchMedia('(prefers-color-scheme: dark)').addEventListener("
+        b"  'change', e => {"
+        b"  document.title = 'scheme ' + (e.matches ? 'dark' : 'light'); });"
         b"let still;"
         b"addEventListener('scroll', () => { clearTimeout(still);"
         b"  still = setTimeout(() => {"
         b"    document.title = 'scrolled ' + Math.round(scrollY); }, 500); });"
         b'</script></body></html>')
 BAR_TOP, BAR_H = 300, 100
+TALL_BG = (0x40, 0x50, 0x70)
+TICKED = (0x80, 0x30, 0xC0)
 BAND_TOP, BAND_H = 800, 200
 
 SCRIPT = r"""

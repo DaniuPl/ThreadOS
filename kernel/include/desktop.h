@@ -84,6 +84,14 @@ int desktop_win_blit_hi(int winid, int owner, int x, int y, int w, int h,
    coordinates); w or h 0 draws everywhere again. For a web page's boxes
    that hide what overflows them. */
 #define WD_CLIP    12
+/* A panel in the system's own look over what is drawn there - the
+   phone's Liquid Glass, matte or solid as its Settings say; a tint on
+   the PC - answering how light it came out (0..255), for what is put
+   on it to be dark or light; and the window's pixels held back from
+   the screen (w = 1) until they are let go (w = 0), so that a picture
+   and what is drawn over it reach the screen together */
+#define WD_GLASS   13
+#define WD_HOLD    14
 
 struct win_draw {
     int op;

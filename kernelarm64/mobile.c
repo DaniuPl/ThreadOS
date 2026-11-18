@@ -644,11 +644,25 @@ static void icon(int k, int x, int y)
  * tiles, the lock screen's notifications - are matte (a tint over what
  * is under them) or Liquid Glass, as an iPhone's since iOS 26: what is
  * under the panel shows through clear, a little brighter, and bent at
- * its rim as through the edge of a lens; a bright rim lit from above
- * and a soft shadow below make it a thing in front.
+ * its rim as through the edge of a lens - the colours parting a little
+ * there, as through real glass. The rounded edge is lit from the top
+ * left: lighter on the sides that face the light and darker on those
+ * that turn from it, and its rim catches the light where it curves
+ * round the corners that face it (and, weaker, the opposite ones, as
+ * light thrown back through the glass). A soft shadow below makes it a
+ * thing in front.
  */
 
 #define GLASS_LENS     14       /* the rim that bends, logical pixels */
+#define GLASS_BEND     2        /* ... showing what is up to twice that
+                                   further in, at the very rim */
+#define GLASS_SPREAD   3        /* red bends 3/16 less, blue 3/16 more */
+#define GLASS_BEVEL    40       /* the edge lit or shaded by this much */
+#define GLASS_GLINT    230      /* the rim's light where it faces the light */
+#define GLASS_BACK     140      /* ... and where it faces away */
+#define MOB_MATTE_DARK  0x1C1C1E    /* a program's matte panel: this tint */
+#define MOB_MATTE_LIGHT 0xF8F8FA
+#define MOB_MATTE_A     200         /* ... this much of it */
 #define GLASS_LIFT     16       /* brighter by 16/256 of what is left */
 #define GLASS_MAX      (720 * 260)      /* panel pixels copied at most */
 
@@ -667,6 +681,31 @@ static int isqrt(int v)
     return r;
 }
 
+static int clampi(int v, int lo, int hi)
+{
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
+/* Each channel moved by 'by' (lighter if positive), held in 0..255 */
+static uint32_t bevel(uint32_t c, int by)
+{
+    uint32_t out = 0;
+    for (int sh = 0; sh < 24; sh += 8)
+        out |= (uint32_t)clampi((int)((c >> sh) & 0xFF) + by, 0, 255) << sh;
+    return out;
+}
+
+/* a over c, a of 256 */
+static uint32_t mix(uint32_t c, uint32_t to, int a)
+{
+    uint32_t out = 0;
+    for (int sh = 0; sh < 24; sh += 8) {
+        uint32_t u = (c >> sh) & 0xFF, v = (to >> sh) & 0xFF;
+        out |= ((u * (uint32_t)(256 - a) + v * (uint32_t)a) >> 8) << sh;
+    }
+    return out;
+}
+
 static uint32_t lift(uint32_t c)
 {
     uint32_t out = 0;
@@ -677,27 +716,115 @@ static uint32_t lift(uint32_t c)
     return out;
 }
 
-static void liquid_glass(int x, int y, int w, int h, int r)
+/* The glass on a surface - the screen's, or a program's window's: what
+   is under the rounded rectangle, bent at its rim and a little brighter,
+   and the rim lit. 'shadow' (the screen only) lays the panel's shadow
+   under it once what it covers has been taken. */
+static struct spinlock glass_lock = SPINLOCK_FREE;
+static uint32_t *glass_tmp;
+
+/* A program's glass is lightly frosted, over an app's content: what
+   is under it blurred - a box blur each way, twice, which is close to a
+   Gaussian - so that text under the toolbar does not fight what is on
+   it. pw x ph pixels in glass_px, glass_tmp the room to work in */
+#define FROST_R 6               /* the blur's reach, panel pixels: the
+                                   page shows through, its colours and
+                                   shapes, as through Apple's, but not
+                                   its text, which would fight what is on
+                                   the glass */
+static void frost(int pw, int ph)
 {
-    int k = video_k();
+    for (int pass = 0; pass < 2; pass++) {
+        for (int j = 0; j < ph; j++) {          /* across, into tmp */
+            const uint32_t *src = glass_px + j * pw;
+            uint32_t *dst = glass_tmp + j * pw;
+            int sr = 0, sg = 0, sb = 0, n = 0;
+            for (int i = -FROST_R; i < pw + FROST_R; i++) {
+                int add = i + FROST_R, drop = i - FROST_R - 1;
+                if (add >= 0 && add < pw) {
+                    uint32_t c = src[add];
+                    sr += (c >> 16) & 0xFF; sg += (c >> 8) & 0xFF;
+                    sb += c & 0xFF; n++;
+                }
+                if (drop >= 0 && drop < pw) {
+                    uint32_t c = src[drop];
+                    sr -= (c >> 16) & 0xFF; sg -= (c >> 8) & 0xFF;
+                    sb -= c & 0xFF; n--;
+                }
+                if (i >= 0 && i < pw && n)
+                    dst[i] = (uint32_t)(sr / n) << 16 |
+                             (uint32_t)(sg / n) << 8 | (uint32_t)(sb / n);
+            }
+        }
+        for (int i = 0; i < pw; i++) {          /* down, back */
+            int sr = 0, sg = 0, sb = 0, n = 0;
+            for (int j = -FROST_R; j < ph + FROST_R; j++) {
+                int add = j + FROST_R, drop = j - FROST_R - 1;
+                if (add >= 0 && add < ph) {
+                    uint32_t c = glass_tmp[add * pw + i];
+                    sr += (c >> 16) & 0xFF; sg += (c >> 8) & 0xFF;
+                    sb += c & 0xFF; n++;
+                }
+                if (drop >= 0 && drop < ph) {
+                    uint32_t c = glass_tmp[drop * pw + i];
+                    sr -= (c >> 16) & 0xFF; sg -= (c >> 8) & 0xFF;
+                    sb -= c & 0xFF; n--;
+                }
+                if (j >= 0 && j < ph && n)
+                    glass_px[j * pw + i] = (uint32_t)(sr / n) << 16 |
+                                           (uint32_t)(sg / n) << 8 |
+                                           (uint32_t)(sb / n);
+            }
+        }
+    }
+}
+
+/* ... and tinted towards the look's own surface, an eighth of the way */
+#define FROST_TINT 32
+static uint32_t tint(uint32_t c, uint32_t to)
+{
+    uint32_t out = 0;
+    for (int sh = 0; sh < 24; sh += 8) {
+        uint32_t a = (c >> sh) & 0xFF, b = (to >> sh) & 0xFF;
+        out |= ((a * (256 - FROST_TINT) + b * FROST_TINT) >> 8) << sh;
+    }
+    return out;
+}
+
+static void glass_on(const struct gfx_surface *t, int x, int y, int w, int h,
+                     int r, int shadow, int frosted)
+{
+    int k = t->k ? t->k : 16;
     int px = x * k / 16, py = y * k / 16, pw = w * k / 16, ph = h * k / 16;
-    int pr = r * k / 16, lens = GLASS_LENS * k / 16;
+    int pr = r * k / 16, lens = GLASS_LENS * k / 16, rim = 2 * k / 16;
     if (!glass_px)
         glass_px = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
             (GLASS_MAX * 4 + PAGE_SIZE - 1) / PAGE_SIZE);
-    if (!glass_px || pw * ph > GLASS_MAX || px < 0 || py < 0 ||
-        px + pw > video_pw() || py + ph > video_ph()) {
-        gfx_rrect(x, y, w, h, r, WHITE, 60);
+    /* A panel too big to copy - a card the height of a page - is lit,
+       shaded and glinting all the same, only not bent: what is under it
+       is read in place. (Under those, an app's blurred backdrop, a bend
+       would not show anyway.) A program's frosted glass needs the copy. */
+    int whole = glass_px && pw * ph <= GLASS_MAX;
+    if (px < 0 || py < 0 || px + pw > t->w || py + ph > t->h ||
+        (!whole && frosted)) {
+        gfx_rrect16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, WHITE, 60);
         return;
     }
     /* what is under it, before the shadow - which darkens the bands
        inside the shape too, counting on the shape to cover them */
-    for (int j = 0; j < ph; j++)
-        memcpy(glass_px + j * pw, video_prow32(py + j) + px,
+    for (int j = 0; whole && j < ph; j++)
+        memcpy(glass_px + j * pw, t->px + (long)(py + j) * t->stride + px,
                (size_t)pw * 4);
-    gfx_shadow(x, y, w, h, r, 10, 60, 3);
+    if (shadow && whole)
+        gfx_shadow(x, y, w, h, r, 10, 60, 3);
+    if (frosted && !glass_tmp)
+        glass_tmp = (uint32_t *)(uintptr_t)pmm_alloc_contiguous(
+            (GLASS_MAX * 4 + PAGE_SIZE - 1) / PAGE_SIZE);
+    if (frosted && glass_tmp)
+        frost(pw, ph);
+    uint32_t surface = mob_prefs.dark ? 0x1C1C1E : 0xFFFFFF;
     for (int j = 0; j < ph; j++) {
-        uint32_t *row = video_prow32(py + j) + px;
+        uint32_t *row = t->px + (long)(py + j) * t->stride + px;
         for (int i = 0; i < pw; i++) {
             /* how far inside the rounded rectangle, and which way in */
             int cx = i < pr ? pr - i : i > pw - 1 - pr ? i - (pw - 1 - pr)
@@ -720,28 +847,93 @@ static void liquid_glass(int x, int y, int w, int h, int r)
                 if (top < d) { d = top; nx = 0; ny = 256; }
                 if (bottom < d) { d = bottom; nx = 0; ny = -256; }
             }
-            int sx = i, sy = j;
+            uint32_t c;
             if (d < lens) {
                 /* the lens: nearer the rim, what is shown comes from
-                   further in - the picture bends there */
-                int t = lens - d, shift = t * t / lens;
-                sx += shift * nx / 256;
-                sy += shift * ny / 256;
-                if (sx < 0) sx = 0;
-                if (sx >= pw) sx = pw - 1;
-                if (sy < 0) sy = 0;
-                if (sy >= ph) sy = ph - 1;
+                   further in - the picture bends there, each colour by
+                   its own amount */
+                int depth = lens - d;
+                int shift = GLASS_BEND * depth * depth / lens;
+                c = whole ? 0 : row[i];
+                for (int ch = 0; whole && ch < 3; ch++) {
+                    int sh = shift * (16 + (ch - 1) * GLASS_SPREAD) / 16;
+                    int sx = clampi(i + sh * nx / 256, 0, pw - 1);
+                    int sy = clampi(j + sh * ny / 256, 0, ph - 1);
+                    c |= glass_px[sy * pw + sx] & (0xFF0000u >> (ch * 8));
+                }
+                c = frosted ? tint(lift(c), surface) : lift(c);
+                /* which way this part of the edge faces: towards the
+                   light at the top left (+256), or away from it (-256) */
+                int face = (nx + ny) * 181 / 256;
+                c = bevel(c, face * GLASS_BEVEL * depth * depth /
+                             (256 * lens * lens));
+                if (d < rim) {
+                    /* the rim's glint, only where it turns round to face
+                       the light (or straight away from it) */
+                    int p = face < 0 ? -face : face;
+                    int p2 = p * p >> 8, p6 = (p2 * p2 >> 8) * p2 >> 8;
+                    c = mix(c, WHITE, p6 * (face > 0 ? GLASS_GLINT
+                                                     : GLASS_BACK) >> 8);
+                }
+            } else {
+                c = whole ? glass_px[j * pw + i] : row[i];
+                c = frosted ? tint(lift(c), surface) : lift(c);
             }
-            row[i] = lift(glass_px[sy * pw + sx]);
+            row[i] = c;
         }
     }
-    /* the rim, and the light on it: brighter along the top's left, and
-       the bottom's right */
-    gfx_rring16(x * 16, y * 16, w * 16, h * 16, r * 16, 20, WHITE, 90);
-    gfx_line16((x + r) * 16, (y + 1) * 16 + 8, (x + w * 45 / 100) * 16,
-               (y + 1) * 16 + 8, 22, WHITE, 150);
-    gfx_line16((x + w * 60 / 100) * 16, (y + h - 2) * 16 + 8,
-               (x + w - r) * 16, (y + h - 2) * 16 + 8, 20, WHITE, 70);
+    /* the rim itself, lit all round alike and smooth - the glint above
+       follows its curve; a streak of light drawn along one edge read as
+       a line across the glass rather than as its edge */
+    gfx_rring16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16, 20, WHITE, 70);
+}
+
+static void liquid_glass(int x, int y, int w, int h, int r)
+{
+    struct gfx_surface scr = { video_prow32(0), video_pw(), video_ph(),
+                               video_pw(), video_k() };
+    irqflags_t f = spin_lock_irq(&glass_lock);
+    glass_on(&scr, x, y, w, h, r, 1, 0);
+    spin_unlock_irq(&glass_lock, f);
+}
+
+/* How light a part of a surface is, 0..255: what goes on it is dark
+   above the middle, light below */
+static int lightness(const struct gfx_surface *t, int x, int y, int w, int h)
+{
+    int k = t->k ? t->k : 16;
+    int px = x * k / 16, py = y * k / 16, pw = w * k / 16, ph = h * k / 16;
+    uint32_t sum = 0, n = 0;
+    for (int j = py; j < py + ph && j < t->h; j += 3)
+        for (int i = px; i < px + pw && i < t->w; i += 3) {
+            if (i < 0 || j < 0)
+                continue;
+            uint32_t c = t->px[(long)j * t->stride + i];
+            sum += (((c >> 16) & 0xFF) * 77 + ((c >> 8) & 0xFF) * 150 +
+                    (c & 0xFF) * 29) >> 8;
+            n++;
+        }
+    return n ? (int)(sum / n) : 0;
+}
+
+/* A program's panel (WIN_DRAW's WD_GLASS) in the look Settings choose:
+   Liquid Glass, a tint, or a surface - and how light it came out */
+int mob_panel_on(const struct gfx_surface *t, int x, int y, int w, int h,
+                 int r)
+{
+    if (glassy()) {
+        irqflags_t f = spin_lock_irq(&glass_lock);
+        glass_on(t, x, y, w, h, r, 0, 1);
+        spin_unlock_irq(&glass_lock, f);
+    } else if (mob_prefs.theme == MOB_THEME_SOLID) {
+        gfx_rrect16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16,
+                      mob_prefs.dark ? 0x2C2C2E : 0xFFFFFF, 255);
+    } else {
+        gfx_rrect16_s(t, x * 16, y * 16, w * 16, h * 16, r * 16,
+                      mob_prefs.dark ? MOB_MATTE_DARK : MOB_MATTE_LIGHT,
+                      MOB_MATTE_A);
+    }
+    return lightness(t, x + r / 2, y + 4, w - r, h - 8);
 }
 
 /* A panel in the theme Settings choose: a tint, glass, or a surface */
@@ -911,6 +1103,23 @@ static void draw_dock(void)
 static void with_background(void)
 {
     memcpy(video_prow32(0), bg, frame_bytes);
+}
+
+/* An app's backdrop under Liquid Glass (Settings'): the wallpaper,
+   blurred and darkened as under the pulled-down shade, for its cards of
+   glass to lie on. 0, and nothing drawn, in the other looks. */
+int mob_glass_backdrop(void)
+{
+    if (!glassy())
+        return 0;
+    with_background();
+    backdrop_blur();
+    return 1;
+}
+
+void mob_glass_card(int x, int y, int w, int h, int r)
+{
+    liquid_glass(x, y, w, h, r);
 }
 
 static void draw_lock(void)
@@ -1669,8 +1878,21 @@ void mobile_main(void *arg)
     go(LOCK, "start");
 
     uint32_t ticked = 0, changes = winmob_changes(), seq = notif_seq;
-    int net = -1, sound = rec_changes(), mic = 0;
+    int net = -1, sound = rec_changes(), mic = 0, look = -1;
     for (;;) {
+        /* The look - which theme, light or dark, the accent - changed,
+           from Settings or the shade: programs' windows draw themselves
+           in it again, those in the background too, so that one comes
+           back to the screen as the rest of the phone looks */
+        int now_look = mob_prefs.theme | mob_prefs.dark << 4 |
+                       mob_prefs.accent << 8;
+        if (now_look != look) {
+            if (look >= 0) {
+                winmob_look_changed();
+                printk("[mobile] look changed\n");
+            }
+            look = now_look;
+        }
         struct touch_event e;
         while (touch_next(&e))
             touch(&e);
