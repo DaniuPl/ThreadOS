@@ -495,10 +495,17 @@ int proc64_clone(const struct clone64 *c)
        pointer are not checked further: ring 3 is the only one using
        them, and a bad one ends in the thread's own page fault. */
     if (!paging64_user_range(c->entry, 1) || !c->stack ||
-        (c->tls && !paging64_user_range(c->tls, 8)) ||
-        (c->clear_tid && (c->clear_tid & 3)))
+        (c->tls && !paging64_user_range(c->tls, 8)))
         return -1;
-    if (c->parent_tid && !paging64_user_range(c->parent_tid, 4))
+    /* The kernel writes into both words itself - the number below, zero
+       when the thread ends (task64.c, say_gone) - so both have to be
+       the program's to write: a word it may only read would fault in
+       ring 0 and stop the machine. (One shared with a forked child is
+       split by the check, not written through.) clear_tid is a futex
+       word too, and those are aligned. */
+    if ((c->clear_tid && ((c->clear_tid & 3) ||
+                          !paging64_user_writable(c->clear_tid, 4))) ||
+        (c->parent_tid && !paging64_user_writable(c->parent_tid, 4)))
         return -1;
 
     struct task64 *t = start_thread(c->entry, 0, c->stack);

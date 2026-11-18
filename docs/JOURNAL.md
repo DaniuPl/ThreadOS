@@ -9909,3 +9909,31 @@ works and is checked by `make test`.
       cores - the child sees the parent's data - and passes on one,
       where the boot core's WP still catches the write: it is the
       secondary core's write that it holds to the right page.
+- [x] **A thread's numbers no longer stop the machine** (kernel64/proc64.c,
+      kernel64/task64.c, user64/hostile64.c, scripts/tests/t_hostile.py)
+      SYS64_CLONE writes the new thread's number to parent_tid at once,
+      and the thread's end writes zero to clear_tid (say_gone). Both
+      words were checked only for reading, and clear_tid not at all at
+      clone time. A program that pointed either at its own read-only
+      data made the kernel write there: a page fault in ring 0 that is
+      no copy-on-write page, and "The system has stopped" - parent_tid
+      in proc64_clone, clear_tid in say_gone when the thread ended.
+      Both were run before the fix: hostile64 stopped the machine at
+      each in turn. They were also the last kernel writes into program
+      memory that leaned on CR0.WP to split a page shared with a forked
+      child. Both words are now checked with paging64_user_writable at
+      clone time - a word the program cannot write is refused with -1 -
+      and say_gone checks the same way when the thread ends, splitting a
+      page shared since and leaving alone a word it may not write, as
+      Linux does. The ARM64 kernel already checked both for writing.
+      hostile64 makes a thread with each word in its .rodata, beside an
+      honest twin whose thread gets its number and its end written into
+      the program's data; t_hostile holds both refused, and fails on the
+      kernel before the fix (the machine stops at the first). hostile,
+      pthread, signals, libc, glib, jsc and k64proc pass. proccores
+      passes alone (three runs on this kernel, the one before and the
+      one before the PC's signals: 0.5 of the serial time on each) and
+      in a batch of the others; run beside hostile, which no longer
+      stops its machine but runs it to the end on two cores, its
+      parallel timing missed twice - the same batch without hostile
+      gives the same times on this kernel and the one before.

@@ -997,15 +997,21 @@ void task64_sleep(uint32_t ms)
 /* What every way out of a thread does before anything else: tell the
    C library it is gone (clear_tid), while the address space is still
    there and interrupts are still on - the word may be on a page that
-   went out to disk, and fetching it back needs the disk's interrupt. */
+   went out to disk, and fetching it back needs the disk's interrupt.
+   SYS64_CLONE took only a word the program could write, but the check
+   is the one for writing here as well: a page shared with a child
+   forked since is split rather than written through, and a word the
+   kernel may not write is left alone, as Linux leaves it, rather than
+   faulted on in ring 0. */
 static void say_gone(void)
 {
     uint64_t at = current->clear_tid;
     if (!at || !current->space)
         return;
     current->clear_tid = 0;
-    if (!paging64_user_range(at, 4) &&
-        !(paging64_swap_in(current->space, at) && paging64_user_range(at, 4)))
+    if (!paging64_user_writable(at, 4) &&
+        !(paging64_swap_in(current->space, at) &&
+          paging64_user_writable(at, 4)))
         return;
     *(volatile uint32_t *)(uintptr_t)at = 0;
     futex64_wake(current->space, at, 1);
