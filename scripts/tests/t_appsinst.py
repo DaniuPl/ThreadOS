@@ -20,6 +20,13 @@ says so before anything is written. Three disks, one for each answer:
     and the installed system, started on its own, its loader finding
     the package in its directory and running a program out of it.
 
+And a package installed on that system while it runs ('tapp install'):
+refused while it is signed by a key the system does not trust, and an
+unsigned one always; once update.key holds the test's key, written into
+/EFI/ThreadOS/apps, its program running at once and its tile in the
+dock, refused a second time as the version it has, read back off the
+disk by mtools, and there again - from the disk - at the next start.
+
 What is on the disks afterwards is read by mtools, not asked of the
 system that wrote it. The case of a whole disk too small for the
 larger partition is in t_wholedisk.
@@ -33,12 +40,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import _kernel_define, _at, MTOOLS_ENV
 from ptest import (check, summary, no64, make_gpt_disk, mtools_ok,
-                   fat_format, fat_put, fat_get, gpt_read, stick_starts_live)
+                   fat_format, fat_put, fat_get, gpt_read, stick_starts_live,
+                   SERVED, start_http_server)
 from mkblob import blob as pattern
 
 ESP_MIB_APPS = _kernel_define("kernel/install.c", "ESP_MIB_APPS")
@@ -130,6 +139,79 @@ def beside(work, esp, apps, esp_mib, fill_to=None):
     finally:
         q.close()
     return target, plan, done
+
+
+HELLO = {}
+
+
+def installed_while_running(q, work):
+    """'tapp install' on the installed system: a package from the
+    network, signed with the test's key"""
+    key = os.path.join(work, "key.pem")
+    subprocess.run(["openssl", "ecparam", "-name", "prime256v1", "-genkey",
+                    "-noout", "-out", key], check=True, capture_output=True)
+    pub = subprocess.run(["openssl", "ec", "-in", key, "-pubout", "-outform",
+                          "DER"], check=True,
+                         capture_output=True).stdout[-65:].hex()
+    mk = os.path.join(ROOT, "scripts", "mktapp.py")
+    hello, plain = (os.path.join(work, n) for n in ("hello.tapp",
+                                                    "plain.tapp"))
+    subprocess.run([sys.executable, mk, hello, "--id", "hello", "--name",
+                    "Hello", "--version", "1", "--arch", "x86_64", "--exec",
+                    "tapphi", "--dock", "--key", key, "tapphi=" + ECHO],
+                   check=True, capture_output=True)
+    subprocess.run([sys.executable, mk, plain, "--id", "plain", "--name",
+                    "Plain", "--version", "1", "--arch", "x86_64", "--exec",
+                    "tappplain", "tappplain=" + ECHO],
+                   check=True, capture_output=True)
+    HELLO["data"] = open(hello, "rb").read()
+    SERVED["/hello.tapp"] = HELLO["data"]
+    SERVED["/plain.tapp"] = open(plain, "rb").read()
+    SERVED["/update.key"] = pub.encode() + b"\n"
+    port, stop = start_http_server()
+    try:
+        q.wait_serial("[net] DHCP", timeout=60)
+        for name in ("hello.tapp", "plain.tapp"):
+            q.command("run httpget 10.0.2.2 %d /%s %s" % (port, name, name),
+                      "[httpget] done", timeout=60)
+        out = q.sudo("run tapp install hello.tapp", "[tapp] done",
+                     timeout=120)
+        check("a package signed by a key the system does not trust is "
+              "not installed",
+              "hello.tapp: NOT signed by the system's key" in out and
+              "not installed" in out)
+        q.sudo("run httpget 10.0.2.2 %d /update.key /update.key" % port,
+               "[httpget] done", timeout=60)
+        out = q.sudo("run tapp install plain.tapp", "[tapp] done",
+                     timeout=120)
+        check("an unsigned one never is",
+              "plain.tapp: has no signature" in out and
+              "not installed" in out)
+        seen = len(q.serial())
+        out = q.sudo("run tapp install hello.tapp", "[tapp] done",
+                     timeout=120)
+        check("one signed by the key in update.key is: written, and its "
+              "programs run now",
+              "hello.tapp: installed - its programs run now" in out and
+              "Package hello 1 installed: Hello" in out)
+        end = time.time() + 20
+        while time.time() < end and "a tile for the package hello" not in \
+                q.serial()[seen:]:
+            time.sleep(0.5)
+        check("its tile comes into the dock",
+              "[desktop] a tile for the package hello: Hello"
+              in q.serial()[seen:])
+        out = q.command("run tapphi installed-just-now", "exit code",
+                        timeout=60)
+        check("and its program runs",
+              "installed-just-now" in out and
+              "[tapphi] done, exit code 0" in out)
+        out = q.sudo("run tapp install hello.tapp", "[tapp] done",
+                     timeout=120)
+        check("the same version a second time is refused",
+              "that version or a newer one is installed already" in out)
+    finally:
+        stop()
 
 
 def main():
@@ -245,6 +327,20 @@ def main():
             check("and runs a program out of it",
                   "off-the-installed-disk" in out
                   and "[%s] done, exit code 0" % PROBE in out)
+            installed_while_running(q, work)
+        finally:
+            q.close()
+        got = fat_get(target, ESP_START, "/EFI/ThreadOS/apps/hello.tapp")
+        check("the package installed while the system ran is on its disk, "
+              "byte for byte", got == HELLO["data"])
+        q = Qemu(KERNEL, INITRD, disk=target, sata=True,
+                 serial=os.path.join(work, "w3.log"),
+                 qemu="qemu-system-x86_64", uefi=(OVMF_CODE, nvram))
+        try:
+            out = q.wait_serial("The 64-bit system is ready", timeout=120)
+            check("and the next start takes it from there",
+                  "Package hello 1: Hello" in out
+                  and "Package probe 1: Probe" in out)
         finally:
             q.close()
     finally:

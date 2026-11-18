@@ -118,6 +118,18 @@ int install_step(int n);
    system, -5 = backup failed, -6 = an earlier update is incomplete. */
 int install_update_file(int which, const void *data, uint32_t len);
 
+/* An application package (.tapp) written into /EFI/ThreadOS/apps of the
+   installed system it is running on, and taken at once where it can be.
+   The data is the whole package; its signature is the caller's to check. */
+#define INSTPKG_NOW           0   /* written, and its programs run now */
+#define INSTPKG_NEXT_START    1   /* written; taken from the next start */
+#define INSTPKG_FAILED      (-1)  /* writing it failed */
+#define INSTPKG_NOT_INSTALLED (-3) /* not started from an installed system */
+#define INSTPKG_NOT_PACKAGE (-4)  /* not a package, or not for this machine */
+#define INSTPKG_NO_ROOM     (-5)  /* no room on the EFI partition */
+#define INSTPKG_HAVE_IT     (-6)  /* that version or a newer one runs */
+int install_package(const void *data, uint32_t len);
+
 /* Restores the previous kernel, initrd and loader saved by an update.
    0 = done, -1 = writing failed, -3 = no installed system,
    -4 = not booted from the installed system, -5 = no valid backup. */

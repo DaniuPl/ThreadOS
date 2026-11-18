@@ -9393,3 +9393,26 @@ works and is checked by `make test`.
       instead of an image, the installed system's loader finding them
       in its directory; t_bigprog runs bigprog out of a package; t_webkit
       and t_isa take Weft's package.
+
+- [x] **Installing a package on the running system: tapp install**
+      (kernel/install.c, include/install.h, kernel/initrd.c,
+      kernel64/syscall64.c, kernel/desktop.c, user/tapp.c,
+      scripts/tests/t_appsinst.py)
+      A package that came from the network could be checked but not
+      installed. 'sudo run tapp install FILE' reads it, checks it
+      against the system's key - one that is not signed by it, or not
+      signed at all, is not installed - and hands it to the kernel
+      (SYS64_PACKAGE_INSTALL, an administrator's only), which checks it
+      again as a package, writes it to /EFI/ThreadOS/apps/<id>.tapp on
+      the installed system, and takes a copy at once when there is
+      contiguous memory for it and no older version of it is running;
+      otherwise it starts with the next start. The same version, or an
+      older one, is refused. The desktop adds the tile of a package
+      that asks for one between two frames, on its own thread.
+      t_appsinst installs onto the installed system it has just made:
+      a package signed by the test's key is refused while the system
+      trusts only its own, an unsigned one always; with update.key
+      holding the test's key it is installed, its tile comes into the
+      dock and its program runs; the same version again is refused; the
+      package is on the disk byte for byte as mtools reads it, and the
+      next start takes it from there.

@@ -115,6 +115,9 @@ int desktop_frame_stats(int *fps, int *busy, int *drawn);
 /* A notification in the island at the top of the screen: something
    worth a glance that nobody asked for. Callable from anywhere. */
 void desktop_notify(const char *title, const char *body);
+/* A package was taken while the desktop runs: its tile, if it asks for
+   one, comes with the next frame */
+void desktop_packages_changed(void);
 
 /* Locks the screen: nothing but the time and a field for the password
    until it is given. 0, or -1 when there is no desktop to lock. */

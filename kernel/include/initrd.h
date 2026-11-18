@@ -36,6 +36,11 @@ struct package {
 #define PKG_FULL        (-6)
 /* Checked - the image, then its manifest - and taken: 0, or PKG_* */
 int package_use(const void *image, uint32_t size);
+/* Only checked, and what it says put in 'out': 0, or PKG_* (never
+   PKG_TWICE or PKG_FULL, which are about the packages already taken) */
+int package_check(const void *image, uint32_t size, struct package *out);
+/* The package taken under that id, or NULL */
+const struct package *package_find(const char *id);
 const char *package_why(int code);
 int package_count(void);
 const struct package *package_at(int i);

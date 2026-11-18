@@ -547,6 +547,16 @@ static int icons_read_list(void)
     return 1;
 }
 
+/* A package installed while the desktop runs (kernel/install.c): its
+   tile is added here, by the desktop's own thread, between frames -
+   not by the program that installed it, in the middle of one */
+static volatile int packages_changed;
+
+void desktop_packages_changed(void)
+{
+    packages_changed = 1;
+}
+
 /* The application packages that ask for a tile of their own (their
    manifest's "dock yes") get one after the dock's own, in the order the
    loader brought them, while there is room - unless their program has
@@ -8072,6 +8082,10 @@ static void desktop_thread(void *arg)
         reap_windows();
         look_refresh(0);
         anim_settle();
+        if (packages_changed) {
+            packages_changed = 0;
+            icons_add_packages();
+        }
         if (frames && frames % (2 * FRAME_HZ) == 0 &&
             desktop_read_items())
             desktop_layout_load();

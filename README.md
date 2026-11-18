@@ -345,9 +345,11 @@ on the disc, and the kernel takes each one that is a package for its
 processor: its programs run by name after the initrd's (a package cannot
 replace a program of the system's), and `dock yes` gives it a tile. The
 installer copies them to `\EFI\ThreadOS\apps`. `tapp` lists them,
-`tapp info FILE` shows what a package holds, and `tapp verify NAME`
+`tapp info FILE` shows what a package holds, `tapp verify NAME`
 checks a package - one the system has, or a file - against the system's
-key. The EFI partition is as trusted as the kernel on it, so packages a
+key, and `sudo run tapp install FILE` puts a package signed by that key
+onto the installed system: into `\EFI\ThreadOS\apps`, its programs
+running at once and its tile in the dock. The EFI partition is as trusted as the kernel on it, so packages a
 loader finds there are not checked at boot.
 
 ```sh

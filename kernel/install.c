@@ -37,6 +37,7 @@
 #include "include/gpt.h"
 #include "include/fs.h"
 #include "include/efirt.h"
+#include "include/pmm.h"
 
 #include "../kernel64/paging64.h"
 #define IDENTITY_TOP() paging64_identity_top()
@@ -732,6 +733,61 @@ int install_update_file(int which, const void *data, uint32_t len)
         update_active = 0;
     }
     return 0;
+}
+
+/* A package written onto the installed system while it runs (tapp
+   install): where the loader will find it from the next start on, and -
+   when there is room in memory for a copy and no older version of it is
+   running - taken at once. Whether it is signed is the caller's
+   business (user/tapp.c checks, then asks); this is where it goes. */
+int install_package(const void *data, uint32_t len)
+{
+    struct package p;
+    struct fat_entry e;
+
+    if (!update_allowed)
+        return INSTPKG_NOT_INSTALLED;
+    if (!data || !len || package_check(data, len, &p) < 0)
+        return INSTPKG_NOT_PACKAGE;
+    const struct package *running = package_find(p.id);
+    if (running && running->version >= p.version)
+        return INSTPKG_HAVE_IT;
+    if (!update_mount_esp() || !fat_stat(PATH_KERNEL, &e) || e.is_dir)
+        return INSTPKG_NOT_INSTALLED;
+
+    char path[sizeof(DIR_APPS) + sizeof(p.id) + 8];
+    int at = 0;
+    for (const char *c = DIR_APPS "/"; *c; c++)
+        path[at++] = *c;
+    for (const char *c = p.id; *c; c++)
+        path[at++] = *c;
+    for (const char *c = ".tapp"; *c; c++)
+        path[at++] = *c;
+    path[at] = 0;
+    /* Room for it, less what it replaces */
+    uint32_t had = fat_stat(path, &e) && !e.is_dir ? e.size : 0;
+    if (fat_free_kib() + had / 1024 < len / 1024 + 64)
+        return INSTPKG_NO_ROOM;
+    if (fat_mkdir(DIR_APPS) < 0 || fat_write_file(path, data, len) < 0)
+        return INSTPKG_FAILED;
+
+    /* A newer version of one that is running starts next time: its
+       programs may be running now, out of the old one's memory */
+    if (running)
+        return INSTPKG_NEXT_START;
+    uint32_t pages = (len + 4095) / 4096;
+    uint32_t where = pmm_alloc_contiguous(pages);
+    if (!where)
+        return INSTPKG_NEXT_START;
+    memcpy((void *)(uintptr_t)where, data, len);
+    if (package_use((const void *)(uintptr_t)where, len) < 0) {
+        for (uint32_t i = 0; i < pages; i++)
+            pmm_free_frame(where + i * 4096);
+        return INSTPKG_NEXT_START;
+    }
+    printk("[ OK ] Package %s %u installed: %s, %u KiB\n", p.id, p.version,
+           p.name, len / 1024);
+    return INSTPKG_NOW;
 }
 
 int install_update_rollback(void)

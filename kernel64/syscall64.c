@@ -1595,6 +1595,23 @@ static void handle(struct regs *r)
         r->rax = n;
         return;
     }
+    case SYS64_PACKAGE_INSTALL: {
+        /* Putting a program on the system for everybody is an
+           administrator's to do, as replacing the system is */
+        if (task64_level() != USER_ADMIN) {
+            r->rax = (uint64_t)-2;
+            return;
+        }
+        if (!a2 || a2 > 256u * 1024 * 1024 || !paging64_user_range(a1, a2)) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        int rc = install_package((const void *)(uintptr_t)a1, (uint32_t)a2);
+        if (rc == INSTPKG_NOW)
+            desktop_packages_changed();
+        r->rax = (uint64_t)(int64_t)rc;
+        return;
+    }
     case SYS64_UPDATE_ALLOWED:
         r->rax = (uint64_t)(int64_t)install_update_allowed();
         return;

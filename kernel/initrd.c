@@ -113,11 +113,9 @@ static uint32_t number(const char *s, int *ok)
     return v;
 }
 
-int package_use(const void *image, uint32_t size)
+int package_check(const void *image, uint32_t size, struct package *out)
 {
-    if (npkgs == PKG_MAX)
-        return PKG_FULL;
-    struct image *img = &pkg_img[npkgs];
+    struct image one, *img = &one;
     if (take(img, image, size) < 0)
         return PKG_BAD;
     /* The manifest: the first entry, text, its first line the magic */
@@ -165,14 +163,34 @@ int package_use(const void *image, uint32_t size)
         return PKG_OTHER_ARCH;
     if (!find_in(img, p.exec, (uint32_t *)0))
         return PKG_NO_EXEC;
-    for (int i = 0; i < npkgs; i++)
-        if (!strcmp(pkgs[i].id, p.id))
-            return PKG_TWICE;
     p.dock = !strcmp(dock, "yes");
     p.base = image;
     p.size = size;
+    *out = p;
+    return 0;
+}
+
+int package_use(const void *image, uint32_t size)
+{
+    struct package p;
+    if (npkgs == PKG_MAX)
+        return PKG_FULL;
+    int rc = package_check(image, size, &p);
+    if (rc < 0)
+        return rc;
+    if (package_find(p.id))
+        return PKG_TWICE;
+    take(&pkg_img[npkgs], image, size);
     pkgs[npkgs++] = p;
     return 0;
+}
+
+const struct package *package_find(const char *id)
+{
+    for (int i = 0; i < npkgs; i++)
+        if (!strcmp(pkgs[i].id, id))
+            return &pkgs[i];
+    return (const struct package *)0;
 }
 
 const char *package_why(int code)

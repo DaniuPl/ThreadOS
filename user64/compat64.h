@@ -378,6 +378,15 @@ static inline int32_t sys_package(int32_t index, struct tapp_info *out)
                               (int64_t)(uintptr_t)out);
 }
 
+/* A whole package written onto the installed system (kernel/install.h
+   INSTPKG_*: 0 runs now, 1 from the next start, below 0 why not; -2 =
+   not an administrator) */
+static inline int32_t sys_package_install(const void *buf, uint64_t len)
+{
+    return (int32_t)syscall64(SYS64_PACKAGE_INSTALL, (int64_t)(uintptr_t)buf,
+                              (int64_t)len);
+}
+
 /* Bytes of the index-th package from 'offset': how many, -1 = none */
 static inline int64_t sys_package_read(int32_t index, uint64_t offset,
                                        void *buf, uint64_t len)
