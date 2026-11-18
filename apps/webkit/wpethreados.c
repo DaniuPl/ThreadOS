@@ -24,6 +24,7 @@
 #include "wpethreados.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include "usys64.h"
 
@@ -158,6 +159,11 @@ typedef struct {
     int utf8_left;            /* bytes of it still to come */
     int win_w, win_h;         /* the window's content */
     int top;                  /* the program's own band above the page */
+    /* A finger, not a mouse (WEV_SIZE_TOUCH): where it went down, where
+       it was last, and whether it has moved far enough to be scrolling */
+    int touch;
+    int touch_x, touch_y, last_x, last_y;
+    int scrolling;
     WPEThreadOSChromeFunc chrome;
     gpointer chrome_data;
 } WPEToplevelThreadOS;
@@ -537,6 +543,68 @@ static void pointer_move(WPEToplevelThreadOS *self, WPEView *view, int x,
 }
 
 static void handle(WPEToplevelThreadOS *self, WPEView *view,
+                   const struct win_event *ev);
+
+/* How far a finger may wander and still have tapped, in the window's
+   pixels (two to a point on the phone) */
+#define TOUCH_SLOP 16
+
+/* A finger on a touchscreen moves the page the way it moves: a drag is
+   a scroll by what it moved - never a selection, which is what a
+   mouse's drag would be - and a touch that stays where it went down
+   is a click, sent once it lifts, when it cannot be a drag any more */
+static int handle_touch(WPEToplevelThreadOS *self, WPEView *view,
+                        const struct win_event *ev)
+{
+    switch (ev->type) {
+    case WEV_CLICK:
+        return 1;
+    case WEV_PRESS:
+        self->touch_x = self->last_x = ev->x;
+        self->touch_y = self->last_y = ev->y;
+        self->scrolling = 0;
+        return 1;
+    case WEV_DRAG:
+    case WEV_RELEASE: {
+        int far = abs(ev->x - self->touch_x) + abs(ev->y - self->touch_y);
+        if (!self->scrolling && far > TOUCH_SLOP)
+            self->scrolling = 1;
+        if (self->scrolling) {
+            /* The page goes with the finger: up the screen is down the
+               page. The deltas are pixels (precise, as a touchpad's) */
+            double dx = ev->x - self->last_x, dy = ev->y - self->last_y;
+            int stop = ev->type == WEV_RELEASE;
+            if (dx || dy || stop)
+                send(view, wpe_event_scroll_new(
+                               view, WPE_INPUT_SOURCE_TOUCHPAD, now_ms(),
+                               self->keys, -dx, -dy, TRUE, stop,
+                               self->touch_x, self->touch_y));
+            self->last_x = ev->x;
+            self->last_y = ev->y;
+            return 1;
+        }
+        if (ev->type == WEV_DRAG)
+            return 1;
+        /* A tap: the mouse's press and release where the finger went
+           down */
+        struct win_event at = *ev;
+        at.x = self->touch_x;
+        at.y = self->touch_y;
+        at.type = WEV_PRESS;
+        at.val = 1;
+        self->touch = 0;
+        handle(self, view, &at);
+        at.type = WEV_RELEASE;
+        at.val = 0;
+        handle(self, view, &at);
+        self->touch = 1;
+        return 1;
+    }
+    }
+    return 0;
+}
+
+static void handle(WPEToplevelThreadOS *self, WPEView *view,
                    const struct win_event *ev)
 {
     if (tracing) {
@@ -544,6 +612,8 @@ static void handle(WPEToplevelThreadOS *self, WPEView *view,
                ev->y, ev->val);
         fflush(stdout);
     }
+    if (self->touch && handle_touch(self, view, ev))
+        return;
     switch (ev->type) {
     case WEV_CLICK:
         /* What comes with the press that follows: the keys held */
@@ -606,6 +676,7 @@ static gboolean poll_window(gpointer data)
         if (ev.type == WEV_SIZE) {
             self->win_w = ev.x;
             self->win_h = ev.y;
+            self->touch = (ev.val & WEV_SIZE_TOUCH) != 0;
             page_resized(self);
         }
         /* The program's band hears everything first, in the window's

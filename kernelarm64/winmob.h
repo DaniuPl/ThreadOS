@@ -14,6 +14,7 @@ struct win_event {
 };
 #define WEV_CLICK   1
 #define WEV_SIZE    4
+#define WEV_SIZE_TOUCH 1         /* WEV_SIZE's val: the pointer is a finger */
 #define WEV_PRESS   5
 #define WEV_DRAG    6
 #define WEV_RELEASE 7

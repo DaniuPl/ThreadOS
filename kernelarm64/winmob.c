@@ -99,7 +99,7 @@ int64_t winmob_create(int owner, const char *title)
         w->px = px;
         w->pages = pages;
         set_title(w, title);
-        push(w, WEV_SIZE, ww, wh, 0);
+        push(w, WEV_SIZE, ww, wh, WEV_SIZE_TOUCH);
         fresh = id;
         changes++;
     }

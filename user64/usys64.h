@@ -601,8 +601,12 @@ struct win_text_cmd {
    a window nobody can close is worse than a program that loses its
    say. */
 #define WEV_CLOSE 3
-/* The content area has a new size: x and y carry it. */
+/* The content area has a new size: x and y carry it. val says what
+   the pointer is: WEV_SIZE_TOUCH, a finger on a touchscreen (ThreadOS
+   mobile, kernelarm64/winmob.c), whose drags a page takes to scroll -
+   or 0, a mouse. */
 #define WEV_SIZE  4
+#define WEV_SIZE_TOUCH 1
 
 /* Dragging inside the window's content: down, moved, up. x and y are
    in the content's coordinates, as with a click. Selecting text is
