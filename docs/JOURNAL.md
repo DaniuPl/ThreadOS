@@ -10215,7 +10215,12 @@ works and is checked by `make test`.
       aarch64", no "Mobile"); dark pages (prefers-color-scheme), from
       the system's look to start with; JavaScript; and clearing the
       history and every site's data (cookies, caches). Kept in memory
-      for now: the phone has no disk of its own yet. t_arm64weft: the
-      menu's new tab, History listing the tall page and going back to
-      it, the desktop site's next request a computer's, the history
-      empty once cleared.
+      for now: the phone has no disk of its own yet. The menu fills the
+      window, as the history and the settings do - a row each, with an
+      icon - and the search engine is chosen from a list: DuckDuckGo,
+      Google, Bing, Brave Search, Ecosia, Startpage. t_arm64weft: the
+      menu's heading and rows read off the screen, its new tab, History
+      listing the tall page and going back to it, the desktop site's
+      next request a computer's, Google chosen from the list and words
+      typed on the keyboard looked up there, the history empty once
+      cleared.

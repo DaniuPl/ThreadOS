@@ -346,12 +346,11 @@ def typing(q, port):
 
 
 def menu_row(i):
-    """The middle of the menu's i-th row, on the screen"""
-    win_h = PHONE_H - define(MOB, "MOB_BAR_H") - define(MOB, "MOB_SAFE_UP")
-    top = (win_h - define(WEFT_SRC, "M_BOT_H") -
-           define(WEFT_SRC, "MENU_ITEMS") * define(WEFT_SRC, "MENU_ROW") - 16)
-    return (define(MOB, "MOB_BAR_H") + top + 4 +
-            i * define(WEFT_SRC, "MENU_ROW") + define(WEFT_SRC, "MENU_ROW") // 2)
+    """The middle of the menu's i-th row, on the screen: the menu is the
+    whole window, its rows under its heading"""
+    row = define(WEFT_SRC, "LIST_ROW")
+    return (define(MOB, "MOB_BAR_H") + define(WEFT_SRC, "M_HEAD_H") +
+            i * row + row // 2)
 
 
 def history_and_settings(q, port, agents):
@@ -401,6 +400,14 @@ def history_and_settings(q, port, agents):
           re.match(r"Mozilla/5\.0 \(ThreadOS 1\.0; Linux aarch64\) "
                    r".* Safari/[\d.]+ Weft/1\.0$", ua) is not None and
           "Mobile" not in ua)
+    # the search engine, from the list of them
+    seen = len(q.serial())
+    q.tap(width // 2, bar + head + row // 2)
+    wait_line(q, seen, "[weft] search engines shown", 30)
+    q.tap(width // 2, bar + head + row + row // 2)          # Google
+    chosen = wait_line(q, seen, "[weft] setting search engine ", 30)
+    check(f"Settings: the search engine, chosen from a list ({chosen})",
+          chosen == "[weft] setting search engine Google")
     seen = len(q.serial())
     q.tap(width // 2, bar + head + 4 * row + row // 2)      # Clear
     cleared = wait_line(q, seen, "[weft] cleared history and cookies", 30)
@@ -411,6 +418,21 @@ def history_and_settings(q, port, agents):
     shown = wait_line(q, seen, "[weft] history shown", 30)
     check(f"and clear the history ({cleared}; {shown})",
           cleared is not None and shown == "[weft] history shown, 0 pages")
+    # words typed into the address go to the engine chosen
+    from t_arm64apps import LETTERS, note_key, KB_TOP, a
+    q.tap(width - 30, bar + head // 2)                      # Done
+    seen = len(q.serial())
+    q.tap(width // 2, bar + define(WEFT_SRC, "M_PILL_Y") +
+          define(WEFT_SRC, "M_PILL_H") // 2)
+    wait_line(q, seen, "[winmob] window ", 30)
+    for c in "kot":
+        r = next(i for i, rw in enumerate(LETTERS) if c in rw)
+        q.touch([note_key(r, LETTERS[r].index(c), len(LETTERS[r]))],
+                settle=0.3)
+    q.tap(width - 33, KB_TOP + 3 * a("NOTES_KEY_STEP") + a("NOTES_KEY_H") // 2)
+    go = wait_line(q, seen, "[weft] go ", 30)
+    check(f"and words typed into the address are looked up there ({go})",
+          go == "[weft] go https://www.google.com/search?q=kot")
 
 
 def tabs(q, band):
@@ -421,6 +443,21 @@ def tabs(q, band):
     seen = len(q.serial())
     q.tap(button_x(4, width), cy)
     menu = wait_line(q, seen, "[weft] menu shown", 30)
+    time.sleep(1)
+    sw, sh, at = q.screen_raw()
+    bar = define(MOB, "MOB_BAR_H")
+    head = q.find_ui(0, width * K // 2, (bar + baseline(
+        0, define(WEFT_SRC, "M_HEAD_H"), 17)) * K, px=17 * K, face="bold",
+        charset="Menu", screen=(sw, sh, at))
+    items = [q.find_ui(56 * K, (width - 40) * K,
+                       (bar + baseline(menu_row(i) - bar -
+                                       define(WEFT_SRC, "LIST_ROW") // 2,
+                                       define(WEFT_SRC, "LIST_ROW"),
+                                       define(WEFT_SRC, "M_TEXT_PX"))) * K,
+                       px=define(WEFT_SRC, "M_TEXT_PX") * K,
+                       screen=(sw, sh, at)) for i in range(3)]
+    check(f"the toolbar's menu fills the window: {head!r}, {items}",
+          head == "Menu" and items == ["New tab", "History", "Settings"])
     q.tap(width // 2, menu_row(0))
     check("the toolbar's menu opens a second tab",
           menu is not None and

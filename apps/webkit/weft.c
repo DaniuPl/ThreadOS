@@ -136,7 +136,8 @@ static gboolean pressed_on_band;
    what is over the page - the tabs' cards, the menu, the history, the
    settings - scrolled so far */
 static gboolean touch, mobile;
-enum { SHEET_NONE, SHEET_CARDS, SHEET_MENU, SHEET_HISTORY, SHEET_SETTINGS };
+enum { SHEET_NONE, SHEET_CARDS, SHEET_MENU, SHEET_HISTORY, SHEET_SETTINGS,
+       SHEET_ENGINES };
 static int sheet;
 #define cards (sheet == SHEET_CARDS)
 static int cards_scroll, press_x, press_y, press_scroll;
@@ -158,6 +159,9 @@ static const struct engine {
     { "DuckDuckGo", "https://duckduckgo.com/html/?q=" },
     { "Google", "https://www.google.com/search?q=" },
     { "Bing", "https://www.bing.com/search?q=" },
+    { "Brave Search", "https://search.brave.com/search?q=" },
+    { "Ecosia", "https://www.ecosia.org/search?q=" },
+    { "Startpage", "https://www.startpage.com/do/search?q=" },
 };
 #define ENGINES ((int)(sizeof(engines) / sizeof(engines[0])))
 static struct {
@@ -778,6 +782,7 @@ static void draw_cards(int win, const struct ud_look *l)
 static void draw_menu(int win, const struct ud_look *l);
 static void draw_history(int win, const struct ud_look *l);
 static void draw_settings(int win, const struct ud_look *l);
+static void draw_engines(int win, const struct ud_look *l);
 
 static void draw_mobile(void)
 {
@@ -795,6 +800,7 @@ static void draw_mobile(void)
     case SHEET_MENU:     draw_menu(win, &l); return;
     case SHEET_HISTORY:  draw_history(win, &l); return;
     case SHEET_SETTINGS: draw_settings(win, &l); return;
+    case SHEET_ENGINES:  draw_engines(win, &l); return;
     }
     int w = win_w(), h = win_h();
     WebKitWebView *v = tabs[front]->view;
@@ -869,7 +875,7 @@ static void draw_mobile(void)
 static void show_sheet(int which)
 {
     static const char *const names[] = { "page", "tabs", "menu", "history",
-                                         "settings" };
+                                         "settings", "search engines" };
     if (sheet == which)
         return;
     int was = sheet;
@@ -879,12 +885,6 @@ static void show_sheet(int which)
     wpe_threados_toplevel_cover(toplevel, which != SHEET_NONE);
     if (was != SHEET_NONE)
         say("[weft] %s hidden%s\n", names[was], NULL);
-    if (which == SHEET_MENU) {
-        /* the page, dimmed, behind the menu: once, as it opens */
-        int win = wpe_threados_toplevel_window(toplevel);
-        ud_fill_a(win, 0, M_TOP_H, win_w(), win_h() - M_TOP_H - M_BOT_H,
-                  0x000000, 110);
-    }
     if (which == SHEET_HISTORY) {
         char n[16];
         g_snprintf(n, sizeof(n), "%d", nhistory);
@@ -902,19 +902,15 @@ static void cards_show(gboolean on)
 
 /* --- The menu, the history and the settings ------------------------- */
 
-#define MENU_ROW   52        /* the menu's rows (t_arm64weft.py reads) */
 #define MENU_ITEMS 3         /* a new tab, the history, the settings */
-#define LIST_ROW   56        /* the history's and the settings' rows */
+#define LIST_ROW   56        /* the menu's, the history's and the settings'
+                                rows, under the heading (t_arm64weft.py
+                                reads these) */
 #define SETTINGS_ROWS 5
 
 static const char *const menu_items[MENU_ITEMS] = {
     "New tab", "History", "Settings",
 };
-
-static int menu_top(void)
-{
-    return win_h() - M_BOT_H - MENU_ITEMS * MENU_ROW - 16;
-}
 
 static void draw_header(int win, const struct ud_look *l, const char *title)
 {
@@ -934,17 +930,44 @@ static void toggle(int win, const struct ud_look *l, int x, int cy, int on)
     ud_disc(win, on ? x + 20 : x + 2, cy - 11, 22, 0xFFFFFF);
 }
 
+/* The menu: the whole window, as the history and the settings are -
+   what it leads to, a row each, with the page it was opened from named
+   above them */
 static void draw_menu(int win, const struct ud_look *l)
 {
-    int w = win_w(), y0 = menu_top();
-    ud_round(win, 8, y0, w - 16, MENU_ITEMS * MENU_ROW + 8, 14, l->bg);
+    int w = win_w(), h = win_h();
+    ud_fill(win, 0, 0, w, h, l->bg);
+    draw_header(win, l, "Menu");
     for (int i = 0; i < MENU_ITEMS; i++) {
-        int y = y0 + 4 + i * MENU_ROW;
-        if (i)
-            ud_fill(win, 24, y, w - 48, 1, l->line);
-        ud_text(win, 28, ud_baseline(y, MENU_ROW, M_TEXT_PX), menu_items[i],
+        int y = M_HEAD_H + i * LIST_ROW, cy = y + LIST_ROW / 2;
+        int ix = 32;                 /* its icon's middle */
+        if (i == 0) {                /* a new tab: + */
+            ud_line(win, ix - 8, cy, ix + 8, cy, 28, l->text);
+            ud_line(win, ix, cy - 8, ix, cy + 8, 28, l->text);
+        } else if (i == 1) {         /* the history: a clock */
+            ud_ring(win, ix - 10, cy - 10, 20, 20, 10, l->text);
+            ud_line(win, ix, cy, ix, cy - 6, 24, l->text);
+            ud_line(win, ix, cy, ix + 5, cy + 3, 24, l->text);
+        } else {                     /* the settings: sliders */
+            for (int k = -1; k <= 1; k++) {
+                ud_line(win, ix - 10, cy + k * 7, ix + 10, cy + k * 7, 20,
+                        l->text);
+                ud_disc(win, ix - 3 + k * 5, cy + k * 7 - 3, 6, l->text);
+            }
+        }
+        ud_text(win, 60, ud_baseline(y, LIST_ROW, M_TEXT_PX), menu_items[i],
                 l->text, UD_SANS, M_TEXT_PX);
+        ud_line(win, w - 26, cy - 5, w - 21, cy, 24, l->dim);   /* > */
+        ud_line(win, w - 21, cy, w - 26, cy + 5, 24, l->dim);
+        ud_fill(win, 20, y + LIST_ROW - 1, w - 40, 1, l->line);
     }
+    char shown[256];
+    short_uri(shown_uri(tabs[front]->view), shown, sizeof(shown));
+    ud_clip(win, 0, M_HEAD_H + MENU_ITEMS * LIST_ROW, w, 40);
+    ud_text(win, 20, M_HEAD_H + MENU_ITEMS * LIST_ROW + 28,
+            *tabs[front]->title ? tabs[front]->title : shown, l->dim,
+            UD_SANS, 12);
+    ud_unclip(win);
 }
 
 static void draw_history(int win, const struct ud_look *l)
@@ -1005,6 +1028,24 @@ static void draw_settings(int win, const struct ud_look *l)
             THREADOS_VERSION, l->dim, UD_SANS, 12);
 }
 
+/* The search engines to choose among, the one chosen ticked */
+static void draw_engines(int win, const struct ud_look *l)
+{
+    int w = win_w(), h = win_h();
+    ud_fill(win, 0, 0, w, h, l->bg);
+    draw_header(win, l, "Search engine");
+    for (int i = 0; i < ENGINES; i++) {
+        int y = M_HEAD_H + i * LIST_ROW, cy = y + LIST_ROW / 2;
+        ud_text(win, 20, ud_baseline(y, LIST_ROW, M_TEXT_PX), engines[i].name,
+                l->text, UD_SANS, M_TEXT_PX);
+        if (i == prefs.engine) {     /* a tick */
+            ud_line(win, w - 40, cy, w - 34, cy + 6, 32, l->accent);
+            ud_line(win, w - 34, cy + 6, w - 22, cy - 7, 32, l->accent);
+        }
+        ud_fill(win, 20, y + LIST_ROW - 1, w - 40, 1, l->line);
+    }
+}
+
 static void set_agent(WebKitSettings *s);
 
 /* A setting changed: said, kept, put to work */
@@ -1013,10 +1054,8 @@ static void setting(int row)
     WebKitWebView *v = tabs[front]->view;
     switch (row) {
     case 0:
-        prefs.engine = (prefs.engine + 1) % ENGINES;
-        say("[weft] setting search engine %s%s\n", engines[prefs.engine].name,
-            NULL);
-        break;
+        show_sheet(SHEET_ENGINES);   /* the list of them */
+        return;
     case 1:
         prefs.desktop_site = !prefs.desktop_site;
         set_agent(settings);
@@ -1054,13 +1093,10 @@ static void setting(int row)
 static void sheet_tap(int x, int y)
 {
     int h = win_h();
-    if (sheet == SHEET_MENU) {
-        int y0 = menu_top() + 4;
-        int i = (y - y0) / MENU_ROW;
-        if (y < y0 || i >= MENU_ITEMS) {
-            show_sheet(SHEET_NONE);          /* a tap beside it closes it */
+    if (sheet == SHEET_MENU && y >= M_HEAD_H) {
+        int i = (y - M_HEAD_H) / LIST_ROW;
+        if (i >= MENU_ITEMS)
             return;
-        }
         if (i == 0) {
             show_sheet(SHEET_NONE);
             if (tab_new(NULL, NULL))
@@ -1071,8 +1107,9 @@ static void sheet_tap(int x, int y)
         return;
     }
     if (y < M_HEAD_H) {
-        if (x >= win_w() - 100)
-            show_sheet(SHEET_NONE);          /* Done */
+        if (x >= win_w() - 100)              /* Done: from the engines,
+                                                back to the settings */
+            show_sheet(sheet == SHEET_ENGINES ? SHEET_SETTINGS : SHEET_NONE);
         return;
     }
     if (sheet == SHEET_HISTORY) {
@@ -1096,6 +1133,16 @@ static void sheet_tap(int x, int y)
         int i = (y - M_HEAD_H) / LIST_ROW;
         if (i >= 0 && i < SETTINGS_ROWS)
             setting(i);
+        return;                      /* (which may have opened another) */
+    }
+    if (sheet == SHEET_ENGINES) {
+        int i = (y - M_HEAD_H) / LIST_ROW;
+        if (i >= 0 && i < ENGINES) {
+            prefs.engine = i;
+            say("[weft] setting search engine %s%s\n", engines[i].name,
+                NULL);
+            show_sheet(SHEET_SETTINGS);
+        }
     }
 }
 
