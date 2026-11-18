@@ -45,6 +45,9 @@ int desktop_win_truecolour(int winid, int owner);
 /* A block of colours. Only for a window that asked for them. */
 int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
                        const uint32_t *pixels);
+/* The same in the panel's pixels, at whatever scale the desktop draws */
+int desktop_win_blit_hi(int winid, int owner, int x, int y, int w, int h,
+                        const uint32_t *pixels);
 
 /* Drawing as the desktop itself draws: soft-edged shapes and TrueType
  * text, in colours. Positions in whole pixels of the window's content;

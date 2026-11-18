@@ -3623,7 +3623,7 @@ static int resize_content(struct window *w)
     w->pcw = PC(cw);
     w->pch = PC(ch);
     buf_rect(w, 0, 0, cw, ch, buf_colour(w, COL_WIN));
-    win_enqueue(w, WEV_SIZE, cw, ch, 0);
+    win_enqueue(w, WEV_SIZE, cw, ch, video_k() << 8);
     return 0;
 }
 
@@ -7347,6 +7347,38 @@ int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
     return 0;
 }
 
+/* The panel's own pixels, into the window's content as they are: a
+   program that renders at the screen's scale (a web page) has nothing
+   to gain from each pixel made a block */
+int desktop_win_blit_hi(int winid, int owner, int x, int y, int w, int h,
+                        const uint32_t *pixels)
+{
+    scene_changed();
+    struct window *win = app_window(winid, owner);
+    if (!win || !pixels || w <= 0 || h <= 0 || !win->truecolour)
+        return -1;
+    int lo_x = win->clip ? P(win->clx) : 0;
+    int hi_x = win->clip ? P(win->clx + win->clw) : win->pcw;
+    int lo_y = win->clip ? P(win->cly) : 0;
+    int hi_y = win->clip ? P(win->cly + win->clh) : win->pch;
+    if (lo_x < 0) lo_x = 0;
+    if (lo_y < 0) lo_y = 0;
+    if (hi_x > win->pcw) hi_x = win->pcw;
+    if (hi_y > win->pch) hi_y = win->pch;
+    for (int row = 0; row < h; row++) {
+        int dy = y + row;
+        if (dy < lo_y || dy >= hi_y)
+            continue;
+        const uint32_t *src = pixels + (long)row * w;
+        uint32_t *dst = (uint32_t *)win->content + (long)dy * win->pcw;
+        int from = x < lo_x ? lo_x - x : 0;
+        int to = x + w > hi_x ? hi_x - x : w;
+        for (int col = from; col < to; col++)
+            dst[x + col] = src[col];
+    }
+    return 0;
+}
+
 int desktop_win_draw(int winid, int owner, const struct win_draw *d,
                      const char *s)
 {
@@ -7759,7 +7791,7 @@ static void rebuffer(struct window *w)
     w->ch = ch;
     w->pcw = pcw;
     w->pch = pch;
-    win_enqueue(w, WEV_SIZE, cw, ch, 0);
+    win_enqueue(w, WEV_SIZE, cw, ch, video_k() << 8);
 }
 
 /* A rectangle brought inside the room between the bar and the dock */

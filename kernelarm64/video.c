@@ -28,6 +28,24 @@
 
 static uint32_t *front, *back;
 static int pw, ph, k16 = 16;
+static uint16_t ramfb_item;
+
+/* ramfb is told where the screen's memory is and how it is laid out;
+   told again, the screen changes - QEMU's window with it */
+static int ramfb_describe(int width, int height)
+{
+    struct {
+        uint64_t addr;
+        uint32_t fourcc, flags, width, height, stride;
+    } __attribute__((packed)) cfg;
+    cfg.addr = __builtin_bswap64((uint64_t)(uintptr_t)front);
+    cfg.fourcc = __builtin_bswap32(FOURCC_XRGB8888);
+    cfg.flags = 0;
+    cfg.width = __builtin_bswap32((uint32_t)width);
+    cfg.height = __builtin_bswap32((uint32_t)height);
+    cfg.stride = __builtin_bswap32((uint32_t)width * 4);
+    return fwcfg_write(ramfb_item, &cfg, sizeof(cfg));
+}
 
 static void *pages(uint32_t bytes)
 {
@@ -48,23 +66,39 @@ int video_ramfb_init(int width, int height, int scale16)
         return -2;
     memset(front, 0, bytes);
     memset(back, 0, bytes);
-
-    struct {
-        uint64_t addr;
-        uint32_t fourcc, flags, width, height, stride;
-    } __attribute__((packed)) cfg;
-    cfg.addr = __builtin_bswap64((uint64_t)(uintptr_t)front);
-    cfg.fourcc = __builtin_bswap32(FOURCC_XRGB8888);
-    cfg.flags = 0;
-    cfg.width = __builtin_bswap32((uint32_t)width);
-    cfg.height = __builtin_bswap32((uint32_t)height);
-    cfg.stride = __builtin_bswap32((uint32_t)width * 4);
-    if (fwcfg_write(item, &cfg, sizeof(cfg)) < 0)
+    ramfb_item = item;
+    if (ramfb_describe(width, height) < 0)
         return -3;
     pw = width;
     ph = height;
     k16 = scale16;
     return 0;
+}
+
+/* On its side, or upright: the width and height swapped. A screen the
+   kernel describes is described the other way round - QEMU's window
+   turns, and the touchscreen, which reports where on that window the
+   finger is, with it. (A fixed panel would keep its shape and have the
+   picture turned on its way to it instead, and the finger's axes.) */
+int video_set_landscape(int on)
+{
+    if (!front)
+        return -1;
+    if ((pw > ph) == !!on)
+        return 0;
+    if (ramfb_describe(ph, pw) < 0)
+        return -1;
+    int t = pw;
+    pw = ph;
+    ph = t;
+    memset(back, 0, (size_t)pw * (size_t)ph * 4);
+    memset(front, 0, (size_t)pw * (size_t)ph * 4);
+    return 0;
+}
+
+int video_landscape(void)
+{
+    return pw > ph;
 }
 
 void video_set_scale(int scale16)

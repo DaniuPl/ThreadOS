@@ -53,8 +53,9 @@ AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
 x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
 `arm64mobile`, `arm64user`, `arm64libc`, `arm64net`, `arm64win`,
-`arm64rand`, `arm64libs`, `arm64soup`, `arm64apps`, `arm64sound` and
-`arm64weft` (Weft on the phone). The libraries above musl - and WebKit -
+`arm64rand`, `arm64libs`, `arm64soup`, `arm64apps`, `arm64sound`,
+`arm64weft` (Weft on the phone) and `arm64tablet` (a tablet's screen,
+turned). The libraries above musl - and WebKit -
 build for aarch64 by the PC's own rules: `TARGET=aarch64` switches the
 compilers, flags, `--host`, cross files and linker script, into a build
 directory of its own (`$(BUILD)/aarch64`, `make arm64-libs`,

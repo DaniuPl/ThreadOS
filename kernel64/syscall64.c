@@ -1852,7 +1852,11 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)desktop_win_truecolour(
             (int)a1, task64_current_id());
         return;
-    case SYS64_WIN_BLIT32: {
+    case SYS64_WIN_KEYBOARD:
+        r->rax = 0;                      /* the PC has a real one */
+        return;
+    case SYS64_WIN_BLIT32:
+    case SYS64_WIN_BLITHI: {
         struct win_blit_cmd64 {
             int32_t x, y, w, h;
             uint64_t pixels;
@@ -1868,7 +1872,8 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        r->rax = (uint64_t)(int64_t)desktop_win_blit32(
+        r->rax = (uint64_t)(int64_t)(nr == SYS64_WIN_BLITHI ?
+            desktop_win_blit_hi : desktop_win_blit32)(
             (int)a1, task64_current_id(), c.x, c.y, c.w, c.h,
             (const uint32_t *)(uintptr_t)c.pixels);
         return;

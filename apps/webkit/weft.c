@@ -16,7 +16,11 @@
  *
  * The window is a browser's: tabs across the top, then back, forward,
  * reload and the address field, a thin bar of how far a page has
- * loaded, and the page under them. Each tab is a WebKit view of its
+ * loaded, and the page under them. On a touchscreen - a phone's or a
+ * tablet's - it is a mobile browser's instead: the address alone at the
+ * top, a toolbar at the bottom (back, forward, home, the tabs, a new
+ * tab) within the thumb's reach, and the tabs side by side as cards,
+ * each with its page's picture, behind the toolbar's tabs button. Each tab is a WebKit view of its
  * own; only the one in front is in the window (wpe_view_set_toplevel),
  * the others are kept, unmapped, as they were. Typing in the address
  * field and pressing Enter goes there - an address without its scheme
@@ -36,6 +40,8 @@
  *   [weft] load failed <uri>: <why>
  *   [weft] go <uri>            (from the address field)
  *   [weft] tab <n> of <count>  (the tab in front changed)
+ *   [weft] tabs shown, [weft] tabs hidden   (a touchscreen's cards)
+ *   [weft] user agent <agent>
  */
 
 #include <stdio.h>
@@ -66,6 +72,35 @@
 #define ADDR_H   24
 #define TABS_MAX 8
 
+/* On a touchscreen (scripts/tests/t_arm64weft.py reads these) */
+#define M_TOP_H    56        /* the address band */
+#define M_PILL_X   12        /* the address in a rounded field */
+#define M_PILL_Y   8
+#define M_PILL_H   40
+#define M_TEXT_PX  15
+#define M_BOT_H    52        /* the toolbar: */
+#define M_BUTTONS  5         /* back, forward, home, tabs, new tab */
+#define M_HEAD_H   52        /* the tabs' screen: its heading, */
+#define M_GAP      12        /* cards in columns, this far apart, */
+#define M_CARD_W   170       /* at least this wide - two on a phone, */
+#define M_CARD_H   190       /* this tall, */
+#define M_CARD_BAR 30        /* their titles above their pictures */
+#define TABLET_W   600       /* a touchscreen this wide is a tablet's */
+
+/* How Weft names itself to sites: ThreadOS, and on a touchscreen what
+   a site needs to send its newest pages for one - "Android 10", the
+   version Android's browsers all give since they stopped giving their
+   own, and "Mobile" on a phone's (a tablet's is without, and is sent
+   the pages for a tablet). An agent without them is sent pages for
+   phones of twenty years ago. */
+#define THREADOS_VERSION "1.0"
+#define AGENT_ENGINE "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0"
+#if defined(__aarch64__)
+#define AGENT_ARCH "aarch64"
+#else
+#define AGENT_ARCH "x86_64"
+#endif
+
 struct tab {
     WebKitWebView *view;
     char title[96];
@@ -90,6 +125,12 @@ static gboolean editing, replace_all;
 static char typed[1024];
 
 static gboolean pressed_on_band;
+
+/* A touchscreen, a phone's or a tablet's, and a mobile browser on it;
+   its tabs' cards shown, scrolled so far */
+static gboolean touch, mobile, cards;
+static int cards_scroll, press_x, press_y, press_scroll;
+static gboolean press_moved;
 
 static void draw_band(void);
 static struct tab *tab_new(const char *uri, WebKitWebView *related);
@@ -443,11 +484,17 @@ static void arrow(int win, int x, int y, int left, uint32_t rgb)
     ud_line(win, tip, cy, back, cy + d, 2, rgb);
 }
 
+static void draw_mobile(void);
+
 static void draw_band(void)
 {
     int win = wpe_threados_toplevel_window(toplevel);
     if (win < 0 || !ntabs)
         return;
+    if (mobile) {
+        draw_mobile();
+        return;
+    }
     int w = win_w();
     struct ud_look l;
     ud_look(&l);
@@ -563,10 +610,325 @@ static void band_click(int x, int y, int middle)
     draw_band();
 }
 
+/* --- On a touchscreen ------------------------------------------------ */
+
+static int win_h(void)
+{
+    int w, h;
+    wpe_threados_toplevel_size(toplevel, &w, &h);
+    return h;
+}
+
+/* An address as a phone's browser shows it: no scheme, no "www.", no
+   lone "/" after the host */
+static const char *short_uri(const char *uri, char *out, size_t room)
+{
+    const char *s = strstr(uri, "://");
+    s = s ? s + 3 : uri;
+    if (!strncmp(s, "www.", 4))
+        s += 4;
+    g_strlcpy(out, s, room);
+    char *slash = strchr(out, '/');
+    if (slash && !slash[1])
+        *slash = 0;
+    return out;
+}
+
+static int button_x(int i)
+{
+    return win_w() * (2 * i + 1) / (2 * M_BUTTONS);
+}
+
+static void chevron(int win, int cx, int cy, int left, uint32_t rgb)
+{
+    int d = 7;
+    int tip = left ? cx - d / 2 : cx + d / 2;
+    int back = left ? cx + d / 2 : cx - d / 2;
+    ud_line(win, back, cy - d, tip, cy, 32, rgb);
+    ud_line(win, tip, cy, back, cy + d, 32, rgb);
+}
+
+/* As many columns as the width has room for, two at least */
+static int card_cols(void)
+{
+    return MAX(2, (win_w() - M_GAP) / (M_CARD_W + M_GAP));
+}
+
+static void card_box(int i, int *x, int *y, int *w)
+{
+    int n = card_cols();
+    int cw = (win_w() - (n + 1) * M_GAP) / n;
+    *x = M_GAP + (i % n) * (cw + M_GAP);
+    *y = M_HEAD_H + (i / n) * (M_CARD_H + M_GAP) - cards_scroll;
+    *w = cw;
+}
+
+static int cards_room(void)
+{
+    int rows = (ntabs + card_cols() - 1) / card_cols();
+    int all = rows * (M_CARD_H + M_GAP);
+    int room = win_h() - M_HEAD_H - M_BOT_H;
+    return all > room ? all - room : 0;
+}
+
+static void draw_cards(int win, const struct ud_look *l)
+{
+    int w = win_w(), h = win_h();
+    ud_fill(win, 0, 0, w, h, l->line);
+    for (int i = 0; i < ntabs; i++) {
+        int x, y, cw;
+        card_box(i, &x, &y, &cw);
+        if (y + M_CARD_H <= M_HEAD_H || y >= h - M_BOT_H)
+            continue;
+        if (i == front)
+            ud_round(win, x - 3, y - 3, cw + 6, M_CARD_H + 6, 14, l->accent);
+        ud_round(win, x, y, cw, M_CARD_H, 12, l->bg);
+        const char *title = *tabs[i]->title ? tabs[i]->title
+                          : *shown_uri(tabs[i]->view) ? shown_uri(tabs[i]->view)
+                          : "New tab";
+        ud_clip(win, x + 10, y, cw - 40, M_CARD_BAR);
+        ud_text(win, x + 10, ud_baseline(y, M_CARD_BAR, UD_PX), title,
+                l->text, UD_BOLD, UD_PX);
+        ud_unclip(win);
+        ud_line(win, x + cw - 22, y + M_CARD_BAR / 2 - 5, x + cw - 12,
+                y + M_CARD_BAR / 2 + 5, 24, l->dim);
+        ud_line(win, x + cw - 12, y + M_CARD_BAR / 2 - 5, x + cw - 22,
+                y + M_CARD_BAR / 2 + 5, 24, l->dim);
+        int tx = x + 4, ty = y + M_CARD_BAR, tw = cw - 8;
+        int th = M_CARD_H - M_CARD_BAR - 4;
+        if (!wpe_threados_thumbnail(toplevel,
+                                    webkit_web_view_get_wpe_view(tabs[i]->view),
+                                    tx, ty, tw, th))
+            ud_fill(win, tx, ty, tw, th, l->field);
+    }
+    /* the heading and the toolbar over whatever scrolled under them */
+    ud_fill(win, 0, 0, w, M_HEAD_H, l->line);
+    char head[32];
+    g_snprintf(head, sizeof(head), ntabs == 1 ? "%d tab" : "%d tabs", ntabs);
+    ud_text(win, M_GAP + 4, ud_baseline(0, M_HEAD_H, 17), head, l->text,
+            UD_BOLD, 17);
+    int y0 = h - M_BOT_H;
+    ud_fill(win, 0, y0, w, M_BOT_H, l->bg);
+    ud_fill(win, 0, y0, w, 1, l->line);
+    int cy = y0 + M_BOT_H / 2;
+    ud_line(win, w / 2 - 9, cy, w / 2 + 9, cy, 32, l->text);
+    ud_line(win, w / 2, cy - 9, w / 2, cy + 9, 32, l->text);
+    int dw = ud_width("Done", UD_BOLD, M_TEXT_PX);
+    ud_text(win, w - M_GAP - 8 - dw, ud_baseline(y0, M_BOT_H, M_TEXT_PX),
+            "Done", l->accent, UD_BOLD, M_TEXT_PX);
+}
+
+static void draw_mobile(void)
+{
+    int win = wpe_threados_toplevel_window(toplevel);
+    struct ud_look l;
+    ud_look(&l);
+    /* The address being typed: the phone's keyboard comes up for it */
+    static gboolean keyboard;
+    if (editing != keyboard) {
+        keyboard = editing;
+        win_keyboard(win, keyboard);
+    }
+    if (cards) {
+        draw_cards(win, &l);
+        return;
+    }
+    int w = win_w(), h = win_h();
+    WebKitWebView *v = tabs[front]->view;
+
+    /* The address, in its field */
+    ud_fill(win, 0, 0, w, M_TOP_H, l.bg);
+    int pw = w - 2 * M_PILL_X;
+    ud_round(win, M_PILL_X, M_PILL_Y, pw, M_PILL_H, M_PILL_H / 2, l.field);
+    if (editing)
+        ud_ring(win, M_PILL_X, M_PILL_Y, pw, M_PILL_H, M_PILL_H / 2,
+                l.accent);
+    char shown[256];
+    const char *text = editing ? typed
+                     : short_uri(shown_uri(v), shown, sizeof(shown));
+    int tx = M_PILL_X + 16, room = pw - 16 - 44;
+    int width = ud_width(text, UD_SANS, M_TEXT_PX);
+    if (editing && width > room)
+        tx -= width - room;
+    int base = ud_baseline(M_PILL_Y, M_PILL_H, M_TEXT_PX);
+    ud_clip(win, M_PILL_X + 12, M_PILL_Y, room + 4, M_PILL_H);
+    if (!*text && !editing)
+        ud_text(win, tx, base, "Search or type an address", l.dim, UD_SANS,
+                M_TEXT_PX);
+    int end = ud_text(win, tx, base, text, l.text, UD_SANS, M_TEXT_PX);
+    if (editing)
+        ud_fill(win, *text ? end + 1 : tx, M_PILL_Y + 10, 2, M_PILL_H - 20,
+                l.accent);
+    ud_unclip(win);
+    /* reload, or stop while it loads, at the field's end */
+    int rx = M_PILL_X + pw - 24, ry = M_PILL_Y + M_PILL_H / 2;
+    if (tabs[front]->loading) {
+        ud_line(win, rx - 6, ry - 6, rx + 6, ry + 6, 28, l.text);
+        ud_line(win, rx + 6, ry - 6, rx - 6, ry + 6, 28, l.text);
+    } else {
+        ud_ring(win, rx - 8, ry - 8, 16, 16, 8, l.text);
+        ud_fill(win, rx + 2, ry - 9, 8, 7, l.field);
+        ud_line(win, rx + 2, ry - 8, rx + 8, ry - 8, 24, l.text);
+        ud_line(win, rx + 8, ry - 8, rx + 8, ry - 2, 24, l.text);
+    }
+    ud_fill(win, 0, M_TOP_H - 2, w, 2, l.bg);
+    if (tabs[front]->loading)
+        ud_fill(win, 0, M_TOP_H - 2, (int)(w * tabs[front]->progress), 2,
+                l.accent);
+
+    /* The toolbar */
+    int y0 = h - M_BOT_H, cy = y0 + M_BOT_H / 2;
+    ud_fill(win, 0, y0, w, M_BOT_H, l.bg);
+    ud_fill(win, 0, y0, w, 1, l.line);
+    chevron(win, button_x(0), cy, 1,
+            webkit_web_view_can_go_back(v) ? l.text : l.line);
+    chevron(win, button_x(1), cy, 0,
+            webkit_web_view_can_go_forward(v) ? l.text : l.line);
+    int hx = button_x(2);                         /* home: a house */
+    ud_line(win, hx - 9, cy - 1, hx, cy - 9, 28, l.text);
+    ud_line(win, hx, cy - 9, hx + 9, cy - 1, 28, l.text);
+    ud_line(win, hx - 7, cy - 2, hx - 7, cy + 8, 28, l.text);
+    ud_line(win, hx + 7, cy - 2, hx + 7, cy + 8, 28, l.text);
+    ud_line(win, hx - 7, cy + 8, hx + 7, cy + 8, 28, l.text);
+    int bx = button_x(3);                         /* the tabs, counted */
+    ud_ring(win, bx - 11, cy - 11, 22, 22, 5, l.text);
+    ud_ring(win, bx - 10, cy - 10, 20, 20, 4, l.text);
+    char count[8];
+    g_snprintf(count, sizeof(count), "%d", ntabs);
+    ud_text_mid(win, bx - 11, cy - 11, 22, 22, count, l.text, UD_BOLD, 12);
+    int nx = button_x(4);                         /* a new tab */
+    ud_line(win, nx - 9, cy, nx + 9, cy, 32, l.text);
+    ud_line(win, nx, cy - 9, nx, cy + 9, 32, l.text);
+}
+
+static void cards_show(gboolean on)
+{
+    if (cards == on)
+        return;
+    cards = on;
+    cards_scroll = 0;
+    editing = FALSE;
+    wpe_threados_toplevel_cover(toplevel, on);
+    say(on ? "[weft] tabs shown%s%s\n" : "[weft] tabs hidden%s%s\n", NULL,
+        NULL);
+    draw_band();
+}
+
+static void cards_tap(int x, int y)
+{
+    int w = win_w(), h = win_h();
+    if (y >= h - M_BOT_H) {
+        if (x >= w / 2 - 30 && x < w / 2 + 30) {
+            if (tab_new(NULL, NULL)) {
+                cards_show(FALSE);
+                tab_front(ntabs - 1);
+            }
+        } else if (x >= w - 100) {
+            cards_show(FALSE);
+        }
+        return;
+    }
+    if (y < M_HEAD_H)
+        return;
+    for (int i = 0; i < ntabs; i++) {
+        int cx, cy, cw;
+        card_box(i, &cx, &cy, &cw);
+        if (x < cx || x >= cx + cw || y < cy || y >= cy + M_CARD_H)
+            continue;
+        if (y < cy + M_CARD_BAR && x >= cx + cw - 36) {
+            tab_close(i);            /* its x */
+            draw_band();
+        } else {
+            cards_show(FALSE);
+            tab_front(i);
+        }
+        return;
+    }
+}
+
+static void mobile_tap(int x, int y)
+{
+    WebKitWebView *v = tabs[front]->view;
+    if (y < M_TOP_H) {
+        int rx = M_PILL_X + (win_w() - 2 * M_PILL_X) - 24;
+        if (x >= rx - 20) {
+            if (tabs[front]->loading)
+                webkit_web_view_stop_loading(v);
+            else
+                webkit_web_view_reload(v);
+        } else {
+            address_edit();
+        }
+        return;
+    }
+    editing = FALSE;
+    int b = x * M_BUTTONS / MAX(win_w(), 1);
+    switch (b) {
+    case 0: webkit_web_view_go_back(v); break;
+    case 1: webkit_web_view_go_forward(v); break;
+    case 2: webkit_web_view_load_html(v, start_page, NULL); break;
+    case 3: cards_show(TRUE); return;
+    case 4:
+        if (tab_new(NULL, NULL))
+            tab_front(ntabs - 1);
+        return;
+    }
+    draw_band();
+}
+
+/* A finger on the bands, or anywhere on the cards */
+static gboolean mobile_event(int type, int x, int y)
+{
+    int h = win_h();
+    gboolean band = cards || y < M_TOP_H || y >= h - M_BOT_H;
+    switch (type) {
+    case WEV_CLICK:
+        if (!band && editing) {
+            editing = FALSE;
+            draw_band();
+        }
+        return band;
+    case WEV_PRESS:
+        pressed_on_band = band;
+        press_x = x;
+        press_y = y;
+        press_scroll = cards_scroll;
+        press_moved = FALSE;
+        return band;
+    case WEV_DRAG:
+        if (!pressed_on_band)
+            return FALSE;
+        if (abs(y - press_y) + abs(x - press_x) > 8)
+            press_moved = TRUE;
+        if (cards && press_moved) {
+            int s = press_scroll - (y - press_y);
+            cards_scroll = s < 0 ? 0 : MIN(s, cards_room());
+            draw_band();
+        }
+        return TRUE;
+    case WEV_RELEASE:
+        if (!pressed_on_band)
+            return FALSE;
+        pressed_on_band = FALSE;
+        if (!press_moved) {
+            if (cards)
+                cards_tap(press_x, press_y);
+            else
+                mobile_tap(press_x, press_y);
+        }
+        return TRUE;
+    }
+    return band;
+}
+
 /* The window's events, before the page has them (wpethreados.h) */
 static gboolean band_event(gpointer data, int type, int x, int y, int val)
 {
     (void)data;
+    if (mobile && (type == WEV_CLICK || type == WEV_PRESS ||
+                   type == WEV_DRAG || type == WEV_RELEASE ||
+                   type == WEV_SCROLL || type == WEV_ALTCLICK))
+        return mobile_event(type, x, y);
     switch (type) {
     case WEV_SIZE:
         draw_band();
@@ -629,6 +991,44 @@ static gboolean band_event(gpointer data, int type, int x, int y, int val)
     return FALSE;
 }
 
+/* The agent: a phone's, a tablet's or a computer's (above) */
+static void set_agent(WebKitSettings *s)
+{
+    char ua[256];
+    if (!touch)
+        g_snprintf(ua, sizeof(ua), "Mozilla/5.0 (ThreadOS " THREADOS_VERSION
+                   "; Linux " AGENT_ARCH ") " AGENT_ENGINE " Safari/605.1.15 "
+                   "Weft/" THREADOS_VERSION);
+    else
+        g_snprintf(ua, sizeof(ua), "Mozilla/5.0 (Linux; Android 10; "
+                   "ThreadOS " THREADOS_VERSION ") " AGENT_ENGINE " %s"
+                   "Safari/605.1.15 Weft/" THREADOS_VERSION,
+                   win_w() < TABLET_W ? "Mobile " : "");
+    webkit_settings_set_user_agent(s, ua);
+    say("[weft] user agent %s%s\n", ua, NULL);
+}
+
+/* The languages the system is set to (the PC's "language" setting, the
+   phone's in Settings) first, English after: Accept-Language, which is
+   what a site writes its pages in */
+static void set_languages(void)
+{
+    struct cfg_entry e;
+    const char *lang = "en";
+    for (uint32_t i = 0; sys_cfg_get(i, &e) == 0; i++)
+        if (!strcmp(e.name, "language")) {
+            lang = !strcmp(e.value, "pl") ? "pl" : "en";
+            break;
+        }
+    static const char *const pl[] = { "pl-PL", "pl", "en-US", "en", NULL };
+    static const char *const en[] = { "en-US", "en", NULL };
+    webkit_web_context_set_preferred_languages(
+        webkit_web_context_get_default(),
+        (const char *const *)(!strcmp(lang, "pl") ? pl : en));
+    say("[weft] languages %s%s\n", !strcmp(lang, "pl") ? "pl-PL, pl, en-US, en"
+                                                    : "en-US, en", NULL);
+}
+
 /* --- The program ---------------------------------------------------- */
 
 int main(int argc, char **argv)
@@ -660,11 +1060,27 @@ int main(int argc, char **argv)
         fprintf(stderr, "weft: no window\n");
         return 1;
     }
-    wpe_threados_toplevel_set_chrome(toplevel, CHROME_H, band_event, NULL);
+    /* On a touchscreen, a mobile browser's bands; and pages in the
+       system's dark look when it has it (prefers-color-scheme) */
+    touch = wpe_threados_toplevel_touch(toplevel);
+    mobile = touch;
+    struct ud_look look;
+    ud_look(&look);
+    wpe_settings_set_boolean(wpe_display_get_settings(display),
+                             WPE_SETTING_DARK_MODE, look.dark != 0,
+                             WPE_SETTINGS_SOURCE_APPLICATION, NULL);
+    if (mobile) {
+        wpe_threados_toplevel_set_bottom(toplevel, M_BOT_H);
+        wpe_threados_toplevel_set_chrome(toplevel, M_TOP_H, band_event, NULL);
+    } else {
+        wpe_threados_toplevel_set_chrome(toplevel, CHROME_H, band_event, NULL);
+    }
 
     /* (No EGL and no GPU: the web process paints pages on the processor
        by itself - apps/webkit/patches/web-process-without-egl.patch) */
     settings = webkit_settings_new();
+    set_agent(settings);
+    set_languages();
     /* Cookies and the cache in memory: the disk is TFS3's 32 MiB, and a
        system started from a stick may have none */
     session = webkit_network_session_new_ephemeral();

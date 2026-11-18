@@ -246,15 +246,13 @@ static int keys(struct key *out)
     return n;
 }
 
-/* A letter in capitals: ASCII by arithmetic, the Polish ones are their
-   own keys */
-static void type(const char *s)
+/* What Notes is typed: text, or "\b" to take the last character */
+static void back(void);
+static void note_type(const char *s)
 {
-    char up[2] = { 0, 0 };
-    if (kb_shift && kb_layer == KB_LETTERS && s[0] >= 'a' && s[0] <= 'z' &&
-        !s[1]) {
-        up[0] = (char)(s[0] - 'a' + 'A');
-        s = up;
+    if (s[0] == '\b') {
+        back();
+        return;
     }
     int n = (int)strlen(s);
     if (note_len + n > NOTES_MAX)
@@ -262,7 +260,6 @@ static void type(const char *s)
     memcpy(note + note_len, s, (size_t)n);
     note_len += n;
     note[note_len] = 0;
-    kb_shift = 0;               /* once, as a phone's shift is */
 }
 
 static void back(void)
@@ -343,7 +340,22 @@ void notes_draw(void)
         ui_font_text(UI_SANS, NOTES_PX, NOTES_TEXT_X, NOTES_TEXT_Y,
                      "Type a note", t.muted);
     gfx_fill(cx + 1, cy - 16, 2, 20, mob_accent(), 255);  /* the cursor */
+    mob_kb_draw();
+    mob_pill(t.fg);
+}
 
+/* --- The keyboard: Notes', and programs' (mobile.c) -------------------- */
+
+int mob_kb_top(void)
+{
+    return NOTES_KB_Y - 8;
+}
+
+void mob_kb_draw(void)
+{
+    struct mob_theme t;
+    mob_theme(&t);
+    int lw = video_w(), lh = video_h();
     gfx_fill(0, NOTES_KB_Y - 8, lw, lh - NOTES_KB_Y + 8, t.line, 255);
     struct key k[48];
     int count = keys(k);
@@ -366,10 +378,9 @@ void notes_draw(void)
         }
         mob_centred(UI_SANS, px, kx, ky + px / 3, k[i].text, ink);
     }
-    mob_pill(t.fg);
 }
 
-int notes_tap(int x, int y)
+int mob_kb_tap(int x, int y, void (*emit)(const char *s))
 {
     struct key k[48];
     int count = keys(k);
@@ -377,10 +388,23 @@ int notes_tap(int x, int y)
         if (!inside(x, y, k[i].x, k[i].y, k[i].w, NOTES_KEY_H))
             continue;
         switch (k[i].kind) {
-        case K_CHAR:   type(k[i].text); break;
-        case K_SPACE:  type(" "); break;
-        case K_ENTER:  type("\n"); break;
-        case K_BACK:   back(); break;
+        case K_CHAR: {
+            /* a capital: ASCII by arithmetic, the Polish ones are keys
+               of their own; shift once, as a phone's is */
+            const char *s = k[i].text;
+            char up[2] = { 0, 0 };
+            if (kb_shift && kb_layer == KB_LETTERS && s[0] >= 'a' &&
+                s[0] <= 'z' && !s[1]) {
+                up[0] = (char)(s[0] - 'a' + 'A');
+                s = up;
+            }
+            emit(s);
+            kb_shift = 0;
+            break;
+        }
+        case K_SPACE:  emit(" "); break;
+        case K_ENTER:  emit("\n"); break;
+        case K_BACK:   emit("\b"); break;
         case K_SHIFT:
             if (kb_layer == KB_LETTERS)
                 kb_shift = !kb_shift;
@@ -397,6 +421,11 @@ int notes_tap(int x, int y)
         return 1;
     }
     return 0;
+}
+
+int notes_tap(int x, int y)
+{
+    return mob_kb_tap(x, y, note_type);
 }
 
 /* --- Calculator -------------------------------------------------------- */
@@ -766,7 +795,7 @@ static const struct srow main_rows[] = {
     { "Sound & notifications", R_LINK, 0, P_SOUND },
     { "Battery", R_LINK, 0, P_BATTERY },
     { "Navigation", R_LINK, 0, P_NAV },
-    { "Date & time", R_LINK, 0, P_TIME },
+    { "Language & time", R_LINK, 0, P_TIME },
     { "About phone", R_ABOUT, 0, 0 },
 };
 static const struct srow network_rows[] = {
@@ -778,6 +807,8 @@ static const struct srow network_rows[] = {
 static const struct srow display_rows[] = {
     { "Brightness", R_SLIDER, P(brightness), 0 },
     { "Display size", R_LINK, 0, P_SIZE },
+    { "Portrait", R_CHOICE, P(landscape), 0 },
+    { "Landscape", R_CHOICE, P(landscape), 1 },
 };
 static const struct srow look_rows[] = {
     { "Matte", R_CHOICE, P(theme), MOB_THEME_MATTE },
@@ -824,6 +855,9 @@ static const struct srow nav_rows[] = {
 static const struct srow time_rows[] = {
     { "24-hour clock", R_SWITCH, P(clock24), 0 },
     { "Time zone", R_VALUE, 0, V_ZONE },
+    { "Language: English", R_CHOICE, P(language), 0 },
+    { "Language: Polish", R_CHOICE, P(language), 1 },
+    { "Programs and web pages are told it.", R_NOTE, 0, 0 },
 };
 
 #define ROWS(r) r, (int)(sizeof(r) / sizeof(r[0]))
@@ -840,7 +874,7 @@ static const struct spage {
     { "Sound", ROWS(sound_rows), P_MAIN },
     { "Battery", ROWS(battery_rows), P_MAIN },
     { "Navigation", ROWS(nav_rows), P_MAIN },
-    { "Date & time", ROWS(time_rows), P_MAIN },
+    { "Language & time", ROWS(time_rows), P_MAIN },
     { "Display size", ROWS(size_rows), P_DISPLAY },
     { "Wallpaper", ROWS(wallpaper_rows), P_LOOK },
     { "Appearance", ROWS(look_rows), P_MAIN },
@@ -1016,6 +1050,10 @@ static void changed(const struct srow *r, int value)
         mob_wallpaper_changed();
     if (r->pref == P(size))
         mob_set_size(value);
+    if (r->pref == P(nav_buttons))
+        mob_windows_fit();
+    if (r->pref == P(landscape))
+        mob_set_orientation(value);
     if (r->pref == P(volume))
         vsnd_volume(value, -1);
     if (r->kind == R_CHOICE && r->pref == P(theme))

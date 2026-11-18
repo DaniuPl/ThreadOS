@@ -12,5 +12,9 @@ void video_set_brightness(int level);
 /* Panel pixels to sixteen logical ones from now on (the phone's display
    size): 32 is two to one */
 void video_set_scale(int scale16);
+/* On its side (1) or upright (0): the screen's width and height
+   swapped; and which it is */
+int video_set_landscape(int on);
+int video_landscape(void);
 
 #endif

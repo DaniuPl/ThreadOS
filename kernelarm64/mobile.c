@@ -87,7 +87,10 @@
 #define MOB_HINT_UP    44       /* from the bottom */
 #define MOB_PILL_W     120
 #define MOB_PILL_UP    18       /* the home indicator, from the bottom */
-#define MOB_EDGE       56       /* a swipe home starts this near the bottom */
+#define MOB_EDGE       56       /* a swipe home starts this near the bottom;
+                                   a tap there is the program's */
+#define MOB_SAFE_UP    20       /* below programs' windows: the home
+                                   indicator's own strip */
 #define MOB_TITLE_PX   22
 #define MOB_TITLE_Y    68
 #define MOB_ROW_PX     15
@@ -387,6 +390,32 @@ static void clear_canvas(void);
 /* The display sizes: panel pixels to sixteen logical ones */
 static const int size_k16[MOB_SIZES] = { 32, 28, 24 };
 
+/* Programs' windows end above the home indicator's strip, or above
+   Android's buttons */
+void mob_windows_fit(void)
+{
+    int up = mob_prefs.nav_buttons ? MOB_NAV_UP : MOB_SAFE_UP;
+    winmob_set_bottom(video_ph() - up * video_k() / 16);
+}
+
+/* Turned on its side or upright: the screen's width and height swap,
+   and everything laid out on them is laid out again - home, the
+   wallpaper, Draw's page, programs' windows (each told its new size) */
+void mob_set_orientation(int landscape)
+{
+    if (video_set_landscape(landscape) < 0)
+        return;
+    mob_prefs.landscape = video_landscape();
+    canvas.w = video_pw();
+    canvas.h = video_ph();
+    canvas.stride = video_pw();
+    winmob_reshape(video_pw(), win_top, video_ph());
+    paint_wallpaper();
+    mob_set_size(mob_prefs.size);
+    printk("[mobile] %s, %dx%d\n", mob_prefs.landscape ? "landscape" :
+           "portrait", lw, lh);
+}
+
 void mob_set_size(int which)
 {
     if (which < 0 || which >= MOB_SIZES)
@@ -397,6 +426,8 @@ void mob_set_size(int which)
     lw = video_w();
     lh = video_h();
     touch_screen(lw, lh);
+    mob_windows_fit();
+    winmob_rescale();
     /* Draw's page is panel pixels: drawn on at the new size from now */
     canvas.k = video_k();
     clear_canvas();
@@ -1036,7 +1067,15 @@ static void draw_window(void)
              255);
     status_bar(WHITE);
     winmob_draw(shown);
+    /* the program waits for typing: the keyboard over its bottom */
+    if (winmob_keyboard(shown))
+        mob_kb_draw();
     pill(0x8E8E93);
+}
+
+static void type_into_window(const char *s)
+{
+    winmob_type(shown, s);
 }
 
 static const char *screen_name(int s);
@@ -1454,7 +1493,7 @@ static void tap(int x, int y)
     }
 }
 
-static struct { int on, x0, y0, program; } finger;
+static struct { int on, x0, y0, program, edge; } finger;
 
 /* Where the phone's own bottom begins: the home gesture's edge, or
    the bar of Android's buttons */
@@ -1484,7 +1523,15 @@ static void touch(const struct touch_event *e)
            phone's; the rest of a window is its program's */
         finger.program = !shade && screen == APP_WINDOW &&
                          e->y * video_k() / 16 >= win_top &&
-                         e->y < bottom_edge();
+                         e->y < bottom_edge() &&
+                         !(winmob_keyboard(shown) && e->y >= mob_kb_top());
+        /* In the home gesture's edge a swipe up is the phone's, but a
+           tap is still the program's: it is told once the finger lifts
+           where it went down */
+        finger.edge = !shade && screen == APP_WINDOW && !finger.program &&
+                      !mob_prefs.nav_buttons && e->y >= bottom_edge() &&
+                      e->y < lh - MOB_SAFE_UP &&
+                      !(winmob_keyboard(shown) && e->y >= mob_kb_top());
         if (finger.program)
             to_program(WEV_PRESS, e->x, e->y);
         return;
@@ -1547,7 +1594,16 @@ static void touch(const struct touch_event *e)
         else if (screen >= APP_ABOUT && !mob_prefs.nav_buttons &&
                  finger.y0 >= lh - MOB_EDGE)
             go(HOME, "swipe up from the edge");
+    } else if (adx <= 12 && ady <= 12 && finger.edge) {
+        to_program(WEV_PRESS, finger.x0, finger.y0);
+        to_program(WEV_RELEASE, finger.x0, finger.y0);
     } else if (adx <= 12 && ady <= 12 && !finger.program) {
+        if (!shade && screen == APP_WINDOW && winmob_keyboard(shown) &&
+            finger.y0 >= mob_kb_top()) {
+            if (mob_kb_tap(finger.x0, finger.y0, type_into_window))
+                dirty = 1;
+            return;
+        }
         tap(finger.x0, finger.y0);
     }
 }
@@ -1575,6 +1631,8 @@ int mobile_init(const struct mobile_info *arg)
        it is at the largest size */
     win_top = MOB_BAR_H * video_k() / 16;
     winmob_init(video_pw(), win_top, video_ph());
+    mob_windows_fit();
+    mob_prefs.landscape = video_landscape();
     /* The battery, as the machine reports it: QEMU's virt has none, and
        a test or an emulator gives one as a fw_cfg file of text */
     uint16_t item;

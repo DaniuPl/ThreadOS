@@ -102,18 +102,20 @@ TALL = (b'<!doctype html><html><head><meta charset="utf-8"><title>tall'
         b'width:200px;height:100px;background:#3366cc}'
         b'#bar{position:absolute;left:0;top:300px;width:100%;'
         b'height:100px;background:#22aa44}'
-        b'#band{position:absolute;left:0;top:1600px;width:100%;'
+        b'#band{position:absolute;left:0;top:800px;width:100%;'
         b'height:200px;background:#c03030}</style></head><body>'
         b'<div id="tap"></div><div id="bar"></div><div id="band"></div>'
         b"<script>document.getElementById('tap').onclick = () => {"
         b"  document.title = 'tapped'; };"
+        b"addEventListener('load', () => {"
+        b"  document.title = 'tall ' + innerWidth + ' ' + devicePixelRatio; });"
         b"let still;"
         b"addEventListener('scroll', () => { clearTimeout(still);"
         b"  still = setTimeout(() => {"
         b"    document.title = 'scrolled ' + Math.round(scrollY); }, 500); });"
         b'</script></body></html>')
 BAR_TOP, BAR_H = 300, 100
-BAND_TOP, BAND_H = 1600, 200
+BAND_TOP, BAND_H = 800, 200
 
 SCRIPT = r"""
 const r = id => { const b = document.getElementById(id)
@@ -420,6 +422,9 @@ def wheel(q, port, ox, oy):
     ok, _ = wait_colour(q, ox + 20, oy + BAR_TOP + 20, GREEN)
     check(f"the tall page loads, its green bar {BAR_TOP} pixels down",
           done is not None and ok)
+    size = wait_line(q, seen, "[weft] title tall ", 30)
+    check(f"as wide as the window, at one pixel to one ({size})",
+          size == f"[weft] title tall {define(SRC, 'WIDTH')} 1")
     q.mouse_goto(ox + 300, oy + 300)
     seen = len(q.serial())
     q.mouse_wheel(-2)
@@ -560,10 +565,12 @@ def main():
 
     # As a web server says it - a page served as bytes of no known type
     # is a download, which a browser does not show
+    agents = []
     for path, body in (("/page.html", PAGE), ("/two.html", TWO),
                        ("/three.html", THREE), ("/tall.html", TALL)):
         ROUTES[path] = (lambda b: lambda h, body: (
-            200, [("Content-Type", "text/html; charset=utf-8")], b))(body)
+            agents.append(h.headers.get("User-Agent") or ""),
+            (200, [("Content-Type", "text/html; charset=utf-8")], b))[1])(body)
     port, stop = start_http_server()
     work = tempfile.mkdtemp()
     iso = os.path.join(work, "t.iso")
@@ -590,6 +597,12 @@ def main():
             done = wait_line(q, seen, "[weft] load finished", 300)
             check(f"WebKit fetches and loads the page ({done})",
                   done is not None and "/page.html" in done)
+            ua = agents[0] if agents else ""
+            check(f"asking for it as ThreadOS 1.0's browser: {ua!r}",
+                  re.match(r"Mozilla/5\.0 \(ThreadOS 1\.0; Linux x86_64\) "
+                           r"AppleWebKit/[\d.]+ \(KHTML, like Gecko\) "
+                           r"Version/[\d.]+ Safari/[\d.]+ Weft/1\.0$", ua)
+                  is not None)
             if done is None or "/page.html" not in done:
                 time.sleep(5)
                 tell(q, seen)

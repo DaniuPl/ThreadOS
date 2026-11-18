@@ -159,6 +159,12 @@ typedef struct {
     int utf8_left;            /* bytes of it still to come */
     int win_w, win_h;         /* the window's content */
     int top;                  /* the program's own band above the page */
+    int bottom;               /* ... and below it (a phone's toolbar) */
+    int covered;              /* the program's own screen over the page */
+    /* The screen's pixels to one of the window's, in sixteenths (32 on
+       a phone at 200%): WebKit paints at that scale, and the page is
+       handed over in the screen's pixels, sharp */
+    int k;
     /* A finger, not a mouse (WEV_SIZE_TOUCH): where it went down, where
        it was last, and whether it has moved far enough to be scrolling */
     int touch;
@@ -197,6 +203,12 @@ int wpe_threados_toplevel_window(WPEToplevel *toplevel)
     return t ? t->win : -1;
 }
 
+gboolean wpe_threados_toplevel_touch(WPEToplevel *toplevel)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    return t && t->touch;
+}
+
 void wpe_threados_toplevel_size(WPEToplevel *toplevel, int *w, int *h)
 {
     WPEToplevelThreadOS *t = ours(toplevel);
@@ -218,9 +230,31 @@ static gboolean view_to_page_size(WPEToplevel *toplevel, WPEView *view,
    page's size */
 static void page_resized(WPEToplevelThreadOS *t)
 {
-    int h = MAX(t->win_h - t->top, 1);
+    int h = MAX(t->win_h - t->top - t->bottom, 1);
     wpe_toplevel_resized(WPE_TOPLEVEL(t), t->win_w, h);
     wpe_toplevel_foreach_view(WPE_TOPLEVEL(t), view_to_page_size, NULL);
+}
+
+void wpe_threados_toplevel_set_bottom(WPEToplevel *toplevel, int bottom)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    if (!t)
+        return;
+    t->bottom = MAX(bottom, 0);
+    page_resized(t);
+}
+
+static WPEView *first_view(WPEToplevel *toplevel);
+
+void wpe_threados_toplevel_cover(WPEToplevel *toplevel, gboolean covered)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    if (!t || t->covered == !!covered)
+        return;
+    t->covered = !!covered;
+    WPEView *view = first_view(toplevel);
+    if (!covered && view)
+        wpe_threados_view_show_last(view);
 }
 
 void wpe_threados_toplevel_set_chrome(WPEToplevel *toplevel, int top,
@@ -236,7 +270,7 @@ void wpe_threados_toplevel_set_chrome(WPEToplevel *toplevel, int top,
     page_resized(t);
 }
 
-static void blit_rect(WPEViewThreadOS *self, int win, int top,
+static void blit_rect(WPEViewThreadOS *self, int win, int top, int k,
                       const guint8 *data, guint stride, int bw, int bh,
                       int x, int y, int w, int h)
 {
@@ -261,7 +295,10 @@ static void blit_rect(WPEViewThreadOS *self, int win, int top,
                last layer is opaque, and the desktop does not blend */
             for (int i = 0; i < n; i++)
                 self->row[i] = src[xx + i] & 0x00FFFFFFu;
-            win_blit32(win, xx, top + yy, n, 1, self->row);
+            if (k == 16)
+                win_blit32(win, xx, top + yy, n, 1, self->row);
+            else
+                win_blit_hi(win, xx, top + yy, n, 1, self->row);
         }
     }
 }
@@ -289,22 +326,31 @@ static gboolean show(WPEViewThreadOS *self, WPEBuffer *buffer,
                      const WPERectangle *damage, guint n_damage)
 {
     WPEToplevelThreadOS *t = ours(wpe_view_get_toplevel(WPE_VIEW(self)));
-    if (!t || t->win < 0 || !WPE_IS_BUFFER_SHM(buffer))
+    if (!t || t->win < 0 || !WPE_IS_BUFFER_SHM(buffer) || t->covered)
         return FALSE;
     WPEBufferSHM *shm = WPE_BUFFER_SHM(buffer);
     gsize size;
     const guint8 *data = g_bytes_get_data(wpe_buffer_shm_get_data(shm), &size);
     guint stride = wpe_buffer_shm_get_stride(shm);
+    /* The buffer is in the screen's pixels: the page's size times the
+       scale; the band above it, in the window's, is k/16 of them */
+    int k = t->k, top = t->top * k / 16;
     int bw = wpe_buffer_get_width(buffer);
-    int bh = MIN(wpe_buffer_get_height(buffer), t->win_h - t->top);
+    int bh = MIN(wpe_buffer_get_height(buffer),
+                 (t->win_h - t->bottom) * k / 16 - top);
     if (!data || bh <= 0 ||
         (gsize)stride * (gsize)wpe_buffer_get_height(buffer) > size)
         return FALSE;
     if (!n_damage)
-        blit_rect(self, t->win, t->top, data, stride, bw, bh, 0, 0, bw, bh);
+        blit_rect(self, t->win, top, k, data, stride, bw, bh, 0, 0, bw, bh);
+    /* (the damage is the page's, in its own pixels: the screen's are
+       k/16 as many, a pixel more each way for the parts) */
     for (guint i = 0; i < n_damage; i++)
-        blit_rect(self, t->win, t->top, data, stride, bw, bh, damage[i].x,
-                  damage[i].y, damage[i].width, damage[i].height);
+        blit_rect(self, t->win, top, k, data, stride, bw, bh,
+                  damage[i].x * k / 16 - (k != 16),
+                  damage[i].y * k / 16 - (k != 16),
+                  damage[i].width * k / 16 + 2 * (k != 16),
+                  damage[i].height * k / 16 + 2 * (k != 16));
     return TRUE;
 }
 
@@ -356,6 +402,42 @@ void wpe_threados_view_show_last(WPEView *view)
     WPEBuffer *last = self->pending ? self->pending : self->committed;
     if (last)
         show(self, last, NULL, 0);
+}
+
+gboolean wpe_threados_thumbnail(WPEToplevel *toplevel, WPEView *view, int x,
+                                int y, int w, int h)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    WPEViewThreadOS *self = (WPEViewThreadOS *)view;
+    WPEBuffer *last = self ? (self->pending ? self->pending
+                                            : self->committed) : NULL;
+    if (!t || t->win < 0 || !last || !WPE_IS_BUFFER_SHM(last) || w <= 0 ||
+        h <= 0)
+        return FALSE;
+    WPEBufferSHM *shm = WPE_BUFFER_SHM(last);
+    gsize size;
+    const guint8 *data = g_bytes_get_data(wpe_buffer_shm_get_data(shm), &size);
+    guint stride = wpe_buffer_shm_get_stride(shm);
+    int bw = wpe_buffer_get_width(last), bh = wpe_buffer_get_height(last);
+    if (!data || bw <= 0 || bh <= 0 || (gsize)stride * (gsize)bh > size)
+        return FALSE;
+    /* The page's top, its width fitted to the box's: one source pixel
+       for each of the screen's, the nearest */
+    int k = t->k, px = x * k / 16, py = y * k / 16;
+    int pw = MIN(w * k / 16, BLIT_MAX), ph = h * k / 16;
+    for (int r = 0; r < ph; r++) {
+        int sy = (int)((gint64)r * bw / pw);
+        if (sy >= bh)
+            break;
+        const guint32 *src = (const guint32 *)(data + (gsize)sy * stride);
+        for (int c = 0; c < pw; c++)
+            self->row[c] = src[(gint64)c * bw / pw] & 0x00FFFFFFu;
+        if (k == 16)
+            win_blit32(t->win, px, py + r, pw, 1, self->row);
+        else
+            win_blit_hi(t->win, px, py + r, pw, 1, self->row);
+    }
+    return TRUE;
 }
 
 static void view_dispose(GObject *object)
@@ -546,8 +628,8 @@ static void handle(WPEToplevelThreadOS *self, WPEView *view,
                    const struct win_event *ev);
 
 /* How far a finger may wander and still have tapped, in the window's
-   pixels (two to a point on the phone) */
-#define TOUCH_SLOP 16
+   pixels */
+#define TOUCH_SLOP 8
 
 /* A finger on a touchscreen moves the page the way it moves: a drag is
    a scroll by what it moved - never a selection, which is what a
@@ -678,9 +760,14 @@ static gboolean poll_window(gpointer data)
     struct win_event ev;
     while (self->win >= 0 && win_poll(self->win, &ev) == 1) {
         if (ev.type == WEV_SIZE) {
+            int k = (ev.val >> 8) & 0xFF;
             self->win_w = ev.x;
             self->win_h = ev.y;
             self->touch = (ev.val & WEV_SIZE_TOUCH) != 0;
+            if (k && k != self->k) {
+                self->k = k;
+                wpe_toplevel_scale_changed(WPE_TOPLEVEL(self), k / 16.0);
+            }
             page_resized(self);
         }
         /* The program's band hears everything first, in the window's
@@ -699,14 +786,18 @@ static gboolean poll_window(gpointer data)
         if (ev.type == WEV_SIZE)
             continue;
         if (pointer_event(ev.type)) {
-            /* The page lies below the band. A press above it was the
-               band's; a drag that began on the page and went up there
-               is still the page's, at its top edge. */
+            /* The page lies between the bands. A press on one was the
+               band's; a drag that began on the page and went onto one
+               is still the page's, at its edge. Over a page the program
+               has covered, nothing is the page's. */
+            int page_h = self->win_h - self->top - self->bottom;
+            if (self->covered)
+                continue;
             ev.y -= self->top;
-            if (ev.y < 0) {
+            if (ev.y < 0 || ev.y >= page_h) {
                 if (ev.type != WEV_DRAG && ev.type != WEV_RELEASE)
                     continue;
-                ev.y = 0;
+                ev.y = ev.y < 0 ? 0 : page_h - 1;
             }
         }
         WPEView *view = first_view(WPE_TOPLEVEL(self));
@@ -735,6 +826,10 @@ static void toplevel_constructed(GObject *object)
     wpe_toplevel_resized(WPE_TOPLEVEL(self), display->width,
                          display->height);
     wpe_toplevel_state_changed(WPE_TOPLEVEL(self), WPE_TOPLEVEL_STATE_ACTIVE);
+    /* What the window first hears is its size - on a phone with its
+       scale and that it is touched: the program asks before it makes
+       its pages (wpe_threados_toplevel_touch) */
+    poll_window(self);
     self->poll_source = g_timeout_add(POLL_MS, poll_window, self);
 }
 
@@ -768,6 +863,7 @@ static gboolean toplevel_resize(WPEToplevel *toplevel, int width,
 static void wpe_toplevel_threados_init(WPEToplevelThreadOS *self)
 {
     self->win = -1;
+    self->k = 16;
     self->x = self->y = -1;
 }
 

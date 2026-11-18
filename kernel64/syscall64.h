@@ -199,6 +199,15 @@
    says the number is a thread's (tkill), 0 a program's (kill). */
 #define SYS64_SIGMASK    110
 #define SYS64_SIGSUSPEND 111
+/* Pixels at the panel's own resolution, into a window whose logical
+   pixels are larger (WEV_SIZE's val gives the scale): a1=winid,
+   a2=&{x, y, w, h, pixels} in the panel's pixels from the window's
+   corner. At one to one the same as SYS64_WIN_BLIT32. */
+#define SYS64_WIN_BLITHI 112
+/* A program waits for typing (a1 = winid, a2 = 1) or no longer does
+   (a2 = 0): a touchscreen's shell shows its keyboard. The PC's desktop
+   has one of wood and plastic, and answers 0. */
+#define SYS64_WIN_KEYBOARD 113
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

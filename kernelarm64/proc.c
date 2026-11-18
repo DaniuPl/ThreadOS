@@ -51,6 +51,8 @@
 #include "ipchost.h"
 #include "netglue.h"
 #include "winmob.h"
+#include "mobapps.h"
+#include "../kernel/include/desktop.h"
 #include "mobile.h"
 #include "vsnd.h"
 #include "../kernel/include/mic_info.h"
@@ -2120,7 +2122,8 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
         }
         return got;
     }
-    case SYS64_WIN_BLIT32: {
+    case SYS64_WIN_BLIT32:
+    case SYS64_WIN_BLITHI: {
         /* Bigger blocks than the PC's desktop takes (1024 pixels): a
            whole page at once, here */
         struct blit_cmd c;
@@ -2131,8 +2134,73 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
             c.w * c.h > 65536 ||
             !user_range(p, c.pixels, (uint64_t)c.w * (uint64_t)c.h * 4, 0))
             return -1;
+        if (n == SYS64_WIN_BLITHI)
+            return winmob_blit_hi((int)x[0], p->pid, c.x, c.y, c.w, c.h,
+                                  (const uint32_t *)(uintptr_t)c.pixels);
         return winmob_blit32((int)x[0], p->pid, c.x, c.y, c.w, c.h,
                              (const uint32_t *)(uintptr_t)c.pixels);
+    }
+    case SYS64_WIN_DRAW: {
+        /* The PC's struct: a shape or a text in the window */
+        struct {
+            int32_t op, x, y, w, h, r;
+            uint32_t rgb, rgb2;
+            int32_t a, font, px;
+            uint64_t s;
+        } c;
+        char s[256];
+        if (!user_range(p, x[1], sizeof(c), 0))
+            return -1;
+        memcpy(&c, (const void *)(uintptr_t)x[1], sizeof(c));
+        if (c.s && copy_string(p, c.s, s, sizeof(s)) < 0)
+            return -1;
+        struct win_draw d = { c.op, c.x, c.y, c.w, c.h, c.r, c.rgb, c.rgb2,
+                              c.a, c.font, c.px };
+        return winmob_draw_cmd((int)x[0], p->pid, &d, c.s ? s : 0);
+    }
+    case SYS64_WIN_KEYBOARD:
+        return winmob_set_keyboard((int)x[0], p->pid, (int)x[1]);
+    case SYS64_CFG_GET: {
+        /* The PC's settings as the phone has them: the language, which
+           a program tells the pages it fetches */
+        struct { char name[32], value[32], help[80]; } e;
+        if (x[0] != 0 || !user_range(p, x[1], sizeof(e), 1))
+            return -1;
+        memset(&e, 0, sizeof(e));
+        memcpy(e.name, "language", 9);
+        memcpy(e.value, mob_prefs.language ? "pl" : "en", 3);
+        memcpy(e.help, "Settings, Language & time", 26);
+        memcpy((void *)(uintptr_t)x[1], &e, sizeof(e));
+        return 0;
+    }
+    case SYS64_UI_LOOK: {
+        /* The phone's colours, in the order desktop.h gives the PC's */
+        uint32_t look[UI_LOOK_N];
+        struct mob_theme t;
+        if (!user_range(p, x[0], sizeof(look), 1))
+            return -1;
+        mob_theme(&t);
+        int dark = (int64_t)x[1] == 1 ? 1 : (int64_t)x[1] == 2 ? 0 :
+                   mob_prefs.dark;
+        if (dark != mob_prefs.dark) {
+            int was = mob_prefs.dark;
+            mob_prefs.dark = dark;
+            mob_theme(&t);
+            mob_prefs.dark = was;
+        }
+        look[0] = (uint32_t)dark;
+        look[1] = t.bg;
+        look[2] = t.key;
+        look[3] = t.fg;
+        look[4] = t.muted;
+        look[5] = t.line;
+        look[6] = t.card;
+        look[7] = mob_accent();
+        look[8] = 0xFFFFFF;
+        look[9] = 0xFF453A;
+        look[10] = 0x30D158;
+        memcpy((void *)(uintptr_t)x[0], look, sizeof(look));
+        return 0;
     }
     }
     return -1;
@@ -2413,6 +2481,11 @@ void proc_syscall(struct trap_frame *f)
     case SYS64_WIN_TITLE:
     case SYS64_WIN_POLL:
     case SYS64_WIN_BLIT32:
+    case SYS64_WIN_BLITHI:
+    case SYS64_WIN_DRAW:
+    case SYS64_UI_LOOK:
+    case SYS64_CFG_GET:
+    case SYS64_WIN_KEYBOARD:
         r = win_call(p, x[8], x);
         break;
     default:

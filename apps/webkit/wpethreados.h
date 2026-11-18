@@ -39,8 +39,23 @@ void wpe_threados_toplevel_set_chrome(WPEToplevel *toplevel, int top,
                                       WPEThreadOSChromeFunc func,
                                       gpointer data);
 int wpe_threados_toplevel_window(WPEToplevel *toplevel);
+/* A band across the bottom as well (a phone's toolbar): the page is
+   between the two, and the band's function hears the events on it */
+void wpe_threados_toplevel_set_bottom(WPEToplevel *toplevel, int bottom);
+/* The program's own screen over the page (a phone's tabs, side by
+   side): the page is not drawn or touched until it is uncovered, and
+   then its last frame is shown again */
+void wpe_threados_toplevel_cover(WPEToplevel *toplevel, gboolean covered);
+/* A view's last frame, its top fitted to the width of the box x, y,
+   w, h of the toplevel's window: a tab's picture among the others.
+   FALSE when it has none yet */
+gboolean wpe_threados_thumbnail(WPEToplevel *toplevel, WPEView *view, int x,
+                                int y, int w, int h);
 /* The window's content, band and page */
 void wpe_threados_toplevel_size(WPEToplevel *toplevel, int *w, int *h);
+/* Whether the window is worked by a finger - a phone's or a tablet's:
+   its pages are for a touchscreen */
+gboolean wpe_threados_toplevel_touch(WPEToplevel *toplevel);
 
 /* The last frame the view was given, into its window again (a tab that
    comes to the front) */

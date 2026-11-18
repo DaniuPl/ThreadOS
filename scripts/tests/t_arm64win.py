@@ -9,7 +9,14 @@ built against musl with the PC's user64/usys64.h. From outside - QEMU's
 screen and its tablet:
 
   the program's window is made, and its first event is its size: the
-  panel's width and its height less the status bar
+  screen's logical width and its height less the status bar and the
+  home indicator's strip, and the scale it is drawn at - 32/16 at the
+  phone's 200%
+
+  what it blits is drawn larger by that much, each pixel a block of the
+  panel's - the square's edges fall where twice its own put them - and
+  its text (WIN_DRAW) is drawn at the panel's own resolution, read
+  back as it was written
 
   made while the phone is locked, it is shown once the phone is opened,
   under the status bar: what the program drew, colour for colour,
@@ -17,7 +24,7 @@ screen and its tablet:
   square in the middle, the black one in the corner
 
   a tap in the square reaches the program as a click, a press and a
-  release at that point in the window's own pixels, and the square
+  release at that point in the window's own (logical) pixels, and the square
   turns yellow on the screen; a drag reaches it as a press, drags and
   a release along the way
 
@@ -59,6 +66,7 @@ GRID_X = _kernel_define(MOB, "MOB_GRID_X")
 GRID_STEP = _kernel_define(MOB, "MOB_GRID_STEP")
 GRID_Y = _kernel_define(MOB, "MOB_GRID_Y")
 EDGE = _kernel_define(MOB, "MOB_EDGE")
+SAFE = _kernel_define(MOB, "MOB_SAFE_UP")
 ROW_STEP = _kernel_define(MOB, "MOB_ROW_STEP")
 LW = Phone.LOGICAL[0]
 
@@ -76,9 +84,13 @@ def after_apps():
 WIN = "libc/tests/wintest.c"
 SQUARE = _kernel_define(WIN, "SQUARE")
 CORNER = _kernel_define(WIN, "CORNER")
+TEXT_X = _kernel_define(WIN, "TEXT_X")
+TEXT_Y = _kernel_define(WIN, "TEXT_Y")
+TEXT_PX = _kernel_define(WIN, "TEXT_PX")
 
 RED, BLUE = (0xE0, 0x20, 0x20), (0x20, 0x40, 0xE0)
 GREEN, YELLOW, BLACK = (0x20, 0xB0, 0x40), (0xF0, 0xD0, 0x20), (0, 0, 0)
+WHITE = (0xFF, 0xFF, 0xFF)
 TILE_COLOUR = (0x5E, 0x5C, 0xE6)
 PKG_COLOUR = (0xFF, 0x9F, 0x0A)
 
@@ -160,15 +172,18 @@ def main():
     try:
         out = q.wait_serial("[wintest] window", timeout=120)
         out = q.wait_serial("drawn", timeout=30)
-        m = re.search(r"\[wintest\] window (\d+), (\d+)x(\d+), drawn", out)
-        ww, wh = (int(m.group(2)), int(m.group(3))) if m else (0, 0)
+        m = re.search(r"\[wintest\] window (\d+), (\d+)x(\d+) at (\d+)/16, "
+                      r"text to (-?\d+), drawn", out)
+        ww, wh, k = ((int(m.group(2)), int(m.group(3)), int(m.group(4)))
+                     if m else (0, 0, 0))
         check(f"the window is made, and its first event is its size: the "
-              f"panel's width, its height less the status bar ({ww}x{wh})",
-              (ww, wh) == (360 * K, (640 - BAR) * K))
+              f"screen's logical width, its height less the status bar "
+              f"and the home indicator's strip ({ww}x{wh}), and its scale "
+              f"({k}/16)", (ww, wh, k) == (360, 640 - BAR - SAFE, 16 * K))
         top = BAR * K
 
         def win(x, y):          # the window's pixels to the panel's
-            return x, top + y
+            return x * K, top + y * K
 
         # Locked: the swipe that opens the phone shows the window
         q.touch([(180, 560), (180, 420), (180, 300)])
@@ -187,14 +202,25 @@ def main():
               "status bar: red above, blue below, the green square in the "
               "middle, the black corner - where the program drew them",
               poll_screen(q, drawn(GREEN)))
+        w, h, at = q.screen_raw()
+        sx, sy = win((ww - SQUARE) // 2, (wh - SQUARE) // 2)
+        edges = [at(sx - 1, sy + 40), at(sx, sy + 40),
+                 at(sx + SQUARE * K - 1, sy + 40), at(sx + SQUARE * K, sy + 40)]
+        check(f"drawn twice as large: the square {SQUARE * K} of the "
+              f"panel's pixels wide, from {sx} ({edges})",
+              edges == [RED, GREEN, GREEN, RED])
+        text = q.find_ui(TEXT_X * K, ww * K, top + TEXT_Y * K,
+                         px=TEXT_PX * K, face="bold", fg=WHITE, screen=(w, h, at))
+        check(f"and its text at the panel's own resolution ({text!r})",
+              text == "Hello phone")
 
         # A tap in the square, at its middle
         seen = len(q.serial())
-        lx, ly = 180, BAR + (mid[1] // K)
+        lx, ly = 180, BAR + mid[1]
         q.tap(lx, ly)
         q.wait_serial("[wintest] the square is", timeout=20)
         said = q.serial()[seen:].replace("\r", "")
-        px, py = lx * K, ly * K - top
+        px, py = lx, ly - BAR
         events = re.findall(r"^\[wintest\] (click|press|drag|release) "
                             r"(\d+),(\d+)$", said, re.M)
         check(f"a tap reaches the program as a click, a press and a "
@@ -215,7 +241,7 @@ def main():
         events = [(k, int(x), int(y)) for k, x, y in re.findall(
             r"^\[wintest\] (click|press|drag|release) (\d+),(\d+)$", said,
             re.M)]
-        want = [(x * K, y * K - top) for x, y in path]
+        want = [(x, y - BAR) for x, y in path]
         check(f"a drag reaches it as a press, drags and a release along "
               f"the way ({events})",
               events[:2] == [("click",) + want[0], ("press",) + want[0]] and
@@ -243,7 +269,7 @@ def main():
 
         # The corner ends the program
         seen = len(q.serial())
-        q.tap(CORNER // (2 * K), BAR + CORNER // (2 * K))
+        q.tap(CORNER // 2, BAR + CORNER // 2)
         q.wait_serial("[mobile] home (its program ended)", timeout=30)
         out = q.wait_serial("pages free", timeout=30)
         check("a tap in the corner ends the program with 0, and the phone "

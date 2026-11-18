@@ -9974,3 +9974,69 @@ works and is checked by `make test`.
       dot, counting time, its row and length - plays back as the very
       samples the microphone was given. Home has four apps now, so
       t_arm64win finds the tile after them by the grid's columns.
+- [x] **A mobile browser on the phone and the tablet; the screen turns**
+      (kernelarm64/winmob.c, winmob.h, proc.c, mobile.c, mobapps.c,
+      mobapps.h, video.c, video64.h, kmain.c, kernel/desktop.c,
+      kernel/include/desktop.h, kernel64/syscall64.c, syscall64.h,
+      user64/usys64.h, apps/webkit/wpethreados.c, wpethreados.h,
+      weft.c, libc/tests/wintest.c, scripts/tests/t_arm64win.py,
+      t_arm64weft.py, t_arm64tablet.py, t_webkit.py)
+      Weft loaded real sites on the phone as a desktop does: WebKit
+      painted at one pixel to one, so a 720-pixel panel was a 720-pixel
+      page, and it named itself a Linux desktop, so sites sent desktop
+      pages. A program's window on the phone is now in logical pixels,
+      as the shell's are: WEV_SIZE says 360 x 592 and, in its val, the
+      scale (32/16 at 200%); what a program blits is drawn as blocks of
+      the panel's, its shapes and text (WIN_DRAW, now on the phone too,
+      and UI_LOOK, the phone's colours) at the panel's own resolution,
+      and WIN_BLITHI (new, on both kernels) takes the panel's pixels as
+      they are. Weft's platform hands WebKit the scale
+      (wpe_toplevel_scale_changed): pages are laid out 360 CSS pixels
+      wide and painted sharp at twice that. WPE has no meta viewport
+      (an iOS feature in WebKit), so the width is what responsive pages
+      go by. Weft names itself ThreadOS 1.0 everywhere - "ThreadOS 1.0;
+      Linux x86_64" on the PC; on a touchscreen "Linux; Android 10;
+      ThreadOS 1.0" and "Mobile Safari" (a tablet without "Mobile"):
+      tried against google.com, an agent without "Android" is sent its
+      page for twenty-year-old phones and WebKit's own mobile agent
+      ("like Android 4.4") its old one, while "Android 10" - what
+      Android's browsers all give since they stopped giving their own -
+      gets the newest. Pages hear the system's language (the PC's
+      "language" setting, the phone's new one in Settings, Language &
+      time) as Accept-Language, and its dark look as
+      prefers-color-scheme.
+      On a touchscreen Weft is a mobile browser, as Safari and Brave
+      are: the address alone at the top in a rounded field, without its
+      scheme; a toolbar at the bottom - back, forward, home, the tabs
+      counted, a new tab; and the tabs behind that button as cards in
+      as many columns as fit, each with its title, an x and the picture
+      of its page as it was left (the platform's thumbnail of a view's
+      last frame). The page lies between the two bands (a bottom band
+      and a cover for the cards are new in the platform). A tap on the
+      address brings up the phone's keyboard - Notes' keyboard, shared
+      now, over the window of a program that asks for it
+      (SYS64_WIN_KEYBOARD; the PC answers 0) - whose keys come to the
+      program as WEV_KEY bytes, Polish letters as UTF-8. Programs'
+      windows end above the home indicator's strip (or Android's
+      buttons), and in the home gesture's edge a tap is the program's:
+      only a swipe up is the phone's.
+      A tablet is a larger phone: the same shell and browser. It starts
+      on its side and a phone upright - a screen whose shorter side is
+      600 logical pixels or more is a tablet's, Android's line - and
+      Settings, Display turn either: ramfb is described again the other
+      way round, QEMU's window and touchscreen turning with it, and the
+      shell, the wallpaper and programs' windows are laid out anew, each
+      program told its new size.
+      t_arm64win: the window 360 x 592 at 32/16, the square's edges at
+      twice its own, text written through WIN_DRAW read back.
+      t_arm64weft: the agent, Chromium's measurements at 360 x 484, the
+      boxes at twice the size, the address without its scheme, the
+      toolbar counting one tab, an address typed on the keyboard and
+      gone to with Enter; the tall page 360 wide at a ratio of 2,
+      scrolled by a drag exactly as far as the screen shows; + opening
+      a tab, the cards titled, the first with its page's red band in
+      its picture, a card bringing its tab back and its x closing one.
+      t_arm64tablet: a 1600 x 2560 panel comes up 2560 x 1600, home's
+      grid in one row, the dock centred, turned upright and back from
+      Settings, a phone given 1280 x 720 upright; Weft 1280 CSS pixels
+      wide with the tablet's agent, scrolled. t_webkit: the PC's agent.

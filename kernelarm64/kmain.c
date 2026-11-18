@@ -52,6 +52,7 @@
 #include "../kernel/include/random.h"
 #include "touch.h"
 #include "mobile.h"
+#include "mobapps.h"
 #include "proc.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/heap.h"
@@ -493,10 +494,19 @@ void kmain(uint64_t x0)
             if (v[i] == 'x')
                 for (i++; v[i] >= '0' && v[i] <= '9'; i++)
                     b = b * 10 + (v[i] - '0');
-            if (a >= 320 && a <= 2048 && b >= 480 && b <= 4096) {
+            if (a >= 320 && a <= 4096 && b >= 320 && b <= 4096) {
                 pw = a;
                 ph = b;
             }
+        }
+        /* A tablet starts on its side, a phone upright: one whose
+           shorter side is 600 logical pixels or more at the phone's
+           200% is a tablet (Android's line between the two) */
+        int shorter = pw < ph ? pw : ph;
+        if ((shorter / 2 >= 600) != (pw > ph)) {
+            int t = pw;
+            pw = ph;
+            ph = t;
         }
         int r = video_ramfb_init(pw, ph, 32);
         if (r == 0) {
@@ -563,6 +573,10 @@ void kmain(uint64_t x0)
             mi.scale = n;
         }
     }
+    /* lang=pl: the language Settings start with, as a phone set up in
+       Poland would */
+    if (has_word(fi.bootargs, "lang=pl"))
+        mob_prefs.language = 1;
     mi.mem_mib = (uint32_t)(fi.mem_total >> 20);
     mi.screen_w = video_pw();
     mi.screen_h = video_ph();

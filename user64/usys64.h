@@ -85,6 +85,8 @@
 #define SYS64_SEM_WAIT 66
 #define SYS64_SEM_POST 67
 #define SYS64_WIN_DRAW 68
+#define SYS64_WIN_BLITHI 112
+#define SYS64_WIN_KEYBOARD 113
 #define SYS64_UI_LOOK  69
 #define SYS64_NOTIFY   70
 #define SYS64_BG_PREVIEW 71
@@ -825,6 +827,24 @@ static inline int64_t win_blit32(int win, int x, int y, int w, int h,
 {
     struct win_blit_cmd c = { x, y, w, h, (const uint8_t *)pixels };
     return syscall64(SYS64_WIN_BLIT32, win, (int64_t)(uintptr_t)&c);
+}
+
+/* The same in the screen's own pixels, for a window whose pixels the
+   screen draws larger (WEV_SIZE's val, bits 8-15: sixteenths of the
+   panel's to one of the window's): x, y, w and h are the panel's,
+   from the window's corner */
+static inline int64_t win_blit_hi(int win, int x, int y, int w, int h,
+                                  const uint32_t *pixels)
+{
+    struct win_blit_cmd c = { x, y, w, h, (const uint8_t *)pixels };
+    return syscall64(SYS64_WIN_BLITHI, win, (int64_t)(uintptr_t)&c);
+}
+
+/* The program waits for typing, or no longer does: on a touchscreen
+   the shell shows its keyboard, whose keys come as WEV_KEY */
+static inline int64_t win_keyboard(int win, int on)
+{
+    return syscall64(SYS64_WIN_KEYBOARD, win, on);
 }
 
 static inline int64_t win_title(int win, const char *title)

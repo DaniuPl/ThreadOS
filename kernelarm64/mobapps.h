@@ -28,6 +28,11 @@ struct mob_prefs {
     int theme;                  /* the panels: MOB_THEME_* */
     int flashlight;             /* the torch: no LED on QEMU's virt, a
                                    driver's on a phone that has one */
+    int language;               /* what programs are told (the PC's
+                                   "language" setting): 0 en, 1 pl */
+    int landscape;              /* the screen on its side: a tablet's
+                                   from the start, a phone's when
+                                   turned */
 };
 
 #define MOB_THEME_MATTE  0      /* a tint over what is under them */
@@ -62,6 +67,10 @@ void mob_apply_saver(void);
 void mob_wallpaper_changed(void);
 /* The display size: everything drawn larger or smaller */
 void mob_set_size(int which);
+/* Programs' windows to the room the navigation leaves them */
+void mob_windows_fit(void);
+/* The screen on its side (1) or upright (0) */
+void mob_set_orientation(int landscape);
 /* The battery as the shell knows it: per cent, or -1 on mains power
    with no battery; *charging set */
 int mob_battery(int *charging);
@@ -91,6 +100,13 @@ void mob_chime(void);
 int rec_changes(void);
 void recorder_draw(void);
 int recorder_tap(int x, int y);
+
+/* The keyboard on the screen, Notes' and a program's: its top, drawn
+   across the bottom, and a tap on it - each key's text to 'emit', "\n"
+   for enter and "\b" for backspace; 1 when a key was hit */
+int mob_kb_top(void);
+void mob_kb_draw(void);
+int mob_kb_tap(int x, int y, void (*emit)(const char *s));
 
 /* Text helpers both use */
 char *mob_put(char *p, const char *s);
