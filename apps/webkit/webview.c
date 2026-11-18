@@ -1,14 +1,28 @@
-/* webview: a window with WebKit in it (WPE WebKit on ThreadOS)
+/* webview: the web browser on WebKit (WPE WebKit on ThreadOS)
  *
  *   webview [URL]
  *   webview --eval SCRIPT URL
  *   webview --trace URL       (every event from the desktop said too)
+ *   webview --proxy http://HOST:PORT URL
+ *                             (every page through that proxy: an
+ *                              https:// page by CONNECT, the rest asked
+ *                              of it by their whole address)
  *
  * The UI process of WebKit's three: it opens a window through the
  * ThreadOS platform (apps/webkit/wpethreados.c), and WebKit starts the
- * web process, which lays out and paints the page (wpewebproc), and the
- * network process, which fetches it (wpenetproc), and talks to them
+ * web process, which lays out and paints pages (wpewebproc), and the
+ * network process, which fetches them (wpenetproc), and talks to them
  * over socket pairs.
+ *
+ * The window is a browser's: tabs across the top, then back, forward,
+ * reload and the address field, a thin bar of how far a page has
+ * loaded, and the page under them. Each tab is a WebKit view of its
+ * own; only the one in front is in the window (wpe_view_set_toplevel),
+ * the others are kept, unmapped, as they were. Typing in the address
+ * field and pressing Enter goes there - an address without its scheme
+ * gets http://, and words are looked up. A link that opens a new window
+ * opens a tab. Ctrl+T, Ctrl+W, Ctrl+L and Ctrl+R are a new tab, closing
+ * this one, the address field and reload.
  *
  * What happens is said on standard output, a line each, so that the
  * tests can follow it (scripts/tests/t_webkit.py):
@@ -20,6 +34,8 @@
  *   [webview] eval <result>          (--eval: the script's value, as a
  *                                     string, once the page has loaded)
  *   [webview] load failed <uri>: <why>
+ *   [webview] go <uri>               (from the address field)
+ *   [webview] tab <n> of <count>     (the tab in front changed)
  */
 
 #include <stdio.h>
@@ -27,15 +43,66 @@
 #include <string.h>
 #include <wpe/webkit.h>
 #include "wpethreados.h"
+#include "udraw.h"
 
-/* The window's content; small enough for an 800 x 600 screen, which
-   is the tests' (scripts/tests/t_webkit.py reads these) */
+/* The page's part of the window; small enough, with the band above it,
+   for an 800 x 600 screen, which is the tests' (scripts/tests/
+   t_webkit.py reads these) */
 #define WIDTH  640
 #define HEIGHT 400
+
+/* The band: the tabs, the toolbar, the loading bar */
+#define TAB_H    26
+#define BAR_H    32
+#define PROG_H   2
+#define CHROME_H 60
+#define TAB_W    180         /* a tab at its widest */
+#define CLOSE_W  18          /* its close button, at its right end */
+#define PLUS_W   26          /* the new-tab button after the tabs */
+#define BTN_X    6           /* back, forward, reload: from here, */
+#define BTN_W    28          /* this wide, */
+#define BTN_STEP 30          /* this far apart */
+#define ADDR_X   100         /* the address field */
+#define ADDR_H   24
+#define TABS_MAX 8
+
+struct tab {
+    WebKitWebView *view;
+    char title[96];
+    double progress;
+    gboolean loading;
+};
 
 static GMainLoop *loop;
 static const char *eval_script;
 static int frame_said;
+
+static WPEDisplay *display;
+static WPEToplevel *toplevel;
+static WebKitSettings *settings;
+static WebKitNetworkSession *session;
+
+static struct tab *tabs[TABS_MAX];
+static int ntabs, front;
+
+/* The address field, while it has the keys */
+static gboolean editing, replace_all;
+static char typed[1024];
+
+static gboolean pressed_on_band;
+
+static void draw_band(void);
+static struct tab *tab_new(const char *uri, WebKitWebView *related);
+static void tab_front(int i);
+static void tab_close(int i);
+
+/* --- What the tests follow ----------------------------------------- */
+
+static void say(const char *fmt, const char *a, const char *b)
+{
+    printf(fmt, a ? a : "", b ? b : "");
+    fflush(stdout);
+}
 
 static void evaluated(GObject *object, GAsyncResult *result, gpointer data)
 {
@@ -44,58 +111,14 @@ static void evaluated(GObject *object, GAsyncResult *result, gpointer data)
     JSCValue *value = webkit_web_view_evaluate_javascript_finish(
         WEBKIT_WEB_VIEW(object), result, &error);
     if (!value) {
-        printf("[webview] eval failed: %s\n", error->message);
+        say("[webview] eval failed: %s%s\n", error->message, NULL);
         g_error_free(error);
     } else {
         char *s = jsc_value_to_string(value);
-        printf("[webview] eval %s\n", s);
+        say("[webview] eval %s%s\n", s, NULL);
         g_free(s);
         g_object_unref(value);
     }
-    fflush(stdout);
-}
-
-static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
-                         gpointer data)
-{
-    (void)data;
-    const char *uri = webkit_web_view_get_uri(view);
-    if (event == WEBKIT_LOAD_COMMITTED) {
-        printf("[webview] load committed %s\n", uri);
-    } else if (event == WEBKIT_LOAD_FINISHED) {
-        printf("[webview] load finished %s\n", uri);
-        if (eval_script)
-            webkit_web_view_evaluate_javascript(view, eval_script, -1, NULL,
-                                                NULL, NULL, evaluated, NULL);
-    }
-    fflush(stdout);
-}
-
-static gboolean load_failed(WebKitWebView *view, WebKitLoadEvent event,
-                            const char *uri, GError *error, gpointer data)
-{
-    (void)view;
-    (void)event;
-    (void)data;
-    printf("[webview] load failed %s: %s\n", uri, error->message);
-    fflush(stdout);
-    return FALSE;                    /* WebKit shows its error page */
-}
-
-static void title_changed(WebKitWebView *view, GParamSpec *pspec,
-                          gpointer data)
-{
-    (void)pspec;
-    (void)data;
-    const char *title = webkit_web_view_get_title(view);
-    if (!title || !*title)
-        return;
-    printf("[webview] title %s\n", title);
-    fflush(stdout);
-    WPEToplevel *toplevel =
-        wpe_view_get_toplevel(webkit_web_view_get_wpe_view(view));
-    if (toplevel)
-        wpe_toplevel_set_title(toplevel, title);
 }
 
 /* The first frame on the screen is said once: from then on the window
@@ -105,73 +128,574 @@ static gboolean watch_frames(gpointer data)
     (void)data;
     if (!frame_said && wpe_threados_frames_shown() > 0) {
         frame_said = 1;
-        printf("[webview] frame shown\n");
-        fflush(stdout);
+        say("[webview] frame shown%s%s\n", NULL, NULL);
         return G_SOURCE_REMOVE;
     }
     return G_SOURCE_CONTINUE;
 }
 
-static void closed(WebKitWebView *view, gpointer data)
+/* --- Tabs and their pages ------------------------------------------ */
+
+static int index_of(WebKitWebView *view)
 {
-    (void)view;
-    (void)data;
-    g_main_loop_quit(loop);
+    for (int i = 0; i < ntabs; i++)
+        if (tabs[i]->view == view)
+            return i;
+    return -1;
 }
 
-/* The window went: WebKit's view is no longer in a toplevel */
-static void toplevel_changed(WPEView *view, GParamSpec *pspec, gpointer data)
+/* What the address field shows of an address: nothing for a page that
+   has none of its own (a new tab's) */
+static const char *shown_uri(WebKitWebView *view)
+{
+    const char *uri = webkit_web_view_get_uri(view);
+    if (!uri || !strcmp(uri, "about:blank"))
+        return "";
+    return uri;
+}
+
+static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
+                         gpointer data)
+{
+    struct tab *t = data;
+    const char *uri = webkit_web_view_get_uri(view);
+    t->loading = event != WEBKIT_LOAD_FINISHED;
+    if (event == WEBKIT_LOAD_COMMITTED) {
+        say("[webview] load committed %s%s\n", uri, NULL);
+    } else if (event == WEBKIT_LOAD_FINISHED) {
+        say("[webview] load finished %s%s\n", uri, NULL);
+        if (eval_script && index_of(view) == 0)
+            webkit_web_view_evaluate_javascript(view, eval_script, -1, NULL,
+                                                NULL, NULL, evaluated, NULL);
+    }
+    draw_band();
+}
+
+static gboolean load_failed(WebKitWebView *view, WebKitLoadEvent event,
+                            const char *uri, GError *error, gpointer data)
+{
+    (void)view;
+    (void)event;
+    (void)data;
+    say("[webview] load failed %s: %s\n", uri, error->message);
+    return FALSE;                    /* WebKit shows its error page */
+}
+
+static void title_changed(WebKitWebView *view, GParamSpec *pspec,
+                          gpointer data)
+{
+    (void)pspec;
+    struct tab *t = data;
+    const char *title = webkit_web_view_get_title(view);
+    g_strlcpy(t->title, title && *title ? title : "", sizeof(t->title));
+    if (title && *title)
+        say("[webview] title %s%s\n", title, NULL);
+    if (index_of(view) == front)
+        wpe_toplevel_set_title(toplevel, *t->title ? t->title : "Web");
+    draw_band();
+}
+
+static void progress_changed(WebKitWebView *view, GParamSpec *pspec,
+                             gpointer data)
+{
+    (void)pspec;
+    struct tab *t = data;
+    t->progress = webkit_web_view_get_estimated_load_progress(view);
+    if (index_of(view) == front)
+        draw_band();
+}
+
+static void uri_changed(WebKitWebView *view, GParamSpec *pspec,
+                        gpointer data)
 {
     (void)pspec;
     (void)data;
-    if (!wpe_view_get_toplevel(view))
-        g_main_loop_quit(loop);
+    if (index_of(view) == front && !editing)
+        draw_band();
 }
+
+/* window.close() from the page: its tab goes */
+static void page_closed(WebKitWebView *view, gpointer data)
+{
+    (void)data;
+    int i = index_of(view);
+    if (i >= 0)
+        tab_close(i);
+}
+
+/* A link or a script that opens a new window: a new tab, related to
+   this one (the same session, and window.opener), which WebKit loads */
+static void new_tab_ready(WebKitWebView *view, gpointer data)
+{
+    (void)data;
+    int i = index_of(view);
+    if (i >= 0)
+        tab_front(i);
+}
+
+static WebKitWebView *page_wants_window(WebKitWebView *view,
+                                        WebKitNavigationAction *action,
+                                        gpointer data)
+{
+    (void)action;
+    (void)data;
+    struct tab *t = tab_new(NULL, view);
+    if (!t)
+        return NULL;
+    g_signal_connect(t->view, "ready-to-show", G_CALLBACK(new_tab_ready),
+                     NULL);
+    return t->view;
+}
+
+static const char start_page[] =
+    "<!doctype html><html><head><meta charset=utf-8><title>New tab</title>"
+    "<style>body{margin:0;height:100vh;display:flex;align-items:center;"
+    "justify-content:center;font-family:sans-serif;color:#555;"
+    "background:#f4f4f6}h1{font-weight:normal;font-size:28px;margin:0}"
+    "p{margin:8px 0 0;font-size:13px;text-align:center}</style></head>"
+    "<body><div><h1>ThreadOS</h1><p>Type an address or words above</p>"
+    "</div></body></html>";
+
+static struct tab *tab_new(const char *uri, WebKitWebView *related)
+{
+    if (ntabs == TABS_MAX)
+        return NULL;
+    struct tab *t = g_new0(struct tab, 1);
+    /* A related view shares its parent's session; naming one as well
+       would be two answers to one question */
+    t->view = WEBKIT_WEB_VIEW(related
+        ? g_object_new(WEBKIT_TYPE_WEB_VIEW, "display", display,
+                       "settings", settings, "related-view", related, NULL)
+        : g_object_new(WEBKIT_TYPE_WEB_VIEW, "display", display,
+                       "settings", settings, "network-session", session,
+                       NULL));
+    g_signal_connect(t->view, "load-changed", G_CALLBACK(load_changed), t);
+    g_signal_connect(t->view, "load-failed", G_CALLBACK(load_failed), t);
+    g_signal_connect(t->view, "notify::title", G_CALLBACK(title_changed), t);
+    g_signal_connect(t->view, "notify::estimated-load-progress",
+                     G_CALLBACK(progress_changed), t);
+    g_signal_connect(t->view, "notify::uri", G_CALLBACK(uri_changed), t);
+    g_signal_connect(t->view, "close", G_CALLBACK(page_closed), t);
+    g_signal_connect(t->view, "create", G_CALLBACK(page_wants_window), t);
+    tabs[ntabs++] = t;
+    if (uri)
+        webkit_web_view_load_uri(t->view, uri);
+    else if (!related)
+        webkit_web_view_load_html(t->view, start_page, NULL);
+    return t;
+}
+
+static void tab_front(int i)
+{
+    if (i < 0 || i >= ntabs)
+        return;
+    if (front < ntabs && front != i)
+        wpe_view_set_toplevel(webkit_web_view_get_wpe_view(tabs[front]->view),
+                              NULL);
+    front = i;
+    wpe_view_set_toplevel(webkit_web_view_get_wpe_view(tabs[i]->view),
+                          toplevel);
+    wpe_toplevel_set_title(toplevel, *tabs[i]->title ? tabs[i]->title : "Web");
+    editing = FALSE;
+    char n[16], count[16];
+    g_snprintf(n, sizeof(n), "%d", i + 1);
+    g_snprintf(count, sizeof(count), "%d", ntabs);
+    say("[webview] tab %s of %s\n", n, count);
+    draw_band();
+}
+
+static void tab_close(int i)
+{
+    if (i < 0 || i >= ntabs)
+        return;
+    if (ntabs == 1) {                /* the last tab: the window goes */
+        g_main_loop_quit(loop);
+        return;
+    }
+    struct tab *t = tabs[i];
+    wpe_view_set_toplevel(webkit_web_view_get_wpe_view(t->view), NULL);
+    memmove(&tabs[i], &tabs[i + 1], (size_t)(ntabs - i - 1) * sizeof(tabs[0]));
+    ntabs--;
+    g_signal_handlers_disconnect_by_data(t->view, t);
+    g_object_unref(t->view);
+    g_free(t);
+    /* The one in front stays in front; closing it brings its right-hand
+       neighbour, or the last tab */
+    if (i < front)
+        front--;
+    else if (i == front) {
+        front = MIN(i, ntabs - 1);
+        wpe_view_set_toplevel(
+            webkit_web_view_get_wpe_view(tabs[front]->view), toplevel);
+    }
+    tab_front(front);
+}
+
+/* --- The address field --------------------------------------------- */
+
+/* What was typed, as an address: one with a scheme as it is, a host
+   (it has a dot or a port, and no spaces) with http://, anything else
+   looked up */
+static char *address_of(const char *s)
+{
+    while (*s == ' ')
+        s++;
+    if (!*s)
+        return NULL;
+    if (strstr(s, "://") || !strncmp(s, "about:", 6) ||
+        !strncmp(s, "data:", 5))
+        return g_strdup(s);
+    if (!strchr(s, ' ') && (strchr(s, '.') || strchr(s, ':') ||
+                            !strncmp(s, "localhost", 9)))
+        return g_strconcat("http://", s, NULL);
+    char *q = g_uri_escape_string(s, NULL, FALSE);
+    char *uri = g_strconcat("https://duckduckgo.com/html/?q=", q, NULL);
+    g_free(q);
+    return uri;
+}
+
+static void address_go(void)
+{
+    char *uri = address_of(typed);
+    editing = FALSE;
+    if (uri) {
+        say("[webview] go %s%s\n", uri, NULL);
+        webkit_web_view_load_uri(tabs[front]->view, uri);
+        g_free(uri);
+    }
+    draw_band();
+}
+
+static void address_edit(void)
+{
+    editing = TRUE;
+    replace_all = TRUE;              /* the first key replaces it all */
+    g_strlcpy(typed, shown_uri(tabs[front]->view), sizeof(typed));
+    draw_band();
+}
+
+/* One byte the desktop typed into the field: UTF-8 bytes are kept as
+   they come (a Polish letter is two), backspace takes a whole
+   character */
+static void address_key(unsigned char c)
+{
+    size_t n = strlen(typed);
+    if (c == '\n' || c == '\r') {
+        address_go();
+        return;
+    }
+    if (c == 0x1B) {                 /* Esc: as it was */
+        editing = FALSE;
+        draw_band();
+        return;
+    }
+    if (replace_all && (c == '\b' || c >= 0x20)) {
+        typed[0] = 0;
+        n = 0;
+        replace_all = FALSE;
+        if (c == '\b') {
+            draw_band();
+            return;
+        }
+    }
+    if (c == '\b') {
+        while (n > 0 && ((unsigned char)typed[n - 1] & 0xC0) == 0x80)
+            n--;
+        if (n > 0)
+            n--;
+        typed[n] = 0;
+    } else if (c >= 0x20 && c != 0x7F && n + 1 < sizeof(typed)) {
+        typed[n] = (char)c;
+        typed[n + 1] = 0;
+    }
+    draw_band();
+}
+
+/* --- The band ------------------------------------------------------ */
+
+static int win_w(void)
+{
+    int w, h;
+    wpe_threados_toplevel_size(toplevel, &w, &h);
+    return w;
+}
+
+static int tab_width(void)
+{
+    int room = win_w() - PLUS_W - 8;
+    int w = ntabs ? room / ntabs : TAB_W;
+    return MIN(w, TAB_W);
+}
+
+static void cross(int win, int x, int y, int d, uint32_t rgb)
+{
+    ud_line(win, x, y, x + d, y + d, 1, rgb);
+    ud_line(win, x + d, y, x, y + d, 1, rgb);
+}
+
+static void arrow(int win, int x, int y, int left, uint32_t rgb)
+{
+    /* a chevron in a BTN_W x BAR_H button */
+    int cx = x + BTN_W / 2, cy = y + BAR_H / 2, d = 6;
+    int tip = left ? cx - d / 2 : cx + d / 2;
+    int back = left ? cx + d / 2 : cx - d / 2;
+    ud_line(win, back, cy - d, tip, cy, 2, rgb);
+    ud_line(win, tip, cy, back, cy + d, 2, rgb);
+}
+
+static void draw_band(void)
+{
+    int win = wpe_threados_toplevel_window(toplevel);
+    if (win < 0 || !ntabs)
+        return;
+    int w = win_w();
+    struct ud_look l;
+    ud_look(&l);
+
+    /* The tabs */
+    ud_fill(win, 0, 0, w, TAB_H, l.line);
+    int tw = tab_width();
+    for (int i = 0; i < ntabs; i++) {
+        int x = 4 + i * tw;
+        uint32_t bg = i == front ? l.bg : l.row;
+        ud_round(win, x, 3, tw - 2, TAB_H - 3, 6, bg);
+        ud_fill(win, x, TAB_H - 6, tw - 2, 6, bg);
+        const char *title = *tabs[i]->title ? tabs[i]->title
+                          : *shown_uri(tabs[i]->view) ? shown_uri(tabs[i]->view)
+                          : "New tab";
+        ud_clip(win, x + 8, 3, tw - 10 - CLOSE_W, TAB_H - 3);
+        ud_text(win, x + 8, ud_baseline(3, TAB_H - 3, UD_PX), title,
+                i == front ? l.text : l.dim, UD_SANS, UD_PX);
+        ud_unclip(win);
+        cross(win, x + tw - 2 - CLOSE_W + 5, 3 + (TAB_H - 3) / 2 - 3, 6,
+              l.dim);
+    }
+    int px = 4 + ntabs * tw + 4;             /* the new-tab button */
+    ud_line(win, px + 7, TAB_H / 2 + 1, px + 17, TAB_H / 2 + 1, 2, l.text);
+    ud_line(win, px + 12, TAB_H / 2 - 4, px + 12, TAB_H / 2 + 6, 2, l.text);
+
+    /* The toolbar */
+    WebKitWebView *v = tabs[front]->view;
+    ud_fill(win, 0, TAB_H, w, BAR_H, l.bg);
+    arrow(win, BTN_X, TAB_H, 1,
+          webkit_web_view_can_go_back(v) ? l.text : l.line);
+    arrow(win, BTN_X + BTN_STEP, TAB_H, 0,
+          webkit_web_view_can_go_forward(v) ? l.text : l.line);
+    int rx = BTN_X + 2 * BTN_STEP + BTN_W / 2, ry = TAB_H + BAR_H / 2;
+    if (tabs[front]->loading) {
+        cross(win, rx - 5, ry - 5, 10, l.text);     /* stop */
+    } else {
+        ud_ring(win, rx - 7, ry - 7, 14, 14, 7, l.text);   /* reload */
+        ud_fill(win, rx + 2, ry - 8, 6, 6, l.bg);
+        ud_line(win, rx + 2, ry - 7, rx + 7, ry - 7, 2, l.text);
+        ud_line(win, rx + 7, ry - 7, rx + 7, ry - 2, 2, l.text);
+    }
+
+    int ax = ADDR_X, ay = TAB_H + (BAR_H - ADDR_H) / 2;
+    int aw = w - ADDR_X - 8;
+    ud_round(win, ax, ay, aw, ADDR_H, 6, l.field);
+    ud_ring(win, ax, ay, aw, ADDR_H, 6, editing ? l.accent : l.line);
+    const char *text = editing ? typed : shown_uri(v);
+    int tx = ax + 10, room = aw - 20;
+    int width = ud_width(text, UD_SANS, UD_PX);
+    if (width > room)
+        tx -= width - room;              /* the end of it, where one types */
+    ud_clip(win, ax + 6, ay, aw - 12, ADDR_H);
+    if (editing && replace_all && *text) {
+        ud_fill(win, ax + 8, ay + 4, MIN(width, room) + 4, ADDR_H - 8,
+                l.accent);
+        ud_text(win, tx, ud_baseline(ay, ADDR_H, UD_PX), text, l.on_accent,
+                UD_SANS, UD_PX);
+    } else {
+        int end = ud_text(win, tx, ud_baseline(ay, ADDR_H, UD_PX), text,
+                          l.text, UD_SANS, UD_PX);
+        if (editing)
+            ud_fill(win, *text ? end + 1 : tx, ay + 5, 1, ADDR_H - 10,
+                    l.text);
+    }
+    ud_unclip(win);
+
+    /* How far the page has loaded */
+    ud_fill(win, 0, TAB_H + BAR_H, w, PROG_H, l.line);
+    if (tabs[front]->loading)
+        ud_fill(win, 0, TAB_H + BAR_H, (int)(w * tabs[front]->progress),
+                PROG_H, l.accent);
+}
+
+static void band_click(int x, int y, int middle)
+{
+    if (y < TAB_H) {
+        int tw = tab_width();
+        int i = (x - 4) / tw;
+        if (x >= 4 && i < ntabs) {
+            if (middle || x >= 4 + i * tw + tw - 2 - CLOSE_W)
+                tab_close(i);
+            else
+                tab_front(i);
+            return;
+        }
+        int px = 4 + ntabs * tw + 4;
+        if (!middle && x >= px && x < px + PLUS_W) {
+            tab_new(NULL, NULL);
+            tab_front(ntabs - 1);
+            address_edit();
+        }
+        return;
+    }
+    if (middle)
+        return;
+    WebKitWebView *v = tabs[front]->view;
+    if (x >= ADDR_X) {
+        address_edit();
+        return;
+    }
+    editing = FALSE;
+    if (x >= BTN_X && x < BTN_X + BTN_W)
+        webkit_web_view_go_back(v);
+    else if (x >= BTN_X + BTN_STEP && x < BTN_X + BTN_STEP + BTN_W)
+        webkit_web_view_go_forward(v);
+    else if (x >= BTN_X + 2 * BTN_STEP && x < BTN_X + 2 * BTN_STEP + BTN_W) {
+        if (tabs[front]->loading)
+            webkit_web_view_stop_loading(v);
+        else
+            webkit_web_view_reload(v);
+    }
+    draw_band();
+}
+
+/* The window's events, before the page has them (wpethreados.h) */
+static gboolean band_event(gpointer data, int type, int x, int y, int val)
+{
+    (void)data;
+    switch (type) {
+    case WEV_SIZE:
+        draw_band();
+        return FALSE;
+    case WEV_CLOSE:
+        g_main_loop_quit(loop);
+        return TRUE;
+    case WEV_CLICK:
+        if (y < CHROME_H) {
+            if ((val & 7) == 1)
+                band_click(x, y, 0);
+            return TRUE;
+        }
+        if (editing) {               /* a click on the page leaves it */
+            editing = FALSE;
+            draw_band();
+        }
+        return FALSE;
+    case WEV_ALTCLICK:
+        if (y < CHROME_H) {
+            band_click(x, y, (val & 4) != 0);
+            return TRUE;
+        }
+        return FALSE;
+    case WEV_PRESS:
+        pressed_on_band = y < CHROME_H;
+        return pressed_on_band;
+    case WEV_DRAG:
+    case WEV_RELEASE:
+        return pressed_on_band;
+    case WEV_SCROLL:
+        return y < CHROME_H;
+    case WEV_KEY: {
+        unsigned char c = (unsigned char)val;
+        if (x & WEV_MOD_CTRL) {
+            switch (c) {
+            case 't':
+                if (tab_new(NULL, NULL)) {
+                    tab_front(ntabs - 1);
+                    address_edit();
+                }
+                return TRUE;
+            case 'w':
+                tab_close(front);
+                return TRUE;
+            case 'l':
+                address_edit();
+                return TRUE;
+            case 'r':
+                webkit_web_view_reload(tabs[front]->view);
+                return TRUE;
+            }
+        }
+        if (!editing)
+            return FALSE;
+        address_key(c);
+        return TRUE;
+    }
+    }
+    return FALSE;
+}
+
+/* --- The program ---------------------------------------------------- */
 
 int main(int argc, char **argv)
 {
-    const char *uri = "about:blank";
+    const char *uri = NULL, *proxy = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--eval") && i + 1 < argc)
             eval_script = argv[++i];
+        else if (!strcmp(argv[i], "--proxy") && i + 1 < argc)
+            proxy = argv[++i];
         else if (!strcmp(argv[i], "--trace"))
             wpe_threados_trace(TRUE);
         else
             uri = argv[i];
     }
 
-    WPEDisplay *display = wpe_display_threados_new(WIDTH, HEIGHT, "Web");
+    display = wpe_display_threados_new(WIDTH, HEIGHT + CHROME_H, "Web");
     if (!display) {
         fprintf(stderr, "webview: no display\n");
         return 1;
     }
+    /* One window for all the tabs: WebKit is not to make one for each
+       view; the tab in front is put into it */
+    wpe_settings_set_boolean(wpe_display_get_settings(display),
+                             WPE_SETTING_CREATE_VIEWS_WITH_A_TOPLEVEL, FALSE,
+                             WPE_SETTINGS_SOURCE_APPLICATION, NULL);
+    toplevel = wpe_display_create_toplevel(display, 1);
+    if (!toplevel || wpe_threados_toplevel_window(toplevel) < 0) {
+        fprintf(stderr, "webview: no window\n");
+        return 1;
+    }
+    wpe_threados_toplevel_set_chrome(toplevel, CHROME_H, band_event, NULL);
 
     /* (No EGL and no GPU: the web process paints pages on the processor
        by itself - apps/webkit/patches/web-process-without-egl.patch) */
-    WebKitSettings *settings = webkit_settings_new();
-
+    settings = webkit_settings_new();
     /* Cookies and the cache in memory: the disk is TFS3's 32 MiB, and a
        system started from a stick may have none */
-    WebKitNetworkSession *session = webkit_network_session_new_ephemeral();
-
-    WebKitWebView *view = WEBKIT_WEB_VIEW(g_object_new(
-        WEBKIT_TYPE_WEB_VIEW, "display", display, "settings", settings,
-        "network-session", session, NULL));
-    g_signal_connect(view, "load-changed", G_CALLBACK(load_changed), NULL);
-    g_signal_connect(view, "load-failed", G_CALLBACK(load_failed), NULL);
-    g_signal_connect(view, "notify::title", G_CALLBACK(title_changed), NULL);
-    g_signal_connect(view, "close", G_CALLBACK(closed), NULL);
-    g_signal_connect(webkit_web_view_get_wpe_view(view), "notify::toplevel",
-                     G_CALLBACK(toplevel_changed), NULL);
-    g_timeout_add(20, watch_frames, NULL);
+    session = webkit_network_session_new_ephemeral();
+    /* A network that lets nothing out but through its proxy (an office,
+       a school) is reached only this way: WebKit's own default asks
+       GIO, which on ThreadOS knows of no proxy */
+    if (proxy) {
+        WebKitNetworkProxySettings *ps =
+            webkit_network_proxy_settings_new(proxy, NULL);
+        webkit_network_session_set_proxy_settings(
+            session, WEBKIT_NETWORK_PROXY_MODE_CUSTOM, ps);
+        webkit_network_proxy_settings_free(ps);
+    }
 
     loop = g_main_loop_new(NULL, FALSE);
-    webkit_web_view_load_uri(view, uri);
+    tab_new(uri, NULL);
+    tab_front(0);
+    if (!uri)
+        address_edit();
+    g_timeout_add(20, watch_frames, NULL);
     g_main_loop_run(loop);
 
-    g_object_unref(view);
+    while (ntabs) {
+        struct tab *t = tabs[--ntabs];
+        g_signal_handlers_disconnect_by_data(t->view, t);
+        g_object_unref(t->view);
+        g_free(t);
+    }
     g_object_unref(session);
     g_object_unref(settings);
+    g_object_unref(toplevel);
     g_object_unref(display);
     return 0;
 }

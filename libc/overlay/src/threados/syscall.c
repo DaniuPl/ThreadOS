@@ -968,6 +968,54 @@ static long map_memfd(int fd, unsigned long len, int flags, long off)
 	return at;
 }
 
+static long do_munmap(unsigned long addr, unsigned long len);
+
+/* A private mapping of a file - a disk file or one of the made-up ones
+   (socket.c: the system's fonts, the CA bundle) - is a copy of it:
+   nothing written through a private mapping reaches the file, so the
+   only difference a program could see is that it does not follow later
+   writes by others, which none of the libraries here wait for. Skia
+   checks a font is usable by mapping it, and with every map of a file
+   refused it took no font of the system's for its own and drew all
+   text with fallbacks: right letters, but metrics of nought, and so
+   list markers with no height. A shared mapping of a file is still
+   refused; there is no page cache here to share. */
+static long map_copy(int fd, unsigned long len, long off)
+{
+	if (off < 0 || (off & 4095))
+		return -EINVAL;
+	int made_up = __tos_net_owns(SYS_pread64, fd);
+	if (!made_up && kind_of(fd) != K_FILE)
+		return kind_of(fd) < 0 ? -EBADF : -ENODEV;
+	lock();
+	long at = do_mmap_locked(len);
+	unlock();
+	if (at < 0)
+		return at;
+	for (unsigned long done = 0; done < len; ) {
+		unsigned long want = len - done > T_CHUNK ? T_CHUNK : len - done;
+		long r;
+		if (made_up) {
+			r = __tos_net(SYS_pread64, fd, at + done, want,
+			              off + done, 0, 0);
+		} else {
+			long was = do_lseek(fd, 0, SEEK_CUR);
+			r = do_lseek(fd, off + done, SEEK_SET);
+			if (r >= 0)
+				r = do_read(fd, (void *)(at + done), want);
+			do_lseek(fd, was, SEEK_SET);
+		}
+		if (r < 0 && !done) {
+			do_munmap(at, len);      /* not readable: say why */
+			return r;
+		}
+		if (r <= 0)
+			break;                   /* past its end: zeros */
+		done += r;
+	}
+	return at;
+}
+
 static long do_mmap(unsigned long addr, unsigned long len, int prot,
                     int flags, int fd, long off)
 {
@@ -977,9 +1025,12 @@ static long do_mmap(unsigned long addr, unsigned long len, int prot,
 	if (flags & MAP_FIXED)
 		return -ENOMEM;
 	len = (len + 4095) & ~4095UL;
-	if (!(flags & MAP_ANONYMOUS))
-		return kind_of(fd) == K_MEMFD ? map_memfd(fd, len, flags, off)
-		                               : -ENODEV;
+	if (!(flags & MAP_ANONYMOUS)) {
+		if (kind_of(fd) == K_MEMFD)
+			return map_memfd(fd, len, flags, off);
+		return (flags & 3) == MAP_PRIVATE ? map_copy(fd, len, off)
+		                                  : -ENODEV;
+	}
 	lock();
 	long r = do_mmap_locked(len);
 	unlock();

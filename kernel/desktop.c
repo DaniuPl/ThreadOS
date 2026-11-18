@@ -16,6 +16,7 @@
 
 #include <stdint.h>
 #include "include/desktop.h"
+#include "include/prog.h"
 #include "include/video.h"
 #include "include/vga.h"
 #include "include/mouse.h"
@@ -105,8 +106,11 @@ struct icon {
                                   their own literals */
 };
 /* The browser is the litehtml one (apps/browser), in the initrd as
-   "web"; gweb, the older one in C, is still there to be run by name */
+   "web"; gweb, the older one in C, is still there to be run by name.
+   Where the system has WebKit (apps64.img), the Web tile starts its
+   browser instead (desktop_spawn_app). */
 #define WEB_APP "web"
+#define WEBKIT_APP "webview"
 #define ART_N      22
 #define ART_LETTER 14
 #define ART_TRASH  15
@@ -2790,6 +2794,11 @@ static int desktop_spawn_app(const char *command)
         command_append(line, sizeof(line), &n, " /");
         return exec_spawn(line);
     }
+    /* The browser is WebKit's (webview) where the system has it - the
+       loader brought apps64.img (kernel/initrd.c) - and litehtml's
+       otherwise */
+    if (!strcmp(command, WEB_APP) && prog_exists(WEBKIT_APP))
+        return exec_spawn(WEBKIT_APP);
     return exec_spawn(command);
 }
 

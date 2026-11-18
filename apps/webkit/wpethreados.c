@@ -156,6 +156,10 @@ typedef struct {
     double x, y;              /* where the pointer was last */
     guint32 utf8;             /* a character's value, so far */
     int utf8_left;            /* bytes of it still to come */
+    int win_w, win_h;         /* the window's content */
+    int top;                  /* the program's own band above the page */
+    WPEThreadOSChromeFunc chrome;
+    gpointer chrome_data;
 } WPEToplevelThreadOS;
 typedef struct {
     WPEToplevelClass parent_class;
@@ -166,19 +170,69 @@ G_DEFINE_TYPE(WPEToplevelThreadOS, wpe_toplevel_threados, WPE_TYPE_TOPLEVEL)
 
 /* --- Showing a frame ------------------------------------------------- */
 
+static WPEToplevelThreadOS *ours(WPEToplevel *toplevel)
+{
+    if (!toplevel || !G_TYPE_CHECK_INSTANCE_TYPE(toplevel,
+                                                 wpe_toplevel_threados_get_type()))
+        return NULL;
+    return (WPEToplevelThreadOS *)toplevel;
+}
+
 /* The window of the view's toplevel, or -1 */
 int wpe_threados_view_window(WPEView *view)
 {
-    WPEToplevel *toplevel = wpe_view_get_toplevel(view);
-    if (!toplevel || !G_TYPE_CHECK_INSTANCE_TYPE(toplevel,
-                                                 wpe_toplevel_threados_get_type()))
-        return -1;
-    return ((WPEToplevelThreadOS *)toplevel)->win;
+    WPEToplevelThreadOS *t = ours(wpe_view_get_toplevel(view));
+    return t ? t->win : -1;
 }
 
-static void blit_rect(WPEViewThreadOS *self, int win, const guint8 *data,
-                      guint stride, int bw, int bh, int x, int y, int w,
-                      int h)
+int wpe_threados_toplevel_window(WPEToplevel *toplevel)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    return t ? t->win : -1;
+}
+
+void wpe_threados_toplevel_size(WPEToplevel *toplevel, int *w, int *h)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    *w = t ? t->win_w : 0;
+    *h = t ? t->win_h : 0;
+}
+
+static gboolean view_to_page_size(WPEToplevel *toplevel, WPEView *view,
+                                  gpointer data)
+{
+    (void)data;
+    int w, h;
+    wpe_toplevel_get_size(toplevel, &w, &h);
+    wpe_view_resized(view, w, h);
+    return FALSE;
+}
+
+/* The page is the window less the band; WPE and its views are told the
+   page's size */
+static void page_resized(WPEToplevelThreadOS *t)
+{
+    int h = MAX(t->win_h - t->top, 1);
+    wpe_toplevel_resized(WPE_TOPLEVEL(t), t->win_w, h);
+    wpe_toplevel_foreach_view(WPE_TOPLEVEL(t), view_to_page_size, NULL);
+}
+
+void wpe_threados_toplevel_set_chrome(WPEToplevel *toplevel, int top,
+                                      WPEThreadOSChromeFunc func,
+                                      gpointer data)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    if (!t)
+        return;
+    t->top = MAX(top, 0);
+    t->chrome = func;
+    t->chrome_data = data;
+    page_resized(t);
+}
+
+static void blit_rect(WPEViewThreadOS *self, int win, int top,
+                      const guint8 *data, guint stride, int bw, int bh,
+                      int x, int y, int w, int h)
 {
     if (x < 0) {
         w += x;
@@ -201,7 +255,7 @@ static void blit_rect(WPEViewThreadOS *self, int win, const guint8 *data,
                last layer is opaque, and the desktop does not blend */
             for (int i = 0; i < n; i++)
                 self->row[i] = src[xx + i] & 0x00FFFFFFu;
-            win_blit32(win, xx, yy, n, 1, self->row);
+            win_blit32(win, xx, top + yy, n, 1, self->row);
         }
     }
 }
@@ -223,6 +277,31 @@ static gboolean frame_done(gpointer data)
     return G_SOURCE_REMOVE;
 }
 
+/* A buffer into the window of the view's toplevel, below its band: the
+   damaged rectangles, or all of it */
+static gboolean show(WPEViewThreadOS *self, WPEBuffer *buffer,
+                     const WPERectangle *damage, guint n_damage)
+{
+    WPEToplevelThreadOS *t = ours(wpe_view_get_toplevel(WPE_VIEW(self)));
+    if (!t || t->win < 0 || !WPE_IS_BUFFER_SHM(buffer))
+        return FALSE;
+    WPEBufferSHM *shm = WPE_BUFFER_SHM(buffer);
+    gsize size;
+    const guint8 *data = g_bytes_get_data(wpe_buffer_shm_get_data(shm), &size);
+    guint stride = wpe_buffer_shm_get_stride(shm);
+    int bw = wpe_buffer_get_width(buffer);
+    int bh = MIN(wpe_buffer_get_height(buffer), t->win_h - t->top);
+    if (!data || bh <= 0 ||
+        (gsize)stride * (gsize)wpe_buffer_get_height(buffer) > size)
+        return FALSE;
+    if (!n_damage)
+        blit_rect(self, t->win, t->top, data, stride, bw, bh, 0, 0, bw, bh);
+    for (guint i = 0; i < n_damage; i++)
+        blit_rect(self, t->win, t->top, data, stride, bw, bh, damage[i].x,
+                  damage[i].y, damage[i].width, damage[i].height);
+    return TRUE;
+}
+
 static gboolean view_render_buffer(WPEView *view, WPEBuffer *buffer,
                                    const WPERectangle *damage,
                                    guint n_damage, GError **error)
@@ -242,23 +321,8 @@ static gboolean view_render_buffer(WPEView *view, WPEBuffer *buffer,
         return FALSE;
     }
 
-    int win = wpe_threados_view_window(view);
-    if (win >= 0) {
-        gsize size;
-        const guint8 *data = g_bytes_get_data(wpe_buffer_shm_get_data(shm),
-                                              &size);
-        guint stride = wpe_buffer_shm_get_stride(shm);
-        int bw = wpe_buffer_get_width(buffer);
-        int bh = wpe_buffer_get_height(buffer);
-        if (data && (gsize)stride * (gsize)bh <= size) {
-            if (!n_damage)
-                blit_rect(self, win, data, stride, bw, bh, 0, 0, bw, bh);
-            for (guint i = 0; i < n_damage; i++)
-                blit_rect(self, win, data, stride, bw, bh, damage[i].x,
-                          damage[i].y, damage[i].width, damage[i].height);
-            frames_shown++;
-        }
-    }
+    if (show(self, buffer, damage, n_damage))
+        frames_shown++;
 
     /* The frame ends at the next tick of a 60 Hz screen, not at once:
        WebKit paints the next one when it hears, and a page that
@@ -278,6 +342,14 @@ static gboolean view_render_buffer(WPEView *view, WPEBuffer *buffer,
 static gboolean view_can_be_mapped(WPEView *view)
 {
     return wpe_threados_view_window(view) >= 0;
+}
+
+void wpe_threados_view_show_last(WPEView *view)
+{
+    WPEViewThreadOS *self = (WPEViewThreadOS *)view;
+    WPEBuffer *last = self->pending ? self->pending : self->committed;
+    if (last)
+        show(self, last, NULL, 0);
 }
 
 static void view_dispose(GObject *object)
@@ -301,6 +373,7 @@ static void view_toplevel_changed(WPEView *view, GParamSpec *pspec,
     (void)data;
     WPEToplevel *toplevel = wpe_view_get_toplevel(view);
     if (!toplevel) {
+        wpe_view_focus_out(view);
         wpe_view_unmap(view);
         return;
     }
@@ -310,6 +383,9 @@ static void view_toplevel_changed(WPEView *view, GParamSpec *pspec,
         wpe_view_resized(view, width, height);
     wpe_view_map(view);
     wpe_view_focus_in(view);
+    /* A tab brought back shows what it showed at once, before WebKit
+       paints it again */
+    wpe_threados_view_show_last(view);
 }
 
 static void view_constructed(GObject *object)
@@ -513,11 +589,13 @@ static void handle(WPEToplevelThreadOS *self, WPEView *view,
         self->keys = keys_of(ev->x);
         key_byte(self, view, (unsigned char)ev->val);
         break;
-    case WEV_SIZE:
-        wpe_toplevel_resized(WPE_TOPLEVEL(self), ev->x, ev->y);
-        wpe_view_resized(view, ev->x, ev->y);
-        break;
     }
+}
+
+static int pointer_event(int type)
+{
+    return type == WEV_CLICK || type == WEV_PRESS || type == WEV_DRAG ||
+           type == WEV_RELEASE || type == WEV_SCROLL || type == WEV_ALTCLICK;
 }
 
 static gboolean poll_window(gpointer data)
@@ -525,12 +603,36 @@ static gboolean poll_window(gpointer data)
     WPEToplevelThreadOS *self = data;
     struct win_event ev;
     while (self->win >= 0 && win_poll(self->win, &ev) == 1) {
+        if (ev.type == WEV_SIZE) {
+            self->win_w = ev.x;
+            self->win_h = ev.y;
+            page_resized(self);
+        }
+        /* The program's band hears everything first, in the window's
+           own coordinates: a click on it, the keys while its address
+           field has them, the window's new size to draw itself at */
+        if (self->chrome &&
+            self->chrome(self->chrome_data, ev.type, ev.x, ev.y, ev.val))
+            continue;
         if (ev.type == WEV_CLOSE) {
             /* WebKit hears the window went; the program decides what
                that means (apps/webkit/webview.c quits) */
             self->poll_source = 0;
             wpe_toplevel_closed(WPE_TOPLEVEL(self));
             return G_SOURCE_REMOVE;
+        }
+        if (ev.type == WEV_SIZE)
+            continue;
+        if (pointer_event(ev.type)) {
+            /* The page lies below the band. A press above it was the
+               band's; a drag that began on the page and went up there
+               is still the page's, at its top edge. */
+            ev.y -= self->top;
+            if (ev.y < 0) {
+                if (ev.type != WEV_DRAG && ev.type != WEV_RELEASE)
+                    continue;
+                ev.y = 0;
+            }
         }
         WPEView *view = first_view(WPE_TOPLEVEL(self));
         if (view)
@@ -553,6 +655,8 @@ static void toplevel_constructed(GObject *object)
         return;
     /* Colours, not the desktop's palette */
     win_truecolour(self->win);
+    self->win_w = display->width;
+    self->win_h = display->height;
     wpe_toplevel_resized(WPE_TOPLEVEL(self), display->width,
                          display->height);
     wpe_toplevel_state_changed(WPE_TOPLEVEL(self), WPE_TOPLEVEL_STATE_ACTIVE);

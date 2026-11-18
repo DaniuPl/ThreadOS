@@ -26,6 +26,26 @@ WPEDisplay *wpe_display_threados_new(int width, int height,
    or -1 */
 int wpe_threados_view_window(WPEView *view);
 
+/* A program's own band across the top of a toplevel's window - a
+   browser's tabs and address field. The page is shown below it, and
+   the band's function hears each of the window's events first (the
+   desktop's WEV_*, in the window's coordinates): TRUE means the band
+   took it, FALSE that the page is to have it. WEV_SIZE comes to it as
+   the window's new size, to draw itself again; the page is resized
+   whatever it answers. */
+typedef gboolean (*WPEThreadOSChromeFunc)(gpointer data, int type, int x,
+                                          int y, int val);
+void wpe_threados_toplevel_set_chrome(WPEToplevel *toplevel, int top,
+                                      WPEThreadOSChromeFunc func,
+                                      gpointer data);
+int wpe_threados_toplevel_window(WPEToplevel *toplevel);
+/* The window's content, band and page */
+void wpe_threados_toplevel_size(WPEToplevel *toplevel, int *w, int *h);
+
+/* The last frame the view was given, into its window again (a tab that
+   comes to the front) */
+void wpe_threados_view_show_last(WPEView *view);
+
 /* How many frames views of this display have put on the screen */
 guint64 wpe_threados_frames_shown(void);
 

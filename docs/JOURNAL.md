@@ -9261,3 +9261,69 @@ works and is checked by `make test`.
       800 MiB disk, sees the image left out and the partition at 256 MiB;
       t_ginstal's disc brings one as well, and the window's row for it -
       its size, or no room - is what the disk shows afterwards.
+
+- [x] **A browser around the web engine: tabs, an address field, back and forward**
+      (apps/webkit/webview.c, apps/webkit/wpethreados.c, wpethreados.h,
+      kernel/desktop.c, scripts/tests/t_webkit.py)
+      webview was a window with a page in it. It is now a browser: a
+      band across the top of the window with the tabs, back, forward,
+      reload (stop while loading), the address field and a line that
+      fills as the page loads; the page is shown below it. What is typed
+      into the field is an address when it has a scheme, a host when it
+      has a dot or a port and no spaces, and a search otherwise; UTF-8
+      is kept as typed, and backspace takes a whole character. A link
+      or a script that opens a window opens a tab beside its opener,
+      sharing its session; "+" and Ctrl+T open one with a start page,
+      Ctrl+W and a tab's cross close one (the last closes the window),
+      Ctrl+L goes to the field, Ctrl+R reloads, a middle click closes a
+      tab. One window holds all the tabs: WPE is told not to make a
+      window per view, and the tab in front is put into it.
+      The platform learned what that needs: a program's own band over
+      the top of a toplevel, drawn by the program and hearing the
+      window's events first; the page sized to what is left and
+      pointer events moved under the band; a view taken out of its
+      window losing its focus, and a view put back showing its last
+      frame at once rather than when the page next paints.
+      The dock's Web tile starts this browser when the applications'
+      image is there and the desktop's own one when it is not.
+      `webview --proxy http://HOST:PORT` sends every page through a web
+      proxy: a network that lets nothing out otherwise is reached only
+      so, and WebKit's default asks GIO, which knows of none here.
+      t_webkit drives it the way a person does, from the screen: the
+      field shows the page's address (read off the screen), an address
+      typed into it loads that page, back and forward go between the
+      two pages with the field following, a target=_blank link opens a
+      second tab in front named after its page, "+" opens the start
+      page, a click on a tab brings its page back, the tab's cross and
+      Ctrl+W close tabs and the last one ends the program with code 0,
+      the dock's tile starts the browser with the cursor in the field,
+      and with --proxy a page on a host that does not exist arrives from
+      the test's own proxy, which saw it asked for by its whole address.
+      (Started by hand against the outside world through a proxy, it
+      opens google.pl, apple.com and threadgames.pl.)
+
+- [x] **A private mapping of a file is a copy of it - and WebKit's lists have markers**
+      (libc/overlay/src/threados/syscall.c, libc/tests/libctest.c,
+      scripts/tests/t_webkit.py)
+      Lists in WebKit pages had no bullets and no numbers, while
+      ::marker with content of its own and counters in ::before showed.
+      The marker was laid out 0 pixels high: its size comes from the
+      metrics of the style's primary font, and those were nought - for
+      every text on the page, not only markers. Skia takes a font of
+      fontconfig's only if it can map the file, and the C library
+      refused to map any file but a memfd; so WebKit used an empty
+      typeface as every primary font, and drew the letters with
+      per-character fallbacks, which read fonts with pread. Text looked
+      right; whatever was sized from the font itself did not.
+      mmap of a file with MAP_PRIVATE now gives a copy of it, from the
+      offset asked, zeros past its end - a disk file or one of the
+      C library's made-up ones (the system's fonts, the CA bundle).
+      Nothing written through a private mapping reaches the file, so the
+      copy differs only in not following later writes by others. A
+      shared mapping of a file is still refused: there is no page cache
+      to share.
+      libctest maps a file of its own and prints what it sees - the
+      bytes, the zeros after them, a write kept out of the file, a map
+      from the second page, an offset refused - line for line as glibc's
+      build prints it; t_webkit's page has a bulleted and a numbered list
+      and finds their markers drawn, which before had no pixels at all.

@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
@@ -340,6 +341,50 @@ static void unlinked(void)
 	fclose(t);
 }
 
+/* A file mapped privately: the mapping shows what the file holds and
+   zeros in the rest of its last page, an offset maps from there, one
+   that is not a page's start is refused, and what is written into the
+   mapping stays out of the file */
+static void mappings(void)
+{
+	const char *name = "libc_map.bin";
+	static unsigned char data[5000];
+	for (int i = 0; i < (int)sizeof(data); i++)
+		data[i] = (unsigned char)(i * 7 + 3);
+	int fd = open(name, O_CREAT | O_TRUNC | O_RDWR, 0644);
+	if (fd < 0 || write(fd, data, sizeof(data)) != (ssize_t)sizeof(data)) {
+		printf("mmap: cannot make the file\n");
+		return;
+	}
+	unsigned char *m = mmap(0, sizeof(data), PROT_READ | PROT_WRITE,
+	                        MAP_PRIVATE, fd, 0);
+	if (m == MAP_FAILED) {
+		printf("mmap private: %s\n", strerror(errno));
+	} else {
+		printf("mmap private: same bytes %d, the rest of its page zero %d\n",
+		       !memcmp(m, data, sizeof(data)),
+		       m[sizeof(data)] == 0 && m[8191] == 0);
+		m[0] ^= 0xFF;
+		unsigned char first = 0;
+		printf("written into the mapping, the file keeps its byte: %d\n",
+		       pread(fd, &first, 1, 0) == 1 && first == data[0]);
+		munmap(m, sizeof(data));
+	}
+	m = mmap(0, 4096, PROT_READ, MAP_PRIVATE, fd, 4096);
+	printf("mmap from 4096: %s\n", m == MAP_FAILED ? strerror(errno)
+	       : !memcmp(m, data + 4096, sizeof(data) - 4096) ? "the second page"
+	       : "other bytes");
+	if (m != MAP_FAILED)
+		munmap(m, 4096);
+	m = mmap(0, 4096, PROT_READ, MAP_PRIVATE, fd, 100);
+	printf("mmap from 100: %s\n", m == MAP_FAILED ? strerror(errno)
+	       : "mapped");
+	if (m != MAP_FAILED)
+		munmap(m, 4096);
+	close(fd);
+	unlink(name);
+}
+
 static void processes(void)
 {
 	pid_t p = fork();
@@ -408,6 +453,7 @@ int main(int argc, char **argv)
 	files();
 	truncation();
 	unlinked();
+	mappings();
 	fflush(stdout);
 	processes();
 	timing();
