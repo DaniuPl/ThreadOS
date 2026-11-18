@@ -10,12 +10,17 @@
  * A breakpoint is the one exception the kernel steps over and carries
  * on from; it is how the way back out of an exception is tested. Every
  * other fault is the kernel's own bug, and it stops.
+ *
+ * What comes from a program at EL0 is the program's: a system call is
+ * answered, and anything else ends the program (proc.c) - not the
+ * kernel.
  */
 
 #include <stdint.h>
 #include "arm64.h"
 #include "thread.h"
 #include "uart.h"
+#include "proc.h"
 
 extern char exception_vectors[];
 
@@ -28,6 +33,10 @@ extern char exception_vectors[];
 #define EC_DATA_ABORT_LOWER 0x24
 #define EC_DATA_ABORT       0x25
 #define EC_BRK              0x3C
+#define EC_SVC64            0x15
+
+/* Slots 8 and on are a lower level's: a program's */
+#define FROM_EL0(slot)      ((slot) >= 8)
 
 void exceptions_init(void)
 {
@@ -56,6 +65,37 @@ static void say_fault(uint32_t fsc)
         printk("fault status 0x%x", fsc);
 }
 
+/* The fault status code of an abort, as a few words for a program's
+   end */
+static const char *fault_name(uint32_t fsc)
+{
+    switch (fsc & 0x3C) {
+    case 0x04: return "translation fault";
+    case 0x08: return "access flag fault";
+    case 0x0C: return "permission fault";
+    }
+    return fsc == 0x21 ? "alignment fault" : "fault";
+}
+
+/* Whatever a program did that is not a system call ends it: the kernel
+   is not the one at fault, and goes on */
+static void from_program(struct trap_frame *f, uint32_t ec, uint32_t iss)
+{
+    if (ec == EC_SVC64) {
+        proc_syscall(f);
+        return;
+    }
+    if (ec == EC_DATA_ABORT_LOWER)
+        proc_fault(f, (iss & (1u << 6)) ? "writing" : "reading",
+                   read_sysreg(far_el1), fault_name(iss & 0x3F));
+    if (ec == EC_INSN_ABORT_LOWER)
+        proc_fault(f, "running", read_sysreg(far_el1),
+                   fault_name(iss & 0x3F));
+    proc_fault(f, "an exception at", f->elr,
+               ec == 0 ? "an undefined instruction" :
+               ec == EC_BRK ? "a breakpoint" : "not one it may take");
+}
+
 void arm64_exception(struct trap_frame *f, uint64_t slot)
 {
     unsigned kind = slot & 3;
@@ -76,6 +116,11 @@ void arm64_exception(struct trap_frame *f, uint64_t slot)
     uint64_t esr = read_sysreg(esr_el1);
     uint32_t ec = (esr >> 26) & 0x3F;
     uint32_t iss = esr & 0x1FFFFFF;
+
+    if (FROM_EL0(slot)) {
+        from_program(f, ec, iss);
+        return;
+    }
 
     if (ec == EC_BRK) {
         printk("Breakpoint (BRK #0x%x) at 0x%lx - stepping over it\n",

@@ -1995,7 +1995,7 @@ OBJSARM   := $(BUILD)/arm64/boot.o $(BUILD)/arm64/kmain.o \
              $(BUILD)/arm64/smp.o $(BUILD)/arm64/fwcfg.o \
              $(BUILD)/arm64/video.o $(BUILD)/arm64/rtc.o \
              $(BUILD)/arm64/virtio.o $(BUILD)/arm64/touch.o \
-             $(BUILD)/arm64/mobile.o \
+             $(BUILD)/arm64/mobile.o $(BUILD)/arm64/proc.o \
              $(patsubst %,$(BUILD)/arm64/%.o,$(SHAREDARM))
 
 $(BUILD)/arm64:
@@ -2016,12 +2016,33 @@ $(BUILD)/arm64/mark.o: CFLAGSARM += -I$(BUILD)/gen
 $(KERNELARM): $(OBJSARM) kernelarm64/linker.ld
 	ld.lld -nostdlib -static -T kernelarm64/linker.ld $(OBJSARM) -o $@
 
-# The phone's initrd: the fonts, for now. QEMU hands it over through
-# fw_cfg (-fw_cfg name=opt/threados/initrd,file=...).
+# Programs for the ARM64 kernel (userarm64/): freestanding, at EL0, on
+# the system calls of kernelarm64/proc.c. Linked at 256 GiB, where the
+# kernel maps nothing (userarm64/user.ld). The FP/SIMD registers are
+# theirs, so not -mgeneral-regs-only; and no fused multiply-add, so a
+# sum comes out bit for bit as the tests' Python computes it.
+USERARM := hello fpsum fault badcall spin
+USERARM_ELFS := $(patsubst %,$(BUILD)/arm64/user/%.elf,$(USERARM))
+CFLAGSARMUSER := --target=aarch64-none-elf -std=gnu11 -ffreestanding \
+                 -fno-stack-protector -fno-pic -fno-builtin \
+                 -ffp-contract=off -Wall -Wextra -O2
+
+$(BUILD)/arm64/user:
+	mkdir -p $@
+
+$(BUILD)/arm64/user/%.elf: userarm64/%.c userarm64/usys.h userarm64/user.ld \
+                           | $(BUILD)/arm64/user
+	clang $(CFLAGSARMUSER) -c $< -o $(@:.elf=.o)
+	ld.lld -nostdlib -static -T userarm64/user.ld $(@:.elf=.o) -o $@
+
+# The phone's initrd: the fonts and the programs. QEMU hands it over
+# through fw_cfg (-fw_cfg name=opt/threados/initrd,file=...).
 INITRDARM := $(BUILD)/initrd-arm64.img
-$(INITRDARM): scripts/mkinitrd.py fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
+$(INITRDARM): scripts/mkinitrd.py fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf \
+              $(USERARM_ELFS)
 	python3 scripts/mkinitrd.py $@ sans.ttf=fonts/sans.ttf \
-	    bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf
+	    bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
+	    $(foreach p,$(USERARM),$(p)=$(BUILD)/arm64/user/$(p).elf)
 
 kernelarm64: $(KERNELARM) $(INITRDARM)
 	@echo "Done: $(KERNELARM) (AArch64, QEMU virt), $(INITRDARM)"

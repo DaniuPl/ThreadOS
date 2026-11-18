@@ -38,6 +38,7 @@ Run on its own or through scripts/run_tests.py.
 import datetime
 import os
 import re
+import struct
 import sys
 import time
 
@@ -139,9 +140,14 @@ def main():
         q.wait_serial("Clock:", timeout=90)
         REF["at"] = time.time()
         out = q.wait_serial("[mobile] lock screen", timeout=90)
+        # As many files as the image's own listing says, and its size
+        with open(ARM64_INITRD, "rb") as fh:
+            image = fh.read()
+        files = struct.unpack_from("<I", image, 4)[0]
         check("the kernel finds the initrd through fw_cfg (%s)"
               % said_line(out, "initrd:"),
-              said_line(out, "initrd:").startswith("initrd: 3 files"))
+              said_line(out, "initrd:") == "initrd: %d files, %d bytes, "
+              "through fw_cfg" % (files, len(image)))
         check("and starts the screen, upright, at two to one (%s)"
               % said_line(out, "Screen:"),
               "Screen: ramfb, 720x1280, two pixels to one" in out)

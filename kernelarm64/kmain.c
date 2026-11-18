@@ -23,6 +23,12 @@
  * (mobile.c), drawn by the PC's own graphics code - each only when the
  * machine has it, so a virt machine without them boots as before.
  *
+ * Stage five runs programs: an AArch64 ELF file from the initrd in an
+ * address space of its own, at EL0, entering the kernel only by a system
+ * call, an interrupt or a fault - which ends the program, not the
+ * kernel (proc.c). The command line's run=NAME,ARG,... words start
+ * them, all at once, and their ends are said with their codes.
+ *
  * Two self-tests can be asked for on the command line (QEMU's -append,
  * which lands in the device tree's /chosen/bootargs): selftest=brk
  * takes a breakpoint and must come back with the registers intact,
@@ -40,6 +46,7 @@
 #include "virtio.h"
 #include "touch.h"
 #include "mobile.h"
+#include "proc.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/heap.h"
 #include "../kernel/include/pmm.h"
@@ -80,6 +87,54 @@ static const char *core_name(uint64_t midr)
         if (arm[i].part == part)
             return arm[i].name;
     return 0;
+}
+
+/* Every "run=NAME,ARG,ARG" word of the command line: the programs, all
+   started before any is waited for - so that they run beside each other
+   - and each one's end said with its code */
+static void run_programs(const char *line)
+{
+    int pids[16];
+    char names[16][16];
+    int n = 0;
+    uint32_t free_before = pmm_total_frames() - pmm_used_frames();
+    for (const char *p = line; p && *p && n < 16; ) {
+        while (*p == ' ')
+            p++;
+        const char *word = p;
+        while (*p && *p != ' ')
+            p++;
+        if (p - word <= 4 || memcmp(word, "run=", 4))
+            continue;
+        char args[128];
+        int k = 0;
+        for (const char *c = word + 4; c < p && k < (int)sizeof(args) - 1;
+             c++)
+            args[k++] = *c == ',' ? ' ' : *c;
+        args[k] = 0;
+        int m = 0;
+        while (args[m] && args[m] != ' ' && m < 15) {
+            names[n][m] = args[m];
+            m++;
+        }
+        names[n][m] = 0;
+        pids[n] = proc_spawn(names[n], args);
+        if (pids[n] < 0)
+            printk("[proc] %s could not be started (%d)\n", names[n],
+                   pids[n]);
+        else
+            printk("[proc] %s started, pid %d\n", names[n], pids[n]);
+        n++;
+    }
+    for (int i = 0; i < n; i++)
+        if (pids[i] > 0)
+            printk("[proc] %s (pid %d) ended with code %d\n", names[i],
+                   pids[i], proc_wait(pids[i]));
+    /* Every page a program had - its file, its stack, its heap and its
+       tables - is back */
+    if (n)
+        printk("[proc] pages free: %u before the programs, %u after\n",
+               free_before, pmm_total_frames() - pmm_used_frames());
 }
 
 /* Whether a word stands on its own in the command line */
@@ -406,6 +461,7 @@ void kmain(uint64_t x0)
         smp_start(&fi);
         boot_splash_update(70, "Checking the threads");
         threads_selftest();
+        run_programs(fi.bootargs);
         boot_splash_update(96, "Starting the phone");
         if (screen)
             thread_create("mobile", mobile_main, &mi);

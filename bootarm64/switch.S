@@ -34,3 +34,100 @@ switch_to:
     ldp     x29, x30, [sp, #80]
     add     sp, sp, #96
     ret
+
+/* A program's FP/SIMD registers, to and from its thread's area
+   (thread.h FPSTATE_WORDS): the kernel is built not to use them, so
+   only these two touch them, and the assembler is told the core has
+   them. */
+.arch armv8-a+fp+simd
+.global fp_save
+fp_save:
+    stp     q0, q1, [x0, #0]
+    stp     q2, q3, [x0, #32]
+    stp     q4, q5, [x0, #64]
+    stp     q6, q7, [x0, #96]
+    stp     q8, q9, [x0, #128]
+    stp     q10, q11, [x0, #160]
+    stp     q12, q13, [x0, #192]
+    stp     q14, q15, [x0, #224]
+    stp     q16, q17, [x0, #256]
+    stp     q18, q19, [x0, #288]
+    stp     q20, q21, [x0, #320]
+    stp     q22, q23, [x0, #352]
+    stp     q24, q25, [x0, #384]
+    stp     q26, q27, [x0, #416]
+    stp     q28, q29, [x0, #448]
+    stp     q30, q31, [x0, #480]
+    mrs     x1, fpcr
+    mrs     x2, fpsr
+    add     x0, x0, #512            /* past the reach of stp's offset */
+    stp     x1, x2, [x0]
+    ret
+
+.global fp_restore
+fp_restore:
+    ldp     q0, q1, [x0, #0]
+    ldp     q2, q3, [x0, #32]
+    ldp     q4, q5, [x0, #64]
+    ldp     q6, q7, [x0, #96]
+    ldp     q8, q9, [x0, #128]
+    ldp     q10, q11, [x0, #160]
+    ldp     q12, q13, [x0, #192]
+    ldp     q14, q15, [x0, #224]
+    ldp     q16, q17, [x0, #256]
+    ldp     q18, q19, [x0, #288]
+    ldp     q20, q21, [x0, #320]
+    ldp     q22, q23, [x0, #352]
+    ldp     q24, q25, [x0, #384]
+    ldp     q26, q27, [x0, #416]
+    ldp     q28, q29, [x0, #448]
+    ldp     q30, q31, [x0, #480]
+    add     x0, x0, #512
+    ldp     x1, x2, [x0]
+    msr     fpcr, x1
+    msr     fpsr, x2
+    ret
+
+/* Into a program, at EL0: enter_el0(entry, user sp, x0, x1). With
+   interrupts off while ELR and SPSR are set - an interrupt in between
+   would write over them - and every other register cleared, so that
+   nothing of the kernel's goes along. SPSR 0 is EL0 with interrupts
+   unmasked. */
+.global enter_el0
+enter_el0:
+    msr     daifset, #2
+    msr     elr_el1, x0
+    msr     sp_el0, x1
+    msr     spsr_el1, xzr
+    mov     x0, x2
+    mov     x1, x3
+    mov     x2, xzr
+    mov     x3, xzr
+    mov     x4, xzr
+    mov     x5, xzr
+    mov     x6, xzr
+    mov     x7, xzr
+    mov     x8, xzr
+    mov     x9, xzr
+    mov     x10, xzr
+    mov     x11, xzr
+    mov     x12, xzr
+    mov     x13, xzr
+    mov     x14, xzr
+    mov     x15, xzr
+    mov     x16, xzr
+    mov     x17, xzr
+    mov     x18, xzr
+    mov     x19, xzr
+    mov     x20, xzr
+    mov     x21, xzr
+    mov     x22, xzr
+    mov     x23, xzr
+    mov     x24, xzr
+    mov     x25, xzr
+    mov     x26, xzr
+    mov     x27, xzr
+    mov     x28, xzr
+    mov     x29, xzr
+    mov     x30, xzr
+    eret

@@ -21,10 +21,13 @@ came with it (`kernel/include/task.h`, for one) are still used by the
 shared code and answered by `kernel64/compat64.c`.
 
 A second kernel for ARM64 (`bootarm64/` + `kernelarm64/`, QEMU's `virt`
-machine, built with clang) is at its fourth stage: it boots, reads the
+machine, built with clang) is at its fifth stage: it boots, reads the
 device tree, catches exceptions, runs with the MMU on, takes timer
 interrupts through a GICv2, preempts kernel threads and runs them on
-every core it wakes through PSCI - and, given a phone's devices, is
+every core it wakes through PSCI, runs programs from its initrd at EL0
+in address spaces of their own (`kernelarm64/proc.c`, programs in
+`userarm64/`, the PC's system call numbers) - and, given a phone's
+devices, is
 ThreadOS mobile: a ramfb screen set up through fw_cfg, the initrd
 through fw_cfg, a PL031 clock, a virtio-input touchscreen over
 virtio-mmio, and the shell in `kernelarm64/mobile.c`. Of `kernel/` it
@@ -33,8 +36,8 @@ builds `string.c`, `heap.c`, `gfx.c`, `ttf.c`, `uitext.c`, `mark.c`,
 `Makefile`), on `kernel/include/io.h` and `spinlock.h`, which have an
 AArch64 branch next to the x86 one, and `kernelarm64/video.c` in place
 of the PC's video layer; the rest follows as shared code stops assuming
-x86. Its tests are `arm64boot`, `arm64core`, `arm64threads` and
-`arm64mobile`.
+x86. Its tests are `arm64boot`, `arm64core`, `arm64threads`,
+`arm64mobile` and `arm64user`.
 
 ## Commands
 

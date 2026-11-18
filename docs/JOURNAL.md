@@ -9438,3 +9438,43 @@ works and is checked by `make test`.
       takes packages. (The password is not asked in either - both
       sessions have the right - so that path is the installer's code,
       tested there, and not tested here.)
+
+- [x] **The ARM64 kernel runs programs, at EL0**
+      (kernelarm64/proc.c, proc.h, mmu.c, thread.c, thread.h,
+      exceptions.c, kmain.c, arm64.h, bootarm64/vectors.S, switch.S,
+      userarm64/, Makefile, scripts/ptest.py,
+      scripts/tests/t_arm64user.py, t_arm64mobile.py)
+      The first stage of Weft on ARM64: until now everything the ARM64
+      kernel ran was itself, at EL1, in one address space. A program is
+      now an AArch64 ELF file from the initrd, loaded into a table of
+      its own for TTBR0 - the kernel's entries copied in, reachable only
+      at EL1, and the program's 4 KiB pages from 256 GiB up, where no
+      mapping of the kernel's reaches; non-global, never executable at
+      EL1, and executable at EL0 only where the file says, never where
+      writable - and entered with eret. From then on it comes into the
+      kernel only by a system call, an interrupt or a fault. System
+      calls take the PC's numbers (kernel64/syscall64.h) with Linux's
+      AArch64 convention (x8, x0-x5, svc #0), so that the C library's
+      layer can be the same on both machines; this stage has write,
+      exit, sleep, ticks, getpid and sbrk, and checks every pointer it
+      is given against the program's own pages. A fault of a program
+      ends the program with code 139 and says why; the kernel goes on.
+      A program's thread carries what a kernel thread does not: its
+      table (switched with a TLB flush, no ASIDs yet), its FP/SIMD
+      registers and TPIDR_EL0, saved and loaded at every switch, and the
+      exception frame keeps SP_EL0. The command line's run=NAME,ARG,...
+      starts programs, all at once.
+      t_arm64user runs userarm64's programs: hello gets its arguments,
+      and its .bss, its heap from sbrk and a floating-point sum hash to
+      what Python computes from the same recipe; two fpsums on one core,
+      whose running times overlap, each come out as Python's sum bit for
+      bit - and without the FP/SIMD save they come out infinite, which
+      the test was run against once to see it fail; spin never gives
+      the core up, yet hello started after it on the one core finishes
+      first; reading the kernel's memory, address 0 or writing its own
+      code ends a program with the fault named and code 139, and the
+      next program runs; system calls given the kernel's memory,
+      unmapped memory, a file it does not have or no such call answer
+      -1; the same on four cores; and every page comes back.
+      t_arm64mobile now counts the initrd's files from the image, which
+      carries the programs too.

@@ -57,7 +57,7 @@ static inline struct cpu *cpu_this(void)
 /* exceptions.c - the vector table in vectors.S calls into here */
 struct trap_frame {
     uint64_t x[31];
-    uint64_t elr, spsr, pad;
+    uint64_t elr, spsr, sp_el0;
 };
 void exceptions_init(void);
 

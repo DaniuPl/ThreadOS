@@ -36,6 +36,35 @@
 struct cpu cpus[MAX_CORES];
 
 void switch_to(uint64_t *old_sp, uint64_t new_sp);
+void fp_save(uint64_t *state);
+void fp_restore(const uint64_t *state);
+uint64_t mmu_kernel_ttbr0(void);
+
+/* What a program's thread carries besides its registers on the stack
+   (thread.h). Saved and loaded here, before the switch: the kernel
+   uses no FP/SIMD register and runs in any address space - the
+   kernel's half of every table is the same - so nothing it does in
+   between can see the difference, and only the way back to the program
+   needs them. A thread of the kernel's own runs in the kernel's tables,
+   so that a program's can be freed once its thread is gone. */
+static void switch_program_state(struct thread *old, struct thread *next)
+{
+    if (old->fpstate) {
+        fp_save(old->fpstate);
+        old->tpidr_el0 = read_sysreg(tpidr_el0);
+    }
+    if (next->fpstate) {
+        fp_restore(next->fpstate);
+        write_sysreg(tpidr_el0, next->tpidr_el0);
+    }
+    uint64_t want = next->ttbr0 ? next->ttbr0 : mmu_kernel_ttbr0();
+    if (read_sysreg(ttbr0_el1) != want) {
+        write_sysreg(ttbr0_el1, want);
+        /* No address-space numbers yet: what this core cached of the
+           old program's pages goes */
+        __asm__ volatile("isb; tlbi vmalle1; dsb nsh; isb" ::: "memory");
+    }
+}
 
 static struct spinlock rq = SPINLOCK_FREE;
 static struct thread *threads;
@@ -107,6 +136,7 @@ static void reschedule(int state, uint64_t wake_at)
     next->cores |= 1u << c->id;
     c->prev = old;
     c->current = next;
+    switch_program_state(old, next);
     switch_to(&old->sp, next->sp);
     finish_switch();
 }
@@ -157,14 +187,15 @@ static struct thread *new_thread(const char *name, void (*fn)(void *),
     t->wake_at = 0;
     t->cores = 0;
     t->next = 0;
+    t->proc = 0;
+    t->ttbr0 = 0;
+    t->tpidr_el0 = 0;
+    t->fpstate = 0;
     return t;
 }
 
-struct thread *thread_create(const char *name, void (*fn)(void *), void *arg)
+static struct thread *add_thread(struct thread *t)
 {
-    struct thread *t = new_thread(name, fn, arg);
-    if (!t)
-        return 0;
     irqflags_t f = spin_lock_irq(&rq);
     t->id = next_id++;
     struct thread **pp = &threads;
@@ -173,6 +204,36 @@ struct thread *thread_create(const char *name, void (*fn)(void *), void *arg)
     *pp = t;
     spin_unlock_irq(&rq, f);
     return t;
+}
+
+struct thread *thread_create(const char *name, void (*fn)(void *), void *arg)
+{
+    struct thread *t = new_thread(name, fn, arg);
+    return t ? add_thread(t) : 0;
+}
+
+/* Everything a program's thread carries is in place before it can be
+   picked: the first switch to it loads its tables */
+struct thread *thread_create_program(const char *name, void (*fn)(void *),
+                                     void *arg, struct uproc *p,
+                                     uint64_t ttbr0)
+{
+    struct thread *t = new_thread(name, fn, arg);
+    uint64_t *fp = kmalloc(FPSTATE_WORDS * sizeof(uint64_t));
+    if (!t || !fp) {
+        if (t) {
+            kfree(t->stack);
+            kfree(t);
+        }
+        kfree(fp);
+        return 0;
+    }
+    for (int i = 0; i < FPSTATE_WORDS; i++)
+        fp[i] = 0;
+    t->proc = p;
+    t->ttbr0 = ttbr0;
+    t->fpstate = fp;
+    return add_thread(t);
 }
 
 void thread_yield(void)
@@ -208,6 +269,7 @@ void thread_join(struct thread *t)
                 *pp = t->next;
             spin_unlock_irq(&rq, f);
             kfree(t->stack);
+            kfree(t->fpstate);
             kfree(t);
             return;
         }

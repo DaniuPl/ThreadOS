@@ -15,7 +15,7 @@
  * instruction that trapped.
  */
 
-#define FRAME 288           /* 31 registers, ELR, SPSR, padding to 16 */
+#define FRAME 288           /* 31 registers, ELR, SPSR, SP_EL0, padding */
 
 .macro slot n
     .balign 0x80
@@ -37,7 +37,7 @@ exception_vectors:
     slot 5
     slot 6
     slot 7
-    slot 8          /* a lower level, AArch64 - programs, later */
+    slot 8          /* a lower level, AArch64 - programs */
     slot 9
     slot 10
     slot 11
@@ -64,15 +64,19 @@ exception_common:
     mrs     x2, elr_el1
     mrs     x3, spsr_el1
     stp     x30, x2, [sp, #240]
-    str     x3, [sp, #256]
+    /* And a program's stack pointer: while it waits in here another
+       program may run on this core, with a stack of its own */
+    mrs     x4, sp_el0
+    stp     x3, x4, [sp, #256]
 
     mov     x0, sp
     bl      arm64_exception         /* (frame, slot in x1) */
 
     ldp     x30, x2, [sp, #240]
-    ldr     x3, [sp, #256]
+    ldp     x3, x4, [sp, #256]
     msr     elr_el1, x2
     msr     spsr_el1, x3
+    msr     sp_el0, x4
     ldp     x2, x3, [sp, #16]
     ldp     x4, x5, [sp, #32]
     ldp     x6, x7, [sp, #48]

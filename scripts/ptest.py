@@ -3806,10 +3806,11 @@ def noarm64():
 
 
 def arm64_boot(machine="virt", cpu="cortex-a72", mib=256, cores=1,
-               append=None, timeout=30):
+               append=None, timeout=30, initrd=None):
     """Runs the ARM64 kernel until it says it is ready or that it is
     stopping (or the time is up) and returns everything it said, with
-    the carriage returns taken out"""
+    the carriage returns taken out. 'initrd' is handed over through
+    fw_cfg, as the phone's is."""
     log = tempfile.mktemp(suffix=".log")
     cmd = ["qemu-system-aarch64", "-machine", machine, "-cpu", cpu,
            "-m", str(mib), "-smp", str(cores), "-display", "none",
@@ -3817,6 +3818,8 @@ def arm64_boot(machine="virt", cpu="cortex-a72", mib=256, cores=1,
            "-kernel", ARM64_IMAGE]
     if append:
         cmd += ["-append", append]
+    if initrd:
+        cmd += ["-fw_cfg", "name=opt/threados/initrd,file=" + initrd]
     p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL,
                          stderr=subprocess.PIPE)
     text = ""
