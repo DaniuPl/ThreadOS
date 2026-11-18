@@ -111,6 +111,12 @@ void proc_return(void);
 /* And then: a signal for this thread that it does not hold back is
    delivered - the frame becomes a call of the program's handler */
 void proc_signals(struct trap_frame *f);
+/* What the thread's own instruction did, as a signal to it (SIGILL,
+   SIGSEGV, SIGBUS, SIGTRAP with its si_code and address) when its
+   program has a handler and the thread does not hold the signal back:
+   1, the frame is the handler's now. 0: the kernel ends the program. */
+int proc_fault_signal(struct trap_frame *f, int sig, int code,
+                      uint64_t addr);
 void proc_fault(struct trap_frame *f, const char *what, uint64_t addr,
                 const char *why) __attribute__((noreturn));
 

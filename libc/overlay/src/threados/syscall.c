@@ -1310,6 +1310,18 @@ static void on_signal(int sig)
 		if (sig == SIGCHLD || sig == SIGWINCH || sig == SIGURG ||
 		    sig == SIGCONT)
 			return;
+#if defined(__aarch64__)
+		/* A fault of the program's own (si_code above 0): no handler
+		   for the kernel any more, and back to the instruction, which
+		   faults again - and the kernel ends the program saying where,
+		   as it does one that never had a handler */
+		if (info && info->si_code > 0 &&
+		    (sig == SIGSEGV || sig == SIGBUS || sig == SIGILL ||
+		     sig == SIGTRAP || sig == SIGFPE)) {
+			tos(T_SIGNAL, 0, 0, 0, 0);
+			return;
+		}
+#endif
 		tos(T_EXIT_GROUP, 128 + sig, 0, 0, 0);
 	}
 	if (a.flags & SA_RESETHAND)

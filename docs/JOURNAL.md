@@ -9797,3 +9797,40 @@ works and is checked by `make test`.
       sysinfo's memory, which t_arm64libc holds to the 512 MiB QEMU was
       given. All ARM64 groups pass; on the PC libc, pthread, signals,
       glib, ipc, socket, k64proc and random do.
+- [x] **Faults as signals on ARM64; libsoup, TLS and HTTP/2 there**
+      (kernelarm64/exceptions.c, proc.c, proc.h, thread.c, thread.h,
+      libc/overlay/src/threados/syscall.c, libc/tests/sigtest.c,
+      scripts/tests/t_arm64soup.py, t_soup.py, t_arm64libc.py, Makefile)
+      souptest - libsoup, glib-networking and OpenSSL, what Weft's
+      network process fetches with - built for aarch64 died before its
+      first request, on an undefined instruction in _armv8_sm3_probe.
+      OpenSSL built against musl does not read the processor's features
+      from getauxval (it does that for glibc only): it tries an
+      instruction of each and catches SIGILL with sigsetjmp. A program's
+      own fault is now its signal when it has a handler and does not
+      hold the signal back: an undefined instruction SIGILL (ILL_ILLOPC,
+      the instruction's address), a fault on a page it may not have
+      SIGSEGV (SEGV_MAPERR or SEGV_ACCERR, the address), an alignment
+      fault SIGBUS, BRK SIGTRAP - delivered there and then. Held back or
+      without a handler, the kernel ends the program as before, saying
+      where. The C library, asked to do what such a signal does by
+      itself, takes its handler back from the kernel and returns to the
+      instruction, which faults again: the kernel's own end and report,
+      as a program that never had a handler gets.
+      Makefile: ninja ran a compiler for every core and two more, and
+      some of WebCore's files take 3 GB each: WEBKIT_JOBS=n holds it to
+      n. make arm64-libs builds souptest for aarch64 too.
+      sigtest's new part, against glibc on this machine as before: a
+      write where nothing is (SIGSEGV, SEGV_MAPERR, that address, the
+      mask as before after siglongjmp), a write to the program's code
+      (SEGV_ACCERR), an undefined instruction three times (SIGILL), and
+      a forked child that faults with the default action ends -
+      t_arm64libc also holds the kernel's line about it to its form.
+      t_arm64soup runs souptest on the ARM64 kernel with a virtio card
+      against t_soup's servers on the host, and holds it to the same 28
+      lines as the PC's: HTTP/1.1 (chunks, gzip, a redirect, a cookie, a
+      POST, a 404, four at once), HTTPS with TLS 1.3 through the OpenSSL
+      backend - the certificate's names, refused without the CA and for
+      another name - HTTP/2, the public suffix list, OpenSSL's hashes.
+      All ARM64 groups pass; on the PC libc, pthread, signals, ipc and
+      glib do.

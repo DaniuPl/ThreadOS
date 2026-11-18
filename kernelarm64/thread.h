@@ -46,6 +46,10 @@ struct thread {
        what the handler's siginfo_t says */
     int32_t sig_sender[64];
     uint64_t sig_bythread;
+    /* A signal its own instruction raised (SIGILL, SIGSEGV...): which,
+       its si_code and the address it is about */
+    int sig_fault, sig_fault_code;
+    uint64_t sig_fault_addr;
 };
 
 /* A signal it does not hold back waits for it: a system call's wait

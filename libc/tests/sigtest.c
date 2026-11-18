@@ -31,11 +31,18 @@
  *
  *   a handler interrupted by another signal; SA_RESETHAND; a forked
  *   child keeps the handler; waitpid goes on after a handler
+ *
+ *   faults as signals: a write where nothing is (SIGSEGV, SEGV_MAPERR,
+ *   that address) and to code (SEGV_ACCERR), an undefined instruction
+ *   (SIGILL) - each left with siglongjmp, the mask back as it was, as
+ *   OpenSSL asks the processor what it can do; and a fault with no
+ *   handler of its own still ends the program
  */
 
 #define _GNU_SOURCE
 #include <errno.h>
 #include <pthread.h>
+#include <setjmp.h>
 #include <semaphore.h>
 #include <signal.h>
 #include <stdint.h>
@@ -539,6 +546,81 @@ static void the_rest(void)
 	       WIFEXITED(st) ? WEXITSTATUS(st) : -1);
 }
 
+/* --- faults ---------------------------------------------------------------- */
+
+static sigjmp_buf fault_jmp;
+static volatile int fault_sig, fault_code;
+static void *volatile fault_addr;
+
+static void fault_handler(int sig, siginfo_t *si, void *uc)
+{
+	(void)uc;
+	fault_sig = sig;
+	fault_code = si->si_code;
+	fault_addr = si->si_addr;
+	siglongjmp(fault_jmp, 1);
+}
+
+static void undefined_instruction(void)
+{
+#if defined(__aarch64__)
+	__asm__ volatile(".inst 0x00000000");      /* udf #0 */
+#elif defined(__x86_64__)
+	__asm__ volatile("ud2");
+#endif
+}
+
+static const char *segv_code(int c)
+{
+	return c == SEGV_MAPERR ? "SEGV_MAPERR" : c == SEGV_ACCERR ?
+	       "SEGV_ACCERR" : "other";
+}
+
+static void faults(void)
+{
+	handle(SIGSEGV, fault_handler, 0, 0);
+	handle(SIGILL, fault_handler, 0, 0);
+	volatile int *nowhere = (volatile int *)(uintptr_t)0x10;
+	fault_sig = 0;
+	if (!sigsetjmp(fault_jmp, 1))
+		*nowhere = 1;
+	printf("a write where nothing is: %s, %s, at that address %d; the "
+	       "mask after siglongjmp as before %d\n",
+	       fault_sig == SIGSEGV ? "SIGSEGV" : "no signal",
+	       segv_code(fault_code), fault_addr == (void *)nowhere,
+	       !held(SIGSEGV));
+
+	volatile unsigned char *code = (volatile unsigned char *)(uintptr_t)
+	                               &undefined_instruction;
+	fault_sig = 0;
+	if (!sigsetjmp(fault_jmp, 1))
+		*code = 0;
+	printf("a write to the program's code: %s, %s, at that address %d\n",
+	       fault_sig == SIGSEGV ? "SIGSEGV" : "no signal",
+	       segv_code(fault_code), fault_addr == (void *)code);
+
+	fault_sig = 0;
+	static volatile int tries;
+	for (tries = 0; tries < 3; tries++)
+		if (!sigsetjmp(fault_jmp, 1))
+			undefined_instruction();
+	printf("an undefined instruction, three times: %s, raised by the "
+	       "instruction %d\n", fault_sig == SIGILL ? "SIGILL" : "no signal",
+	       fault_code > 0);
+
+	fflush(stdout);
+	pid_t c = fork();
+	if (c == 0) {
+		signal(SIGSEGV, SIG_DFL);
+		*nowhere = 1;
+		_exit(0);
+	}
+	int st = 0;
+	waitpid(c, &st, 0);
+	printf("a fault with no handler ends the program: %d\n",
+	       !(WIFEXITED(st) && WEXITSTATUS(st) == 0));
+}
+
 int main(void)
 {
 	setvbuf(stdout, 0, _IOLBF, 0);
@@ -548,6 +630,7 @@ int main(void)
 	waits();
 	suspending();
 	the_rest();
+	faults();
 	printf("sigtest: done\n");
 	return 0;
 }

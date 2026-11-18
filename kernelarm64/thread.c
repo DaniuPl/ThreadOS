@@ -214,6 +214,7 @@ static struct thread *new_thread(const char *name, void (*fn)(void *),
     t->sig_saved = 0;
     t->sig_suspended = 0;
     t->sig_bythread = 0;
+    t->sig_fault = 0;
     return t;
 }
 

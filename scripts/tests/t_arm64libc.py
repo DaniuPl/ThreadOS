@@ -38,7 +38,10 @@ the machine's own and are read on their own terms):
   computing or waiting (read, a condition variable, waitpid) taking a
   handler and going on, sigsuspend, kill to a program whose thread
   holds the signal back, and WebKit's way of stopping a thread to scan
-  its stack: the thread stands still and its frame has its stack
+  its stack: the thread stands still and its frame has its stack; and
+  faults as signals - SIGSEGV with its address and si_code, SIGILL,
+  left by siglongjmp, as OpenSSL probes the processor - while a fault
+  with no handler of its own is still the kernel's to end and report
 
   ipctest, on one core and on four: the PC's test of processes talking
   (kernel/ipc.c, which the ARM64 kernel now builds too) - socket pairs,
@@ -242,10 +245,22 @@ def main():
         if sigtest:
             want, want_code = host_run(sigtest, [], run_dir)
             for cores in (1, 4):
-                got, code, pages, back, ready = arm_run("sigtest", [], cores)
+                said, code, pages, back, ready = arm_run("sigtest", [],
+                                                         cores)
+                # The kernel's own word on the child that faulted with
+                # no handler of its own, which glibc's side has not
+                kernel = [l for l in said if l.startswith("[proc] ")]
+                got = [l for l in said if not l.startswith("[proc] ")]
                 ok, where = same(want, got)
                 check(f"{cores} core(s): sigtest prints exactly what "
                       f"glibc's build prints ({where})", ok)
+                check(f"{cores} core(s): the child's fault with no handler "
+                      f"went back to the kernel, which ended it saying "
+                      f"where ({kernel})",
+                      len(kernel) == 1 and re.match(
+                          r"\[proc\] sigtest \(pid \d+\): writing 0x10 "
+                          r"\(translation fault\), at 0x[0-9a-f]+ - ended$",
+                          kernel[0]) is not None)
                 check(f"{cores} core(s): WebKit's way of stopping a thread "
                       f"works: it stood still, its frame had its stack",
                       any(l.startswith("WebKit's suspend and resume") and

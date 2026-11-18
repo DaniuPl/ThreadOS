@@ -1627,14 +1627,17 @@ $(WPE_DIR)/build.ninja: $(WPE_PATCHED) apps/webkit/threados.cmake \
 	touch $@
 
 # As with jsc, ninja knows which of WebKit's files changed, and the
-# programs are linked again every time this runs
+# programs are linked again every time this runs. ninja runs a compiler
+# for every core and two more; some of WebCore's files take 3 GB each,
+# so WEBKIT_JOBS=n holds it to n where memory is the limit.
 $(WPE_ELFS) &: $(WPE_DIR)/build.ninja $(LIBC64) $(BUILD)/libc64/cxxrt.o \
                libc/cxx/compat.h apps/webkit/weft.c \
                apps/webkit/wpethreados.c apps/webkit/wpethreados.h \
                apps/webkit/wpewebproc.cpp apps/webkit/wpenetproc.cpp \
                user64/usys64.h | $(BUILD)/user64
 	rm -f $(WPE_PROGRAMS:%=$(WPE_DIR)/bin/%)
-	ninja -C $(WPE_DIR) $(WPE_PROGRAMS:%=bin/%) > $(WPE_DIR)/ninja.log || \
+	ninja $(if $(WEBKIT_JOBS),-j$(WEBKIT_JOBS)) -C $(WPE_DIR) \
+	    $(WPE_PROGRAMS:%=bin/%) > $(WPE_DIR)/ninja.log || \
 	    { grep -A20 FAILED $(WPE_DIR)/ninja.log | head -60; exit 1; }
 	for p in $(WPE_PROGRAMS); do \
 	    $(STRIP) -o $(BUILD)/user64/$$p.elf $(WPE_DIR)/bin/$$p || exit 1; done
@@ -2202,7 +2205,8 @@ ARM64_USER := $(BUILD)/aarch64
 
 arm64-libs:
 	$(MAKE) TARGET=aarch64 BUILD=$(ARM64_USER) webkit-libs \
-	    $(ARM64_USER)/user64/glibtest.elf $(ARM64_USER)/user64/wpedeps.elf
+	    $(ARM64_USER)/user64/glibtest.elf $(ARM64_USER)/user64/wpedeps.elf \
+	    $(ARM64_USER)/user64/souptest.elf
 
 weft-arm64:
 	$(MAKE) TARGET=aarch64 BUILD=$(ARM64_USER) webkit

@@ -33,6 +33,8 @@ extern char exception_vectors[];
 #define EC_DATA_ABORT_LOWER 0x24
 #define EC_DATA_ABORT       0x25
 #define EC_BRK              0x3C
+#define EC_PC_ALIGN         0x22
+#define EC_SP_ALIGN         0x26
 #define EC_SVC64            0x15
 
 /* Slots 8 and on are a lower level's: a program's */
@@ -100,10 +102,24 @@ static int program_page(uint32_t iss)
     return 0;
 }
 
+/* Linux's signals and si_codes for what an instruction did */
+#define SIGNAL_ILL  4
+#define SIGNAL_TRAP 5
+#define SIGNAL_BUS  7
+#define SIGNAL_SEGV 11
+#define ILL_ILLOPC  1
+#define TRAP_BRKPT  1
+#define BUS_ADRALN  1
+#define SEGV_MAPERR 1
+#define SEGV_ACCERR 2
+
 /* Whatever a program did that is not a system call ends it: the kernel
    is not the one at fault, and goes on - except the first touch of a
    page the program may have (its heap, its mappings, its stack), which
-   is made then (proc.c), and the instruction tried again */
+   is made then (proc.c), and the instruction tried again; and a fault
+   the program has a handler for, which becomes its signal - a C
+   library's way of asking the processor what it can do is to try an
+   instruction and catch SIGILL (OpenSSL's, built against musl) */
 static void from_program(struct trap_frame *f, uint32_t ec, uint32_t iss)
 {
     if (ec == EC_SVC64) {
@@ -113,6 +129,22 @@ static void from_program(struct trap_frame *f, uint32_t ec, uint32_t iss)
     if (ec == EC_DATA_ABORT_LOWER && program_page(iss)) {
         proc_return();
         proc_signals(f);
+        return;
+    }
+    if (ec == EC_DATA_ABORT_LOWER || ec == EC_INSN_ABORT_LOWER) {
+        uint32_t fsc = iss & 0x3F;
+        int sig = fsc == 0x21 ? SIGNAL_BUS : SIGNAL_SEGV;
+        int code = sig == SIGNAL_BUS ? BUS_ADRALN :
+                   PERMISSION_FAULT(iss) ? SEGV_ACCERR : SEGV_MAPERR;
+        if (proc_fault_signal(f, sig, code, read_sysreg(far_el1)))
+            return;
+    } else if (ec == EC_BRK) {
+        if (proc_fault_signal(f, SIGNAL_TRAP, TRAP_BRKPT, f->elr))
+            return;
+    } else if (ec == EC_PC_ALIGN || ec == EC_SP_ALIGN) {
+        if (proc_fault_signal(f, SIGNAL_BUS, BUS_ADRALN, f->elr))
+            return;
+    } else if (proc_fault_signal(f, SIGNAL_ILL, ILL_ILLOPC, f->elr)) {
         return;
     }
     if (ec == EC_DATA_ABORT_LOWER)

@@ -1329,8 +1329,13 @@ void fp_restore(const uint64_t *state);
    siginfo_t, ucontext_t, and a frame record for unwinders */
 struct sig_info {
     int32_t signo, err, code, pad;
-    int32_t pid;                 /* the sender's program */
-    uint32_t uid;
+    union {
+        struct {
+            int32_t pid;         /* the sender's program */
+            uint32_t uid;
+        } kill;
+        uint64_t addr;           /* a fault's: where */
+    } u;
     uint8_t rest[128 - 24];
 };
 
@@ -1489,8 +1494,15 @@ void proc_signals(struct trap_frame *f)
     struct sig_frame *sf = (struct sig_frame *)(uintptr_t)at;
     memset(&sf->info, 0, sizeof(sf->info));
     sf->info.signo = sig;
-    sf->info.code = (me->sig_bythread & SIG_BIT(sig)) ? SI_TKILL : SI_USER;
-    sf->info.pid = me->sig_sender[sig - 1];
+    if (sig == me->sig_fault) {
+        sf->info.code = me->sig_fault_code;
+        sf->info.u.addr = me->sig_fault_addr;
+        me->sig_fault = 0;
+    } else {
+        sf->info.code = (me->sig_bythread & SIG_BIT(sig)) ? SI_TKILL
+                                                          : SI_USER;
+        sf->info.u.kill.pid = me->sig_sender[sig - 1];
+    }
     struct sig_ucontext *uc = &sf->uc;
     memset(uc, 0, __builtin_offsetof(struct sig_ucontext, mc));
     uc->sigmask = mask;
@@ -1525,6 +1537,24 @@ void proc_signals(struct trap_frame *f)
     f->x[30] = p->sig_restorer;
     f->sp_el0 = at;
     f->elr = p->sig_handler;
+}
+
+int proc_fault_signal(struct trap_frame *f, int sig, int code,
+                      uint64_t addr)
+{
+    struct thread *me = thread_current();
+    struct uproc *p = me->proc;
+    /* Held back, it could never be taken - the instruction would only
+       fault again - so then, as on Linux, the program ends */
+    if (!p || !p->sig_handler || (me->sig_blocked & SIG_BIT(sig)))
+        return 0;
+    me->sig_fault = sig;
+    me->sig_fault_code = code;
+    me->sig_fault_addr = addr;
+    __atomic_fetch_or(&me->sig_pending, SIG_BIT(sig), __ATOMIC_SEQ_CST);
+    proc_return();
+    proc_signals(f);
+    return 1;
 }
 
 /* The handler has returned to the restorer: the stack is where the
