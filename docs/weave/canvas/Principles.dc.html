@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weave principles and tokens</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="width: 1200px; height: 900px; box-sizing: border-box; padding: 56px 64px; background-color: #F6F3EC; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.018) 0px, rgba(0,0,0,0.018) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.012) 0px, rgba(0,0,0,0.012) 1px, transparent 1px, transparent 3px); font-family: Inter, system-ui, sans-serif; color: #1D1C1A; display: flex; flex-direction: column; gap: 36px">
+
+  <header style="display: flex; align-items: flex-end; justify-content: space-between; gap: 32px">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #6B675F">ThreadOS design language</div>
+      <h1 style="margin: 0; font-size: 64px; line-height: 1; font-weight: 800; letter-spacing: -0.03em">Weave</h1>
+      <p style="margin: 0; font-size: 19px; line-height: 1.45; color: #4A4740; max-width: 620px">Cloth, not glass. Surfaces are opaque and carry a faint grain; whatever has focus carries a coloured thread you can follow across the screen.</p>
+    </div>
+    <svg aria-hidden="true" width="220" height="96" viewBox="0 0 220 96" fill="none" stroke-linecap="round">
+      <path d="M0 70 C 50 20, 90 90, 140 40 S 200 20, 220 30" stroke="#3F5EE8" stroke-width="4"></path>
+      <path d="M0 50 C 40 80, 100 10, 150 60 S 200 70, 220 60" stroke="#C2366F" stroke-width="2.5"></path>
+      <path d="M0 84 C 60 60, 110 96, 160 72 S 205 50, 220 80" stroke="#1E9B9B" stroke-width="2.5"></path>
+    </svg>
+  </header>
+
+  <section aria-label="Principles" style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px">
+    <article style="background: #FCFBF8; border: 1px solid #DDD7CB; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6B675F">01</div>
+      <h2 style="margin: 0; font-size: 18px; font-weight: 700">Cloth, not glass</h2>
+      <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #4A4740">No blur, no transparency behind text. A 3×3 grain tile is copied over a flat fill: on a software compositor that is a memcpy, where blur is a convolution every frame.</p>
+    </article>
+    <article style="background: #FCFBF8; border: 1px solid #DDD7CB; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6B675F">02</div>
+      <h2 style="margin: 0; font-size: 18px; font-weight: 700">One thread</h2>
+      <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #4A4740">Focus is one colour, drawn as a line: the selvedge on top of the window in front, its segment on the loom, the knot by the selected row. Nothing else uses it.</p>
+    </article>
+    <article style="background: #FCFBF8; border: 1px solid #DDD7CB; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6B675F">03</div>
+      <h2 style="margin: 0; font-size: 18px; font-weight: 700">Knots for state</h2>
+      <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #4A4740">A small circle means "this is so": running, unread, the desktop you are on. Hollow is empty, ringed has windows, filled is here.</p>
+    </article>
+    <article style="background: #FCFBF8; border: 1px solid #DDD7CB; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 10px">
+      <div style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6B675F">04</div>
+      <h2 style="margin: 0; font-size: 18px; font-weight: 700">Stitches divide</h2>
+      <p style="margin: 0; font-size: 14px; line-height: 1.5; color: #4A4740">A dashed line separates parts of one surface; a solid line is the edge of a surface. Fields have a stitch under them that turns into the thread when they take focus.</p>
+    </article>
+  </section>
+
+  <section aria-label="Dyes" style="display: flex; flex-direction: column; gap: 14px">
+    <div style="display: flex; align-items: baseline; justify-content: space-between">
+      <h2 style="margin: 0; font-size: 20px; font-weight: 700">Dyes</h2>
+      <div style="font-size: 13px; color: #6B675F">Six colours named after real dyes. Night value above, Linen below; each has one job.</div>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px">
+      <sc-for list="{{dyes}}" as="d" hint-placeholder-count="6">
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <div style="height: 64px; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; border: 1px solid #DDD7CB">
+            <div style="flex-grow: 1; background: {{d.night}}"></div>
+            <div style="flex-grow: 1; background: {{d.linen}}"></div>
+          </div>
+          <div style="font-size: 14px; font-weight: 700">{{d.name}}</div>
+          <div style="font-size: 12px; color: #4A4740; line-height: 1.4">{{d.job}}</div>
+          <div style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6B675F">{{d.night}} / {{d.linen}}</div>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <section aria-label="Compared with other systems" style="display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 32px">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 20px; font-weight: 700">Where it stands</h2>
+      <div role="table" aria-label="Design languages compared" style="display: flex; flex-direction: column; font-size: 13px; border-top: 1px solid #DDD7CB">
+        <div role="row" style="display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px dashed #CFC8BA; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #6B675F">
+          <div role="columnheader">Language</div><div role="columnheader">Surface</div><div role="columnheader">Focus</div>
+        </div>
+        <div role="row" style="display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px dashed #CFC8BA">
+          <div role="cell" style="font-weight: 600">Liquid Glass</div><div role="cell" style="color: #4A4740">Translucent, bends and reflects what is behind</div><div role="cell" style="color: #4A4740">Light and depth</div>
+        </div>
+        <div role="row" style="display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px dashed #CFC8BA">
+          <div role="cell" style="font-weight: 600">Fluent</div><div role="cell" style="color: #4A4740">Mica and Acrylic: tinted by the wallpaper, blurred</div><div role="cell" style="color: #4A4740">Accent fill</div>
+        </div>
+        <div role="row" style="display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px dashed #CFC8BA">
+          <div role="cell" style="font-weight: 600">Adwaita</div><div role="cell" style="color: #4A4740">Flat and opaque</div><div role="cell" style="color: #4A4740">Shadow and accent</div>
+        </div>
+        <div role="row" style="display: grid; grid-template-columns: 130px minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 9px 0; border-bottom: 1px solid #DDD7CB; background: rgba(63,94,232,0.07)">
+          <div role="cell" style="font-weight: 700; color: #2A45C0; padding-left: 8px">Weave</div><div role="cell">Opaque cloth with a woven grain</div><div role="cell">A coloured thread you can follow</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <h2 style="margin: 0; font-size: 20px; font-weight: 700">Type and shape</h2>
+      <div style="display: flex; flex-direction: column; gap: 6px; padding: 16px 18px; background: #FCFBF8; border: 1px solid #DDD7CB; border-radius: 12px">
+        <div style="font-size: 28px; font-weight: 700; letter-spacing: -0.02em">Inter, 13 / 15 / 28</div>
+        <div style="font-size: 13px; color: #4A4740">Interface text: 13 px, titles 13 px bold, the clock 15 px bold</div>
+        <div style="font-family: 'JetBrains Mono', monospace; font-size: 13px; color: #4A4740">JetBrains Mono for Term and Code</div>
+        <div style="border-top: 1px dashed #CFC8BA; margin: 8px 0 4px"></div>
+        <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; font-size: 12px; color: #4A4740">
+          <div><strong style="color: #1D1C1A">10 px</strong><br>window corners</div>
+          <div><strong style="color: #1D1C1A">3 px</strong><br>selvedge, focus thread</div>
+          <div><strong style="color: #1D1C1A">3 px</strong><br>grain tile, 2 % ink</div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1200,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      dyes: [
+        { name: 'Indigo', job: 'Focus, the one thread; primary buttons', night: '#5B7CFA', linen: '#3F5EE8' },
+        { name: 'Madder', job: 'Close, delete, errors', night: '#E5484D', linen: '#C9302C' },
+        { name: 'Saffron', job: 'Warnings, the microphone is on', night: '#F5A524', linen: '#B86E00' },
+        { name: 'Weld', job: 'Done, connected, the camera is on', night: '#46C27A', linen: '#1E8A4C' },
+        { name: 'Woad', job: 'Links, the network, Weft', night: '#2EC4C4', linen: '#1E7F86' },
+        { name: 'Cochineal', job: 'Media: music, pictures, sound', night: '#D152A6', linen: '#C2366F' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weave mobile, linen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background-color: #EEEAE2; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.014) 0px, rgba(0,0,0,0.014) 1px, transparent 1px, transparent 3px); font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+
+  <svg aria-hidden="true" width="390" height="844" viewBox="0 0 390 844" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -20 250 C 90 170, 160 320, 260 230 S 360 150, 420 190" stroke="#3F5EE8" stroke-opacity="0.55" stroke-width="3"></path>
+    <path d="M -20 280 C 80 230, 170 350, 270 260 S 370 200, 420 230" stroke="#C2366F" stroke-opacity="0.35" stroke-width="2"></path>
+    <path d="M -20 310 C 100 270, 180 380, 280 300 S 370 250, 420 270" stroke="#1E7F86" stroke-opacity="0.35" stroke-width="2"></path>
+  </svg>
+
+  <div style="position: relative; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600">
+    <span style="font-variant-numeric: tabular-nums">12:36</span>
+    <span style="display: flex; align-items: center; gap: 8px">
+      <svg role="img" aria-label="Network connected" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1D1C1A" stroke-width="2.2" stroke-linecap="round"><path d="M3 9a14 14 0 0 1 18 0"></path><path d="M6 12.5a9 9 0 0 1 12 0"></path><path d="M9 16a4 4 0 0 1 6 0"></path><circle cx="12" cy="19" r="1" fill="#1D1C1A"></circle></svg>
+      <span style="display: flex; align-items: center; gap: 4px; font-size: 12px"><span style="width: 22px; height: 11px; box-sizing: border-box; border: 1.5px solid #1D1C1A; border-radius: 3px; padding: 1px"><span style="display: block; width: 70%; height: 100%; border-radius: 1px; background: #1E8A4C"></span></span>70%</span>
+    </span>
+  </div>
+
+  <div style="position: relative; padding: 18px 24px 0">
+    <div style="font-size: 15px; font-weight: 500; color: #4A4740">Thursday, 19 November</div>
+    <div style="font-size: 76px; font-weight: 800; letter-spacing: -0.04em; line-height: 1; font-variant-numeric: tabular-nums">12:36</div>
+  </div>
+
+  <section aria-label="Threads" style="position: relative; margin: 150px 16px 0; padding-left: 22px; display: flex; flex-direction: column; gap: 10px">
+    <div style="position: absolute; left: 6px; top: 8px; bottom: 20px; width: 2px; background: linear-gradient(#3F5EE8, #DAD5CA)"></div>
+    <div style="position: relative; background: #FCFBF8; border: 1px solid #DAD5CA; border-radius: 14px; padding: 12px 14px; box-shadow: 0 6px 18px rgba(60,50,30,0.08)">
+      <div style="position: absolute; left: -21px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: #3F5EE8; border: 2px solid #EEEAE2"></div>
+      <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B675F"><span style="width: 8px; height: 8px; border-radius: 2px; background: #3F5EE8"></span>Messages · now</div>
+      <div style="font-size: 15px; font-weight: 700; margin-top: 4px">Ania</div>
+      <div style="font-size: 14px; color: #4A4740; margin-top: 2px">Is the new build on the stick yet?</div>
+    </div>
+    <div style="position: relative; background: #FCFBF8; border: 1px solid #DAD5CA; border-radius: 14px; padding: 12px 14px">
+      <div style="position: absolute; left: -21px; top: 14px; width: 10px; height: 10px; border-radius: 50%; background: #B86E00; border: 2px solid #EEEAE2"></div>
+      <div style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B675F"><span style="width: 8px; height: 8px; border-radius: 2px; background: #B86E00"></span>Recorder · 12 min</div>
+      <div style="font-size: 15px; font-weight: 700; margin-top: 4px">Recording saved</div>
+      <div style="font-size: 14px; color: #4A4740; margin-top: 2px">Voice memo, 0:48</div>
+    </div>
+  </section>
+
+  <section aria-label="Programs" style="position: relative; margin: 22px 20px 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 14px; column-gap: 8px">
+    <sc-for list="{{apps}}" as="a" hint-placeholder-count="8">
+      <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; color: #1D1C1A">
+        <dc-import name="Icon" app="{{a.key}}" size="{{ 58 }}" hint-size="58px,58px"></dc-import>
+        <span style="font-size: 12px; font-weight: 500">{{a.name}}</span>
+      </a>
+    </sc-for>
+  </section>
+
+  <nav aria-label="Loom" style="position: absolute; left: 14px; right: 14px; bottom: 34px; height: 80px; box-sizing: border-box; border-radius: 24px; background-color: #FAF8F4; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.014) 0px, rgba(0,0,0,0.014) 1px, transparent 1px, transparent 3px); border: 1px solid #DAD5CA; box-shadow: 0 10px 28px rgba(60,50,30,0.12); display: flex; align-items: center; justify-content: space-around; padding: 0 10px 6px">
+    <div style="position: absolute; left: 22px; right: 22px; bottom: 12px; height: 1px; background: #DAD5CA"></div>
+    <sc-for list="{{dock}}" as="d" hint-placeholder-count="4">
+      <div style="position: relative; display: flex; flex-direction: column; align-items: center">
+        <button aria-label="{{d.name}}" style="width: 52px; height: 52px; border: 0; padding: 0; background: transparent"><dc-import name="Icon" app="{{d.key}}" size="{{ 52 }}" hint-size="52px,52px"></dc-import></button>
+        <div style="position: absolute; bottom: -10px; height: 3px; width: {{d.threadW}}; border-radius: 2px; background: {{d.thread}}"></div>
+      </div>
+    </sc-for>
+  </nav>
+  <!-- the thread, at home: what runs, nothing in front -->
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+    <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #CFC8BA"></div>
+    
+    <div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #3F5EE8"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #1E7F86"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #B86E00"></span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const apps = [
+      { name: 'Weft', glyph: 'W', dye: '#1E7F86' },
+      { name: 'Gallery', glyph: 'G', dye: '#C2366F' },
+      { name: 'Camera', glyph: 'C', dye: '#4A4740' },
+      { name: 'Recorder', glyph: 'R', dye: '#B86E00' },
+      { name: 'Calendar', glyph: '19', dye: '#C9302C' },
+      { name: 'Files', glyph: 'F', dye: '#3F5EE8' },
+      { name: 'Clock', glyph: 'K', dye: '#2B2A27' },
+      { name: 'Settings', glyph: 'S', dye: '#6B675F' }
+    ];
+    const dock = [
+      { name: 'Phone', glyph: 'P', dye: '#1E8A4C', run: 'no' },
+      { name: 'Messages', glyph: 'M', dye: '#3F5EE8', run: 'focus' },
+      { name: 'Weft', glyph: 'W', dye: '#1E7F86', run: 'yes' },
+      { name: 'Term', glyph: '>', dye: '#2B2A27', run: 'no' }
+    ].map((d) => ({
+      ...d,
+      thread: d.run === 'focus' ? '#3F5EE8' : (d.run === 'yes' ? '#8A857B' : 'transparent'),
+      threadW: d.run === 'focus' ? '28px' : '12px'
+    }));
+    const K = (n) => ({ messages: 'purl', 'skein': 'skein' }[n.toLowerCase()] || n.toLowerCase());
+    apps.forEach((a) => { a.key = K(a.name); });
+    dock.forEach((d) => { d.key = K(d.name); });
+    return { apps, dock };
+  }
+}
+</script>
+</body>
+</html>

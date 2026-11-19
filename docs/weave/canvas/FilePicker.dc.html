@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Open and save</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <!-- the program asking: Editor, dimmed under its own question -->
+  <section aria-label="Editor window" style="position: absolute; left: 160px; top: 40px; width: 1120px; height: 760px; border-radius: 10px; overflow: hidden; background: #FAF8F4; border: 1px solid #D3CCBE; box-shadow: 0 22px 56px rgba(60,50,30,0.22)">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #EDE8DE"><dc-import name="Icon" app="editor" size="{{ 18 }}" hint-size="18px,18px"></dc-import><span style="font-size: 13px; font-weight: 700">Editor</span><span style="font-size: 13px; color: #6B675F">Untitled</span></div>
+    <div style="padding: 24px 40px; font: 400 14px/1.8 'JetBrains Mono', monospace; color: #8A857B">Things to take to the market on Saturday<br>- the linen, folded<br>- the dyes for Ola</div>
+    <div style="position: absolute; inset: 41px 0 0 0; background: rgba(60,50,30,0.18)"></div>
+  </section>
+
+  <!-- the question hangs from the window's title bar, on a short thread -->
+  <div aria-hidden="true" style="position: absolute; left: 719px; top: 81px; width: 2px; height: 14px; background: #3F5EE8"></div>
+  <section role="dialog" aria-label="{{title}}" style="position: absolute; left: 260px; top: 95px; width: 920px; height: 600px; border-radius: 14px; overflow: hidden; background: #FAF8F4; border: 1px solid #CFC8BA; box-shadow: 0 30px 70px rgba(60,50,30,0.3); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid #E3DDD1">
+      <span style="font-size: 16px; font-weight: 800">{{title}}</span>
+      <div role="tablist" aria-label="Open or save" style="display: inline-flex; padding: 3px; border-radius: 9px; background: #EFEBE3; border: 1px solid #DDD6C9">
+        <sc-for list="{{modes}}" as="m" hint-placeholder-count="2"><button role="tab" aria-selected="{{m.sel}}" onClick="{{m.pick}}" style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: {{m.bg}}; color: #1D1C1A; font: {{m.w}} 12.5px Inter, sans-serif; box-shadow: {{m.sh}}">{{m.name}}</button></sc-for>
+      </div>
+      <div style="flex-grow: 1"></div>
+      <label style="display: flex; align-items: center; gap: 8px; width: 220px; height: 32px; box-sizing: border-box; padding: 0 10px; border-radius: 8px 8px 3px 3px; background: #FFFFFF; border: 1px solid #E3DDD1; border-bottom: 2px dashed #CFC8BA"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg><input aria-label="Find in this folder" placeholder="Find in this folder" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font: 400 12.5px Inter, sans-serif; color: #1D1C1A; outline: none"></label>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <nav aria-label="Places" style="width: 190px; flex-shrink: 0; box-sizing: border-box; padding: 12px 8px; border-right: 1px solid #E3DDD1; background: #F6F3EC; display: flex; flex-direction: column; gap: 2px; font-size: 13px">
+        <sc-for list="{{places}}" as="p" hint-placeholder-count="7">
+          <a href="#" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 7px; text-decoration: none; color: #1D1C1A; background: {{p.bg}}; font-weight: {{p.w}}; margin-top: {{p.gap}}"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{p.knot}}"></span>{{p.name}}</a>
+        </sc-for>
+      </nav>
+      <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column">
+        <div style="height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 14px; font-size: 13px; color: #6B675F; border-bottom: 1px dashed #DDD6C9">Home <span style="color: #B3AC9F">/</span> <span style="color: #1D1C1A; font-weight: 600">Documents</span></div>
+        <div style="flex-grow: 1; padding: 6px 10px; display: flex; flex-direction: column">
+          <sc-for list="{{files}}" as="f" hint-placeholder-count="8">
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 90px 90px; gap: 10px; height: 34px; align-items: center; padding: 0 10px; border-radius: 7px; background: {{f.bg}}; color: {{f.fg}}; font-size: 13.5px; opacity: {{f.op}}">
+              <span style="display: flex; align-items: center; gap: 10px; font-weight: {{f.w}}"><span style="width: 18px; height: 14px; border-radius: 3px; background: {{f.swatch}}"></span>{{f.name}}</span>
+              <span style="font-size: 12px; color: #6B675F">{{f.kind}}</span>
+              <span style="font-size: 12px; color: #6B675F; text-align: right">{{f.when}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <sc-if value="{{isOpen}}" hint-placeholder-val="{{ false }}">
+        <aside aria-label="Preview" style="width: 220px; flex-shrink: 0; box-sizing: border-box; padding: 14px; border-left: 1px solid #E3DDD1; background: #F6F3EC; display: flex; flex-direction: column; gap: 10px">
+          <div style="height: 150px; border-radius: 10px; background: #FFFFFF; border: 1px solid #E3DDD1; padding: 10px; box-sizing: border-box; font: 400 9.5px/1.6 'JetBrains Mono', monospace; color: #6B675F">Things to take to the market on Saturday<br>- the linen, folded<br>- the dyes for Ola<br>- …</div>
+          <div style="font-size: 14px; font-weight: 700">market-list.txt</div>
+          <div style="font-size: 12px; color: #6B675F; line-height: 1.6">Text · 412 bytes<br>Changed today, 11:40</div>
+        </aside>
+      </sc-if>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-top: 1px solid #E3DDD1; background: #F6F3EC">
+      <sc-if value="{{isSave}}" hint-placeholder-val="{{ true }}">
+        <label style="display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600">Name<input aria-label="File name" value="market-list.txt" style="width: 260px; height: 34px; box-sizing: border-box; padding: 0 10px; border-radius: 8px 8px 3px 3px; border: 0; border-bottom: 2px solid #3F5EE8; background: #FFFFFF; color: #1D1C1A; font: 400 14px Inter, sans-serif; outline: none"></label>
+        <span style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid #DDD6C9; background: #FCFBF8; font-size: 13px">Plain text (.txt)<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.4" stroke-linecap="round"><path d="M7 10l5 5 5-5"></path></svg></span>
+      </sc-if>
+      <sc-if value="{{isOpen}}" hint-placeholder-val="{{ false }}">
+        <span style="display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid #DDD6C9; background: #FCFBF8; font-size: 13px">Show: text files<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.4" stroke-linecap="round"><path d="M7 10l5 5 5-5"></path></svg></span>
+      </sc-if>
+      <span style="flex-grow: 1"></span>
+      <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #DDD6C9; background: #FCFBF8; color: #1D1C1A; font: 500 13px Inter, sans-serif">Cancel</button>
+      <button style="height: 34px; padding: 0 18px; border-radius: 8px; border: 0; background: #3F5EE8; color: #FFFFFF; font: 600 13px Inter, sans-serif">{{action}}</button>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mode = (this.state && this.state.m) || 'Save';
+    const isSave = mode === 'Save';
+    const modes = ['Open', 'Save'].map((n) => ({ name: n, sel: n === mode ? 'true' : 'false', bg: n === mode ? '#FCFBF8' : 'transparent', w: n === mode ? 600 : 500, sh: n === mode ? 'inset 0 -2px 0 #3F5EE8' : 'none', pick: () => this.setState({ m: n }) }));
+    const places = [['Home'], ['Documents', 1], ['Pictures'], ['Projects'], ['Desktop'], ['NVMe disk', 0, 10], ['USB stick']].map((p) => ({ name: p[0], bg: p[1] ? 'rgba(63,94,232,0.12)' : 'transparent', w: p[1] ? 700 : 400, knot: p[1] ? '#3F5EE8' : 'transparent', gap: (p[2] || 0) + 'px' }));
+    const F = [['letters', 'Folder', 'Mon', '#4A6BE0', 1], ['receipts', 'Folder', 'Oct 2', '#4A6BE0', 1], ['market-list.txt', 'Text', '11:40', '#C77F0A', 1], ['notes.txt', 'Text', 'Mon', '#C77F0A', 1], ['budget.csv', 'Table', 'Nov 3', '#2F9A5C', 0], ['photo-0412.jpg', 'Picture', 'Nov 16', '#D152A6', 0], ['talk.wav', 'Sound', 'Nov 18', '#B23D8C', 0]];
+    const files = F.map((f) => {
+      const sel = !isSave && f[0] === 'market-list.txt';
+      const fits = f[4] === 1;
+      return { name: f[0], kind: f[1], when: f[2], swatch: f[3], bg: sel ? 'rgba(63,94,232,0.12)' : 'transparent', fg: '#1D1C1A', w: sel ? 700 : (f[1] === 'Folder' ? 600 : 400), op: (isSave || fits) ? 1 : 0.4 };
+    });
+    return { modes, places, files, isSave, isOpen: !isSave, title: isSave ? 'Save as' : 'Open', action: isSave ? 'Save' : 'Open' };
+  }
+}
+</script>
+</body>
+</html>

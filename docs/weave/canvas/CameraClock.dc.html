@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Camera and Clock</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <!-- Camera -->
+  <section aria-label="Camera window" style="position: absolute; left: 30px; top: 30px; width: 820px; height: 700px; border-radius: 10px; overflow: hidden; background: #0A0B0E; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.55); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; background: #1B1D24"><dc-import name="Icon" app="camera" size="{{ 18 }}" hint-size="18px,18px"></dc-import><span style="font-size: 13px; font-weight: 700">Camera</span><span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #7AD69B"><span style="width: 7px; height: 7px; border-radius: 50%; background: #46C27A"></span>on</span></div>
+    <div style="position: relative; flex-grow: 1; background: #1E2A3A; overflow: hidden">
+      <svg aria-hidden="true" width="100%" height="100%" viewBox="0 0 820 560" preserveAspectRatio="xMidYMid slice"><rect width="820" height="560" fill="#2C3E55"></rect><rect y="330" width="820" height="230" fill="#3A3226"></rect><rect x="470" y="150" width="200" height="190" rx="8" fill="#4A5D78"></rect><rect x="490" y="170" width="160" height="110" fill="#8FB4D8"></rect><circle cx="250" cy="300" r="70" fill="#C9A27A"></circle><rect x="170" y="360" width="160" height="200" rx="60" fill="#5B7CFA" opacity="0.8"></rect></svg>
+      <!-- the thirds, as stitches -->
+      <div aria-hidden="true" style="position: absolute; inset: 0; background-image: linear-gradient(90deg, transparent 33.1%, rgba(255,255,255,0.25) 33.1%, rgba(255,255,255,0.25) 33.3%, transparent 33.3%, transparent 66.6%, rgba(255,255,255,0.25) 66.6%, rgba(255,255,255,0.25) 66.8%, transparent 66.8%), linear-gradient(180deg, transparent 33.1%, rgba(255,255,255,0.25) 33.1%, rgba(255,255,255,0.25) 33.3%, transparent 33.3%, transparent 66.6%, rgba(255,255,255,0.25) 66.6%, rgba(255,255,255,0.25) 66.8%, transparent 66.8%)"></div>
+      <span aria-hidden="true" style="position: absolute; left: 210px; top: 220px; width: 90px; height: 90px; border: 2px solid #F5A524; border-radius: 12px"></span>
+    </div>
+    <div style="height: 110px; display: flex; align-items: center; justify-content: space-between; padding: 0 30px; background: #0F1116">
+      <span style="position: relative; width: 56px; height: 56px; border-radius: 12px; overflow: hidden; background: #8FB4D8; border: 2px solid #2E323D"><span style="position: absolute; left: 0; right: 0; bottom: 0; height: 20px; background: #3A3226"></span></span>
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+        <div role="tablist" aria-label="Mode" style="display: flex; gap: 18px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase"><sc-for list="{{modes}}" as="m" hint-placeholder-count="3"><button role="tab" aria-selected="{{m.sel}}" onClick="{{m.pick}}" style="border: 0; background: transparent; padding: 0; color: {{m.fg}}; font: inherit; box-shadow: {{m.sh}}">{{m.name}}</button></sc-for></div>
+        <button aria-label="{{shutterLabel}}" style="width: 66px; height: 66px; border-radius: 50%; border: 4px solid #ECEDF2; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><span style="width: 50px; height: 50px; border-radius: {{shutterR}}; background: {{shutterBg}}"></span></button>
+      </div>
+      <button aria-label="Switch camera" style="width: 48px; height: 48px; border-radius: 50%; border: 1px solid #2E323D; background: #1A1C23; color: #ECEDF2; font: 600 14px Inter, sans-serif">↺</button>
+    </div>
+  </section>
+
+  <!-- Clock -->
+  <section aria-label="Clock window" style="position: absolute; left: 880px; top: 70px; width: 530px; height: 640px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #262A33; box-shadow: 0 12px 32px rgba(0,0,0,0.45); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #16181E"></div>
+    <div style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 10px; background: #1B1D24"><dc-import name="Icon" app="clock" size="{{ 18 }}" hint-size="18px,18px"></dc-import><span style="font-size: 13px; font-weight: 600; color: #8D93A1">Clock</span></div>
+    <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 20px">
+        <svg role="img" aria-label="Tea timer, 3:12 left of 5:00" width="140" height="140" viewBox="0 0 140 140" fill="none"><circle cx="70" cy="70" r="60" stroke="#2E323D" stroke-width="6" stroke-dasharray="3 6"></circle><path d="M70 10 A 60 60 0 1 1 13 89" stroke="#F5A524" stroke-width="6" stroke-linecap="round"></path><circle cx="13" cy="89" r="7" fill="#FFFFFF"></circle></svg>
+        <div><div style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Timer · Tea</div><div style="font: 700 46px 'JetBrains Mono', monospace; color: #F5A524">3:12</div><div style="display: flex; gap: 8px; margin-top: 6px"><button style="height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 13px Inter, sans-serif">Pause</button><button style="height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: transparent; color: #9AA0AE; font: 500 13px Inter, sans-serif">+1 min</button></div></div>
+      </div>
+      <div style="border-top: 1px dashed #2E323D"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Alarms</span>
+        <sc-for list="{{alarms}}" as="a" hint-placeholder-count="3">
+          <div style="display: flex; align-items: center; justify-content: space-between; height: 58px; border-bottom: 1px dashed #22252E">
+            <span><span style="display: block; font: 700 24px 'JetBrains Mono', monospace; color: {{a.fg}}">{{a.time}}</span><span style="display: block; font-size: 12px; color: #9AA0AE">{{a.days}}</span></span>
+            <button onClick="{{a.toggle}}" aria-label="{{a.time}}" style="width: 42px; height: 24px; border-radius: 999px; border: 0; padding: 0 3px; background: {{a.track}}; display: flex; align-items: center; justify-content: {{a.just}}"><span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF"></span></button>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; gap: 10px">
+        <sc-for list="{{zones}}" as="z" hint-placeholder-count="3"><div style="flex: 1; padding: 10px 12px; border-radius: 10px; background: #1F2229; border: 1px solid #2E323D"><div style="font-size: 12px; color: #9AA0AE">{{z.city}}</div><div style="font: 700 18px 'JetBrains Mono', monospace">{{z.t}}</div></div></sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- an alarm going off rides the shuttle and stays until answered -->
+  <div role="alert" style="position: absolute; left: 50%; bottom: 60px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; height: 58px; padding: 0 8px 0 16px; border-radius: 999px; background: #1F2229; border: 1px solid rgba(229,72,77,0.6); box-shadow: 0 14px 36px rgba(0,0,0,0.6)">
+    <span style="width: 10px; height: 10px; border-radius: 50%; background: #E5484D; box-shadow: 0 0 10px #E5484D"></span>
+    <span><span style="display: block; font-size: 14px; font-weight: 800">7:00 · Wake up</span><span style="display: block; font-size: 12px; color: #9AA0AE">Urgent: it stays until you answer</span></span>
+    <button style="height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 13px Inter, sans-serif">10 more minutes</button>
+    <button style="height: 40px; padding: 0 18px; border-radius: 999px; border: 0; background: #E5484D; color: #FFFFFF; font: 700 13px Inter, sans-serif">Stop</button>
+  </div>
+  <div style="position: absolute; left: 50%; bottom: 38px; width: 2px; height: 22px; background: #E5484D"></div>
+  <div style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 26px; border-radius: 10px 10px 0 0; background: #181A20; border: 1px solid #2E323D; border-bottom: 0"></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const mode = st.m || 'Photo';
+    const modes = ['Photo', 'Video', 'Scan'].map((n) => ({ name: n, sel: n === mode ? 'true' : 'false', fg: n === mode ? '#FFFFFF' : '#6A7080', sh: n === mode ? 'inset 0 -2px 0 #5B7CFA' : 'none', pick: () => this.setState({ m: n }) }));
+    const on = st.on || { a: true, b: false, c: true };
+    const A = [['a', '7:00', 'Weekdays'], ['b', '9:30', 'Saturday, Sunday'], ['c', '18:45', 'Tuesday · the market']];
+    const alarms = A.map((a) => { const v = !!on[a[0]]; return { time: a[1], days: a[2], fg: v ? '#ECEDF2' : '#6A7080', track: v ? '#5B7CFA' : '#3A3F4C', just: v ? 'flex-end' : 'flex-start', toggle: () => this.setState({ on: Object.assign({}, on, { [a[0]]: !v }) }) }; });
+    const zones = [{ city: 'Warsaw', t: '12:36' }, { city: 'Lisbon', t: '11:36' }, { city: 'Tokyo', t: '20:36' }];
+    const video = mode === 'Video';
+    return { modes, alarms, zones, shutterBg: video ? '#E5484D' : '#ECEDF2', shutterR: video ? '12px' : '50%', shutterLabel: video ? 'Start recording' : 'Take a picture' };
+  }
+}
+</script>
+</body>
+</html>

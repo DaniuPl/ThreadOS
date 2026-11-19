@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Family on the phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #E9E4DA; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <svg role="img" aria-label="Map with Ania at home and Ola at school" width="390" height="520" viewBox="0 0 390 520" style="position: absolute; left: 0; top: 0">
+    <rect width="390" height="520" fill="#ECE7DD"></rect>
+    <g fill="#E1DACC"><rect x="20" y="60" width="110" height="90" rx="6"></rect><rect x="150" y="60" width="100" height="90" rx="6"></rect><rect x="270" y="60" width="100" height="90" rx="6"></rect><rect x="20" y="320" width="150" height="120" rx="6"></rect><rect x="200" y="330" width="170" height="110" rx="6"></rect></g>
+    <path d="M150 170 H370 V290 H150 Z" fill="#D5E4C8"></path>
+    <path d="M0 250 C 100 220, 200 300, 300 260 S 380 240, 400 250 L400 290 C 330 280, 250 320, 160 290 S 60 270, 0 290 Z" fill="#BFD9DC"></path>
+    <g stroke="#FFFFFF" stroke-width="8" fill="none" stroke-linecap="round"><path d="M140 40 V500"></path><path d="M260 40 V160"></path><path d="M0 160 H390"></path><path d="M0 310 H390"></path><path d="M185 310 V500"></path></g>
+    <path d="M80 400 C 140 400, 160 360, 220 370 S 300 390, 300 380" stroke="#B86E00" stroke-width="2" stroke-dasharray="4 5" fill="none"></path>
+  </svg>
+  <div style="position: absolute; left: 0; right: 0; top: 0; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600">
+    <span style="display: flex; align-items: center; gap: 8px">08:24<span aria-label="You share where you are" style="width: 8px; height: 8px; border-radius: 50%; background: #C2366F"></span></span>
+    <span style="font-size: 12px">71%</span>
+  </div>
+  <sc-for list="{{pins}}" as="p" hint-placeholder-count="2">
+    <div style="position: absolute; left: {{p.x}}; top: {{p.y}}; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center">
+      <span style="width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%; border: 3px solid #FFFFFF; background: {{p.dye}}; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font-weight: 800; box-shadow: 0 6px 16px rgba(60,50,30,0.3)">{{p.initial}}</span>
+      <span style="width: 2px; height: 10px; background: #FFFFFF"></span>
+    </div>
+  </sc-for>
+
+  <section aria-label="People" style="position: absolute; left: 0; right: 0; bottom: 0; height: 400px; border-radius: 24px 24px 0 0; background: #FAF8F4; box-shadow: 0 -10px 30px rgba(60,50,30,0.15); padding: 10px 16px 0; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px">
+    <span style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: #CFC8BA"></span>
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 4px 4px">
+      <span style="font-size: 22px; font-weight: 800; letter-spacing: -0.02em">Family</span>
+      <div role="tablist" style="display: flex; padding: 3px; border-radius: 10px; background: #EFEBE3"><button role="tab" aria-selected="true" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 0; background: #FCFBF8; font: 600 13px Inter, sans-serif; color: #1D1C1A; box-shadow: inset 0 -2px 0 #3F5EE8">People</button><button role="tab" aria-selected="false" style="height: 30px; padding: 0 12px; border-radius: 7px; border: 0; background: transparent; font: 500 13px Inter, sans-serif; color: #4A4740">Devices</button></div>
+    </div>
+    <sc-for list="{{people}}" as="p" hint-placeholder-count="3">
+      <div style="display: flex; align-items: center; gap: 12px; height: 60px; padding: 0 6px; border-radius: 14px">
+        <span style="width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{p.dye}}; padding: 3px; opacity: {{p.op}}"><span style="display: flex; width: 100%; height: 100%; border-radius: 50%; background: {{p.dye}}; align-items: center; justify-content: center; color: #FFFFFF; font-weight: 800">{{p.initial}}</span></span>
+        <span style="flex-grow: 1"><span style="display: block; font-size: 16px; font-weight: 700">{{p.name}}</span><span style="display: block; font-size: 13px; color: #6B675F">{{p.where}}</span></span>
+        <span style="font-size: 13px; color: #6B675F">{{p.dist}}</span>
+      </div>
+    </sc-for>
+    <div style="margin-top: auto; margin-bottom: 36px; display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 14px; background: #F1EDE5; border: 1px dashed #CFC8BA">
+      <span style="width: 10px; height: 10px; border-radius: 50%; background: #C2366F"></span>
+      <span style="flex-grow: 1; font-size: 13.5px; font-weight: 600">You share where you are</span>
+      <button style="height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid #DDD6C9; background: #FCFBF8; color: #1D1C1A; font: 600 13px Inter, sans-serif">Stop</button>
+    </div>
+  </section>
+  <!-- the thread: the phone's navigation, every running program a knot -->
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+    <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #CFC8BA"></div>
+    <div style="position: absolute; left: 50%; top: 9px; width: 56px; margin-left: -28px; height: 4px; border-radius: 2px; background: #C2366F"></div>
+    <div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #3F5EE8"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #1E7F86"></span><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #C2366F; border: 2px solid #FFFFFF"></span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      pins: [ { x: '22%', y: '47%', dye: '#C2366F', initial: 'N' }, { x: '77%', y: '45%', dye: '#B86E00', initial: 'O' } ],
+      people: [
+        { name: 'Ania', initial: 'N', dye: '#C2366F', where: 'Home · since 7:40', dist: '2.1 km', op: 1 },
+        { name: 'Ola', initial: 'O', dye: '#B86E00', where: 'School · 3 min ago', dist: '1.6 km', op: 1 },
+        { name: 'Tomek', initial: 'T', dye: '#8A857B', where: 'Not sharing at the moment', dist: '', op: 0.5 }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

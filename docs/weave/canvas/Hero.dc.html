@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ThreadOS, on its page</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 520 C 380 380, 460 660, 760 470 S 1200 190, 1500 230" stroke="#46C27A" stroke-opacity="0.35" stroke-width="1.5"></path>
+    <path d="M -40 580 C 340 450, 480 720, 790 530 S 1220 250, 1500 300" stroke="#D152A6" stroke-opacity="0.5" stroke-width="2"></path>
+    <path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="#5B7CFA" stroke-opacity="0.85" stroke-width="3"></path>
+    <path d="M -40 700 C 260 620, 560 840, 860 630 S 1260 390, 1500 440" stroke="#2EC4C4" stroke-opacity="0.5" stroke-width="2"></path>
+    <path d="M -40 760 C 300 720, 600 880, 900 680 S 1280 470, 1500 510" stroke="#F5A524" stroke-opacity="0.35" stroke-width="1.5"></path>
+  </svg>
+
+  <nav aria-label="The project" style="position: absolute; left: 64px; right: 64px; top: 28px; display: flex; align-items: center; gap: 28px; font-size: 14px">
+    <span style="display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 800"><span style="width: 28px; height: 28px; border-radius: 8px; background: #5B7CFA"></span>ThreadOS</span>
+    <span style="flex-grow: 1"></span>
+    <a href="#" style="color: #C9CDD8; text-decoration: none">Look</a><a href="#" style="color: #C9CDD8; text-decoration: none">Journal</a><a href="#" style="color: #C9CDD8; text-decoration: none">Source</a><a href="#" style="color: #C9CDD8; text-decoration: none">Contribute</a>
+  </nav>
+
+  <div style="position: absolute; left: 64px; top: 150px; width: 560px; display: flex; flex-direction: column; gap: 22px">
+    <span style="align-self: flex-start; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid #2E323D; font-size: 13px; color: #C9CDD8"><span style="width: 8px; height: 8px; border-radius: 50%; background: #F5A524"></span>0.1.0-alpha · early, and moving fast</span>
+    <h1 style="margin: 0; font-size: 68px; line-height: 1.02; font-weight: 800; letter-spacing: -0.04em">An operating system, woven from scratch.</h1>
+    <p style="margin: 0; font-size: 19px; line-height: 1.55; color: #B4B9C6">Its own kernel in C and assembly, for x86-64 and ARM64. A desktop with a look of its own, a phone and a tablet, and Weft - a WebKit browser - built from source with everything else.</p>
+    <div style="display: flex; gap: 12px">
+      <a href="#" style="display: flex; align-items: center; height: 50px; padding: 0 24px; border-radius: 12px; background: #5B7CFA; color: #FFFFFF; font-size: 16px; font-weight: 700; text-decoration: none">Try it from a stick</a>
+      <a href="#" style="display: flex; align-items: center; height: 50px; padding: 0 22px; border-radius: 12px; border: 1px solid #2E323D; background: rgba(20,22,27,0.8); color: #ECEDF2; font-size: 16px; font-weight: 600; text-decoration: none">Read the source</a>
+    </div>
+    <div style="display: flex; gap: 26px; margin-top: 10px; font-size: 13.5px; color: #9AA0AE">
+      <span style="display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; color: #ECEDF2">Tested in QEMU</b>every feature boots a real kernel</span>
+      <span style="display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; color: #ECEDF2">Signed updates</b>checked before installing</span>
+      <span style="display: flex; flex-direction: column; gap: 2px"><b style="font-size: 15px; color: #ECEDF2">Open</b>every library built from source</span>
+    </div>
+  </div>
+
+  <!-- the desktop and the phone, as they look -->
+  <div aria-hidden="true" style="position: absolute; left: 700px; top: 150px; width: 700px; height: 440px; border-radius: 14px; background: #0D0F15; border: 1px solid #2E323D; box-shadow: 0 40px 100px rgba(0,0,0,0.6); overflow: hidden">
+    <svg width="700" height="440" viewBox="0 0 700 440" style="position: absolute; inset: 0" fill="none"><path d="M -20 330 C 150 270, 260 380, 400 300 S 620 200, 720 230" stroke="#5B7CFA" stroke-width="2.5" stroke-opacity="0.7"></path><path d="M -20 350 C 140 300, 270 400, 410 320 S 620 230, 720 260" stroke="#D152A6" stroke-width="1.5" stroke-opacity="0.5"></path></svg>
+    <div style="position: absolute; left: 40px; top: 30px; width: 380px; height: 260px; border-radius: 8px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden"><div style="height: 3px; background: #5B7CFA"></div><div style="height: 22px; background: #21242C; display: flex; justify-content: flex-end; align-items: center; padding-right: 6px"><span style="display: flex; gap: 3px; padding: 2px 5px; border-radius: 999px; background: rgba(255,255,255,0.06)"><span style="width: 6px; height: 6px; border-radius: 50%; border: 1px solid #B4B9C6"></span><span style="width: 6px; height: 6px; border-radius: 50%; border: 1px solid #B4B9C6"></span><span style="width: 6px; height: 6px; border-radius: 50%; border: 1px solid #FF6B6F"></span></span></div><div style="padding: 14px; display: flex; flex-direction: column; gap: 8px"><span style="height: 8px; width: 60%; border-radius: 4px; background: #2E323D"></span><span style="height: 8px; width: 85%; border-radius: 4px; background: #2E323D"></span><span style="height: 8px; width: 45%; border-radius: 4px; background: #2E323D"></span></div></div>
+    <div style="position: absolute; left: 330px; top: 140px; width: 300px; height: 200px; border-radius: 8px; background: #16181E; border: 1px solid #262A33"></div>
+    <div style="position: absolute; left: 50%; bottom: 46px; transform: translateX(-50%); width: 150px; height: 22px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46"></div>
+    <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 30px; border-radius: 9px; background: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; justify-content: center; gap: 6px"><span style="width: 18px; height: 18px; border-radius: 5px; background: #4A6BE0"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #1FA3A3"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #B23D8C"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #C77F0A"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #6A4FD6"></span></div>
+  </div>
+  <div aria-hidden="true" style="position: absolute; left: 1210px; top: 360px; width: 180px; height: 370px; border-radius: 30px; background: #0D0F15; border: 3px solid #2E323D; box-shadow: 0 30px 80px rgba(0,0,0,0.7); overflow: hidden">
+    <div style="padding: 30px 16px 0; font-size: 34px; font-weight: 800; letter-spacing: -0.04em">12:36</div>
+    <div style="margin: 14px 12px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; justify-items: center"><span style="width: 36px; height: 36px; border-radius: 10px; background: #1FA3A3"></span><span style="width: 36px; height: 36px; border-radius: 10px; background: #D152A6"></span><span style="width: 36px; height: 36px; border-radius: 10px; background: #2F9A5C"></span><span style="width: 36px; height: 36px; border-radius: 10px; background: #4A6BE0"></span><span style="width: 36px; height: 36px; border-radius: 10px; background: #C77F0A"></span><span style="width: 36px; height: 36px; border-radius: 10px; background: #4B505E"></span></div>
+    <div style="position: absolute; left: 14px; right: 14px; bottom: 10px; height: 2px; background: #3A3F4C"></div><div style="position: absolute; left: 50%; bottom: 6px; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: #5B7CFA; border: 2px solid #FFFFFF"></div>
+  </div>
+
+  <div style="position: absolute; left: 64px; right: 64px; bottom: 34px; display: flex; justify-content: space-between; font-size: 13px; color: #6A7080"><span>Weave is ThreadOS's own look. The bar-and-dock and taskbar styles are there too.</span><span style="font-family: 'JetBrains Mono', monospace">make -j8 &amp;&amp; make run</span></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

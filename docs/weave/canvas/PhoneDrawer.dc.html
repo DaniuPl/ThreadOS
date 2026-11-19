@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: the drawer</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <div style="height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600"><span>12:36</span><span style="font-size: 12px">71%</span></div>
+  <span style="display: block; margin: 2px auto 10px; width: 40px; height: 5px; border-radius: 3px; background: #3A3F4C"></span>
+
+  <div style="padding: 0 16px; display: flex; flex-direction: column; gap: 12px">
+    <label style="display: flex; align-items: center; gap: 10px; height: 46px; box-sizing: border-box; padding: 0 14px; border-radius: 999px; background: #14161B; border: 1px solid #2E323D; border-bottom: 2px solid #5B7CFA"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8FA5FF" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg><input aria-label="Find a program" placeholder="Find a program" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #ECEDF2; font: 400 15px Inter, sans-serif; outline: none"></label>
+    <div role="tablist" aria-label="Order" style="align-self: center; display: inline-flex; padding: 3px; border-radius: 10px; background: #14161B; border: 1px solid #2E323D">
+      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="2"><button role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="height: 30px; padding: 0 16px; border-radius: 7px; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: 600 13px Inter, sans-serif; box-shadow: {{t.sh}}">{{t.name}}</button></sc-for>
+    </div>
+  </div>
+
+  <sc-if value="{{byThread}}" hint-placeholder-val="{{ true }}">
+    <div style="margin-top: 14px; display: flex; flex-direction: column; gap: 14px">
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+        <div style="position: relative; padding: 0 12px">
+          <div style="position: absolute; left: 0; right: 0; top: 29px; height: 2px; background: {{r.dye}}; opacity: 0.85"></div>
+          <span style="position: relative; display: inline-flex; align-items: center; height: 20px; padding: 0 9px; margin-left: 6px; border-radius: 999px; background: #0B0C10; border: 1px solid {{r.dye}}; font-size: 10.5px; font-weight: 700; color: {{r.label}}">{{r.name}}</span>
+          <div style="position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 8px; margin-top: -10px">
+            <sc-for list="{{r.apps}}" as="a" hint-placeholder-count="4">
+              <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 5px; text-decoration: none; color: #D6D9E2">
+                <span style="display: block; padding: 3px; border-radius: 16px; background: #0B0C10"><dc-import name="Icon" app="{{a.key}}" size="{{ 46 }}" hint-size="46px,46px"></dc-import></span>
+                <span style="font-size: 11.5px">{{a.name}}</span>
+              </a>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{byName}}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top: 14px; padding: 0 30px 0 16px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 14px">
+      <sc-for list="{{az}}" as="a" hint-placeholder-count="20">
+        <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 5px; text-decoration: none; color: #D6D9E2">
+          <dc-import name="Icon" app="{{a.key}}" size="{{ 50 }}" hint-size="50px,50px"></dc-import>
+          <span style="font-size: 11.5px">{{a.name}}</span>
+        </a>
+      </sc-for>
+    </div>
+    <div aria-hidden="true" style="position: absolute; right: 8px; top: 170px; display: flex; flex-direction: column; gap: 3px; font-size: 10px; font-weight: 700; color: #8A90A0; text-align: center"><span style="color: #8FA5FF">A</span><span>C</span><span>E</span><span>F</span><span>G</span><span>L</span><span>M</span><span>P</span><span>R</span><span>S</span><span>T</span><span>W</span></div>
+  </sc-if>
+
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+    <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #3A3F4C"></div>
+    <div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #4A6BE0"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #2EC4C4"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #C77F0A"></span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const by = (this.state && this.state.by) || 'By use';
+    const tabs = ['By use', 'A to Z'].map((n) => ({ name: n, sel: n === by ? 'true' : 'false', bg: n === by ? '#2A2D36' : 'transparent', fg: n === by ? '#FFFFFF' : '#B4B9C6', sh: n === by ? 'inset 0 -2px 0 #5B7CFA' : 'none', pick: () => this.setState({ by: n }) }));
+    const K = (n) => ({ messages: 'purl', 'skein': 'skein' }[n.toLowerCase()] || n.toLowerCase());
+    const mk = (l) => l.map((a) => ({ name: a[0], key: K(a[0]), glyph: a[1], dye: a[2] }));
+    const rows = [
+      { name: 'People', dye: '#2EC4C4', label: '#9FECEC', apps: mk([['Purl', 'P', '#1FA3A3'], ['Phone', 'T', '#2F9A5C'], ['Family', 'F', '#D152A6'], ['Mail', '@', '#3B5BDB']]) },
+      { name: 'Out and about', dye: '#46C27A', label: '#9BE3B8', apps: mk([['Weft', 'W', '#1FA3A3'], ['Map', 'M', '#2F9A5C'], ['Calendar', '19', '#C9302C'], ['Clock', 'K', '#2A2D36']]) },
+      { name: 'Pictures and sound', dye: '#D152A6', label: '#F2A6D6', apps: mk([['Camera', 'C', '#4B505E'], ['Gallery', 'G', '#2F9A5C'], ['Skein', 'S', '#B23D8C'], ['Recorder', 'R', '#C77F0A']]) },
+      { name: 'Work', dye: '#5B7CFA', label: '#B7C5FF', apps: mk([['Files', 'F', '#4A6BE0'], ['Editor', 'E', '#C77F0A'], ['Tasks', 'T', '#C9302C'], ['Term', '>', '#2A2D36']]) },
+      { name: 'This phone', dye: '#F5A524', label: '#FFD48A', apps: mk([['Settings', 'S', '#4B505E'], ['Market', 'M', '#C2366F'], ['Find', '?', '#4A6BE0'], ['Monitor', 'M', '#2F9A5C']]) }
+    ];
+    const all = [].concat.apply([], rows.map((r) => r.apps)).sort((a, b) => a.name.localeCompare(b.name));
+    return { tabs, rows, az: all, byThread: by === 'By use', byName: by !== 'By use' };
+  }
+}
+</script>
+</body>
+</html>

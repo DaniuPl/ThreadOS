@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Easier to use, and for children</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 30px 36px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 18px">
+
+  <section aria-label="Easier to use" style="border-radius: 14px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden; display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="padding: 18px 22px 8px"><h1 style="margin: 0; font-size: {{titlePx}}; font-weight: 800">Easier to use</h1><p style="margin: 4px 0 0; font-size: {{bodyPx}}; color: #9AA0AE">Settings, for seeing, hearing and moving. Each one shows itself here as you change it.</p></div>
+    <div style="padding: 8px 22px 18px; display: flex; flex-direction: column; gap: 14px; overflow: hidden">
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Seeing</span>
+        <div style="background: #1F2229; border: 1px solid #2E323D; border-radius: 12px; padding: 4px 16px">
+          <div style="display: flex; align-items: center; justify-content: space-between; min-height: 54px; border-bottom: 1px dashed #2E323D">
+            <span style="font-size: {{bodyPx}}; font-weight: 600">Text size</span>
+            <span role="group" aria-label="Text size" style="display: inline-flex; padding: 3px; border-radius: 9px; background: #17191F; border: 1px solid #2E323D"><sc-for list="{{sizes}}" as="s" hint-placeholder-count="4"><button onClick="{{s.pick}}" style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{s.bg}}; color: {{s.fg}}; font: 600 {{s.t}} Inter, sans-serif; box-shadow: {{s.sh}}">Aa</button></sc-for></span>
+          </div>
+          <div style="display: flex; align-items: center; justify-content: space-between; min-height: 54px; border-bottom: 1px dashed #2E323D">
+            <span><span style="display: block; font-size: {{bodyPx}}; font-weight: 600">More contrast</span><span style="display: block; font-size: 12px; color: #9AA0AE">No grain, stronger lines, text at 7 to 1</span></span>
+            <button onClick="{{toggleContrast}}" aria-label="More contrast" style="width: 42px; height: 24px; border-radius: 999px; border: 0; padding: 0 3px; background: {{contrastTrack}}; display: flex; align-items: center; justify-content: {{contrastJust}}"><span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF"></span></button>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 0">
+            <span style="display: flex; justify-content: space-between; align-items: center"><span><span style="display: block; font-size: {{bodyPx}}; font-weight: 600">Threads told apart by pattern too</span><span style="display: block; font-size: 12px; color: #9AA0AE">For anyone who cannot tell the dyes apart: each one gets its own stitch</span></span>
+            <button onClick="{{togglePattern}}" aria-label="Patterns" style="width: 42px; height: 24px; border-radius: 999px; border: 0; padding: 0 3px; background: {{patternTrack}}; display: flex; align-items: center; justify-content: {{patternJust}}"><span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF"></span></button></span>
+            <svg role="img" aria-label="Six threads, each in its dye{{patternLabel}}" width="100%" height="84" viewBox="0 0 600 84" preserveAspectRatio="none" fill="none" stroke-linecap="round">
+              <sc-for list="{{threads}}" as="t" hint-placeholder-count="6"><path d="M0 {{t.y}} C 150 {{t.y1}}, 300 {{t.y2}}, 600 {{t.y}}" stroke="{{t.dye}}" stroke-width="4" stroke-dasharray="{{t.dash}}"></path></sc-for>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+        <div style="background: #1F2229; border: 1px solid #2E323D; border-radius: 12px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+          <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Hearing</span>
+          <span style="font-size: {{bodyPx}}">Flash the screen's edge with the chime</span>
+          <span style="font-size: {{bodyPx}}">Words under a video when Weft has them</span>
+        </div>
+        <div style="background: #1F2229; border: 1px solid #2E323D; border-radius: 12px; padding: 12px 16px; display: flex; flex-direction: column; gap: 8px">
+          <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Moving</span>
+          <span style="font-size: {{bodyPx}}">Keys stay pressed: Ctrl, then C</span>
+          <span style="font-size: {{bodyPx}}">A slower double click; a larger pointer</span>
+        </div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; background: #1F2229; border: 1px solid #2E323D">
+        <svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#5B7CFA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10z"></path><path d="M16.5 9a4 4 0 0 1 0 6"></path><path d="M19 6.5a8 8 0 0 1 0 11"></path></svg>
+        <span style="flex-grow: 1; font-size: {{bodyPx}}"><b>Read aloud</b> · every control says its name; the thread is where it reads</span>
+        <span style="font-size: 12px; color: #9AA0AE">Super + Alt + S</span>
+      </div>
+    </div>
+  </section>
+
+  <section aria-label="For children" style="border-radius: 14px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden; display: flex; flex-direction: column">
+    <div style="height: 3px; background: #F5A524"></div>
+    <div style="padding: 18px 22px; display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; align-items: center; gap: 12px"><span style="width: 44px; height: 44px; box-sizing: border-box; border-radius: 50%; border: 2px solid #F5A524; padding: 3px"><span style="display: flex; width: 100%; height: 100%; border-radius: 50%; background: #F5A524; align-items: center; justify-content: center; font-weight: 800; color: #1D1C1A">O</span></span><span><span style="display: block; font-size: 18px; font-weight: 800">Ola's account</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">Looked after by Alex and Ania, in Family</span></span></div>
+      <div style="display: flex; flex-direction: column; gap: 10px; font-size: 13.5px">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; background: #1F2229; border: 1px solid #2E323D"><span><b>Hours</b><br><span style="font-size: 12px; color: #9AA0AE">Weekdays 15:00 to 19:30</span></span><span style="font-size: 12px; color: #F5A524">1 h 10 left today</span></div>
+        <div style="padding: 12px 14px; border-radius: 12px; background: #1F2229; border: 1px solid #2E323D; display: flex; flex-direction: column; gap: 8px">
+          <b>Today, by program</b>
+          <sc-for list="{{use}}" as="u" hint-placeholder-count="3">
+            <div style="display: grid; grid-template-columns: 22px 80px minmax(0, 1fr) 46px; gap: 8px; align-items: center"><dc-import name="Icon" app="{{u.app}}" size="{{ 22 }}" hint-size="22px,22px"></dc-import><span>{{u.name}}</span><span style="position: relative; height: 6px"><span style="position: absolute; left: 0; right: 0; top: 2px; border-top: 2px dashed #3A3F4C"></span><span style="position: absolute; left: 0; top: 1px; height: 4px; width: {{u.w}}; border-radius: 2px; background: {{u.dye}}"></span></span><span style="font-size: 12px; color: #9AA0AE; text-align: right">{{u.t}}</span></div>
+          </sc-for>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; border-radius: 12px; background: #1F2229; border: 1px solid #2E323D"><span><b>Market asks first</b><br><span style="font-size: 12px; color: #9AA0AE">Ola asks, you answer from your phone</span></span><span style="width: 42px; height: 24px; border-radius: 999px; background: #5B7CFA; display: flex; justify-content: flex-end; align-items: center; padding: 0 3px; box-sizing: border-box"><span style="width: 18px; height: 18px; border-radius: 50%; background: #FFFFFF"></span></span></div>
+        <div style="padding: 10px 12px; border-radius: 10px; background: rgba(245,165,36,0.1); border: 1px dashed rgba(245,165,36,0.5); font-size: 12.5px; color: #E8D7B4; line-height: 1.5">Ola sees all of this on her own account too: what is limited, by whom, and how much time is left. Nothing is watched in secret.</div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const size = st.size == null ? 0 : st.size;
+    const contrast = !!st.contrast;
+    const pattern = st.pattern == null ? true : st.pattern;
+    const px = [13, 15, 17, 20];
+    const sizes = px.map((p, i) => ({ t: (11 + i * 2) + 'px', bg: i === size ? '#2A2D36' : 'transparent', fg: i === size ? '#FFFFFF' : '#B4B9C6', sh: i === size ? 'inset 0 -2px 0 #5B7CFA' : 'none', pick: () => this.setState({ size: i }) }));
+    const dash = ['', '10 6', '2 6', '14 4 2 4', '6 6', '1 4'];
+    const dyes = ['#5B7CFA', '#E5484D', '#F5A524', '#46C27A', '#2EC4C4', '#D152A6'];
+    const threads = dyes.map((d, i) => ({ dye: d, y: 10 + i * 13, y1: 4 + i * 13, y2: 18 + i * 13, dash: pattern ? dash[i] : '' }));
+    const use = [['loomflight', 'Loomflight', '48 min', '70%', '#6A4FD6'], ['weft', 'Weft', '32 min', '46%', '#1FA3A3'], ['paint', 'Paint', '20 min', '30%', '#D152A6']].map((u) => ({ app: u[0], name: u[1], t: u[2], w: u[3], dye: u[4] }));
+    return {
+      sizes, threads, use,
+      bodyPx: px[size] + 'px', titlePx: (22 + size * 3) + 'px',
+      contrastTrack: contrast ? '#5B7CFA' : '#3A3F4C', contrastJust: contrast ? 'flex-end' : 'flex-start', toggleContrast: () => this.setState({ contrast: !contrast }),
+      patternTrack: pattern ? '#5B7CFA' : '#3A3F4C', patternJust: pattern ? 'flex-end' : 'flex-start', togglePattern: () => this.setState({ pattern: !pattern }),
+      patternLabel: pattern ? ' and its own stitch' : ''
+    };
+  }
+}
+</script>
+</body>
+</html>

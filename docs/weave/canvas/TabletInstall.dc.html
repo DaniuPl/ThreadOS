@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tablet: install, confirm by touch</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1180px; height: 820px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: 560px minmax(0, 1fr)">
+  <!-- the left half: what will happen, the same words as on a computer -->
+  <section aria-label="What will happen" style="padding: 36px 34px; display: flex; flex-direction: column; gap: 20px; border-right: 1px solid #1F2229">
+    <div style="display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700"><span style="width: 22px; height: 22px; border-radius: 6px; background: #5B7CFA"></span>Install ThreadOS <span style="color: #8A90A0; font-weight: 500">· step 2 of 3</span></div>
+    <h1 style="margin: 0; font-size: 32px; line-height: 1.15; font-weight: 800; letter-spacing: -0.03em">Everything on this tablet will be replaced</h1>
+    <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #B4B9C6">A tablet has one system at a time. What it runs now, and what is stored in it, is erased.</p>
+
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">Storage, 128 GB</div>
+      <div style="display: flex; height: 44px; gap: 3px">
+        <div style="width: 4%; border-radius: 10px 3px 3px 10px; background: #3A3F4C; box-shadow: inset 0 -3px 0 #E5484D"></div>
+        <div style="flex-grow: 1; border-radius: 3px 10px 10px 3px; background-color: #5B7CFA; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.14) 0px, rgba(255,255,255,0.14) 2px, transparent 2px, transparent 5px), repeating-linear-gradient(90deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 5px); display: flex; align-items: center; padding: 0 14px; font-size: 13px; font-weight: 700">ThreadOS · TFS · 127.7 GB</div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 12px; padding: 18px 20px; border-radius: 16px; background: #14161B; border: 1px solid #262A33">
+      <div style="display: flex; gap: 12px; align-items: baseline"><span style="width: 10px; height: 10px; border-radius: 50%; background: #E5484D; flex-shrink: 0"></span><span style="font-size: 15px"><strong>Erased:</strong> the system it runs now, its apps, photos and files</span></div>
+      <div style="display: flex; gap: 12px; align-items: baseline"><span style="width: 10px; height: 10px; border-radius: 50%; background: #5B7CFA; flex-shrink: 0"></span><span style="font-size: 15px"><strong>Written:</strong> threadboot, the kernel, the initrd and Weft, about 420 MB</span></div>
+      <div style="display: flex; gap: 12px; align-items: baseline"><span style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid #46C27A; flex-shrink: 0"></span><span style="font-size: 15px"><strong>Kept:</strong> the memory card and the stick you install from</span></div>
+    </div>
+
+    <a href="Install2.dc.html" style="margin-top: auto; font-size: 14px; text-decoration: none">Back to choosing</a>
+  </section>
+
+  <!-- the right half: the word, typed with the fingers, keys large enough for them -->
+  <section aria-label="Confirm" style="padding: 36px 34px; display: flex; flex-direction: column; gap: 18px; background: #0D0F15">
+    <div style="font-size: 18px; font-weight: 700">Type ERASE to install</div>
+    <div style="display: flex; gap: 10px">
+      <sc-for list="{{slots}}" as="s" hint-placeholder-count="5">
+        <span style="width: 64px; height: 72px; box-sizing: border-box; border-radius: 14px 14px 6px 6px; background: #1B1D24; border-bottom: 3px solid {{s.line}}; display: flex; align-items: center; justify-content: center; font: 700 32px 'JetBrains Mono', monospace; color: #ECEDF2">{{s.ch}}</span>
+      </sc-for>
+    </div>
+    <div style="font-size: 13.5px; color: #9AA0AE">A word, not a tap: a tap is a reflex, and reflexes are how storage gets wiped.</div>
+
+    <div role="group" aria-label="Keyboard" style="margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 18px; background: #14161B; border: 1px solid #262A33">
+      <sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
+        <div style="display: flex; justify-content: center; gap: 6px">
+          <sc-for list="{{r.keys}}" as="k" hint-placeholder-count="10">
+            <button onClick="{{k.press}}" style="width: {{k.w}}; height: 54px; border-radius: 10px; border: 0; background: {{k.bg}}; color: #ECEDF2; font: 600 16px Inter, sans-serif">{{k.label}}</button>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{ok}}" hint-placeholder-val="{{ false }}">
+      <a href="Install4.dc.html" style="display: flex; align-items: center; justify-content: center; height: 58px; border-radius: 16px; background: #E5484D; color: #FFFFFF; font: 700 17px Inter, sans-serif; text-decoration: none">Erase and install</a>
+    </sc-if>
+    <sc-if value="{{notOk}}" hint-placeholder-val="{{ true }}">
+      <span aria-disabled="true" style="display: flex; align-items: center; justify-content: center; height: 58px; border-radius: 16px; border: 1px dashed #3A3F4C; color: #6A7080; font: 700 17px Inter, sans-serif">Erase and install</span>
+    </sc-if>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1180,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const typed = (this.state && this.state.typed != null) ? this.state.typed : 'ERA';
+    const word = 'ERASE';
+    const ok = typed === word;
+    const slots = word.split('').map((c, i) => ({ ch: typed[i] || '', line: i < typed.length ? (typed[i] === c ? '#E5484D' : '#F5A524') : (i === typed.length ? '#5B7CFA' : '#2E323D') }));
+    const press = (ch) => () => {
+      const t = (this.state && this.state.typed != null) ? this.state.typed : 'ERA';
+      if (ch === 'del') this.setState({ typed: t.slice(0, -1) });
+      else if (t.length < 5) this.setState({ typed: t + ch });
+    };
+    const key = (label, w) => ({ label, w: w || '46px', bg: '#2A2D36', press: press(label) });
+    const rows = [
+      { keys: 'QWERTYUIOP'.split('').map((c) => key(c)) },
+      { keys: 'ASDFGHJKL'.split('').map((c) => key(c)) },
+      { keys: 'ZXCVBNM'.split('').map((c) => key(c)).concat([{ label: 'Delete', w: '96px', bg: '#3A3F4C', press: press('del') }]) }
+    ];
+    return { slots, rows, ok, notOk: !ok };
+  }
+}
+</script>
+</body>
+</html>

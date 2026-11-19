@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weave desktop, night</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+
+  <!-- Wallpaper: Warp. Threads of dye crossing a dark loom; each is one Bezier the kernel can draw with gfx_line16 -->
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0">
+    <defs>
+      <pattern id="warp" width="6" height="6" patternUnits="userSpaceOnUse">
+        <rect x="0" y="0" width="1" height="6" fill="#FFFFFF" fill-opacity="0.025"></rect>
+        <rect x="0" y="3" width="6" height="1" fill="#FFFFFF" fill-opacity="0.015"></rect>
+      </pattern>
+    </defs>
+    <rect x="0" y="0" width="1440" height="900" fill="url(#warp)"></rect>
+    <g fill="none" stroke-linecap="round">
+      <path d="M -40 520 C 380 380, 460 660, 760 470 S 1200 190, 1500 230" stroke="#46C27A" stroke-opacity="0.08" stroke-width="12"></path>
+      <path d="M -40 520 C 380 380, 460 660, 760 470 S 1200 190, 1500 230" stroke="#46C27A" stroke-opacity="0.35" stroke-width="1.5"></path>
+      <path d="M -40 580 C 340 450, 480 720, 790 530 S 1220 250, 1500 300" stroke="#D152A6" stroke-opacity="0.09" stroke-width="14"></path>
+      <path d="M -40 580 C 340 450, 480 720, 790 530 S 1220 250, 1500 300" stroke="#D152A6" stroke-opacity="0.5" stroke-width="2"></path>
+      <path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="{{accent}}" stroke-opacity="0.12" stroke-width="16"></path>
+      <path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="{{accent}}" stroke-opacity="0.75" stroke-width="3"></path>
+      <path d="M -40 700 C 260 620, 560 840, 860 630 S 1260 390, 1500 440" stroke="#2EC4C4" stroke-opacity="0.09" stroke-width="12"></path>
+      <path d="M -40 700 C 260 620, 560 840, 860 630 S 1260 390, 1500 440" stroke="#2EC4C4" stroke-opacity="0.5" stroke-width="2"></path>
+      <path d="M -40 760 C 300 720, 600 880, 900 680 S 1280 470, 1500 510" stroke="#F5A524" stroke-opacity="0.32" stroke-width="1.5"></path>
+    </g>
+  </svg>
+
+  <!-- Terminal: a window without focus - no selvedge, quiet title -->
+  <section aria-label="Terminal window" style="position: absolute; left: 110px; top: 132px; width: 520px; height: 330px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #2A2E38; box-shadow: 0 10px 30px rgba(0,0,0,0.4); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #16181E"></div>
+    <div style="height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #1B1D24; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.014) 0px, rgba(255,255,255,0.014) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #252830">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #2A2D36; display: flex; align-items: center; justify-content: center">
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8D93A1" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7l5 5-5 5"></path><path d="M13 18h6"></path></svg>
+      </div>
+      <div style="font-size: 13px; font-weight: 600; color: #7D8391">Term</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.03)">
+        <button aria-label="Minimise" style="width: 24px; height: 24px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5F6573" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 24px; height: 24px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5F6573" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 24px; height: 24px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5F6573" stroke-width="2.4" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+    <div style="flex-grow: 1; padding: 14px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 21px; color: #8D93A1; white-space: pre">
+<span style="color: #46C27A">you@threados</span> <span style="color: #6E7FD8">~/src</span> $ make -j8
+  CC      kernel/desktop.c
+  CC      kernel/weave.c
+  LD      build/threados64.bin
+  INITRD  build/initrd64.img
+<span style="color: #46C27A">you@threados</span> <span style="color: #6E7FD8">~/src</span> $ make test T=desktop
+  desktop ........................ <span style="color: #46C27A">ok</span>
+<span style="color: #46C27A">you@threados</span> <span style="color: #6E7FD8">~/src</span> $ <span style="display: inline-block; width: 8px; height: 15px; background: #5F6573; vertical-align: -3px"></span>
+    </div>
+  </section>
+
+  <!-- Files: the window in front. The selvedge along its top is the thread of focus -->
+  <section aria-label="Files window" style="position: absolute; left: 372px; top: 64px; width: 772px; height: 540px; border-radius: 10px; overflow: hidden; background: #1A1C23; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5), 0 2px 6px rgba(0,0,0,0.3); display: flex; flex-direction: column">
+    <div style="height: 3px; background: {{accent}}"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #2B2F3A">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: {{accent}}; display: flex; align-items: center; justify-content: center">
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.4" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+      </div>
+      <div style="font-size: 13px; font-weight: 700; color: #ECEDF2">Files</div>
+      <div style="font-size: 13px; color: #8A90A0">home / projects / threados</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid #262A33">
+      <button aria-label="Back" style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#C9CDD8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></button>
+      <button style="height: 32px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif; padding: 0 12px">New folder</button>
+      <button style="height: 32px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif; padding: 0 12px">Copy</button>
+      <button style="height: 32px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif; padding: 0 12px">Paste</button>
+      <div style="flex-grow: 1"></div>
+      <label style="display: flex; align-items: center; gap: 8px; width: 210px; height: 32px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; background: #14161B; border-bottom: 2px solid #3A3F4C">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg>
+        <input aria-label="Search in folder" placeholder="Search in folder" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #ECEDF2; font: 400 13px Inter, sans-serif; outline: none">
+      </label>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; min-height: 0">
+      <nav aria-label="Places" style="width: 184px; padding: 12px 8px; box-sizing: border-box; border-right: 1px solid #262A33; display: flex; flex-direction: column; gap: 2px; font-size: 13px">
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A90A0; padding: 4px 10px 6px">Places</div>
+        <a href="#" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 7px; color: #C9CDD8; text-decoration: none">Home</a>
+        <a href="#" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 7px; color: #C9CDD8; text-decoration: none">Documents</a>
+        <a href="#" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 7px; background: {{accentSoft}}; color: #FFFFFF; text-decoration: none; font-weight: 600"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{accent}}"></span>Projects</a>
+        <a href="#" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 7px; color: #C9CDD8; text-decoration: none">Pictures</a>
+        <a href="#" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 7px; color: #C9CDD8; text-decoration: none">Trash</a>
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A90A0; padding: 14px 10px 6px">Disks</div>
+        <a href="#" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 7px; color: #C9CDD8; text-decoration: none">System (TFS3)</a>
+        <a href="#" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 7px; color: #C9CDD8; text-decoration: none">USB stick</a>
+      </nav>
+
+      <div style="flex-grow: 1; padding: 8px 12px; display: flex; flex-direction: column; font-size: 13px">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 110px 80px; gap: 12px; height: 28px; align-items: center; padding: 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A90A0; border-bottom: 1px dashed #2E323D">
+          <div>Name</div><div>Kind</div><div style="text-align: right">Size</div>
+        </div>
+        <sc-for list="{{rows}}" as="r" hint-placeholder-count="9">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 110px 80px; gap: 12px; height: 32px; align-items: center; padding: 0 12px; border-radius: 7px; margin-top: 2px; background: {{r.bg}}; color: {{r.fg}}">
+            <div style="display: flex; align-items: center; gap: 10px; font-weight: {{r.weight}}">
+              <span style="width: 6px; height: 6px; border-radius: 50%; background: {{r.knot}}"></span>
+              <span style="width: 16px; height: 12px; border-radius: 3px; background: {{r.swatch}}"></span>
+              {{r.name}}
+            </div>
+            <div style="color: #8A90A0">{{r.kind}}</div>
+            <div style="color: #8A90A0; text-align: right; font-variant-numeric: tabular-nums">{{r.size}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div style="height: 30px; display: flex; align-items: center; padding: 0 14px; border-top: 1px solid #262A33; font-size: 12px; color: #8A90A0">9 items · 1 selected</div>
+  </section>
+
+  <!-- Threads, opened from the knot by the clock: each program's notes on a thread of its own -->
+  <aside aria-label="Threads" style="position: absolute; right: 16px; bottom: 86px; width: 320px; border-radius: 14px; overflow: hidden; background: #1A1C23; border: 1px solid #2E323D; box-shadow: 0 20px 50px rgba(0,0,0,0.5)">
+    <div style="height: 3px; background: {{accent}}"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px">
+      <span style="font-size: 16px; font-weight: 800">Threads</span>
+      <button style="border: 0; background: transparent; color: #9AA0AE; font: 500 12px Inter, sans-serif; padding: 4px 6px">Clear all</button>
+    </div>
+    <div style="padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px">
+      <div style="position: relative; border-radius: 12px; background: #20232B; border: 1px solid #F5A524; padding: 8px 12px 10px 34px">
+        <div style="position: absolute; left: 16px; top: 34px; bottom: 12px; width: 2px; background: #F5A524"></div>
+        <div style="position: absolute; left: 10px; top: 10px; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #F5A524"></div>
+        <div style="display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 700"><span>Recorder</span><span style="color: #8A90A0; font-weight: 600">1 note</span></div>
+        <div style="font-size: 13px; font-weight: 600; margin-top: 6px">Recording saved</div>
+        <div style="font-size: 12px; color: #9AA0AE; margin-top: 2px">recording-3.wav, 1:42 · now</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 12px; background: #20232B; border: 1px solid #2E323D; font-size: 12.5px; font-weight: 700"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid #2EC4C4"></span><span style="flex-grow: 1">Weft</span><span style="color: #8A90A0; font-weight: 600">1 note</span></div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 12px; background: #20232B; border: 1px solid #2E323D; font-size: 12.5px; font-weight: 700"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid #3B5BDB"></span><span style="flex-grow: 1">Mail</span><span style="color: #8A90A0; font-weight: 600">2 notes</span></div>
+    </div>
+  </aside>
+  <!-- the short thread from the panel down to the clock it opened from -->
+  <div aria-hidden="true" style="position: absolute; right: 60px; bottom: 72px; width: 2px; height: 14px; background: {{accent}}"></div>
+
+  <!-- The loom: launcher, programs as tiles, the thread under what runs, desktops as knots -->
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border: 1px solid #2E323D; box-shadow: 0 12px 32px rgba(0,0,0,0.45); display: flex; align-items: center; padding: 0 10px; gap: 14px">
+
+    <button aria-label="Open the spool (all programs)" style="width: 40px; height: 40px; border-radius: 10px; border: 0; background: {{accent}}; display: flex; align-items: center; justify-content: center; padding: 0">
+      <svg aria-hidden="true" width="24" height="24" viewBox="0 0 96.59 96.42"><g fill="#FFFFFF"><path d="m78.54,26.05l-10.86,10.96c-1.69-1.63-3.54-2.89-5.82-3.96-.02-.02-.05-.03-.06-.03-.51-.25-1.08-.49-1.73-.72l-.05-.02h0c-2.47-.91-5.06-1.37-7.69-1.37-2.44,0-4.85.4-7.17,1.19-.14.05-.28.09-.42.14-.45.16-1.04.39-1.6.67-.07.02-.13.05-.18.07l-.06.03c-2.39,1.11-4.54,2.62-6.4,4.5-1.68,1.7-3.07,3.63-4.12,5.73-.09.19-.18.37-.27.57-.26.54-.5,1.11-.71,1.73l-.06.14c-1.71,4.75-1.74,10-.1,14.75.03.11.07.22.1.32.03.06.05.12.07.19.2.57.45,1.13.7,1.68l.11.24s.03.07.04.09c1.03,2.12,2.17,3.73,3.9,5.48l-10.17,10.27c-1.71-1.71-2.84-3.13-3.95-4.96l4.2-4.23c.63-.64.76-1.6.33-2.4-.94-1.74-1.7-3.58-2.27-5.49-.26-.87-1.04-1.46-1.94-1.46-2.01.01-4.01.01-6.01.02-1.18-4.72-1.2-9.5-.05-14.23h3.65s2.51-.03,2.51-.03c.89,0,1.66-.59,1.93-1.46.55-1.83,1.3-3.61,2.23-5.3.44-.81.31-1.79-.33-2.42l-4.43-4.39c2.49-4.18,5.86-7.57,10.01-10.1l4.6,4.55c.37.37.87.58,1.41.58.33,0,.67-.09.97-.24,1.63-.85,3.36-1.56,5.15-2.1.88-.27,1.47-1.05,1.46-1.94,0-2.18-.02-4.36-.03-6.54,2.38-.6,4.81-.91,7.23-.91s4.69.28,7,.84v3.25s.03,3.47.03,3.47c0,.89.59,1.66,1.46,1.93,1.71.52,3.38,1.21,4.98,2.04.3.16.64.25.97.25.54,0,1.05-.21,1.43-.59l4.73-4.78c2.08,1.24,3.72,2.48,5.28,3.99Z"></path><polygon points="78.13 45.24 74.27 47.69 70.68 49.98 71.1 48.25 71.18 47.94 48.45 47.94 49.75 42.6 72.47 42.6 72.52 42.41 72.99 40.51 75.52 42.85 78.13 45.24"></polygon><polygon points="68.45 58.7 64.6 61.15 60.99 63.44 61.42 61.71 61.49 61.4 45.12 61.4 46.43 56.06 62.8 56.06 62.85 55.87 63.32 53.97 65.85 56.3 68.45 58.7"></polygon><polygon points="75.82 73.27 71.96 75.71 68.37 78 68.79 76.27 68.87 75.96 41.55 75.96 42.86 70.63 70.17 70.63 70.21 70.44 70.68 68.53 73.21 70.87 75.82 73.27"></polygon></g></svg>
+    </button>
+
+    <label style="display: flex; align-items: center; gap: 8px; width: 220px; height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 9px; background: #121419; border-bottom: 2px solid #3A3F4C">
+      <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg>
+      <input aria-label="Find anything" placeholder="Find anything" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #ECEDF2; font: 400 13px Inter, sans-serif; outline: none">
+    </label>
+
+    <div style="flex-grow: 1; display: flex; justify-content: center">
+      <div style="position: relative; display: flex; gap: 10px; padding: 0 4px 10px">
+        <div style="position: absolute; left: 0; right: 0; bottom: 3px; height: 1px; background: #2E323D"></div>
+        <sc-for list="{{apps}}" as="a" hint-placeholder-count="8">
+          <div style="position: relative; display: flex; flex-direction: column; align-items: center">
+            <button aria-label="{{a.name}}" style="width: 38px; height: 38px; border: 0; padding: 0; background: transparent"><dc-import name="Icon" app="{{a.key}}" size="{{ 38 }}" hint-size="38px,38px"></dc-import></button>
+            <div style="position: absolute; bottom: -9px; height: 3px; width: {{a.threadW}}; border-radius: 2px; background: {{a.thread}}"></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div role="group" aria-label="Desktops" style="display: flex; align-items: center; gap: 7px; padding: 0 4px">
+      <span style="width: 10px; height: 10px; border-radius: 50%; background: {{accent}}"></span>
+      <span style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid #8A90A0"></span>
+      <span style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid #3A3F4C"></span>
+      <span style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid #3A3F4C"></span>
+    </div>
+
+    <div style="display: flex; align-items: center; gap: 12px; padding-left: 4px">
+      <svg role="img" aria-label="Network connected" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C9CDD8" stroke-width="2" stroke-linecap="round"><path d="M3 9a14 14 0 0 1 18 0"></path><path d="M6 12.5a9 9 0 0 1 12 0"></path><path d="M9 16a4 4 0 0 1 6 0"></path><circle cx="12" cy="19" r="1" fill="#C9CDD8"></circle></svg>
+      <svg role="img" aria-label="Volume" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C9CDD8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10z"></path><path d="M16.5 9a4 4 0 0 1 0 6"></path></svg>
+      <div style="display: flex; align-items: center; gap: 5px; font-size: 12px; color: #C9CDD8; font-variant-numeric: tabular-nums">
+        <div style="width: 24px; height: 11px; box-sizing: border-box; border: 1.5px solid #C9CDD8; border-radius: 3px; padding: 1px"><div style="width: 80%; height: 100%; border-radius: 1px; background: #46C27A"></div></div>82%
+      </div>
+    </div>
+
+    <div style="position: relative; display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 8px; border-left: 1px dashed #2E323D; line-height: 1.15">
+      <span aria-label="4 notes waiting" style="position: absolute; left: -12px; top: -6px; width: 18px; height: 18px; border-radius: 50%; background: {{accent}}; color: #FFFFFF; font: 700 10.5px Inter, sans-serif; display: flex; align-items: center; justify-content: center">4</span>
+      <div style="font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums">12:36</div>
+      <div style="font-size: 11px; color: #9AA0AE">Thu 19 Nov</div>
+    </div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5B7CFA","options":["#5B7CFA","#2EC4C4","#D152A6","#F5A524"]},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#5B7CFA';
+    const h = accent.replace('#', '');
+    const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+    const accentSoft = 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',0.18)';
+    const folder = '#4A6BE0';
+    const file = '#3A3F4C';
+    const raw = [
+      ['kernel', 'Folder', '—', folder],
+      ['kernel64', 'Folder', '—', folder],
+      ['user', 'Folder', '—', folder],
+      ['docs', 'Folder', '—', folder],
+      ['scripts', 'Folder', '—', folder],
+      ['AGENTS.md', 'Markdown', '9 KB', file],
+      ['JOURNAL.md', 'Markdown', '412 KB', file],
+      ['Makefile', 'Make file', '61 KB', file],
+      ['README.md', 'Markdown', '14 KB', file]
+    ];
+    const rows = raw.map((r, i) => {
+      const sel = i === 6;
+      return {
+        name: r[0], kind: r[1], size: r[2], swatch: r[3],
+        bg: sel ? accentSoft : 'transparent',
+        fg: sel ? '#FFFFFF' : '#D6D9E2',
+        weight: sel ? 600 : (r[1] === 'Folder' ? 500 : 400),
+        knot: sel ? accent : 'transparent'
+      };
+    });
+    const apps = [
+      { name: 'Files', glyph: 'F', dye: accent, run: 'focus' },
+      { name: 'Weft', glyph: 'W', dye: '#1FA3A3', run: 'yes' },
+      { name: 'Term', glyph: '>', dye: '#2A2D36', run: 'yes' },
+      { name: 'Code', glyph: '{', dye: '#B23D8C', run: 'no' },
+      { name: 'Recorder', glyph: 'R', dye: '#C77F0A', run: 'yes' },
+      { name: 'Gallery', glyph: 'G', dye: '#2F9A5C', run: 'no' },
+      { name: 'Mixer', glyph: 'M', dye: '#6A4FD6', run: 'no' },
+      { name: 'Settings', glyph: 'S', dye: '#4B505E', run: 'no' }
+    ].map((a) => ({
+      ...a,
+      key: a.name.toLowerCase(),
+      thread: a.run === 'focus' ? accent : (a.run === 'yes' ? '#9AA0AE' : 'transparent'),
+      threadW: a.run === 'focus' ? '30px' : '14px'
+    }));
+    return { accent, accentSoft, rows, apps };
+  }
+}
+</script>
+</body>
+</html>

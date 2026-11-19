@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notifications: Threads</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 36px 44px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: 520px minmax(0, 1fr); gap: 34px">
+
+  <!-- the panel: Threads, grouped by program -->
+  <section aria-label="Threads, opened" style="position: relative; border-radius: 18px; background: #0D0F15; border: 1px solid #1F2229; overflow: hidden">
+    <svg aria-hidden="true" width="520" height="828" viewBox="0 0 520 828" style="position: absolute; left: 0; top: 0" fill="none"><path d="M -20 600 C 120 540, 220 660, 340 600 S 480 520, 540 560" stroke="#5B7CFA" stroke-opacity="0.35" stroke-width="3"></path></svg>
+    <div style="position: absolute; right: 14px; top: 14px; bottom: 84px; width: 380px; border-radius: 16px; background: #1A1C23; border: 1px solid #2E323D; box-shadow: 0 20px 50px rgba(0,0,0,0.5); display: flex; flex-direction: column; overflow: hidden">
+      <div style="height: 3px; background: #5B7CFA"></div>
+      <div style="padding: 14px 16px 10px; display: flex; align-items: center; gap: 10px">
+        <span style="font-size: 18px; font-weight: 800; flex-grow: 1">Threads</span>
+        <button onClick="{{toggleQuiet}}" style="display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 999px; border: 1px solid {{quietLine}}; background: {{quietBg}}; color: #ECEDF2; font: 600 12px Inter, sans-serif"><span style="width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 2px solid #6A4FD6; background: {{quietDot}}"></span>Quiet</button>
+        <button style="height: 28px; padding: 0 10px; border-radius: 999px; border: 0; background: transparent; color: #9AA0AE; font: 500 12px Inter, sans-serif">Clear all</button>
+      </div>
+      <sc-if value="{{quiet}}" hint-placeholder-val="{{ false }}"><div style="margin: 0 16px 8px; padding: 8px 12px; border-radius: 10px; background: rgba(106,79,214,0.14); font-size: 12.5px; color: #C9CDD8">Quiet until 7:00. Ania and Family still get through.</div></sc-if>
+      <div style="flex-grow: 1; overflow: hidden; padding: 0 12px 12px; display: flex; flex-direction: column; gap: 10px">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="4">
+          <div style="position: relative; border-radius: 14px; background: #20232B; border: 1px solid {{g.line}}; overflow: hidden">
+            <div style="position: absolute; left: 18px; top: 40px; bottom: 14px; width: 2px; background: {{g.dye}}; opacity: {{g.threadOp}}"></div>
+            <button onClick="{{g.pick}}" style="width: 100%; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border: 0; background: transparent; color: #ECEDF2; font: 700 13px Inter, sans-serif; text-align: left">
+              <span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: {{g.knot}}; border: 2px solid {{g.dye}}"></span>
+              <span style="flex-grow: 1">{{g.name}}</span>
+              <span style="font-size: 11.5px; font-weight: 600; color: #8A90A0">{{g.count}}</span>
+              <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2.4" stroke-linecap="round"><path d="{{g.chev}}"></path></svg>
+            </button>
+            <sc-for list="{{g.items}}" as="i" hint-placeholder-count="2">
+              <div style="position: relative; padding: 4px 12px 10px 36px">
+                <span style="position: absolute; left: 14px; top: 9px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: #20232B; border: 2px solid {{g.dye}}"></span>
+                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #9AA0AE"><span>{{i.from}}</span><span>{{i.when}}</span></div>
+                <div style="font-size: 13.5px; font-weight: 600; margin-top: 2px">{{i.text}}</div>
+              </div>
+            </sc-for>
+            <sc-if value="{{g.hasReply}}" hint-placeholder-val="{{ false }}">
+              <div style="display: flex; gap: 8px; padding: 0 12px 12px 36px"><label style="flex-grow: 1; display: flex; align-items: center; height: 32px; box-sizing: border-box; padding: 0 10px; border-radius: 8px 8px 3px 3px; background: #14161B; border-bottom: 2px solid #5B7CFA"><input aria-label="Reply to Ania" placeholder="Reply to Ania" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #ECEDF2; font: 400 12.5px Inter, sans-serif; outline: none"></label><button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2E323D; background: #1A1C23; color: #ECEDF2; font: 600 12px Inter, sans-serif">Mark read</button></div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <!-- the loom's right end: the knot that says something waits -->
+    <div style="position: absolute; left: 14px; right: 14px; bottom: 14px; height: 54px; box-sizing: border-box; border-radius: 14px; background: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; padding: 0 12px; gap: 10px">
+      <span style="width: 36px; height: 36px; border-radius: 10px; background: #5B7CFA"></span><span style="flex-grow: 1"></span>
+      <span style="position: relative; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 10px; border-radius: 9px; background: rgba(91,124,250,0.16); font-size: 13px; font-weight: 700"><span style="width: 18px; height: 18px; border-radius: 50%; background: #5B7CFA; color: #FFFFFF; font-size: 10.5px; display: flex; align-items: center; justify-content: center">{{total}}</span>12:36</span>
+    </div>
+  </section>
+
+  <!-- the rules -->
+  <section style="display: flex; flex-direction: column; gap: 20px; min-width: 0">
+    <div>
+      <h1 style="margin: 0; font-size: 34px; font-weight: 800; letter-spacing: -0.03em">Notifications: Threads</h1>
+      <p style="margin: 8px 0 0; font-size: 14.5px; line-height: 1.55; color: #B4B9C6">Each program's notifications hang on its own thread, in its colour. A new one rides the shuttle for a moment, then ties itself on. The knot at the clock counts what waits; a click opens Threads.</p>
+    </div>
+
+    <div>
+      <h2 style="margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Three weights</h2>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+        <sc-for list="{{weights}}" as="w" hint-placeholder-count="3">
+          <div style="padding: 16px; border-radius: 14px; background: #14161B; border: 1px solid {{w.line}}; display: flex; flex-direction: column; gap: 10px">
+            <div style="display: flex; align-items: center; gap: 10px"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{w.fill}}; border: 2px solid {{w.dye}}"></span><span style="font-size: 16px; font-weight: 800">{{w.name}}</span></div>
+            <div style="font-size: 13px; line-height: 1.5; color: #C9CDD8">{{w.what}}</div>
+            <div style="font-size: 12px; color: #8A90A0">{{w.eg}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <div>
+      <h2 style="margin: 0 0 10px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">How one arrives</h2>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+        <sc-for list="{{steps}}" as="s" hint-placeholder-count="3">
+          <div style="position: relative; height: 150px; border-radius: 14px; background: #0D0F15; border: 1px solid #1F2229; overflow: hidden">
+            <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 22px; border-radius: 7px; background: #181A20; border: 1px solid #2E323D"></div>
+            <sc-if value="{{s.banner}}" hint-placeholder-val="{{ false }}"><div style="position: absolute; left: 50%; bottom: 42px; transform: translateX(-50%); width: 220px; height: 44px; box-sizing: border-box; padding: 0 10px; border-radius: 16px; background: #1F2229; border: 1px solid #353A46; display: flex; align-items: center; gap: 8px"><span style="width: 24px; height: 24px; border-radius: 50%; background: #D152A6"></span><span style="font-size: 11.5px; line-height: 1.3"><b>Ania</b><br><span style="color: #9AA0AE">Is the new build on…</span></span></div><div style="position: absolute; left: 50%; bottom: 32px; width: 2px; height: 10px; background: #D152A6"></div></sc-if>
+            <sc-if value="{{s.knot}}" hint-placeholder-val="{{ false }}"><div style="position: absolute; right: 20px; bottom: 16px; width: 12px; height: 12px; border-radius: 50%; background: #5B7CFA"></div><svg aria-hidden="true" width="200" height="110" viewBox="0 0 200 110" style="position: absolute; left: 30px; top: 10px" fill="none"><path d="M10 60 C 60 10, 140 30, 180 104" stroke="#D152A6" stroke-width="2" stroke-dasharray="4 5"></path></svg></sc-if>
+            <sc-if value="{{s.panel}}" hint-placeholder-val="{{ false }}"><div style="position: absolute; right: 10px; top: 10px; bottom: 40px; width: 150px; border-radius: 10px; background: #1A1C23; border: 1px solid #2E323D; padding: 10px; box-sizing: border-box; display: flex; flex-direction: column; gap: 6px"><span style="height: 22px; border-radius: 6px; background: #20232B; border-left: 0; box-shadow: inset 0 -2px 0 #D152A6"></span><span style="height: 22px; border-radius: 6px; background: #20232B"></span><span style="height: 22px; border-radius: 6px; background: #20232B"></span></div></sc-if>
+            <span style="position: absolute; left: 12px; top: 10px; font-size: 12px; font-weight: 700">{{s.n}}</span>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 8px; font-size: 12.5px; color: #B4B9C6; line-height: 1.45">
+        <span>It rides the shuttle for four seconds. A click opens it; Reply answers it there.</span>
+        <span>Then it ties itself to the knot at the clock, which counts what waits.</span>
+        <span>In Threads it hangs on its program's thread until you read it or clear it.</span>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+      <div style="padding: 16px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; font-size: 13px; line-height: 1.5; color: #C9CDD8"><strong style="color: #ECEDF2; display: block; margin-bottom: 4px">Quiet</strong>Nothing rides the shuttle and nothing chimes; all of it waits in Threads. Chosen people and Urgent still get through. By the clock, or while a game or a full-screen video runs.</div>
+      <div style="padding: 16px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; font-size: 13px; line-height: 1.5; color: #C9CDD8"><strong style="color: #ECEDF2; display: block; margin-bottom: 4px">Locked</strong>The lock screen says who and how many, never what - unless you allow one program to show more. A program asks once to send notifications at all.</div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const open = st.open || 'Purl';
+    const quiet = !!st.quiet;
+    const G = [
+      { name: 'Purl', dye: '#2EC4C4', items: [['Ania', 'now', 'Is the new build on the stick yet?'], ['Ania', '1 min', 'I want to try the installer tonight'], ['ThreadOS builders', '12 min', 'Tomek: fix-hda is merged']], reply: true },
+      { name: 'Market', dye: '#C2366F', items: [['Updates', '10 min', 'Darkroom 3.1 is ready']] },
+      { name: 'Family', dye: '#F5A524', items: [['Ola', '1 h', 'Got to school']] },
+      { name: 'Strand', dye: '#6A4FD6', items: [['threados', '2 h', 'Pushed 2 commits to weave-theme']] }
+    ];
+    let total = 0;
+    const groups = G.map((g) => {
+      total += g.items.length;
+      const on = g.name === open;
+      return {
+        name: g.name, dye: g.dye, count: g.items.length + (g.items.length === 1 ? ' note' : ' notes'),
+        items: on ? g.items.map((i) => ({ from: i[0], when: i[1], text: i[2] })) : [],
+        hasReply: on && !!g.reply, knot: on ? g.dye : '#20232B', line: on ? g.dye : '#2E323D', threadOp: on ? 0.9 : 0,
+        chev: on ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6', pick: () => this.setState({ open: on ? '' : g.name })
+      };
+    });
+    const weights = [
+      { name: 'Quiet', dye: '#8A90A0', fill: 'transparent', line: '#262A33', what: 'Straight into Threads. No shuttle, no chime.', eg: 'An update is ready; a backup finished' },
+      { name: 'Normal', dye: '#5B7CFA', fill: '#5B7CFA', line: '#262A33', what: 'Rides the shuttle for a moment, with one chime, then waits in Threads.', eg: 'A message; a download finished' },
+      { name: 'Urgent', dye: '#E5484D', fill: '#E5484D', line: 'rgba(229,72,77,0.5)', what: 'Stays on the shuttle until you answer it, even in Quiet.', eg: 'A call; an alarm; battery at 5 %' }
+    ];
+    const steps = [{ n: '1 · Arrives', banner: true, knot: false, panel: false }, { n: '2 · Ties on', banner: false, knot: true, panel: false }, { n: '3 · Waits', banner: false, knot: false, panel: true }];
+    return { groups, weights, steps, total, quiet, quietBg: quiet ? 'rgba(106,79,214,0.25)' : 'transparent', quietLine: quiet ? '#6A4FD6' : '#2E323D', quietDot: quiet ? '#6A4FD6' : 'transparent', toggleQuiet: () => this.setState({ quiet: !quiet }) };
+  }
+}
+</script>
+</body>
+</html>

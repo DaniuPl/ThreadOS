@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tablet welcome: how it should work</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1180px; height: 820px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; align-items: center; padding-top: 34px; box-sizing: border-box">
+  <nav aria-label="Setup steps" style="display: flex; width: 560px">
+    <sc-for list="{{steps}}" as="st" hint-placeholder-count="5">
+      <div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <div style="position: absolute; top: 7px; right: 50%; width: 100%; height: 2px; background: {{st.line}}"></div>
+        <span style="position: relative; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{st.fill}}; border: 2px solid {{st.ring}}"></span>
+        <span style="font-size: 12px; color: {{st.fg}}; font-weight: {{st.weight}}">{{st.label}}</span>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="margin-top: 34px; text-align: center">
+    <h1 style="margin: 0; font-size: 38px; font-weight: 800; letter-spacing: -0.03em">How should the tablet work?</h1>
+    <p style="margin: 8px 0 0; font-size: 15.5px; color: #B4B9C6">Both are Weave. The difference is how much one finger has to aim.</p>
+  </div>
+
+  <div role="radiogroup" aria-label="Tablet mode" style="margin-top: 28px; display: grid; grid-template-columns: repeat(2, 470px); gap: 24px">
+    <sc-for list="{{modes}}" as="m" hint-placeholder-count="2">
+      <button role="radio" aria-checked="{{m.checked}}" onClick="{{m.pick}}" style="display: flex; flex-direction: column; gap: 14px; padding: 14px 14px 18px; border-radius: 18px; border: {{m.border}}; background: {{m.bg}}; color: #ECEDF2; text-align: left; font-family: Inter, sans-serif">
+        <div style="position: relative; height: 250px; border-radius: 12px; overflow: hidden; background: #0B0C10; border: 1px solid #22252E">
+          <sc-if value="{{m.isTouch}}" hint-placeholder-val="{{ true }}">
+            <div style="position: absolute; left: 10px; top: 10px; bottom: 62px; width: 58%; border-radius: 10px; background: #1A1C23; overflow: hidden"><div style="height: 3px; background: #5B7CFA"></div><div style="padding: 14px; display: flex; flex-direction: column; gap: 8px"><span style="height: 8px; width: 70%; border-radius: 4px; background: #2E323D"></span><span style="height: 8px; width: 90%; border-radius: 4px; background: #2E323D"></span><span style="height: 8px; width: 60%; border-radius: 4px; background: #2E323D"></span></div></div>
+            <div style="position: absolute; left: calc(58% + 14px); top: 10px; bottom: 62px; width: 4px; border-radius: 2px; background: #4A4F5C"></div>
+            <div style="position: absolute; right: 10px; top: 10px; bottom: 62px; left: calc(58% + 24px); border-radius: 10px; background: #1A1C23"></div>
+            <div style="position: absolute; left: 30%; right: 30%; bottom: 4px; height: 2px; background: #3A3F4C"></div><div style="position: absolute; left: 50%; bottom: 1px; width: 8px; height: 8px; margin-left: -4px; border-radius: 50%; background: #5B7CFA"></div>
+            <div style="position: absolute; left: 20%; right: 20%; bottom: 14px; height: 38px; border-radius: 14px; background: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; justify-content: center; gap: 10px"><span style="width: 26px; height: 26px; border-radius: 8px; background: #4A6BE0"></span><span style="width: 26px; height: 26px; border-radius: 8px; background: #1FA3A3"></span><span style="width: 26px; height: 26px; border-radius: 8px; background: #B23D8C"></span><span style="width: 26px; height: 26px; border-radius: 8px; background: #C77F0A"></span></div>
+          </sc-if>
+          <sc-if value="{{m.isDesk}}" hint-placeholder-val="{{ false }}">
+            <div style="position: absolute; left: 40px; top: 20px; width: 230px; height: 140px; border-radius: 8px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden"><div style="height: 3px; background: #5B7CFA"></div><div style="height: 16px; background: #21242C"></div></div>
+            <div style="position: absolute; left: 190px; top: 70px; width: 200px; height: 120px; border-radius: 8px; background: #16181E; border: 1px solid #262A33"></div>
+            <svg aria-hidden="true" width="16" height="20" viewBox="0 0 16 20" style="position: absolute; left: 300px; top: 150px"><path d="M1 1 L1 16 L5 12 L8 19 L11 18 L8 11 L14 11 Z" fill="#FFFFFF" stroke="#0B0C10" stroke-width="1.2"></path></svg>
+            <div style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 28px; border-radius: 8px; background: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; justify-content: center; gap: 6px"><span style="width: 16px; height: 16px; border-radius: 5px; background: #4A6BE0"></span><span style="width: 16px; height: 16px; border-radius: 5px; background: #1FA3A3"></span><span style="width: 16px; height: 16px; border-radius: 5px; background: #B23D8C"></span><span style="width: 16px; height: 16px; border-radius: 5px; background: #C77F0A"></span></div>
+          </sc-if>
+        </div>
+        <span style="display: flex; align-items: center; gap: 10px"><span style="width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{m.ring}}; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{m.ring}}; opacity: {{m.dot}}"></span></span><span style="font-size: 19px; font-weight: 700">{{m.name}}</span></span>
+        <span style="font-size: 14px; line-height: 1.5; color: #B4B9C6">{{m.body}}</span>
+      </button>
+    </sc-for>
+  </div>
+
+  <div style="margin-top: 20px; display: flex; align-items: center; gap: 36px">
+  <label style="display: flex; align-items: center; gap: 14px; font-size: 15px">
+    <span style="width: 48px; height: 28px; border-radius: 999px; background: #5B7CFA; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box"><span style="width: 22px; height: 22px; border-radius: 50%; background: #FFFFFF"></span></span>
+    Windows when a keyboard is attached
+  </label>
+  <div style="display: flex; align-items: center; gap: 12px; font-size: 15px">Getting around
+    <div role="group" aria-label="Getting around" style="display: inline-flex; padding: 3px; border-radius: 11px; background: #1B1D24; border: 1px solid #2E323D">
+      <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 0; background: #2A2D36; color: #FFFFFF; font: 600 13.5px Inter, sans-serif; box-shadow: inset 0 -2px 0 #5B7CFA">The thread</button>
+      <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 0; background: transparent; color: #B4B9C6; font: 500 13.5px Inter, sans-serif">Gestures</button>
+      <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 0; background: transparent; color: #B4B9C6; font: 500 13.5px Inter, sans-serif">Three buttons</button>
+    </div>
+  </div>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 32px; display: flex; justify-content: center; gap: 12px">
+    <a href="M3.dc.html" style="display: flex; align-items: center; height: 54px; padding: 0 26px; border-radius: 15px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 16px Inter, sans-serif; text-decoration: none">Back</a>
+    <a href="M5.dc.html" style="display: flex; align-items: center; height: 54px; padding: 0 34px; border-radius: 15px; background: #5B7CFA; color: #FFFFFF; font: 700 16px Inter, sans-serif; text-decoration: none">Continue</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1180,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = 3;
+    const steps = ['Language', 'Network', 'You', 'Tablet', 'Ready'].map((label, i) => ({
+      label,
+      line: i === 0 ? 'transparent' : (i <= cur ? '#5B7CFA' : '#2E323D'),
+      fill: i <= cur ? '#5B7CFA' : '#0D0F15',
+      ring: i <= cur ? '#5B7CFA' : '#4A4F5C',
+      fg: i === cur ? '#FFFFFF' : (i < cur ? '#B4B9C6' : '#6A7080'),
+      weight: i === cur ? 700 : 500
+    }));
+    const picked = (this.state && this.state.mode) || 'touch';
+    const modes = [
+      { id: 'touch', name: 'Touch', body: 'One program fills the screen, or two side by side with a seam to drag. The loom is larger and swipes up into loom view.' },
+      { id: 'desk', name: 'Windows', body: 'The Weave desktop as on a computer: windows, a pointer, the loom along the bottom. Best with a keyboard and a touchpad.' }
+    ].map((m) => {
+      const on = m.id === picked;
+      return Object.assign({}, m, {
+        isTouch: m.id === 'touch', isDesk: m.id === 'desk',
+        checked: on ? 'true' : 'false',
+        border: on ? '2px solid #5B7CFA' : '2px solid #262A33',
+        bg: on ? '#1A1C23' : '#14161B',
+        ring: on ? '#5B7CFA' : '#4A4F5C', dot: on ? 1 : 0,
+        pick: () => this.setState({ mode: m.id })
+      });
+    });
+    return { steps, modes };
+  }
+}
+</script>
+</body>
+</html>

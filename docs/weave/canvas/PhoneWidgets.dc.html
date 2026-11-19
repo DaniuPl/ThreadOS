@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: home with widgets</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background-color: #EEEAE2; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.02) 0px, rgba(0,0,0,0.02) 1px, transparent 1px, transparent 3px); font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <svg aria-hidden="true" width="390" height="844" viewBox="0 0 390 844" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round"><path d="M -20 470 C 90 410, 170 520, 260 450 S 370 380, 420 410" stroke="#3F5EE8" stroke-opacity="0.45" stroke-width="3"></path></svg>
+  <div style="position: relative; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600"><span>12:36</span><span style="font-size: 12px">71%</span></div>
+
+  <div style="position: relative; margin: 10px 16px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+    <!-- the day: the next thing in Calendar, on a thread -->
+    <div style="grid-column: span 2; padding: 16px; border-radius: 22px; background: #FAF8F4; border: 1px solid #DDD6C9; display: flex; flex-direction: column; gap: 10px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 13px; font-weight: 700; color: #C9302C">Thursday 19</span><span style="font-size: 12px; color: #6B675F">Calendar</span></div>
+      <div style="position: relative; padding-left: 20px; display: flex; flex-direction: column; gap: 8px">
+        <div style="position: absolute; left: 5px; top: 6px; bottom: 6px; width: 2px; background: #DDD6C9"></div>
+        <sc-for list="{{events}}" as="e" hint-placeholder-count="3"><div style="position: relative; display: flex; justify-content: space-between; font-size: 14px"><span style="position: absolute; left: -20px; top: 4px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: {{e.fill}}; border: 2px solid {{e.dye}}"></span><span style="font-weight: {{e.w}}">{{e.title}}</span><span style="color: #6B675F; font-family: 'JetBrains Mono', monospace; font-size: 12.5px">{{e.time}}</span></div></sc-for>
+      </div>
+    </div>
+    <!-- what plays -->
+    <div style="padding: 14px; border-radius: 22px; background: #B23D8C; color: #FFFFFF; display: flex; flex-direction: column; gap: 8px">
+      <span style="font-size: 12px; opacity: 0.85">Skein</span>
+      <span style="font-size: 15px; font-weight: 800; line-height: 1.2">The shuttle</span>
+      <svg aria-hidden="true" width="100%" height="20" viewBox="0 0 140 20" preserveAspectRatio="none" fill="none" stroke-linecap="round"><path d="M0 10 C 10 2, 20 18, 30 10 S 50 2, 60 10" stroke="#FFFFFF" stroke-width="2.5"></path><path d="M60 10 C 70 18, 80 2, 90 10 S 110 18, 120 10 S 135 6, 140 10" stroke="rgba(255,255,255,0.45)" stroke-width="2" stroke-dasharray="3 4"></path></svg>
+      <span style="align-self: flex-start; width: 34px; height: 34px; border-radius: 50%; background: #FFFFFF; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="#B23D8C"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></span>
+    </div>
+    <!-- Family -->
+    <div style="padding: 14px; border-radius: 22px; background: #FAF8F4; border: 1px solid #DDD6C9; display: flex; flex-direction: column; gap: 10px">
+      <span style="font-size: 12px; color: #6B675F">Family</span>
+      <sc-for list="{{people}}" as="p" hint-placeholder-count="2"><span style="display: flex; align-items: center; gap: 8px; font-size: 13px"><span style="width: 26px; height: 26px; border-radius: 50%; background: {{p.dye}}; color: #FFFFFF; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800">{{p.i}}</span><span><b>{{p.name}}</b><br><span style="font-size: 11.5px; color: #6B675F">{{p.where}}</span></span></span></sc-for>
+    </div>
+    <!-- Tasks, tickable from here -->
+    <div style="grid-column: span 2; padding: 14px 16px; border-radius: 22px; background: #FAF8F4; border: 1px solid #DDD6C9; display: flex; flex-direction: column; gap: 8px">
+      <span style="display: flex; justify-content: space-between; font-size: 12px; color: #6B675F"><span>Tasks · today</span><span>2 of 4</span></span>
+      <sc-for list="{{tasks}}" as="t" hint-placeholder-count="3"><button onClick="{{t.toggle}}" style="display: flex; align-items: center; gap: 10px; border: 0; background: transparent; padding: 2px 0; font: 500 14px Inter, sans-serif; color: {{t.fg}}; text-decoration: {{t.dec}}; text-align: left"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid #C9302C; background: {{t.fill}}"></span>{{t.text}}</button></sc-for>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 20px; right: 20px; bottom: 132px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); justify-items: center">
+    <sc-for list="{{apps}}" as="a" hint-placeholder-count="4"><dc-import name="Icon" app="{{a}}" size="{{ 56 }}" hint-size="56px,56px"></dc-import></sc-for>
+  </div>
+  <nav aria-label="Loom" style="position: absolute; left: 14px; right: 14px; bottom: 34px; height: 80px; box-sizing: border-box; border-radius: 24px; background: #FAF8F4; border: 1px solid #D3CCBE; display: flex; align-items: center; justify-content: space-around; padding: 0 10px">
+    <sc-for list="{{dock}}" as="d" hint-placeholder-count="4"><dc-import name="Icon" app="{{d}}" size="{{ 52 }}" hint-size="52px,52px"></dc-import></sc-for>
+  </nav>
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px"><div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #CFC8BA"></div><div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #B23D8C"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #1E7F86"></span></div></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const done = (this.state && this.state.done) || { 0: true, 1: true };
+    const T = ['Write the installer screens', 'Pick up the dyes', 'Call the plumber', 'Tea with Ania'];
+    const tasks = T.slice(1).map((t, j) => { const i = j + 1; const v = !!done[i]; return { text: t, fg: v ? '#8A857B' : '#1D1C1A', dec: v ? 'line-through' : 'none', fill: v ? '#C9302C' : 'transparent', toggle: () => this.setState({ done: Object.assign({}, done, { [i]: !v }) }) }; });
+    const events = [{ title: 'Design review: Weave', time: '11:00', dye: '#1E7F86', fill: '#1E7F86', w: 700 }, { title: 'Tea with Ania', time: '17:00', dye: '#C9302C', fill: '#FAF8F4', w: 500 }, { title: 'Ola at the pool', time: '18:30', dye: '#B86E00', fill: '#FAF8F4', w: 500 }];
+    const people = [{ i: 'N', name: 'Ania', where: 'Home', dye: '#C2366F' }, { i: 'O', name: 'Ola', where: 'School', dye: '#B86E00' }];
+    return { tasks, events, people, apps: ['weft', 'camera', 'gallery', 'settings'], dock: ['phone', 'purl', 'map', 'skein'] };
+  }
+}
+</script>
+</body>
+</html>

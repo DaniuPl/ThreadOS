@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Find, linen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="#3F5EE8" stroke-opacity="0.5" stroke-width="3"></path>
+  </svg>
+
+  <section aria-label="Find window" style="position: absolute; left: 70px; top: 30px; width: 1300px; height: 770px; border-radius: 10px; overflow: hidden; background: #FAF8F4; border: 1px solid #D3CCBE; box-shadow: 0 22px 56px rgba(60,50,30,0.22); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #EDE8DE; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.022) 0px, rgba(0,0,0,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.015) 0px, rgba(0,0,0,0.015) 1px, transparent 1px, transparent 3px)">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #3F5EE8"></div>
+      <div style="font-size: 13px; font-weight: 700">Find</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A4740" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A4740" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(201,48,44,0.12); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C9302C" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="padding: 18px 22px 12px; display: flex; flex-direction: column; gap: 14px; border-bottom: 1px dashed #DDD6C9">
+      <label style="display: flex; align-items: center; gap: 12px; height: 52px; box-sizing: border-box; padding: 0 18px; border-radius: 12px 12px 5px 5px; background: #FFFFFF; border: 1px solid #DDD6C9; border-bottom: 2px solid #3F5EE8">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#3F5EE8" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg>
+        <input aria-label="Find" value="selvedge" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #1D1C1A; font: 500 18px Inter, sans-serif; outline: none">
+        <span style="font-size: 12.5px; color: #6B675F">14 found in 0.04 s</span>
+      </label>
+      <div role="group" aria-label="Where to look" style="display: flex; gap: 8px; flex-wrap: wrap">
+        <sc-for list="{{filters}}" as="f" hint-placeholder-count="6">
+          <button style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 999px; border: 1px solid {{f.border}}; background: {{f.bg}}; color: {{f.fg}}; font: 600 13px Inter, sans-serif"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{f.dye}}"></span>{{f.name}}<span style="font-weight: 500; opacity: 0.7">{{f.n}}</span></button>
+        </sc-for>
+        <span style="flex-grow: 1"></span>
+        <button style="height: 32px; padding: 0 12px; border-radius: 999px; border: 1px dashed #CFC8BA; background: transparent; color: #4A4740; font: 500 13px Inter, sans-serif">Changed: any time</button>
+        <button style="height: 32px; padding: 0 12px; border-radius: 999px; border: 1px dashed #CFC8BA; background: transparent; color: #4A4740; font: 500 13px Inter, sans-serif">In: everywhere</button>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; display: grid; grid-template-columns: 540px minmax(0, 1fr)">
+      <div style="overflow: hidden; padding: 12px 14px; border-right: 1px solid #E3DDD1; display: flex; flex-direction: column; gap: 14px">
+        <sc-for list="{{groups}}" as="g" hint-placeholder-count="3">
+          <div style="display: flex; flex-direction: column; gap: 2px">
+            <div style="display: flex; align-items: center; gap: 8px; padding: 0 8px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6B675F"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{g.dye}}"></span>{{g.name}}</div>
+            <sc-for list="{{g.items}}" as="r" hint-placeholder-count="3">
+              <a href="#" style="display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 9px; background: {{r.bg}}; text-decoration: none; color: #1D1C1A">
+                <span style="width: 32px; height: 32px; flex-shrink: 0; border-radius: 8px; background: {{r.dye}}; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font: 700 12px 'JetBrains Mono', monospace">{{r.glyph}}</span>
+                <span style="flex-grow: 1; min-width: 0"><span style="display: block; font-size: 14px; font-weight: 600">{{r.name}}</span><span style="display: block; font-size: 12px; color: #6B675F; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{r.where}}</span></span>
+                <span style="width: 6px; height: 6px; border-radius: 50%; background: {{r.knot}}"></span>
+              </a>
+            </sc-for>
+          </div>
+        </sc-for>
+      </div>
+
+      <!-- the chosen one, opened where the word is -->
+      <div style="padding: 18px 24px; display: flex; flex-direction: column; gap: 14px; background: #F6F3EC">
+        <div style="display: flex; align-items: center; gap: 12px">
+          <span style="width: 40px; height: 40px; border-radius: 10px; background: #4A6BE0; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font: 700 13px 'JetBrains Mono', monospace">.c</span>
+          <span style="flex-grow: 1"><span style="display: block; font-size: 16px; font-weight: 700">weave.c</span><span style="display: block; font-size: 12.5px; color: #6B675F">Projects / threados / kernel · 3 matches · changed today</span></span>
+          <a href="#" style="display: flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 9px; background: #3F5EE8; color: #FFFFFF; font: 600 13px Inter, sans-serif; text-decoration: none">Open in Code</a>
+          <a href="#" style="display: flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid #DDD6C9; background: #FCFBF8; color: #1D1C1A; font: 500 13px Inter, sans-serif; text-decoration: none">Show in Files</a>
+        </div>
+        <div style="border-radius: 12px; background: #FFFFFF; border: 1px solid #E3DDD1; padding: 12px 0; font: 400 13px/22px 'JetBrains Mono', monospace; color: #2B2A27">
+          <sc-for list="{{lines}}" as="l" hint-placeholder-count="10">
+            <div style="display: flex; background: {{l.bg}}"><span style="width: 52px; padding-right: 14px; text-align: right; color: #A8A296">{{l.n}}</span><span style="white-space: pre">{{l.a}}<mark style="background: {{l.mbg}}; color: #2A45C0; border-bottom: {{l.mline}}; padding: 0 1px">{{l.m}}</mark>{{l.b}}</span></div>
+          </sc-for>
+        </div>
+        <div style="font-size: 12.5px; color: #6B675F">Up and down move between the matches; Enter opens the file at the one you are on.</div>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const filters = [
+      ['Everything', '#3F5EE8', '14', true], ['Files', '#4A6BE0', '6'], ['Inside files', '#1E8A4C', '5'], ['Settings', '#6B675F', '1'], ['Programs', '#C2366F', '0'], ['Weft history', '#1E7F86', '2']
+    ].map((f) => ({ name: f[0], dye: f[1], n: f[2], bg: f[3] ? '#3F5EE8' : '#FCFBF8', fg: f[3] ? '#FFFFFF' : '#1D1C1A', border: f[3] ? '#3F5EE8' : '#DDD6C9' }));
+    const it = (glyph, name, where, dye, sel) => ({ glyph, name, where, dye, bg: sel ? 'rgba(63,94,232,0.12)' : 'transparent', knot: sel ? '#3F5EE8' : 'transparent' });
+    const groups = [
+      { name: 'Inside files', dye: '#1E8A4C', items: [it('.c', 'weave.c', 'kernel · "draw the selvedge along the top"', '#4A6BE0', true), it('.h', 'look.h', 'kernel/include · "#define SELVEDGE_H 3"', '#9C6FE0'), it('.md', 'JOURNAL.md', 'docs · "the selvedge marks focus"', '#4A4740')] },
+      { name: 'Settings', dye: '#6B675F', items: [it('S', 'Show the selvedge', 'Settings, Appearance, Window', '#6B675F')] },
+      { name: 'Weft history', dye: '#1E7F86', items: [it('W', 'Selvedge - what it is, in weaving', 'visited yesterday', '#1E7F86'), it('W', 'Notes on Weave', 'journal.local · last week', '#1E7F86')] }
+    ];
+    const lines = [
+      [18, '', '', '/* Fill a surface in its colour, with the grain over it */'],
+      [19, '', '', 'void weave_fill(uint32_t *buf, int w, int h, int stride,'],
+      [27, '/* The ', 'selvedge', ': three pixels of the focus dye along'],
+      [28, ' * the top of the window in front */', '', ''],
+      [29, 'void weave_', 'selvedge', '(int x, int y, int w, uint32_t dye)'],
+      [30, '{', '', ''],
+      [31, '    gfx_fill(x, y, w, ', 'SELVEDGE', '_H, dye, 255);'],
+      [32, '}', '', '']
+    ].map((l) => ({ n: l[0], a: l[1], m: l[2], b: l[3], bg: l[2] ? 'rgba(63,94,232,0.05)' : 'transparent', mbg: l[2] ? 'rgba(63,94,232,0.18)' : 'transparent', mline: l[2] ? '2px solid #3F5EE8' : '0px solid transparent' }));
+    return { filters, groups, lines };
+  }
+}
+</script>
+</body>
+</html>

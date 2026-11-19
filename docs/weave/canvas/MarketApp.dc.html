@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Market, one app</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <section aria-label="Market window" style="position: absolute; left: 16px; top: 14px; width: 1408px; height: 800px; border-radius: 10px; overflow: hidden; background: #FAF8F4; border: 1px solid #D3CCBE; box-shadow: 0 22px 56px rgba(60,50,30,0.22); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background-color: #EDE8DE; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.022) 0px, rgba(0,0,0,0.022) 1px, transparent 1px, transparent 3px)">
+      <a href="Market.dc.html" aria-label="Back to Market" style="display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; text-decoration: none"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#3F5EE8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>Market</a>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,0.05)">
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(201,48,44,0.12); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C9302C" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 26px 40px; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 36px">
+      <div style="display: flex; flex-direction: column; gap: 24px; min-width: 0">
+        <div style="display: flex; gap: 22px; align-items: center">
+          <span style="width: 104px; height: 104px; border-radius: 28px; background: #6A4FD6; display: flex; align-items: center; justify-content: center; box-shadow: 0 16px 40px rgba(106,79,214,0.3)"><svg aria-hidden="true" width="64" height="64" viewBox="0 0 64 64" fill="none" stroke-width="5" stroke-linecap="round"><path d="M18 8 V56" stroke="#FFFFFF"></path><path d="M44 8 V26 C 44 38, 18 36, 18 46" stroke="#F2A6D6"></path><circle cx="18" cy="16" r="6" fill="#FFFFFF" stroke="none"></circle><circle cx="44" cy="20" r="6" fill="#F2A6D6" stroke="none"></circle><circle cx="18" cy="48" r="6" fill="#FFFFFF" stroke="none"></circle></svg></span>
+          <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px">
+            <h1 style="margin: 0; font-size: 36px; font-weight: 800; letter-spacing: -0.03em">Strand</h1>
+            <div style="font-size: 15px; color: #4A4740">Version control, with your history drawn as threads</div>
+            <div style="font-size: 13px; color: #6B675F">From ThreadOS · For developers · works with git repositories</div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px">
+            <button style="height: 44px; padding: 0 30px; border-radius: 999px; border: 0; background: #3F5EE8; color: #FFFFFF; font: 700 15px Inter, sans-serif">Get</button>
+            <span style="font-size: 12px; color: #6B675F">Free · 4.2 MB</span>
+          </div>
+        </div>
+
+        <!-- pictures of it -->
+        <div style="display: flex; gap: 14px">
+          <div style="flex: 1.6; height: 250px; border-radius: 14px; background: #16181E; border: 1px solid #D3CCBE; position: relative; overflow: hidden">
+            <svg aria-hidden="true" width="100%" height="250" viewBox="0 0 560 250" preserveAspectRatio="xMinYMin slice" fill="none" stroke-linecap="round">
+              <path d="M40 60 V250" stroke="#5B7CFA" stroke-width="4"></path><path d="M80 20 V130 C 80 170, 40 170, 40 200" stroke="#D152A6" stroke-width="4"></path><path d="M120 70 V150 C 120 175, 40 175, 40 185" stroke="#2EC4C4" stroke-width="4"></path>
+              <circle cx="80" cy="30" r="8" fill="#FFFFFF" stroke="#D152A6" stroke-width="3"></circle><circle cx="80" cy="70" r="6" fill="#D152A6"></circle><circle cx="120" cy="90" r="6" fill="#2EC4C4"></circle><circle cx="40" cy="110" r="6" fill="#5B7CFA"></circle><circle cx="80" cy="120" r="6" fill="#D152A6"></circle><circle cx="120" cy="140" r="6" fill="#2EC4C4"></circle><circle cx="40" cy="200" r="6" fill="#5B7CFA"></circle>
+              <g fill="#3A3F4C"><rect x="160" y="26" width="240" height="8" rx="4"></rect><rect x="160" y="66" width="200" height="8" rx="4"></rect><rect x="160" y="86" width="260" height="8" rx="4"></rect><rect x="160" y="106" width="180" height="8" rx="4"></rect><rect x="160" y="116" width="0" height="8" rx="4"></rect><rect x="160" y="136" width="220" height="8" rx="4"></rect><rect x="160" y="196" width="230" height="8" rx="4"></rect></g>
+            </svg>
+          </div>
+          <div style="flex: 1; height: 250px; border-radius: 14px; background: #0F1116; border: 1px solid #D3CCBE; padding: 14px; box-sizing: border-box; display: flex; flex-direction: column; gap: 4px; font: 400 11px/18px 'JetBrains Mono', monospace">
+            <span style="color: #8A90A0">kernel/desktop.c</span>
+            <span style="color: #9AA0AE">  gfx_rrect(x, y, w, h, ...);</span>
+            <span style="color: #ECEDF2; background: rgba(229,72,77,0.15)">- gfx_fill(x, y, w, TITLE_H, ...);</span>
+            <span style="color: #ECEDF2; background: rgba(70,194,122,0.15)">+ if (focused)</span>
+            <span style="color: #ECEDF2; background: rgba(70,194,122,0.15)">+   gfx_fill(x, y, w, SELVEDGE_H,</span>
+            <span style="color: #ECEDF2; background: rgba(70,194,122,0.15)">+            L.accent, 255);</span>
+            <span style="color: #9AA0AE">  draw_title(win, x, y);</span>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <h2 style="margin: 0; font-size: 17px; font-weight: 800">About it</h2>
+          <p style="margin: 0; font-size: 14.5px; line-height: 1.6; color: #2B2A27; max-width: 720px">Each branch is a thread and each commit a knot on it, so a merge looks like what it is: two threads becoming one. Stage what you changed, write why, commit and push without leaving the window. It reads and writes ordinary git repositories, so the command line and Strand can take turns.</p>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <h2 style="margin: 0; font-size: 17px; font-weight: 800">New in 1.2</h2>
+          <ul style="margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.7; color: #2B2A27"><li>Side threads for a branch you only want to look at</li><li>Push and pull show their progress on the shuttle</li></ul>
+        </div>
+      </div>
+
+      <!-- the facts that matter before you get it -->
+      <aside style="display: flex; flex-direction: column; gap: 14px">
+        <div style="padding: 18px; border-radius: 16px; background: #FCFBF8; border: 1px solid #E3DDD1; display: flex; flex-direction: column; gap: 12px">
+          <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6B675F">What it may use</h2>
+          <sc-for list="{{uses}}" as="u" hint-placeholder-count="5">
+            <div style="display: flex; align-items: center; gap: 10px; font-size: 14px"><span style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: {{u.fill}}; border: 2px solid {{u.ring}}"></span><span style="flex-grow: 1; color: {{u.fg}}">{{u.what}}</span><span style="font-size: 12px; color: #6B675F">{{u.note}}</span></div>
+          </sc-for>
+        </div>
+        <div style="padding: 18px; border-radius: 16px; background: #FCFBF8; border: 1px solid #E3DDD1; display: flex; flex-direction: column; gap: 10px">
+          <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6B675F">Made of</h2>
+          <sc-for list="{{facts}}" as="f" hint-placeholder-count="5">
+            <div style="display: flex; justify-content: space-between; gap: 12px; font-size: 13.5px; padding: 3px 0; border-bottom: 1px dashed #E3DDD1"><span style="color: #4A4740">{{f.a}}</span><span style="font-weight: 600; text-align: right; font-family: {{f.font}}">{{f.b}}</span></div>
+          </sc-for>
+          <a href="#" style="font-size: 13.5px; text-decoration: none; font-weight: 600">Read the source</a>
+        </div>
+      </aside>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const uses = [
+      ['Files in the projects you open', true, 'asks once per folder'],
+      ['The network', true, 'to push and pull'],
+      ['The camera', false, 'never'],
+      ['The microphone', false, 'never'],
+      ['Where you are', false, 'never']
+    ].map((u) => ({ what: u[0], note: u[2], fill: u[1] ? '#3F5EE8' : 'transparent', ring: u[1] ? '#3F5EE8' : '#CFC8BA', fg: u[1] ? '#1D1C1A' : '#8A857B' }));
+    const mono = "'JetBrains Mono', monospace";
+    const facts = [
+      ['Licence', 'MIT', 'Inter'], ['Built from', 'commit 7c1e04a', mono], ['Signed by', 'ThreadOS', 'Inter'], ['Libraries', 'libgit2 (GPL-2.0 with linking exception), zlib', 'Inter'], ['Size', '4.2 MB', 'Inter']
+    ].map((f) => ({ a: f[0], b: f[1], font: f[2] }));
+    return { uses, facts };
+  }
+}
+</script>
+</body>
+</html>

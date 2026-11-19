@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Gallery and Mixer, linen</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="#3F5EE8" stroke-opacity="0.5" stroke-width="3"></path>
+    <path d="M -40 580 C 340 450, 480 720, 790 530 S 1220 250, 1500 300" stroke="#C2366F" stroke-opacity="0.35" stroke-width="2"></path>
+  </svg>
+
+  <!-- Gallery, without focus -->
+  <section aria-label="Gallery window" style="position: absolute; left: 28px; top: 28px; width: 860px; height: 770px; border-radius: 10px; overflow: hidden; background: #F6F3EC; border: 1px solid #D9D3C7; box-shadow: 0 12px 32px rgba(60,50,30,0.15); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #F6F3EC"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #EFEBE3; border-bottom: 1px solid #E0DACE">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #8A857B"></div>
+      <div style="font-size: 13px; font-weight: 600; color: #6B675F">Gallery</div>
+      <div style="font-size: 13px; color: #8A857B">Pictures · November</div>
+    </div>
+    <div style="height: 46px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px dashed #DDD6C9">
+      <div role="group" aria-label="Show" style="display: inline-flex; padding: 3px; border-radius: 9px; background: #EFEBE3; border: 1px solid #DDD6C9">
+        <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: #FCFBF8; color: #1D1C1A; font: 600 12.5px Inter, sans-serif; box-shadow: inset 0 -2px 0 #8A857B">Days</button>
+        <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: transparent; color: #6B675F; font: 500 12.5px Inter, sans-serif">Months</button>
+        <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: transparent; color: #6B675F; font: 500 12.5px Inter, sans-serif">Folders</button>
+      </div>
+      <div style="flex-grow: 1"></div>
+      <span style="font-size: 12px; color: #6B675F">146 pictures · 3 selected</span>
+    </div>
+    <div style="flex-grow: 1; padding: 16px; display: flex; flex-direction: column; gap: 10px; overflow: hidden">
+      <div style="font-size: 13px; font-weight: 700">Monday, 16 November</div>
+      <div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px">
+        <sc-for list="{{photos}}" as="p" hint-placeholder-count="15">
+          <div style="position: relative; height: 132px; border-radius: 8px; overflow: hidden; background: {{p.sky}}; outline: {{p.outline}}; outline-offset: 2px">
+            <div style="position: absolute; left: {{p.sunX}}; top: 26px; width: 30px; height: 30px; border-radius: 50%; background: {{p.sun}}"></div>
+            <div style="position: absolute; left: -20%; right: -20%; bottom: -40px; height: 100px; border-radius: 50%; background: {{p.far}}"></div>
+            <div style="position: absolute; left: -10%; right: 30%; bottom: -60px; height: 100px; border-radius: 50%; background: {{p.near}}"></div>
+            <span style="position: absolute; right: 6px; top: 6px; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid #FFFFFF; background: {{p.knot}}"></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- Mixer, in front -->
+  <section aria-label="Mixer window" style="position: absolute; left: 912px; top: 56px; width: 500px; height: 720px; border-radius: 10px; overflow: hidden; background: #FAF8F4; border: 1px solid #D3CCBE; box-shadow: 0 22px 56px rgba(60,50,30,0.22); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #EDE8DE; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.022) 0px, rgba(0,0,0,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.015) 0px, rgba(0,0,0,0.015) 1px, transparent 1px, transparent 3px)">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #6A4FD6"></div>
+      <div style="font-size: 13px; font-weight: 700">Mixer</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A4740" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A4740" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(201,48,44,0.12); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C9302C" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="padding: 22px 24px; display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; gap: 16px; align-items: center">
+        <div style="width: 96px; height: 96px; flex-shrink: 0; border-radius: 12px; background-color: #3F5EE8; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.18) 0px, rgba(255,255,255,0.18) 4px, transparent 4px, transparent 8px), repeating-linear-gradient(90deg, rgba(194,54,111,0.55) 0px, rgba(194,54,111,0.55) 4px, transparent 4px, transparent 8px)"></div>
+        <div style="display: flex; flex-direction: column; gap: 4px; min-width: 0">
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6B675F">Now playing · Recorder</div>
+          <div style="font-size: 20px; font-weight: 800; letter-spacing: -0.01em">Recording 3</div>
+          <div style="font-size: 13px; color: #6B675F">Microphone · 48 kHz · stereo</div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <svg role="img" aria-label="The recording's sound, played to a little past the middle" width="452" height="56" viewBox="0 0 452 56" fill="none" stroke-linecap="round">
+          <path d="M0 28 C 10 10, 20 46, 30 28 S 50 6, 60 28 S 80 50, 90 28 S 110 14, 120 28 S 140 2, 150 28 S 170 52, 180 28 S 200 12, 210 28 S 230 40, 240 28 S 255 18, 262 28" stroke="#3F5EE8" stroke-width="3"></path>
+          <path d="M262 28 C 270 40, 280 16, 290 28 S 310 8, 320 28 S 340 46, 350 28 S 370 20, 380 28 S 400 44, 410 28 S 430 18, 440 28 S 448 30, 452 28" stroke="#CFC8BA" stroke-width="2" stroke-dasharray="3 4"></path>
+          <circle cx="262" cy="28" r="6" fill="#FFFFFF" stroke="#3F5EE8" stroke-width="2.5"></circle>
+        </svg>
+        <div style="display: flex; justify-content: space-between; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6B675F"><span>0:59</span><span>1:42</span></div>
+      </div>
+
+      <div style="display: flex; justify-content: center; align-items: center; gap: 18px">
+        <button aria-label="Back ten seconds" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid #DDD6C9; background: #FCFBF8; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="#1D1C1A"><path d="M11 6v12L3 12zM20 6v12l-8-6z"></path></svg></button>
+        <button aria-label="Pause" style="width: 58px; height: 58px; border-radius: 50%; border: 0; background: #3F5EE8; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+        <button aria-label="Forward ten seconds" style="width: 44px; height: 44px; border-radius: 50%; border: 1px solid #DDD6C9; background: #FCFBF8; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="#1D1C1A"><path d="M4 6v12l8-6zM13 6v12l8-6z"></path></svg></button>
+      </div>
+
+      <div style="border-top: 1px dashed #DDD6C9"></div>
+
+      <div style="display: flex; justify-content: space-between; align-items: baseline">
+        <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6B675F">Programs</h2>
+        <span style="font-size: 12px; color: #6B675F">Out: Speakers (HD Audio)</span>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <sc-for list="{{chans}}" as="c" hint-placeholder-count="4">
+          <div style="display: grid; grid-template-columns: 26px 110px minmax(0, 1fr) 40px; gap: 12px; align-items: center">
+            <span style="width: 26px; height: 26px; border-radius: 7px; background: {{c.dye}}"></span>
+            <span style="font-size: 13.5px; font-weight: 600">{{c.name}}</span>
+            <div style="position: relative; height: 14px">
+              <div style="position: absolute; left: 0; right: 0; top: 6px; border-top: 2px dashed #CFC8BA"></div>
+              <div style="position: absolute; left: 0; top: 5px; height: 4px; width: {{c.w}}; border-radius: 2px; background: {{c.dye}}"></div>
+              <div style="position: absolute; left: {{c.w}}; top: 0; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #FFFFFF; border: 2px solid {{c.dye}}; box-sizing: border-box"></div>
+            </div>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #6B675F; text-align: right">{{c.v}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #FAF8F4; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.022) 0px, rgba(0,0,0,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.015) 0px, rgba(0,0,0,0.015) 1px, transparent 1px, transparent 3px); border: 1px solid #D3CCBE; box-shadow: 0 10px 28px rgba(60,50,30,0.14); display: flex; align-items: center; padding: 0 10px; gap: 14px">
+    <button aria-label="Open the spool" style="width: 40px; height: 40px; border-radius: 10px; border: 0; background: #3F5EE8; color: #FFFFFF; font: 800 16px Inter, sans-serif">T</button>
+    <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 10px; background: #F1EDE5; font-size: 12.5px">
+      <span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 14px"><span style="width: 3px; height: 8px; background: #3F5EE8"></span><span style="width: 3px; height: 14px; background: #3F5EE8"></span><span style="width: 3px; height: 10px; background: #3F5EE8"></span><span style="width: 3px; height: 5px; background: #3F5EE8"></span></span>
+      <span style="font-weight: 600">Recording 3</span><span style="color: #6B675F">0:59</span>
+    </div>
+    <div style="flex-grow: 1"></div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 12px; border-left: 1px dashed #D3CCBE; line-height: 1.15">
+      <div style="font-size: 15px; font-weight: 700">18:20</div>
+      <div style="font-size: 11px; color: #6B675F">Fri 20 Nov</div>
+    </div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const scenes = [
+      ['#F4C9A0', '#FFF2D6', '#C98A6B', '#7A4E3E'], ['#BFD8E8', '#FFFFFF', '#7FA6B8', '#3E6475'],
+      ['#2B2350', '#F7E6C4', '#4A3B7A', '#1B1338'], ['#E8D9B8', '#F4B860', '#B7A27A', '#6E5E3E'],
+      ['#CDE6D3', '#FFFFFF', '#7FB394', '#2F6E4E'], ['#F2B6A0', '#FFE7C2', '#C27A6B', '#6E3E3E'],
+      ['#A8C4E8', '#FFFFFF', '#6E8EC0', '#2F4A7A'], ['#E8C8E0', '#FFF4E0', '#B88AB0', '#6E3E66'],
+      ['#F6E3B4', '#F59E0B', '#D4B06A', '#8A6A2A'], ['#C2D4D8', '#FFFFFF', '#8AA6AC', '#3E5E64'],
+      ['#1E2A44', '#E6EEF8', '#2E4466', '#121A2C'], ['#E0EBD2', '#FFF8E0', '#9DBB82', '#4E6E3A'],
+      ['#F0CFC0', '#FFFFFF', '#C89C8A', '#7A5446'], ['#D6CCF0', '#FFF2D6', '#9A8AC8', '#4E3E7A'],
+      ['#BCE0E6', '#FFFDF0', '#6EB4C0', '#2A6670']
+    ];
+    const selected = [1, 6, 7];
+    const photos = scenes.map((s, i) => ({
+      sky: s[0], sun: s[1], far: s[2], near: s[3],
+      sunX: (20 + (i * 37) % 60) + '%',
+      outline: selected.indexOf(i) >= 0 ? '3px solid #3F5EE8' : '0px solid transparent',
+      knot: selected.indexOf(i) >= 0 ? '#3F5EE8' : 'rgba(0,0,0,0.15)'
+    }));
+    const chans = [
+      ['Recorder', '#B86E00', 80], ['Weft', '#1E7F86', 55], ['Loomflight', '#6A4FD6', 35], ['System sounds', '#6B675F', 60]
+    ].map((c) => ({ name: c[0], dye: c[1], v: c[2] + '%', w: c[2] + '%' }));
+    return { photos, chans };
+  }
+}
+</script>
+</body>
+</html>

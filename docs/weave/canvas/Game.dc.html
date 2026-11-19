@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>A game in a window</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="#5B7CFA" stroke-opacity="0.35" stroke-width="3"></path>
+    <path d="M -40 700 C 260 620, 560 840, 860 630 S 1260 390, 1500 440" stroke="#2EC4C4" stroke-opacity="0.25" stroke-width="2"></path>
+  </svg>
+
+  <!-- Game mode: notifications are held and say so in one quiet capsule -->
+  <div role="status" style="position: absolute; left: 50%; top: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 14px; border-radius: 999px; background: #181A20; border: 1px solid #2E323D; font-size: 12.5px; color: #C9CDD8">
+    <span style="width: 8px; height: 8px; border-radius: 50%; background: #F5A524"></span>Game mode · 2 threads held until you stop playing
+  </div>
+
+  <!-- The game's window: a slimmer title bar, the same selvedge -->
+  <section aria-label="Loomflight window" style="position: absolute; left: 36px; top: 62px; width: 1004px; height: 596px; border-radius: 10px; overflow: hidden; background: #000000; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.55); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 30px; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 10px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px)">
+      <div style="width: 16px; height: 16px; border-radius: 4px; background: #6A4FD6"></div>
+      <div style="font-size: 12.5px; font-weight: 700">Loomflight</div>
+      <div style="display: flex; align-items: center; gap: 6px; height: 20px; padding: 0 8px; border-radius: 999px; background: rgba(70,194,122,0.14); font: 600 11px 'JetBrains Mono', monospace; color: #7AD69B"><span style="width: 5px; height: 5px; border-radius: 50%; background: #46C27A"></span>60 fps</div>
+      <div style="font-size: 12px; color: #8A90A0">1000 × 562 · the mouse is held, Esc lets go</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 2px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 22px; height: 22px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Full screen" style="width: 22px; height: 22px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"></path></svg></button>
+        <button aria-label="Close" style="width: 22px; height: 22px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <!-- The game itself: an original side-scroller. A weaver's shuttle flies through the warp, trailing its thread, and gathers knots -->
+    <div style="position: relative; width: 1002px; height: 562px">
+      <svg role="img" aria-label="Loomflight, a game: the shuttle flies between threads of the warp and gathers knots" width="1002" height="562" viewBox="0 0 1002 562" style="position: absolute; left: 0; top: 0">
+        <defs>
+          <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#140F38"></stop>
+            <stop offset="0.55" stop-color="#4A2668"></stop>
+            <stop offset="1" stop-color="#D86F5A"></stop>
+          </linearGradient>
+          <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+            <stop offset="0" stop-color="#FFD27A" stop-opacity="0.9"></stop>
+            <stop offset="1" stop-color="#FFD27A" stop-opacity="0"></stop>
+          </radialGradient>
+        </defs>
+        <rect x="0" y="0" width="1002" height="562" fill="url(#sky)"></rect>
+        <g fill="#FFFFFF">
+          <circle cx="80" cy="60" r="1.5" opacity="0.8"></circle><circle cx="190" cy="120" r="1" opacity="0.6"></circle><circle cx="320" cy="40" r="1.2" opacity="0.7"></circle>
+          <circle cx="520" cy="90" r="1" opacity="0.5"></circle><circle cx="700" cy="50" r="1.5" opacity="0.8"></circle><circle cx="860" cy="130" r="1" opacity="0.6"></circle><circle cx="960" cy="70" r="1.2" opacity="0.7"></circle>
+        </g>
+        <circle cx="820" cy="140" r="46" fill="#F7E6C4" opacity="0.92"></circle>
+        <circle cx="838" cy="128" r="46" fill="#3A2160" opacity="0.35"></circle>
+        <path d="M0 420 C 120 360, 220 400, 330 370 S 560 330, 680 380 S 900 350, 1002 390 V 562 H 0 Z" fill="#2B1C55"></path>
+        <path d="M0 470 C 140 430, 260 480, 400 450 S 640 420, 760 470 S 920 440, 1002 460 V 562 H 0 Z" fill="#1B1338"></path>
+        <path d="M0 520 C 200 500, 380 540, 560 515 S 860 500, 1002 520 V 562 H 0 Z" fill="#100B24"></path>
+
+        <!-- the warp: threads with a gap to fly through -->
+        <g stroke-linecap="round" stroke-width="6">
+          <path d="M400 0 V 190" stroke="#F5A524"></path><path d="M400 318 V 562" stroke="#F5A524"></path>
+          <path d="M640 0 V 300" stroke="#2EC4C4"></path><path d="M640 428 V 562" stroke="#2EC4C4"></path>
+          <path d="M880 0 V 120" stroke="#D152A6"></path><path d="M880 250 V 562" stroke="#D152A6"></path>
+        </g>
+        <g fill="#FFFFFF" opacity="0.9">
+          <circle cx="400" cy="190" r="7"></circle><circle cx="400" cy="318" r="7"></circle>
+          <circle cx="640" cy="300" r="7"></circle><circle cx="640" cy="428" r="7"></circle>
+          <circle cx="880" cy="120" r="7"></circle><circle cx="880" cy="250" r="7"></circle>
+        </g>
+
+        <!-- knots to gather -->
+        <circle cx="520" cy="290" r="26" fill="url(#glow)"></circle><circle cx="520" cy="290" r="9" fill="#FFD27A"></circle>
+        <circle cx="760" cy="330" r="26" fill="url(#glow)"></circle><circle cx="760" cy="330" r="9" fill="#FFD27A"></circle>
+        <circle cx="940" cy="190" r="26" fill="url(#glow)"></circle><circle cx="940" cy="190" r="9" fill="#FFD27A"></circle>
+
+        <!-- the thread the shuttle leaves behind -->
+        <path d="M-10 330 C 60 300, 110 350, 170 300 S 250 240, 300 254" fill="none" stroke="#5B7CFA" stroke-width="5" stroke-linecap="round"></path>
+        <path d="M-10 330 C 60 300, 110 350, 170 300 S 250 240, 300 254" fill="none" stroke="#9FB2FF" stroke-width="1.5" stroke-linecap="round" opacity="0.8"></path>
+
+        <!-- the shuttle -->
+        <g transform="translate(340 252) rotate(-8)">
+          <path d="M-48 0 C -30 -18, 30 -18, 52 0 C 30 18, -30 18, -48 0 Z" fill="#F4ECDD"></path>
+          <path d="M-30 0 C -18 -8, 18 -8, 32 0 C 18 8, -18 8, -30 0 Z" fill="#8B5A2B"></path>
+          <rect x="-12" y="-4" width="24" height="8" rx="4" fill="#5B7CFA"></rect>
+          <circle cx="-48" cy="0" r="3" fill="#F4ECDD"></circle>
+        </g>
+        <g fill="#FFD27A">
+          <circle cx="292" cy="236" r="2"></circle><circle cx="280" cy="270" r="1.5"></circle><circle cx="262" cy="246" r="1.2"></circle>
+        </g>
+      </svg>
+
+      <div style="position: absolute; left: 20px; top: 16px; display: flex; flex-direction: column; gap: 2px">
+        <div style="font: 700 11px 'JetBrains Mono', monospace; letter-spacing: 0.12em; color: rgba(255,255,255,0.7)">KNOTS</div>
+        <div style="font: 700 30px 'JetBrains Mono', monospace; color: #FFFFFF; text-shadow: 0 2px 0 rgba(0,0,0,0.35)">042</div>
+      </div>
+      <div aria-label="Three lives" style="position: absolute; right: 20px; top: 22px; display: flex; gap: 8px">
+        <span style="width: 14px; height: 14px; border-radius: 50%; background: #FFD27A; box-shadow: 0 0 10px rgba(255,210,122,0.8)"></span>
+        <span style="width: 14px; height: 14px; border-radius: 50%; background: #FFD27A; box-shadow: 0 0 10px rgba(255,210,122,0.8)"></span>
+        <span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5)"></span>
+      </div>
+      <div style="position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); font: 700 12px 'JetBrains Mono', monospace; letter-spacing: 0.2em; color: rgba(255,255,255,0.75)">WARP 3 · 1:12</div>
+    </div>
+  </section>
+
+  <!-- Monitor beside it: what the game costs -->
+  <section aria-label="Monitor window" style="position: absolute; left: 1064px; top: 62px; width: 344px; height: 596px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #262A33; box-shadow: 0 10px 30px rgba(0,0,0,0.4); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #16181E"></div>
+    <div style="height: 34px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #1B1D24; border-bottom: 1px solid #252830">
+      <div style="width: 16px; height: 16px; border-radius: 4px; background: #2F9A5C"></div>
+      <div style="font-size: 12.5px; font-weight: 600; color: #8D93A1">Monitor</div>
+    </div>
+    <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; font-size: 12.5px">
+      <div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Cores, last minute</span><span style="color: #C9CDD8">4 cores · 46 %</span></div>
+      <svg role="img" aria-label="Load of four cores over the last minute, one thread each" width="312" height="120" viewBox="0 0 312 120" style="background: #121419; border-radius: 8px">
+        <g stroke="#262A33" stroke-width="1" stroke-dasharray="2 4"><path d="M0 30 H312"></path><path d="M0 60 H312"></path><path d="M0 90 H312"></path></g>
+        <g fill="none" stroke-width="2" stroke-linejoin="round" stroke-linecap="round">
+          <polyline points="0,96 26,92 52,60 78,34 104,30 130,28 156,32 182,26 208,30 234,28 260,24 286,30 312,26" stroke="#5B7CFA"></polyline>
+          <polyline points="0,104 26,100 52,84 78,70 104,66 130,72 156,64 182,68 208,62 234,70 260,66 286,64 312,68" stroke="#2EC4C4"></polyline>
+          <polyline points="0,108 26,106 52,100 78,92 104,96 130,90 156,94 182,88 208,92 234,96 260,90 286,92 312,90" stroke="#D152A6"></polyline>
+          <polyline points="0,110 26,110 52,108 78,104 104,106 130,104 156,108 182,102 208,106 234,104 260,106 286,104 312,102" stroke="#F5A524"></polyline>
+        </g>
+      </svg>
+      <div style="display: flex; flex-direction: column; gap: 6px">
+        <div style="display: flex; justify-content: space-between"><span>Frame time</span><span style="font-family: 'JetBrains Mono', monospace; color: #7AD69B">16.6 ms</span></div>
+        <div style="position: relative; height: 10px"><div style="position: absolute; left: 0; right: 0; top: 4px; border-top: 2px dashed #3A3F4C"></div><div style="position: absolute; left: 0; top: 3px; width: 61%; height: 4px; border-radius: 2px; background: #46C27A"></div><div style="position: absolute; left: 61%; top: -2px; width: 2px; height: 14px; background: #9AA0AE"></div></div>
+        <div style="font-size: 11.5px; color: #8A90A0">The mark is the 60 fps budget</div>
+      </div>
+      <div style="border-top: 1px dashed #2E323D"></div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 56px 64px; gap: 8px; height: 24px; align-items: center; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8A90A0"><span>Program</span><span style="text-align: right">CPU</span><span style="text-align: right">Memory</span></div>
+        <sc-for list="{{procs}}" as="p" hint-placeholder-count="5">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 56px 64px; gap: 8px; height: 28px; align-items: center; padding: 0 6px; margin: 0 -6px; border-radius: 6px; background: {{p.bg}}">
+            <span style="display: flex; align-items: center; gap: 8px; font-weight: {{p.weight}}"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{p.knot}}"></span>{{p.name}}</span>
+            <span style="text-align: right; font-family: 'JetBrains Mono', monospace; color: #C9CDD8">{{p.cpu}}</span>
+            <span style="text-align: right; font-family: 'JetBrains Mono', monospace; color: #8A90A0">{{p.mem}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+
+  <!-- The loom steps aside while a game has the mouse: only its thread stays, a touch of the bottom edge brings it back -->
+  <div aria-label="Loom, hidden while playing" style="position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%); display: flex; align-items: center; gap: 0">
+    <span style="width: 220px; height: 2px; background: #3A3F4C"></span>
+    <span style="width: 34px; height: 4px; border-radius: 2px; background: #6A4FD6"></span>
+    <span style="width: 220px; height: 2px; background: #3A3F4C"></span>
+  </div>
+  <div style="position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%); font-size: 11.5px; color: #6A7080">The loom is away while you play. Touch the bottom edge to bring it back.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const procs = [
+      ['Loomflight', '38 %', '212 MB', true],
+      ['desktop', '6 %', '64 MB', false],
+      ['Weft', '1 %', '388 MB', false],
+      ['Monitor', '1 %', '9 MB', false],
+      ['Term', '0 %', '6 MB', false]
+    ].map((p) => ({
+      name: p[0], cpu: p[1], mem: p[2],
+      bg: p[3] ? 'rgba(91,124,250,0.14)' : 'transparent',
+      weight: p[3] ? 600 : 400,
+      knot: p[3] ? '#5B7CFA' : 'transparent'
+    }));
+    return { procs };
+  }
+}
+</script>
+</body>
+</html>

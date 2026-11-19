@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The shuttle, live activities</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 44px 48px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; gap: 22px">
+  <header style="display: flex; justify-content: space-between; align-items: flex-end; gap: 40px">
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <h1 style="margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -0.03em">The shuttle</h1>
+      <p style="margin: 0; font-size: 15px; line-height: 1.5; color: #B4B9C6; max-width: 760px">What is going on rides the loom's thread. It slides up out of the loom, grows to hold what it carries and slides back when it is done. Nothing sits at the top of the screen, so nothing covers a window's title.</p>
+    </div>
+    <div style="font-size: 12.5px; color: #8A90A0; max-width: 340px; line-height: 1.5; text-align: right">Click a state. A click on the shuttle opens it; a swipe down puts it away.</div>
+  </header>
+
+  <div role="group" aria-label="States" style="display: flex; flex-wrap: wrap; gap: 8px">
+    <sc-for list="{{chips}}" as="c" hint-placeholder-count="9">
+      <button onClick="{{c.pick}}" style="height: 32px; padding: 0 14px; border-radius: 999px; border: 1px solid {{c.border}}; background: {{c.bg}}; color: {{c.fg}}; font: 600 13px Inter, sans-serif">{{c.label}}</button>
+    </sc-for>
+  </div>
+
+  <div style="position: relative; flex-grow: 1; border-radius: 16px; overflow: hidden; background: #0D0F15; border: 1px solid #1F2229">
+    <svg aria-hidden="true" width="1344" height="600" viewBox="0 0 1344 600" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+      <path d="M -40 300 C 300 200, 520 440, 820 240 S 1200 120, 1400 160" stroke="#5B7CFA" stroke-opacity="0.45" stroke-width="3"></path>
+      <path d="M -40 360 C 260 280, 560 480, 860 290 S 1240 200, 1400 240" stroke="#D152A6" stroke-opacity="0.3" stroke-width="2"></path>
+    </svg>
+    <!-- the bottom of a window behind -->
+    <div style="position: absolute; left: 120px; top: -20px; width: 760px; height: 300px; border-radius: 10px; background: #1A1C23; border: 1px solid #2E323D; box-shadow: 0 18px 40px rgba(0,0,0,0.45)">
+      <div style="padding: 60px 30px; display: flex; flex-direction: column; gap: 12px">
+        <div style="width: 60%; height: 10px; border-radius: 5px; background: #262A33"></div>
+        <div style="width: 80%; height: 10px; border-radius: 5px; background: #262A33"></div>
+        <div style="width: 45%; height: 10px; border-radius: 5px; background: #262A33"></div>
+      </div>
+    </div>
+
+    <!-- the loom -->
+    <div style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border: 1px solid #2E323D; display: flex; align-items: center; padding: 0 10px; gap: 10px">
+      <span style="width: 40px; height: 40px; border-radius: 10px; background: #5B7CFA"></span>
+      <div style="flex-grow: 1; display: flex; justify-content: center; gap: 10px">
+        <span style="width: 38px; height: 38px; border-radius: 10px; background: #4A6BE0"></span><span style="width: 38px; height: 38px; border-radius: 10px; background: #1FA3A3"></span><span style="width: 38px; height: 38px; border-radius: 10px; background: #2A2D36"></span><span style="width: 38px; height: 38px; border-radius: 10px; background: #B23D8C"></span><span style="width: 38px; height: 38px; border-radius: 10px; background: #C77F0A"></span><span style="width: 38px; height: 38px; border-radius: 10px; background: #4B505E"></span>
+      </div>
+      <span style="width: 70px; height: 10px; border-radius: 5px; background: #2E323D"></span>
+    </div>
+
+    <!-- the shuttle's thread, from the loom up to whatever it carries -->
+    <sc-if value="{{showThread}}" hint-placeholder-val="{{ true }}">
+      <div style="position: absolute; left: 50%; bottom: 72px; width: 2px; height: {{threadH}}; margin-left: -1px; background: {{threadColor}}"></div>
+    </sc-if>
+
+    <div style="position: absolute; left: 0; right: 0; bottom: {{lift}}; display: flex; justify-content: center; align-items: flex-end">
+
+      <sc-if value="{{is.rest}}" hint-placeholder-val="{{ false }}">
+        <div aria-label="The shuttle, resting" style="width: 30px; height: 6px; border-radius: 3px; background: #5B7CFA"></div>
+      </sc-if>
+
+      <sc-if value="{{is.volume}}" hint-placeholder-val="{{ false }}">
+        <div role="status" aria-label="Volume 64" style="display: flex; align-items: center; gap: 14px; width: 340px; height: 48px; box-sizing: border-box; padding: 0 18px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+          <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ECEDF2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6L8 10z"></path><path d="M16.5 9a4 4 0 0 1 0 6"></path></svg>
+          <div style="position: relative; flex-grow: 1; height: 14px"><div style="position: absolute; left: 0; right: 0; top: 6px; border-top: 2px dashed #3A3F4C"></div><div style="position: absolute; left: 0; top: 5px; width: 64%; height: 4px; border-radius: 2px; background: #5B7CFA"></div><div style="position: absolute; left: 64%; top: 0; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #FFFFFF"></div></div>
+          <span style="font: 600 13px 'JetBrains Mono', monospace; width: 22px; text-align: right">64</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{is.playing}}" hint-placeholder-val="{{ true }}">
+        <div role="status" aria-label="Playing Recording 3" style="display: flex; align-items: center; gap: 12px; width: 380px; height: 52px; box-sizing: border-box; padding: 0 8px 0 10px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+          <span style="width: 34px; height: 34px; border-radius: 50%; background-color: #5B7CFA; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.2) 0px, rgba(255,255,255,0.2) 3px, transparent 3px, transparent 6px), repeating-linear-gradient(90deg, rgba(209,82,166,0.6) 0px, rgba(209,82,166,0.6) 3px, transparent 3px, transparent 6px)"></span>
+          <span style="flex-grow: 1; min-width: 0; line-height: 1.2"><span style="display: block; font-size: 13.5px; font-weight: 700">Recording 3</span><span style="display: block; font-size: 11.5px; color: #9AA0AE">Recorder · 0:59</span></span>
+          <span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 3px; height: 18px"><span style="width: 3px; height: 8px; border-radius: 1px; background: #D152A6"></span><span style="width: 3px; height: 16px; border-radius: 1px; background: #D152A6"></span><span style="width: 3px; height: 11px; border-radius: 1px; background: #D152A6"></span><span style="width: 3px; height: 18px; border-radius: 1px; background: #D152A6"></span><span style="width: 3px; height: 6px; border-radius: 1px; background: #D152A6"></span></span>
+          <button aria-label="Pause" style="width: 36px; height: 36px; border-radius: 50%; border: 0; background: #ECEDF2; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="#0D0F15"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{is.timer}}" hint-placeholder-val="{{ false }}">
+        <div role="timer" aria-label="Tea timer, 3 minutes 12 seconds left" style="display: flex; align-items: center; gap: 12px; height: 44px; box-sizing: border-box; padding: 0 18px 0 8px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+          <svg aria-hidden="true" width="30" height="30" viewBox="0 0 30 30" fill="none"><circle cx="15" cy="15" r="11" stroke="#3A3F4C" stroke-width="3" stroke-dasharray="2 3"></circle><path d="M15 4 A 11 11 0 1 1 5.5 20.5" stroke="#F5A524" stroke-width="3" stroke-linecap="round"></path></svg>
+          <span style="font-size: 13.5px; font-weight: 600">Tea</span>
+          <span style="font: 600 15px 'JetBrains Mono', monospace; color: #F5A524">3:12</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{is.download}}" hint-placeholder-val="{{ false }}">
+        <div role="status" aria-label="Downloading, 41 percent" style="display: flex; align-items: center; gap: 12px; width: 360px; height: 48px; box-sizing: border-box; padding: 0 18px 0 12px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+          <span style="width: 28px; height: 28px; border-radius: 50%; background: #1FA3A3; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M7 11l5 5 5-5"></path></svg></span>
+          <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px">
+            <span style="display: flex; justify-content: space-between; font-size: 12.5px"><span style="font-weight: 600">gstreamer-1.26.tar.xz</span><span style="color: #9AA0AE">41 %</span></span>
+            <span style="position: relative; display: block; height: 4px"><span style="position: absolute; left: 0; right: 0; top: 1px; border-top: 2px dashed #3A3F4C"></span><span style="position: absolute; left: 0; top: 0; width: 41%; height: 4px; border-radius: 2px; background: #2EC4C4"></span></span>
+          </span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{is.message}}" hint-placeholder-val="{{ false }}">
+        <div role="status" aria-label="Message from Ania" style="display: flex; align-items: center; gap: 12px; width: 460px; height: 66px; box-sizing: border-box; padding: 0 10px 0 12px; border-radius: 22px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+          <span style="width: 42px; height: 42px; border-radius: 50%; background: #6A4FD6; display: flex; align-items: center; justify-content: center; font-weight: 700">A</span>
+          <span style="flex-grow: 1; min-width: 0; line-height: 1.35"><span style="display: block; font-size: 12px; color: #9AA0AE">Ania · Messages · now</span><span style="display: block; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">Is the new build on the stick yet?</span></span>
+          <button style="height: 34px; padding: 0 14px; border-radius: 999px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 13px Inter, sans-serif">Reply</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{is.two}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; align-items: center">
+          <div role="timer" aria-label="Tea, 3:12" style="display: flex; align-items: center; gap: 8px; height: 40px; box-sizing: border-box; padding: 0 14px 0 6px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+            <svg aria-hidden="true" width="26" height="26" viewBox="0 0 30 30" fill="none"><circle cx="15" cy="15" r="11" stroke="#3A3F4C" stroke-width="3" stroke-dasharray="2 3"></circle><path d="M15 4 A 11 11 0 1 1 5.5 20.5" stroke="#F5A524" stroke-width="3" stroke-linecap="round"></path></svg>
+            <span style="font: 600 13px 'JetBrains Mono', monospace; color: #F5A524">3:12</span>
+          </div>
+          <div style="width: 28px; height: 2px; background: #5B7CFA"></div>
+          <div role="status" aria-label="Playing Recording 3" style="display: flex; align-items: center; gap: 10px; height: 40px; box-sizing: border-box; padding: 0 6px 0 8px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+            <span style="width: 26px; height: 26px; border-radius: 50%; background: #5B7CFA"></span>
+            <span style="font-size: 13px; font-weight: 600">Recording 3</span>
+            <span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 14px"><span style="width: 3px; height: 7px; background: #D152A6"></span><span style="width: 3px; height: 14px; background: #D152A6"></span><span style="width: 3px; height: 9px; background: #D152A6"></span></span>
+            <button aria-label="Pause" style="width: 28px; height: 28px; border-radius: 50%; border: 0; background: #ECEDF2; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="#0D0F15"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{is.open}}" hint-placeholder-val="{{ false }}">
+        <div role="dialog" aria-label="Now playing" style="width: 440px; box-sizing: border-box; padding: 18px; border-radius: 26px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 20px 50px rgba(0,0,0,0.6); display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; gap: 14px; align-items: center">
+            <span style="width: 64px; height: 64px; border-radius: 14px; background-color: #5B7CFA; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.2) 0px, rgba(255,255,255,0.2) 4px, transparent 4px, transparent 8px), repeating-linear-gradient(90deg, rgba(209,82,166,0.6) 0px, rgba(209,82,166,0.6) 4px, transparent 4px, transparent 8px)"></span>
+            <span style="flex-grow: 1; line-height: 1.3"><span style="display: block; font-size: 17px; font-weight: 800">Recording 3</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">Recorder · microphone, 48 kHz</span></span>
+          </div>
+          <svg role="img" aria-label="Played to 0:59 of 1:42" width="404" height="34" viewBox="0 0 404 34" fill="none" stroke-linecap="round">
+            <path d="M0 17 C 10 4, 20 30, 30 17 S 50 2, 60 17 S 80 32, 90 17 S 110 8, 120 17 S 140 0, 150 17 S 170 32, 180 17 S 200 8, 210 17 S 226 26, 234 17" stroke="#5B7CFA" stroke-width="3"></path>
+            <path d="M234 17 C 244 26, 254 8, 264 17 S 284 4, 294 17 S 314 30, 324 17 S 344 10, 354 17 S 374 28, 384 17 S 398 12, 404 17" stroke="#3A3F4C" stroke-width="2" stroke-dasharray="3 4"></path>
+            <circle cx="234" cy="17" r="6" fill="#FFFFFF"></circle>
+          </svg>
+          <div style="display: flex; justify-content: space-between; align-items: center">
+            <span style="font: 400 12px 'JetBrains Mono', monospace; color: #9AA0AE">0:59 / 1:42</span>
+            <div style="display: flex; gap: 10px">
+              <button aria-label="Back ten seconds" style="width: 40px; height: 40px; border-radius: 50%; border: 1px solid #353A46; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#ECEDF2"><path d="M11 6v12L3 12zM20 6v12l-8-6z"></path></svg></button>
+              <button aria-label="Pause" style="width: 48px; height: 48px; border-radius: 50%; border: 0; background: #5B7CFA; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="#FFFFFF"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+              <button aria-label="Forward ten seconds" style="width: 40px; height: 40px; border-radius: 50%; border: 1px solid #353A46; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#ECEDF2"><path d="M4 6v12l8-6zM13 6v12l8-6z"></path></svg></button>
+            </div>
+            <button style="height: 30px; padding: 0 10px; border-radius: 8px; border: 1px dashed #4A4F5C; background: transparent; color: #C9CDD8; font: 500 12px Inter, sans-serif">Speakers</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{is.camera}}" hint-placeholder-val="{{ false }}">
+        <div role="status" aria-label="Camera and microphone are on, used by Recorder" style="display: flex; align-items: center; gap: 12px; height: 44px; box-sizing: border-box; padding: 0 18px 0 14px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.5)">
+          <span style="width: 10px; height: 10px; border-radius: 50%; background: #46C27A; box-shadow: 0 0 10px #46C27A"></span><span style="font-size: 13px; font-weight: 600">Camera</span>
+          <span style="width: 10px; height: 10px; border-radius: 50%; background: #F5A524; box-shadow: 0 0 10px #F5A524"></span><span style="font-size: 13px; font-weight: 600">Microphone</span>
+          <span style="font-size: 12.5px; color: #9AA0AE">· Recorder</span>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; font-size: 13px; line-height: 1.5; color: #B4B9C6">
+    <div><strong style="color: #ECEDF2">One grows, two share.</strong> A second activity takes its own capsule on the same thread; a third waits behind the newer one.</div>
+    <div><strong style="color: #ECEDF2">The thread says whose it is.</strong> It is dyed with the program's colour while that program has something going on.</div>
+    <div><strong style="color: #ECEDF2">Camera and microphone always show.</strong> The desktop draws them from the drivers' own state, so no program can hide them.</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const states = [
+      ['rest', 'Resting'], ['volume', 'Volume'], ['playing', 'Playing'], ['timer', 'Timer'],
+      ['download', 'Download'], ['message', 'Message'], ['two', 'Two at once'], ['open', 'Opened'], ['camera', 'Camera on']
+    ];
+    const s = (this.state && this.state.s) || 'playing';
+    const is = {};
+    states.forEach((x) => { is[x[0]] = x[0] === s; });
+    const chips = states.map((x) => ({
+      label: x[1],
+      bg: x[0] === s ? '#5B7CFA' : '#14161B',
+      fg: x[0] === s ? '#FFFFFF' : '#C9CDD8',
+      border: x[0] === s ? '#5B7CFA' : '#2E323D',
+      pick: () => this.setState({ s: x[0] })
+    }));
+    const dye = { playing: '#D152A6', timer: '#F5A524', download: '#2EC4C4', message: '#6A4FD6', two: '#5B7CFA', open: '#D152A6', camera: '#46C27A', volume: '#5B7CFA' };
+    return {
+      is, chips,
+      showThread: s !== 'rest',
+      threadColor: dye[s] || '#5B7CFA',
+      threadH: '22px',
+      lift: s === 'rest' ? '70px' : '94px'
+    };
+  }
+}
+</script>
+</body>
+</html>

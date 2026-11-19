@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: the shade</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <div style="height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600"><span>Thu 19 Nov</span><span style="font-size: 12px">71%</span></div>
+  <div style="padding: 4px 20px 0; font-size: 44px; font-weight: 800; letter-spacing: -0.04em">12:36</div>
+
+  <div style="margin: 14px 14px 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+    <sc-for list="{{tiles}}" as="t" hint-placeholder-count="4">
+      <button onClick="{{t.pick}}" style="display: flex; align-items: center; gap: 10px; height: 64px; padding: 0 14px; border-radius: 18px; border: {{t.line}}; background: {{t.bg}}; color: {{t.fg}}; text-align: left; font-family: Inter, sans-serif">
+        <span style="width: 34px; height: 34px; flex-shrink: 0; border-radius: 50%; background: {{t.iconBg}}; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800">{{t.glyph}}</span>
+        <span style="min-width: 0"><span style="display: block; font-size: 14px; font-weight: 700">{{t.name}}</span><span style="display: block; font-size: 12px; opacity: 0.8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.state}}</span></span>
+      </button>
+    </sc-for>
+  </div>
+
+  <div style="margin: 12px 14px 0; display: flex; flex-direction: column; gap: 10px">
+    <sc-for list="{{sliders}}" as="s" hint-placeholder-count="2">
+      <div style="position: relative; height: 48px; border-radius: 16px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden">
+        <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{s.w}}; background: {{s.dye}}; opacity: 0.85"></div>
+        <div style="position: absolute; inset: 0; display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 14px; font-weight: 600">{{s.name}}<span style="margin-left: auto; font-size: 12.5px; opacity: 0.85">{{s.w}}</span></div>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- what is going on: the shuttle, opened in the shade -->
+  <div style="margin: 12px 14px 0; padding: 12px; border-radius: 18px; background: #1A1C23; border: 1px solid #2E323D; display: flex; align-items: center; gap: 12px">
+    <span style="width: 44px; height: 44px; border-radius: 12px; background-color: #5B7CFA; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.2) 0px, rgba(255,255,255,0.2) 3px, transparent 3px, transparent 6px), repeating-linear-gradient(90deg, rgba(209,82,166,0.6) 0px, rgba(209,82,166,0.6) 3px, transparent 3px, transparent 6px)"></span>
+    <span style="flex-grow: 1"><span style="display: block; font-size: 14px; font-weight: 700">Recording 3</span><span style="display: block; font-size: 12px; color: #9AA0AE">Recorder · 0:59 / 1:42</span></span>
+    <button aria-label="Pause" style="width: 40px; height: 40px; border-radius: 50%; border: 0; background: #ECEDF2; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="#0D0F15"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+  </div>
+
+  <div style="margin: 16px 18px 8px; display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Threads</span><span style="font-size: 13px; color: #8FA5FF">Clear</span></div>
+  <div style="margin: 0 14px; position: relative; padding-left: 20px; display: flex; flex-direction: column; gap: 8px">
+    <div style="position: absolute; left: 5px; top: 8px; bottom: 8px; width: 2px; background: linear-gradient(#D152A6, #2E323D)"></div>
+    <sc-for list="{{notes}}" as="n" hint-placeholder-count="3">
+      <div style="position: relative; padding: 10px 12px; border-radius: 14px; background: #1A1C23; border: 1px solid #2E323D">
+        <span style="position: absolute; left: -20px; top: 14px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: {{n.dye}}; border: 2px solid #08090D"></span>
+        <div style="font-size: 11.5px; color: #9AA0AE">{{n.from}}</div>
+        <div style="font-size: 14px; font-weight: 600; margin-top: 2px">{{n.text}}</div>
+      </div>
+    </sc-for>
+  </div>
+
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+    <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #3A3F4C"></div>
+    <div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #4A6BE0"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #2EC4C4"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #C77F0A"></span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const on = (k, d) => (st[k] === undefined ? d : st[k]);
+    const T = [
+      ['wifi', 'Wi-Fi', 'W', 'Home-5G', true, '#5B7CFA'],
+      ['bt', 'Bluetooth', 'B', '2 devices', true, '#5B7CFA'],
+      ['loc', 'Location', 'L', 'Shared with Family', true, '#D152A6'],
+      ['quiet', 'Quiet', 'Q', 'Off until you turn it on', false, '#6A4FD6']
+    ];
+    const tiles = T.map((t) => {
+      const v = on(t[0], t[4]);
+      return { name: t[1], glyph: t[2], state: v ? t[3] : 'Off', bg: v ? t[5] : '#1A1C23', fg: v ? '#FFFFFF' : '#C9CDD8', line: v ? '0' : '1px solid #2E323D', iconBg: v ? 'rgba(255,255,255,0.22)' : '#2A2D36', pick: () => this.setState({ [t[0]]: !v }) };
+    });
+    const sliders = [{ name: 'Light', w: '70%', dye: '#F5A524' }, { name: 'Sound', w: '45%', dye: '#5B7CFA' }];
+    const notes = [
+      { from: 'Purl · Ania · now', text: 'Is the new build on the stick yet?', dye: '#D152A6' },
+      { from: 'Market · 10 min', text: 'Darkroom has an update', dye: '#B86E00' },
+      { from: 'Family · 1 h', text: 'Ola got to school', dye: '#F5A524' }
+    ];
+    return { tiles, sliders, notes };
+  }
+}
+</script>
+</body>
+</html>

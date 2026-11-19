@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: a program asks</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #0F1218; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <svg aria-hidden="true" width="390" height="844" viewBox="0 0 390 844" style="position: absolute; left: 0; top: 0">
+    <g fill="#151922"><rect x="20" y="70" width="110" height="90" rx="6"></rect><rect x="150" y="70" width="100" height="90" rx="6"></rect><rect x="270" y="70" width="100" height="90" rx="6"></rect><rect x="20" y="300" width="150" height="120" rx="6"></rect></g>
+    <path d="M0 230 C 100 200, 200 280, 300 240 S 380 220, 400 230 L400 270 C 330 260, 250 300, 160 270 S 60 250, 0 270 Z" fill="#12333B"></path>
+    <g stroke="#262B36" stroke-width="8" fill="none"><path d="M140 40 V600"></path><path d="M0 170 H390"></path><path d="M0 290 H390"></path></g>
+  </svg>
+  <div style="position: absolute; inset: 0; background: rgba(5,6,10,0.55)"></div>
+  <div style="position: relative; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600">17:40</div>
+
+  <section role="dialog" aria-label="Map wants to know where you are" style="position: absolute; left: 0; right: 0; bottom: 0; border-radius: 26px 26px 0 0; background: #1A1C23; border-top: 1px solid #353A46; padding: 10px 18px 42px; display: flex; flex-direction: column; gap: 14px">
+    <span style="align-self: center; width: 40px; height: 5px; border-radius: 3px; background: #3A3F4C"></span>
+    <div style="display: flex; gap: 14px; align-items: center">
+      <dc-import name="Icon" app="map" size="{{ 52 }}" hint-size="52px,52px"></dc-import>
+      <div><div style="font-size: 18px; font-weight: 800; line-height: 1.2">Map wants to know where you are</div><div style="font-size: 13px; color: #9AA0AE; margin-top: 3px">To start the route from here</div></div>
+    </div>
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-radius: 14px; background: #14161B; border: 1px solid #2E323D">
+      <span><span style="display: block; font-size: 14.5px; font-weight: 700">{{pr.name}}</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">{{pr.sub}}</span></span>
+      <button onClick="{{togglePrecise}}" aria-label="Precise location" style="width: 48px; height: 28px; border-radius: 999px; border: 0; padding: 0 3px; background: {{pr.track}}; display: flex; align-items: center; justify-content: {{pr.just}}"><span style="width: 22px; height: 22px; border-radius: 50%; background: #FFFFFF"></span></button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <a href="Map.dc.html" style="display: flex; align-items: center; justify-content: center; height: 52px; border-radius: 15px; background: #5B7CFA; color: #FFFFFF; font: 700 15.5px Inter, sans-serif; text-decoration: none">While Map is open</a>
+      <a href="Map.dc.html" style="display: flex; align-items: center; justify-content: center; height: 50px; border-radius: 15px; background: #20232B; border: 1px solid #2E323D; color: #ECEDF2; font: 600 15px Inter, sans-serif; text-decoration: none">Only this time</a>
+      <a href="#" style="display: flex; align-items: center; justify-content: center; height: 46px; border-radius: 15px; color: #C9CDD8; font: 500 15px Inter, sans-serif; text-decoration: none">Don't allow</a>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px; justify-content: center; font-size: 12px; color: #8A90A0"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D152A6"></span>While Map uses it, a knot on the thread says so</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const precise = !(this.state && this.state.rough);
+    return {
+      pr: precise ? { name: 'Precise', sub: 'To the street you are on', track: '#5B7CFA', just: 'flex-end' } : { name: 'Roughly', sub: 'To the part of town, about 3 km', track: '#3A3F4C', just: 'flex-start' },
+      togglePrecise: () => this.setState({ rough: precise })
+    };
+  }
+}
+</script>
+</body>
+</html>

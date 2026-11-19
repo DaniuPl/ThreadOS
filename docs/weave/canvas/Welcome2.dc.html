@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Welcome: network</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; align-items: center; padding-top: 44px; box-sizing: border-box">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 820 C 300 720, 520 900, 820 760 S 1240 600, 1500 650" stroke="#5B7CFA" stroke-opacity="0.45" stroke-width="3"></path>
+    <path d="M -40 860 C 260 800, 560 920, 860 800 S 1260 680, 1500 720" stroke="#2EC4C4" stroke-opacity="0.3" stroke-width="2"></path>
+  </svg>
+
+  <nav aria-label="Setup steps" style="position: relative; display: flex; width: 640px">
+    <sc-for list="{{steps}}" as="st" hint-placeholder-count="5">
+      <div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <div style="position: absolute; top: 7px; right: 50%; width: 100%; height: 2px; background: {{st.line}}"></div>
+        <span style="position: relative; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{st.fill}}; border: 2px solid {{st.ring}}"></span>
+        <span style="font-size: 12px; color: {{st.fg}}; font-weight: {{st.weight}}">{{st.label}}</span>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="position: relative; margin-top: 52px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center">
+    <h1 style="margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -0.03em">Connect to a network</h1>
+    <p style="margin: 0; font-size: 16px; color: #B4B9C6; max-width: 560px; line-height: 1.5">For the clock, updates and Weft. Everything else works without one.</p>
+  </div>
+
+  <div style="position: relative; margin-top: 32px; width: 620px; border-radius: 16px; background: #14161B; border: 1px solid #262A33; overflow: hidden">
+    <div style="display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-bottom: 1px dashed #2E323D">
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#6A7080" stroke-width="2" stroke-linejoin="round"><rect x="4" y="9" width="16" height="10" rx="2"></rect><path d="M8 9V5h8v4M8 15h2M14 15h2"></path></svg>
+      <span style="flex-grow: 1; font-size: 14px; color: #9AA0AE">Cable: nothing plugged in</span>
+      <span style="width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 2px solid #4A4F5C"></span>
+    </div>
+    <div style="padding: 12px 18px 6px; display: flex; justify-content: space-between; align-items: center">
+      <span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Wi-Fi · Intel AX201</span>
+      <span style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8A90A0"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="14" stroke="#2E323D" stroke-width="4" stroke-dasharray="3 4"></circle><path d="M18 4a14 14 0 0 1 14 14" stroke="#5B7CFA" stroke-width="4" stroke-linecap="round"></path></svg>Looking</span>
+    </div>
+    <div style="display: flex; flex-direction: column; padding: 0 8px 8px">
+      <sc-for list="{{nets}}" as="n" hint-placeholder-count="4">
+        <div style="border-radius: 10px; background: {{n.bg}}">
+          <button onClick="{{n.pick}}" style="width: 100%; display: flex; align-items: center; gap: 12px; height: 48px; padding: 0 10px; border: 0; background: transparent; color: #ECEDF2; font: 500 14px Inter, sans-serif; text-align: left">
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: {{n.knot}}"></span>
+            <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><path d="M3 9a14 14 0 0 1 18 0" stroke="{{n.s3}}"></path><path d="M6 12.5a9 9 0 0 1 12 0" stroke="{{n.s2}}"></path><path d="M9 16a4 4 0 0 1 6 0" stroke="#ECEDF2"></path><circle cx="12" cy="19" r="1" fill="#ECEDF2"></circle></svg>
+            <span style="flex-grow: 1; font-weight: {{n.weight}}">{{n.name}}</span>
+            <span style="font-size: 12px; color: #8A90A0">{{n.sec}}</span>
+          </button>
+          <sc-if value="{{n.open}}" hint-placeholder-val="{{ false }}">
+            <div style="display: flex; gap: 10px; padding: 0 10px 12px 38px; align-items: flex-end">
+              <label style="flex-grow: 1; display: flex; flex-direction: column; gap: 6px">
+                <span style="font-size: 12px; color: #B4B9C6">Password for {{n.name}}</span>
+                <input type="password" value="woven-thread-42" style="height: 38px; box-sizing: border-box; padding: 0 12px; border-radius: 8px 8px 4px 4px; border: 0; border-bottom: 2px solid #5B7CFA; background: #20232B; color: #ECEDF2; font: 400 14px Inter, sans-serif; outline: none">
+              </label>
+              <button style="height: 38px; padding: 0 18px; border-radius: 9px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 14px Inter, sans-serif">Join</button>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 56px; display: flex; justify-content: center; align-items: center; gap: 12px">
+    <a href="Welcome1.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 22px; border-radius: 11px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 15px Inter, sans-serif; text-decoration: none">Back</a>
+    <a href="Welcome3.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 18px; border-radius: 11px; color: #B4B9C6; font: 500 15px Inter, sans-serif; text-decoration: none">Skip for now</a>
+    <a href="Welcome3.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 28px; border-radius: 11px; background: #5B7CFA; color: #FFFFFF; font: 600 15px Inter, sans-serif; text-decoration: none">Continue</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = 1;
+    const steps = ['Language', 'Network', 'You', 'Style', 'Ready'].map((label, i) => ({
+      label,
+      line: i === 0 ? 'transparent' : (i <= cur ? '#5B7CFA' : '#2E323D'),
+      fill: i <= cur ? '#5B7CFA' : '#0D0F15',
+      ring: i <= cur ? '#5B7CFA' : '#4A4F5C',
+      fg: i === cur ? '#FFFFFF' : (i < cur ? '#B4B9C6' : '#6A7080'),
+      weight: i === cur ? 700 : 500
+    }));
+    const sel = (this.state && this.state.sel) || 'Home-5G';
+    const nets = [
+      ['Home-5G', 'WPA2', 3], ['Home', 'WPA2', 3], ['Upstairs', 'WPA2', 2], ['Library guest', 'Open', 1]
+    ].map((n) => {
+      const on = n[0] === sel;
+      return {
+        name: n[0], sec: n[1],
+        s3: n[2] >= 3 ? '#ECEDF2' : '#3A3F4C', s2: n[2] >= 2 ? '#ECEDF2' : '#3A3F4C',
+        bg: on ? 'rgba(91,124,250,0.14)' : 'transparent',
+        knot: on ? '#5B7CFA' : 'transparent',
+        weight: on ? 700 : 500,
+        open: on && n[1] !== 'Open',
+        pick: () => this.setState({ sel: n[0] })
+      };
+    });
+    return { steps, nets };
+  }
+}
+</script>
+</body>
+</html>

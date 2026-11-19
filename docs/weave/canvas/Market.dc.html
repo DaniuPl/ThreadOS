@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Market, the app store</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <section aria-label="Market window" style="position: absolute; left: 16px; top: 14px; width: 1408px; height: 800px; border-radius: 10px; overflow: hidden; background: #FAF8F4; border: 1px solid #D3CCBE; box-shadow: 0 22px 56px rgba(60,50,30,0.22); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #EDE8DE; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.022) 0px, rgba(0,0,0,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.015) 0px, rgba(0,0,0,0.015) 1px, transparent 1px, transparent 3px)">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #C2366F"></div>
+      <div style="font-size: 13px; font-weight: 700">Market</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A4740" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4A4740" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(201,48,44,0.12); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#C9302C" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <nav aria-label="Market sections" style="width: 230px; flex-shrink: 0; box-sizing: border-box; padding: 16px 10px; border-right: 1px solid #E3DDD1; background: #F6F3EC; display: flex; flex-direction: column; gap: 2px">
+        <label style="display: flex; align-items: center; gap: 8px; height: 36px; box-sizing: border-box; padding: 0 10px; margin-bottom: 10px; border-radius: 9px 9px 4px 4px; background: #FFFFFF; border: 1px solid #E3DDD1; border-bottom: 2px dashed #CFC8BA"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg><input aria-label="Find an app" placeholder="Find an app" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #1D1C1A; font: 400 13px Inter, sans-serif; outline: none"></label>
+        <sc-for list="{{nav}}" as="n" hint-placeholder-count="8">
+          <a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 8px; text-decoration: none; background: {{n.bg}}; color: {{n.fg}}; font-size: 13.5px; font-weight: {{n.w}}; margin-top: {{n.gap}}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{n.dye}}"></span><span style="flex-grow: 1">{{n.name}}</span><span style="font-size: 11.5px; font-weight: 700; color: {{n.countColor}}">{{n.count}}</span></a>
+        </sc-for>
+      </nav>
+
+      <main style="flex-grow: 1; min-width: 0; overflow: hidden; padding: 22px 28px; display: flex; flex-direction: column; gap: 22px">
+        <!-- the one this week -->
+        <a href="MarketApp.dc.html" style="position: relative; height: 230px; border-radius: 18px; overflow: hidden; text-decoration: none; color: #FFFFFF; background: #140F38; display: flex">
+          <svg aria-hidden="true" width="1120" height="230" viewBox="0 0 1120 230" style="position: absolute; left: 0; top: 0" fill="none"><rect width="1120" height="230" fill="#1E1550"></rect><path d="M0 170 C 200 120, 330 200, 520 150 S 860 110, 1120 150 V230 H0 Z" fill="#2B1C55"></path><g stroke-width="5" stroke-linecap="round"><path d="M700 0 V80" stroke="#F5A524"></path><path d="M700 150 V230" stroke="#F5A524"></path><path d="M860 0 V120" stroke="#2EC4C4"></path><path d="M860 190 V230" stroke="#2EC4C4"></path></g><path d="M480 130 C 540 100, 590 140, 640 112" stroke="#5B7CFA" stroke-width="5" stroke-linecap="round"></path><g transform="translate(680 108) rotate(-8)"><path d="M-40 0 C -25 -15, 25 -15, 44 0 C 25 15, -25 15, -40 0 Z" fill="#F4ECDD"></path><rect x="-10" y="-3" width="20" height="6" rx="3" fill="#5B7CFA"></rect></g><circle cx="780" cy="118" r="8" fill="#FFD27A"></circle><circle cx="940" cy="150" r="8" fill="#FFD27A"></circle></svg>
+          <div style="position: relative; padding: 30px 34px; display: flex; flex-direction: column; gap: 8px; max-width: 440px">
+            <span style="font-size: 11.5px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #FFD27A">Game of the week</span>
+            <span style="font-size: 36px; font-weight: 800; letter-spacing: -0.03em">Loomflight</span>
+            <span style="font-size: 14.5px; line-height: 1.5; color: rgba(255,255,255,0.85)">Fly a shuttle through the warp and gather knots. Made for ThreadOS; 60 frames a second on a software renderer.</span>
+            <span style="margin-top: 6px; align-self: flex-start; display: flex; align-items: center; height: 36px; padding: 0 18px; border-radius: 999px; background: #FFFFFF; color: #1E1550; font-size: 14px; font-weight: 700">Get · free</span>
+          </div>
+        </a>
+
+        <section style="display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline"><h2 style="margin: 0; font-size: 19px; font-weight: 800">Made for ThreadOS</h2><a href="#" style="font-size: 13px; text-decoration: none">See all</a></div>
+          <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+            <sc-for list="{{apps}}" as="a" hint-placeholder-count="6">
+              <a href="MarketApp.dc.html" style="display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 14px; background: #FCFBF8; border: 1px solid #E3DDD1; text-decoration: none; color: #1D1C1A">
+                <span style="width: 54px; height: 54px; flex-shrink: 0; border-radius: 15px; background: {{a.dye}}; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font-size: 21px; font-weight: 800">{{a.glyph}}</span>
+                <span style="flex-grow: 1; min-width: 0"><span style="display: block; font-size: 15px; font-weight: 700">{{a.name}}</span><span style="display: block; font-size: 12.5px; color: #6B675F; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{a.what}}</span><span style="display: inline-block; margin-top: 6px; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: #EFEBE3; color: #4A4740">{{a.licence}}</span></span>
+                <span style="flex-shrink: 0; height: 30px; display: flex; align-items: center; padding: 0 14px; border-radius: 999px; background: {{a.btnBg}}; color: {{a.btnFg}}; font-size: 13px; font-weight: 700">{{a.btn}}</span>
+              </a>
+            </sc-for>
+          </div>
+        </section>
+
+        <div style="display: flex; gap: 14px; padding: 14px 18px; border-radius: 14px; background: #F1EDE5; border: 1px dashed #CFC8BA; font-size: 13px; line-height: 1.5; color: #4A4740">
+          <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1E8A4C" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"></path><path d="M9 12l2 2 4-4"></path></svg>
+          <span><strong style="color: #1D1C1A">Every app here is built from its source,</strong> signed, and says what it may use before you get it. Its licence is on its page, and the source is one click away.</span>
+        </div>
+      </main>
+    </div>
+  </section>
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #FAF8F4; border: 1px solid #D3CCBE; display: flex; align-items: center; padding: 0 10px; gap: 14px">
+    <span style="width: 40px; height: 40px; border-radius: 10px; background: #3F5EE8"></span>
+    <div style="flex-grow: 1; display: flex; justify-content: center; gap: 10px"><span style="width: 38px; height: 38px; border-radius: 10px; background: #3F5EE8"></span><span style="position: relative; width: 38px; height: 38px; border-radius: 10px; background: #C2366F"><span style="position: absolute; left: 4px; right: 4px; bottom: -10px; height: 3px; border-radius: 2px; background: #3F5EE8"></span></span></div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 12px; border-left: 1px dashed #D3CCBE; line-height: 1.15"><div style="font-size: 15px; font-weight: 700">19:10</div><div style="font-size: 11px; color: #6B675F">Thu 19 Nov</div></div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const nav = [
+      ['Discover', '#3F5EE8', '', true], ['Games', '#6A4FD6', ''], ['Work', '#3F5EE8', ''], ['Pictures and sound', '#C2366F', ''], ['For developers', '#1E7F86', ''], ['Updates', '#B86E00', '2', false, 10], ['Installed', '#6B675F', '24']
+    ].map((n) => ({ name: n[0], dye: n[1], count: n[2], bg: n[3] ? 'rgba(63,94,232,0.12)' : 'transparent', fg: n[3] ? '#1D1C1A' : '#4A4740', w: n[3] ? 700 : 500, gap: (n[4] || 0) + 'px', countColor: n[0] === 'Updates' ? '#B86E00' : '#8A857B' }));
+    const apps = [
+      ['Strand', 'S', '#6A4FD6', 'Version control, history as threads', 'MIT', 'Open'],
+      ['Purl', 'P', '#1E7F86', 'Talk to people, end to end', 'MIT', 'Open'],
+      ['Loomflight', 'L', '#3A2A8F', 'A game: fly through the warp', 'MIT', 'Get'],
+      ['Ledger', '$', '#1E8A4C', 'Where the money went, month by month', 'BSD-3-Clause', 'Get'],
+      ['Spindle', 'S', '#B86E00', 'Podcasts and radio', 'Apache-2.0', 'Get'],
+      ['Darkroom', 'D', '#4A4740', 'Develop camera raw files', 'LGPL-2.1', 'Update']
+    ].map((a) => ({ name: a[0], glyph: a[1], dye: a[2], what: a[3], licence: a[4], btn: a[5], btnBg: a[5] === 'Open' ? '#EFEBE3' : (a[5] === 'Update' ? '#B86E00' : '#3F5EE8'), btnFg: a[5] === 'Open' ? '#1D1C1A' : '#FFFFFF' }));
+    return { nav, apps };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Skein, the music player</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <section aria-label="Skein window" style="position: absolute; left: 16px; top: 14px; width: 1408px; height: 800px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #2B2F3A">
+      <div style="width: 18px; height: 18px; border-radius: 50%; background: #B23D8C"></div>
+      <div style="font-size: 13px; font-weight: 700">Skein</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <nav aria-label="Library" style="width: 220px; flex-shrink: 0; box-sizing: border-box; padding: 14px 10px; border-right: 1px solid #262A33; background: #17191F; display: flex; flex-direction: column; gap: 2px">
+        <sc-for list="{{nav}}" as="n" hint-placeholder-count="7">
+          <a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 8px; text-decoration: none; background: {{n.bg}}; color: {{n.fg}}; font-size: 13.5px; font-weight: {{n.w}}; margin-top: {{n.gap}}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{n.dye}}"></span>{{n.name}}</a>
+        </sc-for>
+      </nav>
+
+      <!-- the album -->
+      <main style="flex-grow: 1; min-width: 0; padding: 26px 30px; display: flex; flex-direction: column; gap: 20px">
+        <div style="display: flex; gap: 24px; align-items: flex-end">
+          <!-- a cover woven from the album's own colours -->
+          <span aria-hidden="true" style="width: 190px; height: 190px; flex-shrink: 0; border-radius: 16px; background-color: #B23D8C; background-image: repeating-linear-gradient(0deg, rgba(91,124,250,0.75) 0px, rgba(91,124,250,0.75) 6px, transparent 6px, transparent 14px), repeating-linear-gradient(90deg, rgba(245,165,36,0.55) 0px, rgba(245,165,36,0.55) 6px, transparent 6px, transparent 14px); box-shadow: 0 20px 50px rgba(178,61,140,0.35)"></span>
+          <div style="display: flex; flex-direction: column; gap: 8px">
+            <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #9AA0AE">Album · 2026</span>
+            <h1 style="margin: 0; font-size: 44px; font-weight: 800; letter-spacing: -0.03em; line-height: 1">Warp and weft</h1>
+            <span style="font-size: 15px; color: #C9CDD8">The Selvedge Quartet · 9 songs, 41 min · FLAC</span>
+            <div style="display: flex; gap: 10px; margin-top: 8px">
+              <button onClick="{{toggle}}" style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 20px; border-radius: 999px; border: 0; background: #B23D8C; color: #FFFFFF; font: 700 14px Inter, sans-serif">{{playLabel}}</button>
+              <button style="height: 40px; padding: 0 16px; border-radius: 999px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 14px Inter, sans-serif">Shuffle</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column">
+          <div style="display: grid; grid-template-columns: 40px minmax(0, 1fr) 70px; gap: 12px; height: 28px; align-items: center; padding: 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0; border-bottom: 1px dashed #2E323D"><span>#</span><span>Title</span><span style="text-align: right">Time</span></div>
+          <sc-for list="{{tracks}}" as="t" hint-placeholder-count="9">
+            <button onClick="{{t.pick}}" style="display: grid; grid-template-columns: 40px minmax(0, 1fr) 70px; gap: 12px; height: 38px; align-items: center; padding: 0 12px; border: 0; border-radius: 8px; background: {{t.bg}}; color: {{t.fg}}; font: {{t.w}} 14px Inter, sans-serif; text-align: left">
+              <span style="display: flex; align-items: center; justify-content: flex-start; color: #8A90A0; font-size: 12.5px">
+                <sc-if value="{{t.now}}" hint-placeholder-val="{{ false }}"><span aria-label="Playing" style="display: flex; align-items: flex-end; gap: 2px; height: 14px"><span style="width: 3px; height: 8px; background: #D152A6"></span><span style="width: 3px; height: 14px; background: #D152A6"></span><span style="width: 3px; height: 10px; background: #D152A6"></span></span></sc-if>
+                <sc-if value="{{t.notNow}}" hint-placeholder-val="{{ true }}">{{t.n}}</sc-if>
+              </span>
+              <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{t.title}}</span>
+              <span style="text-align: right; font: 400 12.5px 'JetBrains Mono', monospace; color: #9AA0AE">{{t.len}}</span>
+            </button>
+          </sc-for>
+        </div>
+      </main>
+
+      <!-- playing now, and what comes after: the queue is a thread -->
+      <aside style="width: 360px; flex-shrink: 0; box-sizing: border-box; border-left: 1px solid #262A33; background: #14161B; padding: 20px; display: flex; flex-direction: column; gap: 16px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Playing</span>
+        <span aria-hidden="true" style="align-self: center; width: 240px; height: 240px; border-radius: 18px; background-color: #B23D8C; background-image: repeating-linear-gradient(0deg, rgba(91,124,250,0.75) 0px, rgba(91,124,250,0.75) 8px, transparent 8px, transparent 18px), repeating-linear-gradient(90deg, rgba(245,165,36,0.55) 0px, rgba(245,165,36,0.55) 8px, transparent 8px, transparent 18px)"></span>
+        <div><div style="font-size: 18px; font-weight: 800">{{cur.title}}</div><div style="font-size: 13px; color: #9AA0AE; margin-top: 2px">The Selvedge Quartet</div></div>
+        <svg role="img" aria-label="Played to 1:52 of {{cur.len}}" width="320" height="34" viewBox="0 0 320 34" fill="none" stroke-linecap="round">
+          <path d="M0 17 C 8 6, 16 28, 24 17 S 40 4, 48 17 S 64 30, 72 17 S 88 8, 96 17 S 112 2, 120 17 S 136 30, 144 17" stroke="#D152A6" stroke-width="3"></path>
+          <path d="M144 17 C 152 28, 160 6, 168 17 S 184 4, 192 17 S 208 30, 216 17 S 232 8, 240 17 S 256 26, 264 17 S 280 6, 288 17 S 304 24, 312 17 S 318 16, 320 17" stroke="#3A3F4C" stroke-width="2" stroke-dasharray="3 4"></path>
+          <circle cx="144" cy="17" r="6" fill="#FFFFFF"></circle>
+        </svg>
+        <div style="display: flex; justify-content: space-between; font: 400 12px 'JetBrains Mono', monospace; color: #9AA0AE; margin-top: -10px"><span>1:52</span><span>{{cur.len}}</span></div>
+        <div style="display: flex; justify-content: center; align-items: center; gap: 16px">
+          <button aria-label="Before" style="width: 42px; height: 42px; border-radius: 50%; border: 1px solid #2E323D; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#ECEDF2"><path d="M6 5h2v14H6zM20 5v14L9 12z"></path></svg></button>
+          <button aria-label="{{playLabel}}" onClick="{{toggle}}" style="width: 58px; height: 58px; border-radius: 50%; border: 0; background: #B23D8C; display: flex; align-items: center; justify-content: center; padding: 0">
+            <sc-if value="{{playing}}" hint-placeholder-val="{{ true }}"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></sc-if>
+            <sc-if value="{{paused}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M7 4l13 8-13 8z"></path></svg></sc-if>
+          </button>
+          <button aria-label="Next" style="width: 42px; height: 42px; border-radius: 50%; border: 1px solid #2E323D; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="#ECEDF2"><path d="M16 5h2v14h-2zM4 5v14l11-7z"></path></svg></button>
+        </div>
+        <div style="border-top: 1px dashed #2E323D; padding-top: 12px; display: flex; flex-direction: column; gap: 8px; position: relative; padding-left: 20px">
+          <span style="margin-left: -20px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Next on the thread</span>
+          <div style="position: absolute; left: 5px; top: 40px; bottom: 6px; width: 2px; background: #3A3F4C"></div>
+          <sc-for list="{{next}}" as="q" hint-placeholder-count="3"><div style="position: relative; font-size: 13px"><span style="position: absolute; left: -20px; top: 4px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid #D152A6; background: #14161B"></span>{{q}}</div></sc-for>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- the shuttle carries it outside the window -->
+  <div style="position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px 0 10px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 10px 30px rgba(0,0,0,0.5)"><span style="width: 24px; height: 24px; border-radius: 50%; background: #B23D8C"></span><span style="font-size: 12.5px; font-weight: 600">{{cur.title}}</span><span aria-hidden="true" style="display: flex; align-items: flex-end; gap: 2px; height: 14px"><span style="width: 3px; height: 7px; background: #D152A6"></span><span style="width: 3px; height: 14px; background: #D152A6"></span><span style="width: 3px; height: 9px; background: #D152A6"></span></span></div>
+  <div style="position: absolute; left: 50%; bottom: 72px; width: 2px; height: 12px; background: #D152A6"></div>
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; padding: 0 10px; gap: 14px">
+    <span style="width: 40px; height: 40px; border-radius: 10px; background: #5B7CFA"></span>
+    <div style="flex-grow: 1"></div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 12px; border-left: 1px dashed #2E323D; line-height: 1.15"><div style="font-size: 15px; font-weight: 700">21:20</div><div style="font-size: 11px; color: #9AA0AE">Thu 19 Nov</div></div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const playing = st.paused ? false : true;
+    const sel = st.t == null ? 2 : st.t;
+    const nav = [['Listen now', '#D152A6', true], ['Albums', '#5B7CFA'], ['Artists', '#2EC4C4'], ['Songs', '#F5A524'], ['Playlists', '#46C27A', false, 10], ['Radio', '#6A4FD6'], ['From Files', '#4B505E']].map((n) => ({ name: n[0], dye: n[1], bg: n[2] ? 'rgba(209,82,166,0.14)' : 'transparent', fg: n[2] ? '#FFFFFF' : '#C9CDD8', w: n[2] ? 600 : 400, gap: (n[3] || 0) + 'px' }));
+    const T = [['Cast on', '3:41'], ['Warp and weft', '4:58'], ['The shuttle', '5:12'], ['Selvedge', '3:20'], ['Indigo, madder', '4:44'], ['Slipped stitch', '4:02'], ['Bobbin lace', '6:15'], ['Cast off', '4:31'], ['Unravel', '4:47']];
+    const tracks = T.map((t, i) => ({ n: i + 1, title: t[0], len: t[1], now: i === sel, notNow: i !== sel, bg: i === sel ? 'rgba(209,82,166,0.14)' : 'transparent', fg: i === sel ? '#FFFFFF' : '#D6D9E2', w: i === sel ? 700 : 500, pick: () => this.setState({ t: i, paused: false }) }));
+    const cur = { title: T[sel][0], len: T[sel][1] };
+    const next = T.slice(sel + 1, sel + 4).map((t) => t[0]);
+    return { nav, tracks, cur, next, playing, paused: !playing, playLabel: playing ? 'Pause' : 'Play', toggle: () => this.setState({ paused: playing }) };
+  }
+}
+</script>
+</body>
+</html>

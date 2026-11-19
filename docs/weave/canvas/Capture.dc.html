@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Capture, clipboard and keys</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 30px 36px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: 1.3fr 1fr; grid-template-rows: 1fr 1fr; gap: 18px">
+
+  <!-- taking a picture of the screen -->
+  <section aria-label="Taking a picture of the screen" style="grid-row: span 2; position: relative; border-radius: 14px; overflow: hidden; background: #0D0F15; border: 1px solid #1F2229">
+    <span style="position: absolute; left: 14px; top: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0; z-index: 2">Print Screen</span>
+    <div aria-hidden="true" style="position: absolute; left: 60px; top: 70px; width: 420px; height: 300px; border-radius: 10px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden"><div style="height: 3px; background: #5B7CFA"></div><div style="height: 28px; background: #21242C"></div></div>
+    <div aria-hidden="true" style="position: absolute; left: 340px; top: 240px; width: 360px; height: 260px; border-radius: 10px; background: #16181E; border: 1px solid #262A33"></div>
+    <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.45)"></div>
+    <!-- the part being chosen: clear, edged with a stitch, its size beside it -->
+    <div style="position: absolute; left: 300px; top: 180px; width: 320px; height: 200px; border: 2px dashed #FFFFFF; box-shadow: 0 0 0 9999px rgba(0,0,0,0.0); background: rgba(255,255,255,0.04)">
+      <span style="position: absolute; left: -6px; top: -6px; width: 10px; height: 10px; border-radius: 50%; background: #5B7CFA; border: 2px solid #FFFFFF"></span>
+      <span style="position: absolute; right: -6px; bottom: -6px; width: 10px; height: 10px; border-radius: 50%; background: #5B7CFA; border: 2px solid #FFFFFF"></span>
+      <span style="position: absolute; right: 0; top: -30px; padding: 3px 8px; border-radius: 6px; background: #1F2229; font: 600 11.5px 'JetBrains Mono', monospace">640 × 400</span>
+    </div>
+    <div role="toolbar" aria-label="Capture" style="position: absolute; left: 50%; bottom: 80px; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; padding: 6px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 14px 36px rgba(0,0,0,0.6)">
+      <sc-for list="{{tools}}" as="t" hint-placeholder-count="5">
+        <button onClick="{{t.pick}}" style="height: 34px; padding: 0 14px; border-radius: 999px; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: 600 13px Inter, sans-serif">{{t.name}}</button>
+      </sc-for>
+      <span style="width: 1px; height: 22px; background: #3A3F4C; margin: 0 4px"></span>
+      <button style="height: 34px; padding: 0 16px; border-radius: 999px; border: 0; background: {{goBg}}; color: #FFFFFF; font: 700 13px Inter, sans-serif">{{goLabel}}</button>
+    </div>
+    <div style="position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); font-size: 12.5px; color: #C9CDD8; white-space: nowrap">{{hint}}</div>
+  </section>
+
+  <!-- the clipboard remembers -->
+  <section aria-label="Clipboard history" style="border-radius: 14px; background: #0D0F15; border: 1px solid #1F2229; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+    <div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">Super V · what you copied</span><span style="font-size: 11.5px; color: #8A90A0">kept until you log out</span></div>
+    <div style="position: relative; padding-left: 20px; display: flex; flex-direction: column; gap: 8px">
+      <div style="position: absolute; left: 5px; top: 10px; bottom: 10px; width: 2px; background: #3A3F4C"></div>
+      <sc-for list="{{clips}}" as="c" hint-placeholder-count="4">
+        <div style="position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: {{c.bg}}; border: 1px solid {{c.line}}">
+          <span style="position: absolute; left: -20px; top: 14px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: {{c.knot}}; border: 2px solid #5B7CFA"></span>
+          <dc-import name="Icon" app="{{c.app}}" size="{{ 22 }}" hint-size="22px,22px"></dc-import>
+          <span style="flex-grow: 1; min-width: 0; font-family: {{c.font}}; font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.text}}</span>
+          <span style="font-size: 11px; color: #8A90A0">{{c.when}}</span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size: 11.5px; color: #8A90A0">Passwords copied from a password field are not kept. Enter pastes the chosen one.</div>
+  </section>
+
+  <!-- the keys, when Super is held -->
+  <section aria-label="Keys" style="border-radius: 14px; background: #0D0F15; border: 1px solid #1F2229; padding: 16px; display: flex; flex-direction: column; gap: 10px">
+    <div style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">Hold Super for a second · the keys</div>
+    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 18px">
+      <sc-for list="{{keys}}" as="k" hint-placeholder-count="12">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 26px; border-bottom: 1px dashed #22252E; font-size: 12.5px">
+          <span style="color: #C9CDD8">{{k.what}}</span>
+          <span style="display: flex; gap: 4px"><sc-for list="{{k.keys}}" as="c" hint-placeholder-count="2"><span style="min-width: 22px; height: 20px; box-sizing: border-box; padding: 0 6px; border-radius: 5px; background: #1F2229; border: 1px solid #353A46; border-bottom-width: 2px; font: 600 11px 'JetBrains Mono', monospace; display: flex; align-items: center; justify-content: center">{{c}}</span></sc-for></span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const tool = (this.state && this.state.t) || 'Part';
+    const tools = ['Part', 'Window', 'Screen', 'Record'].map((n) => ({ name: n, bg: n === tool ? (n === 'Record' ? '#E5484D' : '#2A2D36') : 'transparent', fg: n === tool ? '#FFFFFF' : '#C9CDD8', pick: () => this.setState({ t: n }) }));
+    const rec = tool === 'Record';
+    const clips = [
+      ['purl', 'Is the new build on the stick yet?', 'now', true, 'Inter'],
+      ['term', 'make -j8 && make run', '4 min', false, "'JetBrains Mono', monospace"],
+      ['gallery', 'Picture · 640 × 400', '12 min', false, 'Inter'],
+      ['weft', 'https://journal.local/compositor', '1 h', false, "'JetBrains Mono', monospace"]
+    ].map((c) => ({ app: c[0], text: c[1], when: c[2], bg: c[3] ? 'rgba(91,124,250,0.14)' : '#14161B', line: c[3] ? '#5B7CFA' : '#262A33', knot: c[3] ? '#5B7CFA' : '#0D0F15', font: c[4] }));
+    const keys = [
+      ['Loom view', ['Super']], ['Find anything', ['Super', 'Space']], ['Desktop 1 to 4', ['Super', '1']], ['Next window', ['Alt', 'Tab']],
+      ['Left half', ['Super', '←']], ['Right half', ['Super', '→']], ['Fill the screen', ['Super', '↑']], ['Minimise', ['Super', '↓']],
+      ['Clipboard', ['Super', 'V']], ['Picture of the screen', ['PrtSc']], ['Threads', ['Super', 'N']], ['Lock', ['Super', 'L']]
+    ].map((k) => ({ what: k[0], keys: k[1] }));
+    return { tools, clips, keys, goBg: rec ? '#E5484D' : '#5B7CFA', goLabel: rec ? 'Start recording' : 'Take it', hint: rec ? 'While it records, a madder knot on the shuttle says so - and stops it with one click' : 'Saved to Pictures and copied; it waits in Threads for a moment if you want to mark it up' };
+  }
+}
+</script>
+</body>
+</html>
