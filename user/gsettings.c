@@ -1034,6 +1034,27 @@ static void draw_about(void)
     info(i++, "Running for", t);
     /* Level 0 is admin (kernel/include/user.h) */
     info(i++, "Signed in as", sys_level() == 0 ? "admin" : "user");
+    /* Most of the programs are linked with other people's libraries,
+       and their licences (the LGPL's among them) ask that whoever
+       receives the system is told so. The texts are in LICENSES.txt,
+       in the initrd and at the root of the disc; its first line counts
+       the components (scripts/mknotices.py), so only that is read. */
+    static const char lead[] = "ThreadOS contains ";
+    char lic[64];
+    int64_t got = sys_initrd_read("LICENSES.txt", lic, sizeof(lic) - 1);
+    if (got > (int64_t)sizeof(lead)) {
+        lic[got] = 0;
+        int k = 0;
+        while (lead[k] && lic[k] == lead[k])
+            k++;
+        uint32_t parts = 0;
+        while (!lead[k] && lic[k] >= '0' && lic[k] <= '9')
+            parts = parts * 10 + (uint32_t)(lic[k++] - '0');
+        if (parts) {
+            put_str(t, put_num(t, 0, parts), " in LICENSES.txt");
+            info(i++, "Licences", t);
+        }
+    }
 }
 
 static void draw_region(void)

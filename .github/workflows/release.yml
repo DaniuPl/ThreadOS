@@ -8,8 +8,11 @@
 # The SemVer label is shown in Settings; the monotonically increasing run
 # number is kept separately to order signed updates. The release carries
 # the three files an installed system is made of, update.txt saying what
-# they are and signing all of it (scripts/mkupdate.py), and the disc and
-# stick image for a new machine.
+# they are and signing all of it (scripts/mkupdate.py), the disc and
+# stick image for a new machine, and LICENSES.txt - the licences of the
+# libraries linked into them, which the LGPL among others asks to hand
+# out with the binaries (docs/LICENSING.md). GitHub's "Source code"
+# archive of the release's tag is the source those licences ask for.
 #
 # The signature is made with the private key in the repository secret
 # THREADOS_UPDATE_KEY (a P-256 key in PEM - Settings -> Secrets and
@@ -86,7 +89,8 @@ jobs:
         run: |
           gh release create "v0.1.0-alpha.${{ github.run_number }}" \
             --title "ThreadOS 0.1.0-alpha.${{ github.run_number }}" \
-            --notes "Pre-1.0 alpha release built from ${{ github.sha }}. An installed system takes it with 'sudo run update'; a new machine starts from threados64.iso." \
+            --notes "Pre-1.0 alpha release built from ${{ github.sha }}. An installed system takes it with 'sudo run update'; a new machine starts from threados64.iso. LICENSES.txt lists the third-party components the images contain and their licences; the Source code archive below is the complete source they were built from, those components included." \
             --latest \
             build/update.txt build/threados64.bin build/initrd64.img \
-            build/BOOTX64.EFI build/threados64.iso build/threados-stick.img.xz
+            build/BOOTX64.EFI build/threados64.iso build/threados-stick.img.xz \
+            build/LICENSES.txt

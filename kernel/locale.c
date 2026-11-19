@@ -487,6 +487,7 @@ static const struct translation translations[] = {
     { "In use", "W użyciu" },
     { "Running for", "Czas działania" },
     { "Signed in as", "Zalogowano jako" },
+    { "Licences", "Licencje" },
     { "Installed version", "Zainstalowana wersja" },
     { "Check for updates", "Sprawdź aktualizacje" },
     { "Install update", "Zainstaluj aktualizację" },

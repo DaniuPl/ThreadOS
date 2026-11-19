@@ -1939,12 +1939,23 @@ $(shell mkdir -p $(BUILD) && { [ "$$(cat $(VERSION_FILE) 2>/dev/null)" = "$(VERS
 # (MUSL_HEADERS), so a fix in libc.a reaches them here
 $(filter $(BUILD)/user64/%,$(USER64_ELFS) $(DISK64_ELFS)): $(LIBC64)
 
+# The licences of everything the images hand out, taken from the
+# libraries' own archives (scripts/mknotices.py says why). Every
+# program linked with them is on the disc, so the texts travel in the
+# initrd - an installed system and an update carry them too - and lie
+# at the root of the disc, readable on any computer.
+LICENSES_TXT := $(BUILD)/LICENSES.txt
+$(LICENSES_TXT): scripts/mknotices.py third_party/README.md LICENSE \
+                 fonts/LICENSE-DejaVu.txt $(wildcard third_party/* third_party/*/*)
+	@mkdir -p $(BUILD)
+	python3 scripts/mknotices.py $@
+
 $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
-             $(VERSION_FILE) $(VERSION_CODE_FILE) \
+             $(VERSION_FILE) $(VERSION_CODE_FILE) $(LICENSES_TXT) \
              third_party/iwlwifi/iwlwifi-3160-17.ucode \
              third_party/cacert/cacert.pem
 	python3 scripts/mkinitrd.py $@ \
-	    libthread.so=$(LIBTHREAD64) \
+	    libthread.so=$(LIBTHREAD64) LICENSES.txt=$(LICENSES_TXT) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
 	    hello64=$(BUILD)/user64/hello64.elf \
 	    nx64=$(BUILD)/user64/nx64.elf \
@@ -2127,7 +2138,7 @@ ISO64 := $(BUILD)/threados64.iso
 ISO64_LOADER := $(if $(shell command -v clang 2>/dev/null),$(BUILD)/BOOTX64.EFI)
 
 $(ISO64): $(KERNEL64) $(INITRD64) boot/grub64.cfg $(ISO64_LOADER) \
-          $(TAPPS)
+          $(TAPPS) $(LICENSES_TXT)
 	@command -v grub-mkrescue >/dev/null || { \
 	    echo "ERROR: no grub-mkrescue."; \
 	    echo "  Debian/Ubuntu: apt install grub-pc-bin grub-efi-amd64-bin \
@@ -2137,6 +2148,7 @@ grub-common xorriso mtools"; \
 	cp $(KERNEL64) $(BUILD)/isodir64/boot/threados64.bin
 	cp $(INITRD64) $(BUILD)/isodir64/boot/initrd64.img
 	cp boot/grub64.cfg $(BUILD)/isodir64/boot/grub/grub.cfg
+	cp $(LICENSES_TXT) $(BUILD)/isodir64/LICENSES.txt
 	$(if $(ISO64_LOADER),cp $(ISO64_LOADER) $(BUILD)/isodir64/boot/threadboot.efi)
 	rm -rf $(BUILD)/isodir64/boot/apps
 	$(if $(TAPPS),mkdir -p $(BUILD)/isodir64/boot/apps && cp $(TAPPS) $(BUILD)/isodir64/boot/apps/)

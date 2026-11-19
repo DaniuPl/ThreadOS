@@ -10788,3 +10788,48 @@ works and is checked by `make test`.
       and again after a restart (both failed before the fix), and the
       table and the neighbouring partitions are still checked
       untouched afterwards.
+- [x] **Licences shipped with the system, a contributor agreement, the
+      name** (scripts/mknotices.py, Makefile, user/gsettings.c,
+      kernel/locale.c, CLA.md, CLA-SIGNATURES.md, scripts/checkcla.py,
+      .github/workflows/cla.yml, TRADEMARKS.md, docs/LICENSING.md,
+      .github/workflows/release.yml, scripts/tests/t_licences.py,
+      scripts/tests/t_settings.py)
+      ThreadOS may one day ship on devices of its own, and three things
+      had to be in order before that. First, what the releases hand
+      out: most of third_party/ is linked statically into programs of
+      the initrd (gmedia with FFmpeg, jsc with JavaScriptCore, glibtest
+      with GLib, wpedeps with libgcrypt), so every disc and update is a
+      binary distribution of LGPL, Apache, BSD and MIT code, and none of
+      their texts went with it. scripts/mknotices.py now builds
+      LICENSES.txt: ThreadOS's licence, a note on where each release's
+      source is, then every component of third_party/README.md's table
+      (and the DejaVu fonts) with its version, licence and source, then
+      the texts, read out of the libraries' own archives at build time
+      and printed once each (GStreamer's five archives share one LGPL).
+      A component without an entry in its SOURCES, or an entry naming a
+      file the archive no longer has, stops the build. The file goes
+      into the initrd, to the root of the ISO and onto every release;
+      Settings -> About shows "Licences: N in LICENSES.txt". The README
+      table gained the row it lacked for the Brotli data. Second, what
+      comes in: CLA.md, a contributor agreement (contributors keep
+      their copyright; the project may publish their work under any
+      licence and hand the project to a company; fields of use listed
+      the way Polish copyright law wants them), accepted by a row in
+      CLA-SIGNATURES.md that the cla workflow looks for. It runs as
+      pull_request_target from the base branch and only reads the pull
+      request's list, so a pull request cannot rewrite its own check.
+      Third, the name: TRADEMARKS.md says what may be done with
+      "ThreadOS" and its mark without asking (the MIT licence covers
+      the code, not the name). docs/LICENSING.md puts it together,
+      including what would have to change if the repository ever went
+      private (the LGPL's source has to stay available to whoever got a
+      binary) and what a locked device must not carry (LGPL 3 / GPL 3).
+      t_licences (new group): every licence file the README names,
+      taken out of its archive by GNU tar (the script uses Python's
+      tarfile), is in the initrd's LICENSES.txt word for word, links
+      followed (GLib's COPYING is one); the first line counts the
+      table's rows and the fonts; the booted kernel lists the file in
+      its initrd at the size built. t_settings: About shows that count,
+      held to the README table, not to the file. checkcla.py was run by
+      hand against the owner, an app's account, a signer, a signer of
+      an older version and a stranger.
