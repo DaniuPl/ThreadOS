@@ -41,7 +41,7 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
 from ptest import (check, summary, make_gpt_disk, gpt_intact,
-                   neighbours_intact)
+                   neighbours_intact, gpt_read, GUID_TFS4, GUID_ESP4)
 
 PROMPT = "thread64>"
 
@@ -135,8 +135,8 @@ def main():
                   "ERASE PARTITION 3" in said and
                   "partition table stay untouched" in said)
             said = q.command("YES", "format:", timeout=30)
-            check("and it creates a TFS on it",
-                  "this partition is a ThreadOS TFS now" in said)
+            check("and it creates a TFS4 on it",
+                  "this partition is a ThreadOS TFS4 now" in said)
 
             said = q.command("write proof.txt installed-beside-windows",
                              "write:", timeout=20)
@@ -162,6 +162,16 @@ def main():
 
         check("the partition table survived formatting a partition",
               gpt_intact(disk3))
+        # TFS4 is found by its partition's type, so the one partition
+        # asked for became ThreadOS's - in both copies of the table,
+        # their CRCs right, as a firmware reads them - and nothing else
+        # in the table changed
+        ok, parts, why = gpt_read(disk3)
+        check("partition 3 is of ThreadOS's type now, the others as they "
+              "were, both copies of the table whole (%s)"
+              % (why or [p[0] for p in parts]),
+              ok and len(parts) == 3 and parts[2][0] == GUID_TFS4 and
+              parts[0][0] == GUID_ESP4 and parts[1][0] != GUID_TFS4)
         check("and the neighbouring partitions too - they still hold their data",
               neighbours_intact(disk3))
 
@@ -172,7 +182,7 @@ def main():
             check("after the restart the kernel finds the TFS in the partition ('%s')"
                   % next((l.strip() for l in said.splitlines()
                           if "in partition" in l), "no line"),
-                  "TFS: in partition 3" in said)
+                  "TFS4: in partition 3" in said)
             out = q.command("cat proof.txt", "installed", timeout=20)
             check("and the file written before the restart is there",
                   "installed-beside-windows" in out)
@@ -220,7 +230,7 @@ def main():
             sudo(q, "format", "Type YES")
             said = q.command("YES", "format:", timeout=30)
             check("and a typed YES formats the disk",
-                  "the whole disk is a ThreadOS TFS now" in said)
+                  "the whole disk is a ThreadOS TFS4 now" in said)
         finally:
             q.close()
         check("and then the GPT is gone - which is what was asked for",

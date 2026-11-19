@@ -2,7 +2,7 @@
 """ThreadOS smoke test: POSIX's rights and metadata on TFS4.
 
 TFS4 is the ext2 format (docs/tfs4-plan.md); this is its stage 4, the
-metadata TFS3 never kept. A disk formatted with 'format4', two accounts,
+metadata TFS3 never kept. A disk formatted with 'format', two accounts,
 and libc/tests/permtest run as each in turn:
 
   alice makes a directory, a 0600 secret, a 0644 file, a hard link, a
@@ -111,7 +111,7 @@ def main():
         stats = {}
         try:
             q.wait_serial(PROMPT, timeout=90)
-            q.command("sudo format4", "password:", timeout=20)
+            q.command("sudo format", "password:", timeout=20)
             q.command("thread", "Type YES", timeout=20)
             out = q.command("YES", PROMPT, timeout=120)
             check("the disk is TFS4", "is a ThreadOS TFS4 now" in out)

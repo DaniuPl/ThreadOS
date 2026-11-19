@@ -43,9 +43,13 @@ def rows(q):
     return q.term_rows(CX, CY)
 
 
-def run(q, line, want=None, tries=20):
+def run(q, line, want=None, tries=40):
     """Types a line into the terminal; the rows once it has answered -
-    'want' shows, or without one, the next prompt under the line"""
+    'want' shows, or without one, the next prompt under the line and the
+    program done. The input line's prompt is always on the screen, so it
+    alone says nothing: while a program runs the terminal says
+    "running... ^C" beside it, and a program writing a byte at a time to
+    a slow disk (PIO) is still writing well after its first rows show."""
     q.type_line(line)
     seen = []
     for _ in range(tries):
@@ -56,7 +60,8 @@ def run(q, line, want=None, tries=20):
                 break
             continue
         at = echo_of(seen, line)
-        if at >= 0 and any(r.endswith((">", "#")) for r in seen[at + 1:]):
+        if at >= 0 and any(r.endswith((">", "#")) for r in seen[at + 1:]) \
+                and not any("running..." in r for r in seen):
             break
     return seen
 

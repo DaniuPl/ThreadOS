@@ -34,4 +34,12 @@ int gpt_make(uint32_t esp_mib);
 /* CRC-32 (IEEE), the same as zlib.crc32 */
 uint32_t crc32(const void *data, uint32_t len);
 
+/* ThreadOS's partition type, THREADOS-TFS4 */
+const uint8_t *gpt_type_threados(void);
+
+/* A partition (its entry's number, from one) given another type, in
+   both copies of the table. 0, or -1 when the table is not one this
+   can change. */
+int gpt_set_type(uint32_t slot, const uint8_t type[16]);
+
 #endif

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""ThreadOS smoke test: the TFS file system on the disk.
+"""ThreadOS smoke test: the TFS4 file system on the disk.
 
 A file written by a ring 3 process and a file written from the kernel's
 shell are to be the same file seen by both - and both are to survive a
 restart of the machine. That last part matters most here: everything
 else can be faked with a cache, and a SECOND BOOT on the same disk image
 cannot. After the second boot the disk image is also read on the host,
-by code that knows the layout and not the kernel's code.
+by Linux's e2fsprogs (TFS4 is the ext2 format), not the kernel's code.
 
 Everything is read from the serial port: GRUB gives the kernel a
 framebuffer, so the VGA character memory says nothing.
@@ -22,7 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, TfsImage
+from ptest import check, summary, Ext2Image
 
 PROMPT = "64>"
 RING3 = "ThreadOS 64: a file written from ring 3"   # user64/fileio64.c
@@ -39,7 +39,7 @@ def main():
     try:
         boot = q.wait_serial("thread64>", timeout=90)
         check("the first boot formatted the empty disk",
-              "TFS: an empty disk formatted" in boot)
+              "TFS4: an empty disk formatted" in boot)
         q.wait_serial("[net] DHCP", timeout=30)
         time.sleep(0.5)
 
@@ -126,11 +126,12 @@ def main():
         q2.close()
 
     # --- The image read on the host --------------------------------
-    # By TfsImage, written from the layout's description: a rename that
-    # copied the blocks and left the old ones taken would show here as
-    # a leak, and a name changed only in a cache as the old name
+    # By Linux's debugfs and e2fsck: a rename that copied the blocks and
+    # left the old ones taken would show here as blocks the bitmap marks
+    # that no file holds, and a name changed only in a cache as the old
+    # name
     try:
-        img = TfsImage(disk)
+        img = Ext2Image(disk)
         check("on the disk image: the renamed file holds the shell's text",
               (img.read("/powitanie") or b"").decode(errors="replace")
               .strip() == TEXT)
@@ -139,12 +140,11 @@ def main():
               (img.read("/zring3") or b"").decode(errors="replace")
               .strip() == RING3)
         check("on the disk image: the old name is gone",
-              img.find("/greeting") is None)
-        taken, past, free_held = img.leaks()
-        check(f"on the disk image: every block taken belongs to a file "
-              f"({len(taken)} taken but not held, {len(past)} past a "
-              f"file's end, {len(free_held)} held but free)",
-              not taken and not past and not free_held)
+              not img.exists("/greeting"))
+        clean, problems = img.fsck()
+        check(f"on the disk image: every block taken belongs to a file, "
+              f"none past a file's end - e2fsck -fn finds nothing to fix "
+              f"({problems[:3]})", clean)
     finally:
         for f in (disk, slog, slog2):
             if os.path.exists(f):

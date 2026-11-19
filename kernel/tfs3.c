@@ -113,17 +113,26 @@ static uint32_t fs_base;
    behind it - another partition, the end of somebody else's disk - and
    a large one wraps the 32-bit LBA round to the front, where the
    partition table is. Only blocks of the filesystem itself. */
+/* A TFS3 read from a copy in memory, not the disk: the migration to
+   TFS4 formats the partition the TFS3 was on and reads its files from
+   the copy taken first (kernel/tfs3to4.c). Nothing is written then. */
+static const uint8_t *image;
+
 static int block_read(uint32_t block, void *buf)
 {
     if (block >= total_blocks)
         return -1;
+    if (image) {
+        memcpy(buf, image + block * TFS3_BLOCK, TFS3_BLOCK);
+        return 0;
+    }
     return blk_read(fs_base + block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK,
                     buf);
 }
 
 static int block_write(uint32_t block, const void *buf)
 {
-    if (block >= total_blocks)
+    if (block >= total_blocks || image)
         return -1;
     return blk_write(fs_base + block * SECTORS_PER_BLOCK, SECTORS_PER_BLOCK,
                      buf);
@@ -336,30 +345,6 @@ static void format_disk(void)
            total_blocks, TFS3_BLOCK);
 }
 
-/* Whether the disk has never had anything written to it.
- *
- * "Blank" is answered conservatively, because the cost of getting it
- * wrong one way is a fresh disk the person has to format by hand, and
- * the other way is somebody's data. A partition table announces itself
- * with a signature in the last two bytes of sector zero; beyond that,
- * a disk anyone has ever used has SOMETHING in its first sixty-four
- * kilobytes - a boot sector, a superblock, a stray header. All zeros
- * there is what a new disk, and an image made by a test, looks like. */
-static int disk_is_blank(void)
-{
-    static uint8_t probe[512];
-    for (uint32_t lba = 0; lba < 128; lba++) {
-        if (blk_read(lba, 1, probe) < 0)
-            return 0;              /* cannot read it - certainly not ours */
-        if (lba == 0 && probe[510] == 0x55 && probe[511] == 0xAA)
-            return 0;              /* a partition table */
-        for (int i = 0; i < 512; i++)
-            if (probe[i])
-                return 0;
-    }
-    return 1;
-}
-
 /* Fits the filesystem to a stretch of disk: where it starts and how
    many blocks it gets. Returns 0 when that stretch is too small to
    hold a filesystem at all. */
@@ -443,66 +428,75 @@ static int find_our_partition(void)
     return 0;
 }
 
-int tfs3_mount(void)
+/* Where a TFS3 is: the whole disk, or a partition found by its
+   superblock. Nothing is mounted or written. 1 when there is one. */
+int tfs3_probe(struct tfs3_where *w)
 {
-    if (!blk_present()) {
-        printk("[ !! ] FS: there is no disk\n");
+    image = 0;
+    if (!blk_present())
         return 0;
-    }
-
-    if (!fit(0, blk_sectors())) {
-        printk("[ !! ] FS: the disk is too small (%u blocks)\n", total_blocks);
-        return 0;
-    }
-
-    if (block_read(0, block_buf) < 0) {
-        printk("[ !! ] FS: could not read the superblock\n");
-        return 0;
-    }
-
-    struct superblock *sb = (struct superblock *)block_buf;
-    if (memcmp(sb->magic, MAGIC, 4) != 0) {
-        /* A disk that is not ours is NOT ours to take.
-         *
-         * This used to format anything whose first block did not say
-         * TFS3 - which was harmless while every disk this system ever
-         * saw was an empty file made by a test, and is a catastrophe
-         * the moment it boots on a real machine: a laptop's disk does
-         * not say TFS3 either, and the first thing the system would do
-         * is throw away its partition table, its Windows and
-         * everything on it, without asking, in the first second of
-         * the first boot.
-         *
-         * So the disk is formatted only when it is genuinely blank.
-         * Anything else is left alone and said out loud, and the
-         * person who really does want this disk says so with the
-         * 'format' command. */
-        /* Not at the front of the disk - but perhaps in a partition,
-           which is where a system living next to somebody else's
-           actually lives. */
-        int p = find_our_partition();
-        if (p) {
-            printk("[ OK ] TFS: in partition %u (from sector %u)\n",
-                   (uint32_t)p, fs_base);
-            load_tables();
-            ready = 1;
-            return 1;
-        }
-
-        if (!disk_is_blank()) {
-            printk("[ !! ] FS: there IS something on the disk, and it is not a TFS - "
-                   "I am not touching it.\n");
-            printk("       If the whole disk is to be ThreadOS', type "
-                   "'format' (it erases everything);\n");
-            printk("       to take one partition - 'format N'.\n");
-            return 0;
-        }
-        format_disk();
+    w->partition = 0;
+    if (fit(0, blk_sectors()) && block_read(0, block_buf) == 0 &&
+        memcmp(((struct superblock *)block_buf)->magic, MAGIC, 4) == 0) {
+        w->base = 0;
+        w->sectors = blk_sectors();
     } else {
-        load_tables();
+        int p = find_our_partition();
+        if (!p)
+            return 0;
+        struct partition pt;
+        part_get(p - 1, &pt);
+        w->partition = p;
+        w->base = (uint32_t)pt.start;
+        w->sectors = (uint32_t)pt.sectors;
     }
+    /* how much of it TFS3 uses: its bitmap's reach, at most 32 MiB */
+    struct superblock *sb = (struct superblock *)block_buf;
+    if (block_read(0, block_buf) < 0)
+        return 0;
+    w->blocks = sb->nblocks && sb->nblocks <= total_blocks ? sb->nblocks
+                                                           : total_blocks;
+    w->bytes = w->blocks * TFS3_BLOCK;
+    return 1;
+}
+
+int tfs3_mount_at(uint32_t base, uint32_t sectors)
+{
+    image = 0;
+    if (!fit(base, sectors))
+        return 0;
+    if (block_read(0, block_buf) < 0 ||
+        memcmp(((struct superblock *)block_buf)->magic, MAGIC, 4) != 0)
+        return 0;
+    load_tables();
     ready = 1;
     return 1;
+}
+
+/* The TFS3 of a copy in memory, to read: 'len' bytes from its block 0 */
+int tfs3_open_image(const void *img, uint32_t len)
+{
+    const struct superblock *sb = img;
+    if (len < TFS3_BLOCK * 16 || memcmp(sb->magic, MAGIC, 4) != 0)
+        return 0;
+    image = img;
+    fs_base = 0;
+    total_blocks = len / TFS3_BLOCK;
+    if (total_blocks > BITMAP_BITS)
+        total_blocks = BITMAP_BITS;
+    for (uint32_t i = 0; i < BITMAP_BLOCKS; i++)
+        block_read(BITMAP_START + i, bitmap + i * TFS3_BLOCK);
+    uint8_t *dst = (uint8_t *)inodes;
+    for (uint32_t i = 0; i < INODE_BLOCKS; i++)
+        block_read(INODE_START + i, dst + i * TFS3_BLOCK);
+    ready = 1;
+    return 1;
+}
+
+void tfs3_close(void)
+{
+    image = 0;
+    ready = 0;
 }
 
 static uint32_t t3_block_size(void)

@@ -151,7 +151,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 SHARED64 := string serial printk locale bootsplash mark mb2 fbcon vga pic pit pmm heap initrd \
-            kbdmap pci ata ahci nvme blk fs tfs3 tfs4 rtl8139 net dhcp tcp video \
+            kbdmap pci ata ahci nvme blk fs tfs3 tfs4 tfs3to4 rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 rtl8168 virtio_net netdev smp random hid iwlwifi acpios power \

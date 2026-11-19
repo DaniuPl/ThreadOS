@@ -9,7 +9,7 @@ the host (OpenSSL's TLS, certificates made by the openssl tool), which
 record every request and every handshake, so both ends are checked:
 
   a plain GET; a 2 MB download into a file, read back off the disk image
-  (ptest.TfsImage) and compared by SHA-256; a gzip-encoded answer that
+  (ptest.Ext2Image) and compared by SHA-256; a gzip-encoded answer that
   curl inflates with zlib (--compressed); a redirect followed with -L; a
   POST whose body the server checks; a chunked answer; HEAD (-I); a 404
   with -f, which curl must turn into its exit code 22; a name resolved
@@ -53,7 +53,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import (check, summary, make_iso64, no64, TfsImage,
+from ptest import (check, summary, make_iso64, no64, Ext2Image,
                    start_dns_server, DNS_HINT)
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -401,7 +401,7 @@ def main():
         finally:
             q.close()
 
-        img = TfsImage(disk)
+        img = Ext2Image(disk)
         with open(os.path.join(ROOT, "third_party", "cacert",
                                "cacert.pem"), "rb") as fh:
             mozilla = fh.read()

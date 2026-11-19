@@ -37,7 +37,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64, TfsImage
+from ptest import check, summary, make_iso64, no64, Ext2Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROMPT = "thread64>"
@@ -237,17 +237,16 @@ def unlinked_after_crash(work, iso, disk):
     unlinked, open or not, gone with its blocks - and after a crash
     with an unlinked file still open: the file is on the disk without
     a name, and the next mount frees it"""
-    img = TfsImage(disk)
-    orphans = [i for i in img.inodes if i["used"] and i["parent"] == -3]
+    img = Ext2Image(disk)
+    orphans = img.orphans()
     check("the file unlinked while held open is still on the disk, "
-          f"nameless, when the machine is switched off ({len(orphans)}; "
-          f"{[(o['name'], o['size']) for o in orphans]})",
-          len(orphans) == 1 and orphans[0]["size"] == 5000 and
-          not orphans[0]["name"])
-    check("and no other file libctest unlinked is left: "
-          f"{[img.path(i) for i, n in enumerate(img.inodes) if n['used'] and n['name'].startswith('libc_')]}",
-          not any(n["used"] and n["name"].startswith("libc_")
-                  for n in img.inodes))
+          "nameless (on the superblock's orphan list, no links), when the "
+          f"machine is switched off ({len(orphans)}; "
+          f"{[(n, st['size'], st['links']) for n, st in orphans]})",
+          len(orphans) == 1 and orphans[0][1]["size"] == 5000 and
+          orphans[0][1]["links"] == 0)
+    left = [p for p in img.tree() if os.path.basename(p).startswith("libc_")]
+    check(f"and no other file libctest unlinked is left: {left}", not left)
     q = Qemu(KERNEL, INITRD, cdrom=iso, disk=disk, sata=True,
              serial=os.path.join(work, "serial2.log"),
              qemu="qemu-system-x86_64")
@@ -256,14 +255,12 @@ def unlinked_after_crash(work, iso, disk):
         q.wait_serial("] Disk ", timeout=30)
     finally:
         q.close()
-    img = TfsImage(disk)
-    check("the next boot frees it",
-          not any(i["used"] and i["parent"] == -3 for i in img.inodes))
-    taken, past, free_held = img.leaks()
-    check("and every block the bitmap marks as taken belongs to a file "
-          f"({len(taken)} taken but not held, {len(past)} past a file's "
-          f"end, {len(free_held)} held but free)",
-          not taken and not past and not free_held)
+    img = Ext2Image(disk)
+    check("the next boot frees it", not img.orphans())
+    clean, problems = img.fsck()
+    check("and every block the bitmap marks as taken belongs to a file, "
+          "none past a file's end - e2fsck -fn finds nothing to fix "
+          f"({problems[:3]})", clean)
 
 
 def main():

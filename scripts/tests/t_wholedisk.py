@@ -29,7 +29,7 @@ from ptest import *          # noqa: F401,F403
 from ptest import _kernel_define
 from ptest import (check, summary, no64, make_gpt_disk, mtools_ok, fat_format,
                    fat_mkdirs, fat_put, fat_get, fat_dir, fat_kind, gpt_read,
-                   GUID_ESP4, GUID_TFS4, TfsImage)
+                   GUID_ESP4, GUID_TFS4, Ext2Image)
 
 # The EFI partition the installer makes (kernel/install.c)
 ESP_MIB = _kernel_define("kernel/install.c", "ESP_MIB")
@@ -142,7 +142,7 @@ def main():
             check("and it lists what it will do",
                   "a GPT" in out
                   and "an EFI partition of %d MiB (FAT32)" % ESP_MIB in out
-                  and "partition (TFS)" in out)
+                  and "partition (TFS4)" in out)
             check("the word is different from the one for installing beside",
                   "Type ERASE" in out and "Type YES" not in out)
             check("and it says the package does not fit on a disk this size",
@@ -165,7 +165,7 @@ def main():
             check("after ERASE it makes a table, partitions and a filesystem",
                   "partition table (GPT) - done" in out
                   and "EFI partition (FAT32) - done" in out
-                  and "ThreadOS partition (TFS) - done" in out)
+                  and "ThreadOS partition (TFS4) - done" in out)
             check("and it writes the files onto them",
                   "/EFI/ThreadOS/threados64.bin - done" in out
                   and "/EFI/BOOT/BOOTX64.EFI - done" in out)
@@ -257,13 +257,16 @@ def main():
 
         # ...and is there, read off the partition by the host
         if len(parts) == 2:
-            try:
-                kept = TfsImage(target, parts[1][1]).read(
-                    "/home/admin/kept.txt")
-            except ValueError:
-                kept = None
-            check("the file lies in our partition's TFS, as the host reads "
-                  "it (%r)" % kept, kept == b"on-our-partition\n")
+            part = Ext2Image(target, parts[1][1],
+                             parts[1][2] - parts[1][1] + 1)
+            kept = part.read("/home/admin/kept.txt")
+            check("the file lies in our partition's TFS4, as the host "
+                  "(Linux's debugfs) reads it (%r)" % kept,
+                  kept == b"on-our-partition\n")
+            clean, problems = part.fsck()
+            check("and e2fsck -fn finds nothing to fix in the partition "
+                  "(%s)" % problems[:3], clean)
+            part.close()
     finally:
         shutil.rmtree(esp, ignore_errors=True)
         for f in (target, slog, slog2, nvram):

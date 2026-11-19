@@ -18,7 +18,8 @@ Everything is checked against the same SQLite built on this machine:
   output has to be the host's, line for line
 
   the database file ThreadOS wrote is read off the disk image by an
-  independent TFS reader (ptest.TfsImage) and has to be the host's
+  independent ext2 reader (Linux's debugfs, ptest.Ext2Image) and has
+  to be the host's
   file byte for byte, with no journal left behind and no block of the
   disk taken that no file holds
 
@@ -38,7 +39,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64, TfsImage
+from ptest import check, summary, make_iso64, no64, Ext2Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SQL = os.path.join(ROOT, "scripts", "tests", "sql")
@@ -170,7 +171,7 @@ def main():
             q.close()
 
         # What the kernel left on the disk, seen from outside
-        img = TfsImage(disk)
+        img = Ext2Image(disk)
         mine = img.read("/test.db")
         check("test.db is on the disk", mine is not None)
         if mine is not None:
@@ -181,12 +182,11 @@ def main():
                   f"{', first difference at %d' % first if first is not None else ''})",
                   mine == host_db)
         check("no rollback journal is left behind",
-              img.find("/test.db-journal") is None)
-        taken, past, free_held = img.leaks()
+              not img.exists("/test.db-journal"))
+        clean, problems = img.fsck()
         check("every block the bitmap marks as taken belongs to a file, "
-              f"and none past a file's end ({len(taken)} taken but not "
-              f"held, {len(past)} past the end, {len(free_held)} held "
-              "but free)", not taken and not past and not free_held)
+              "and none past a file's end - e2fsck -fn finds nothing to "
+              f"fix ({problems[:3]})", clean)
     finally:
         http_stop()
         shutil.rmtree(work, ignore_errors=True)

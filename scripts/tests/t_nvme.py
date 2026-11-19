@@ -54,7 +54,7 @@ def main():
             check("the block layer picked NVMe instead of ATA",
                   "Disk NVMe (PCIe, queues) + TFS ready" in start)
             check("the filesystem formatted an empty NVMe disk",
-                  "TFS: an empty disk formatted" in start)
+                  "TFS4: an empty disk formatted" in start)
             q64.wait_serial("thread64>", timeout=30)
 
             # Page swapping creates its file only after the file

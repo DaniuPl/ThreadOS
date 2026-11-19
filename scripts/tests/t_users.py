@@ -38,7 +38,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, TfsImage
+from ptest import check, summary, Ext2Image
 
 DISK_MB = 16
 
@@ -176,13 +176,12 @@ def main():
         # swap.sys is private even to read, so the guest cannot list
         # it - the host reads the disk instead, before the next boot
         # sizes the file anew
-        swap = [i for i in TfsImage(disk).inodes if i["used"]
-                and not i["dir"] and i["name"] == "swap.sys"
-                and i["parent"] == -1]
+        swap = Ext2Image(disk).stat("/swap.sys")
         check("the system file is still on the disk, whole (%s B, the "
-              "boot reserved %s B)" % (swap[0]["size"] if swap else "none",
+              "boot reserved %s B)" % (swap["size"] if swap else "none",
                                       swap_bytes),
-              len(swap) == 1 and swap_bytes and swap[0]["size"] == swap_bytes)
+              swap is not None and swap["type"] == "regular" and
+              swap_bytes and swap["size"] == swap_bytes)
 
         print("--- after a restart on the same disk ---")
         slog2 = tempfile.mktemp(suffix=".log")

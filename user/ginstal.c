@@ -123,7 +123,7 @@ static const char *STEP_NAME[INST_STEPS] = {
 static const char *STEP_WHOLE[INST_STEPS_WHOLE] = {
     "partition table (GPT)",
     "EFI partition (FAT32)",
-    "ThreadOS partition (TFS)",
+    "ThreadOS partition (TFS4)",
     "/EFI/ThreadOS",
     "/EFI/ThreadOS/BOOTX64.EFI",
     "/EFI/ThreadOS/threados64.bin",

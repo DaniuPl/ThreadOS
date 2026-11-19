@@ -7,11 +7,12 @@ agreement with something we did not write: negotiate a connection, read
 the response, follow a 302 redirect and assemble a body sent in pieces.
 
 The second thing this is about is the path network -> disk. The files
-fetched land on TFS, and their sizes are chosen so as to go through all
+fetched land on TFS4, and their sizes are chosen so as to go through all
 three levels of an inode's addressing: direct, indirect and doubly
-indirect. They are read back through the kernel, and once the machine
-is off the disk image is read on the host as well and compared byte for
-byte with what the server sent. At the end the machine comes up a
+indirect (past 4 MiB with 4 KiB blocks). They are read back through the
+kernel, and once the machine is off the disk image is read on the host
+as well - by Linux's debugfs - and compared byte for byte with what the
+server sent. At the end the machine comes up a
 second time on the same disk - the largest files are to have their full
 size after the restart.
 
@@ -30,7 +31,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, start_http_server, TfsImage
+from ptest import check, summary, start_http_server, Ext2Image, HUGE_LINES
 
 PROMPT = "thread64>"
 
@@ -86,13 +87,13 @@ def main():
                   "full size", size_in_fls("big.htm") == len(BIG_PAGE))
             usage = q.command("fls", "Used:", timeout=20)
             check("the listing shows the disk usage in blocks",
-                  re.search(r"Used: \d+/\d+ blocks of 1024 B", usage)
+                  re.search(r"Used: \d+/\d+ blocks of 4096 B", usage)
                   is not None)
 
-            # A file above the old ceiling of 268 KiB: the data reach
-            # the doubly indirect block
+            # A file past 4 MiB and 48 KiB: the data reach the doubly
+            # indirect block
             huge = get("/huge huge.htm", timeout=240)
-            check("a file past 268 KiB fetched whole (%d B)"
+            check("a file past the indirect block fetched whole (%d B)"
                   % len(HUGE_PAGE),
                   "content %d B" % len(HUGE_PAGE) in huge)
             check("written to the TFS at its full size",
@@ -107,7 +108,7 @@ def main():
             check("reading through a doubly indirect block gives every "
                   "line and byte back (%s)" % (m.group(0).strip() if m
                                                else "no count"),
-                  m is not None and int(m.group(1)) == 6500
+                  m is not None and int(m.group(1)) == HUGE_LINES
                   and int(m.group(3)) == len(HUGE_PAGE))
 
             # HTTP/1.1: a 302 redirect and a body in pieces (chunked) -
@@ -137,29 +138,28 @@ def main():
         listing = q2.command("fls", "Used:", timeout=20)
         check("a big file (>100 KiB) survived the restart at its full size",
               "big.htm  (%d B)" % len(BIG_PAGE) in listing)
-        check("and the one past 268 KiB too",
+        check("and the one past the indirect block too",
               "huge.htm  (%d B)" % len(HUGE_PAGE) in listing)
         m = re.search(r"Used: (\d+)/\d+ blocks", listing)
-        need = (len(BIG_PAGE) + len(HUGE_PAGE)) // 1024
+        need = (len(BIG_PAGE) + len(HUGE_PAGE)) // 4096
         check("the disk usage was rebuilt from the bitmap after the restart"
               + (f" ({m.group(1)} blocks)" if m else ""),
               m is not None and int(m.group(1)) > need)
     finally:
         q2.close()
 
-    # The image read on the host, by code that knows the layout and not
-    # the kernel's code: every byte as the server sent it
+    # The image read on the host, by Linux's e2fsprogs and not the
+    # kernel's code: every byte as the server sent it
     try:
-        img = TfsImage(disk)
+        img = Ext2Image(disk)
         check("on the disk image: the big file is what the server sent",
               img.read("/big.htm") == BIG_PAGE)
-        check("on the disk image: the file past 268 KiB too, byte for byte",
-              img.read("/huge.htm") == HUGE_PAGE)
-        taken, past, free_held = img.leaks()
-        check(f"on the disk image: every block taken belongs to a file "
-              f"({len(taken)} taken but not held, {len(past)} past a "
-              f"file's end, {len(free_held)} held but free)",
-              not taken and not past and not free_held)
+        check("on the disk image: the file past the indirect block too, "
+              "byte for byte", img.read("/huge.htm") == HUGE_PAGE)
+        clean, problems = img.fsck()
+        check(f"on the disk image: every block taken belongs to a file, "
+              f"none past a file's end - e2fsck -fn finds nothing to fix "
+              f"({problems[:3]})", clean)
     finally:
         for f in (disk, slog, slog2):
             if os.path.exists(f):

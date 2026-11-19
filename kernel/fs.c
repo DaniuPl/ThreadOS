@@ -3,8 +3,9 @@
  * Everything in the kernel reaches files through the fs_* calls of
  * fs.h, and they arrive here. This picks the format on the disk at
  * mount and hands each call to it (struct fs_backend): TFS4, the ext2
- * format (kernel/tfs4.c, read-only for now), or TFS3 (kernel/tfs3.c),
- * which stays for the disks it is on (docs/tfs4-plan.md).
+ * format (kernel/tfs4.c), or TFS3 (kernel/tfs3.c), the format before
+ * it, which a disk is moved off at its first start (kernel/tfs3to4.c,
+ * docs/tfs4-plan.md).
  *
  * What does not depend on the format lives here: whether there is a
  * file system at all, the API's own limits (a path fits FS_PATH_MAX),
@@ -16,6 +17,9 @@
 #include "include/fsbackend.h"
 #include "include/tfs3.h"
 #include "include/tfs4.h"
+#include "include/tfs3to4.h"
+#include "include/part.h"
+#include "include/gpt.h"
 #include "include/string.h"
 #include "include/printk.h"
 #include "include/blk.h"
@@ -48,12 +52,16 @@ static int path_fits(const char *path)
 }
 
 /* Every call starts with no reason to fail yet; one that fails without
-   saying why says EIO rather than leave a stale reason behind */
+   saying why says EIO rather than leave a stale reason behind. With no
+   file system at all (a machine started from a disc, with no disk)
+   nothing is there to be found: ENOENT, which is what a program looking
+   for an optional file - musl's resolver and /etc/hosts - takes in its
+   stride, where EIO stops it */
 static int ready(void)
 {
     err = 0;
     if (!be) {
-        err = FS_EIO;
+        err = FS_ENOENT;
         return 0;
     }
     return 1;
@@ -66,19 +74,95 @@ static int failed(int r)
     return r;
 }
 
+/* Whether the disk has never had anything written to it.
+ *
+ * "Blank" is answered conservatively, because the cost of getting it
+ * wrong one way is a fresh disk the person has to format by hand, and
+ * the other way is somebody's data. A partition table announces itself
+ * with a signature in the last two bytes of sector zero; beyond that,
+ * a disk anyone has ever used has SOMETHING in its first sixty-four
+ * kilobytes - a boot sector, a superblock, a stray header. All zeros
+ * there is what a new disk, and an image made by a test, looks like. */
+static int disk_is_blank(void)
+{
+    static uint8_t probe[512];
+    for (uint32_t lba = 0; lba < 128; lba++) {
+        if (blk_read(lba, 1, probe) < 0)
+            return 0;              /* cannot read it - certainly not ours */
+        if (lba == 0 && probe[510] == 0x55 && probe[511] == 0xAA)
+            return 0;              /* a partition table */
+        for (int i = 0; i < 512; i++)
+            if (probe[i])
+                return 0;
+    }
+    return 1;
+}
+
+static void changed(void);
+
+/* A file system to run on from now: a listing in progress belonged to
+   the one before */
+static int use(const struct fs_backend *b)
+{
+    be = b;
+    changed();
+    return 1;
+}
+
+/* What the disk holds decides, in this order:
+ *
+ *   a move from TFS3 that a start before this one began and did not
+ *   finish (kernel/tfs3to4.c) - first, because the partition may be
+ *   half TFS4 by now and would mount as such;
+ *   TFS4, the whole disk labelled ThreadOS or a partition of our type;
+ *   TFS3, which is moved to TFS4 there and then - and kept as it was,
+ *   and run on, when the move cannot even begin;
+ *   a blank disk, which becomes TFS4;
+ *   anything else, which is somebody's and is left alone. */
 int fs_init(void)
 {
-    /* TFS4 first: a blank disk is one TFS3 formats, so it must not be
-       asked before TFS4 has had its look */
-    if (tfs4_mount()) {
-        be = &tfs4_backend;
-        return 1;
-    }
-    if (tfs3_mount()) {
-        be = &tfs3_backend;
-        return 1;
-    }
     be = 0;
+    if (!blk_present()) {
+        printk("[ !! ] FS: there is no disk\n");
+        return 0;
+    }
+    if (tfs3to4_resume() > 0 || tfs4_mount())
+        return use(&tfs4_backend);
+
+    struct tfs3_where w;
+    if (tfs3_probe(&w)) {
+        int r = tfs3to4_migrate(&w);
+        if (r > 0)
+            return use(&tfs4_backend);
+        if (r == 0 && tfs3_mount_at(w.base, w.sectors)) {
+            printk("[ OK ] TFS3: still on %s %u, as it was\n",
+                   w.partition ? "partition" : "the whole disk",
+                   (uint32_t)w.partition);
+            return use(&tfs3_backend);
+        }
+        return 0;
+    }
+
+    /* A disk that is not ours is NOT ours to take: a laptop's disk does
+       not say TFS either, and formatting whatever did not would throw
+       away its partition table, its Windows and everything on it in the
+       first second of the first start. Only a genuinely blank disk is
+       formatted without asking; the person who wants a used one says
+       so with 'format'. */
+    if (disk_is_blank()) {
+        if (!tfs4_format(0, blk_sectors()) || !tfs4_mount())
+            return 0;
+        uint64_t total = 0;
+        tfs4_backend.usage(0, &total);
+        printk("[ OK ] TFS4: an empty disk formatted (%u blocks of %u B)\n",
+               (uint32_t)total, tfs4_backend.block_size());
+        return use(&tfs4_backend);
+    }
+    printk("[ !! ] FS: there IS something on the disk, and it is not a TFS - "
+           "I am not touching it.\n");
+    printk("       If the whole disk is to be ThreadOS', type "
+           "'format' (it erases everything);\n");
+    printk("       to take one partition - 'format N'.\n");
     return 0;
 }
 
@@ -87,20 +171,55 @@ int fs_ready(void)
     return be != 0;
 }
 
-int fs_format_tfs4(void)
+/* The stretch 'partition' (0: the whole disk) covers, for a format.
+   TFS4 is found by its partition's GPT type, so a partition must be in
+   a GPT table, and becomes of our type before it is formatted. */
+static int format_where(int partition, uint32_t *base, uint32_t *sectors)
 {
-    if (!blk_present() || !tfs4_format(0, blk_sectors()) || !tfs4_mount())
+    if (!blk_present())
         return 0;
-    be = &tfs4_backend;
+    if (partition <= 0) {
+        *base = 0;
+        *sectors = blk_sectors();
+        return 1;
+    }
+    struct partition pt;
+    if (part_scan() < partition || !part_get(partition - 1, &pt) ||
+        pt.start > 0xFFFFFFFFu || pt.sectors > 0xFFFFFFFFu)
+        return 0;
+    if (!part_is_gpt() || !pt.slot) {
+        printk("[ !! ] TFS4 lives in a GPT partition; partition %u is in an "
+               "MBR table\n", (uint32_t)partition);
+        return 0;
+    }
+    if (memcmp(pt.type, "THREADOS-TFS", 12) &&
+        gpt_set_type(pt.slot, gpt_type_threados()) < 0) {
+        printk("[ !! ] TFS4: partition %u could not be made ThreadOS's\n",
+               (uint32_t)partition);
+        return 0;
+    }
+    *base = (uint32_t)pt.start;
+    *sectors = (uint32_t)pt.sectors;
     return 1;
 }
 
 int fs_format_now(int partition)
 {
+    uint32_t base, sectors;
+    if (!format_where(partition, &base, &sectors))
+        return 0;
+    be = 0;
+    if (!tfs4_format(base, sectors) || !tfs4_mount())
+        return 0;
+    return use(&tfs4_backend);
+}
+
+int fs_format_tfs3(int partition)
+{
+    be = 0;
     if (!tfs3_format(partition))
         return 0;
-    be = &tfs3_backend;
-    return 1;
+    return use(&tfs3_backend);
 }
 
 /* --- paths --- */

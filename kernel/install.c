@@ -321,7 +321,7 @@ const char *install_step_name(int n)
         switch (n) {
         case 0: return "partition table (GPT)";
         case 1: return "EFI partition (FAT32)";
-        case 2: return "ThreadOS partition (TFS)";
+        case 2: return "ThreadOS partition (TFS4)";
         default: n -= 3; break;
         }
     }
@@ -535,7 +535,7 @@ int install_plan(int mode, int disk)
         printk("  partition table, %u partitions and everything that is on "
                "them.\n", in.parts);
         printk("I will make: a GPT, an EFI partition of %u MiB (FAT32) and "
-               "a ThreadOS\n        partition (TFS) on the rest of the disk.\n",
+               "a ThreadOS\n        partition (TFS4) on the rest of the disk.\n",
                in.free_kib / 1024);
     }
     else

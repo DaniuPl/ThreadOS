@@ -814,10 +814,18 @@ static uint32_t my_gid(void)
 }
 
 /* want: 4 read, 2 write, 1 enter or run, or a sum */
+static int machine_file(const struct inode *in);
+
 static int permits(const struct inode *in, int want)
 {
     if (admin())
         return !(want & 1) || is_dir_mode(in) || (in->mode & 0111);
+    /* The machine's own files in the root are an administrator's to
+       write, whatever their bits say: their owner, UID 0, may be a
+       session that has dropped the role, and is then an ordinary
+       account as far as they go (TFS3 kept the same rule) */
+    if ((want & 2) && in->uid == 0 && machine_file(in))
+        return 0;
     uint32_t bits;
     if (in->uid == my_uid())
         bits = (in->mode >> 6) & 7;
@@ -860,7 +868,8 @@ static int may_remove(const struct inode *dir, const struct inode *victim)
 
 static int owner_or_admin(const struct inode *in)
 {
-    return admin() || in->uid == my_uid();
+    return admin() || (in->uid == my_uid() &&
+                       !(in->uid == 0 && machine_file(in)));
 }
 
 static int fail(int e)
@@ -937,6 +946,22 @@ static int dir_next(const struct inode *dir, uint64_t *off, struct dentry *e)
         e->name[nl] = '\0';
         return 1;
     }
+    return 0;
+}
+
+/* Is this inode one of the machine's files in the root (system_file)?
+   Asked only of files UID 0 owns, for a task without the admin role:
+   the root's few names are read through once. */
+static int machine_file(const struct inode *in)
+{
+    static struct inode root;
+    static struct dentry e;
+    if (load_inode(ROOT_INO, &root) < 0)
+        return 1;                       /* cannot tell: take it as one */
+    uint64_t off = 0;
+    while (dir_next(&root, &off, &e) == 1)
+        if (e.ino == in->num && system_file(e.name))
+            return 1;
     return 0;
 }
 
@@ -2418,6 +2443,7 @@ static void orphans_release(void)
 int tfs4_mount(void)
 {
     const char *why;
+    int found = 0;
     fs.mounted = 0;
     if (!blk_present())
         return 0;
@@ -2430,14 +2456,13 @@ int tfs4_mount(void)
             return 0;
         }
     } else {
-        int found = 0;
         for (int i = 0; i < n && !found; i++) {
             struct partition pt;
             if (!part_get(i, &pt) || !our_type(pt.type) ||
                 pt.start > 0xFFFFFFFFu || pt.sectors > 0xFFFFFFFFu)
                 continue;
             if (take((uint32_t)pt.start, (uint32_t)pt.sectors, &why))
-                found = 1;
+                found = i + 1;
             else if (why[0] && strcmp(why, "no ext2 superblock"))
                 printk("[ !! ] TFS4: partition %u is ThreadOS's, but %s\n",
                        (uint32_t)(i + 1), why);
@@ -2445,9 +2470,14 @@ int tfs4_mount(void)
         if (!found)
             return 0;
     }
-    printk("[ OK ] TFS4: %u blocks of %u B, %u inodes, from sector %u%s\n",
-           fs.blocks, fs.bs, fs.inodes, fs.base,
-           fs.writable ? "" : " (read-only)");
+    if (found)
+        printk("[ OK ] TFS4: in partition %u: %u blocks of %u B, %u inodes, "
+               "from sector %u%s\n", (uint32_t)found, fs.blocks, fs.bs,
+               fs.inodes, fs.base, fs.writable ? "" : " (read-only)");
+    else
+        printk("[ OK ] TFS4: %u blocks of %u B, %u inodes, from sector %u%s\n",
+               fs.blocks, fs.bs, fs.inodes, fs.base,
+               fs.writable ? "" : " (read-only)");
     if (fs.writable)
         orphans_release();
     return 1;
@@ -2515,7 +2545,12 @@ int tfs4_format(uint32_t base, uint32_t sectors)
         return 0;
     }
 #define PUT(b, data) blk_write(base + (b) * spb, spb, (data))
-    int bad = 0;
+    /* the first block before anything else: a format cut short must not
+       leave whatever was here before (TFS3's superblock, a boot sector)
+       in front of a half-written disk, to be taken for it at the next
+       start */
+    memset(buf, 0, bs);
+    int bad = PUT(0, buf) < 0;
     uint32_t free_blocks = 0;
     for (uint32_t i = 0; i < groups; i++) {
         uint32_t start = i * bpg;

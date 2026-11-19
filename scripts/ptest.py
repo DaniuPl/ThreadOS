@@ -46,7 +46,7 @@ VIDEO_H = 200
 # text mode with a kernel command line.
 TEXT_MODE = "nodesktop"
 
-# The disk image under TFS3 (the kernel formats an empty disk on the
+# The disk image under TFS4 (the kernel formats an empty disk on the
 # first start)
 DISK_SIZE = 16 * 1024 * 1024
 
@@ -145,12 +145,15 @@ LINK_PAGE = (b"<html><body><h1>The first page</h1>"
              + b"</body></html>\n")
 LINK_PAGE2 = (b"<html><body><h1>The second page</h1>"
               b"<p>The link worked.</p></body></html>\n")
-# Above the old ceiling of 268 KiB per file - it reaches into the
-# doubly indirect block
-HUGE_PAGE = b"<p>ThreadOS TFS3: an indirect block, then a doubly indirect one.</p>\n" * 6500
-# A page well above the old TFS limit (16 KiB per file) - it checks
+# Past what a TFS4 inode's direct blocks and its indirect block reach
+# with 4 KiB blocks (12 + 1024 blocks, 4 MiB and 48 KiB) - it reaches
+# into the doubly indirect block
+HUGE_LINES = 64000
+HUGE_PAGE = (b"<p>ThreadOS TFS4: an indirect block, then a doubly indirect "
+             b"one.</p>\n") * HUGE_LINES
+# A page well past what the direct blocks hold (48 KiB) - it checks
 # block allocation, the indirect block and TCP throughput
-BIG_PAGE = b"<p>ThreadOS TFS3: block after block.</p>\n" * 3000
+BIG_PAGE = b"<p>ThreadOS TFS4: block after block.</p>\n" * 3000
 
 
 def make_gpt_disk(path, mib=800, esp_mib=100, third_type=None):
@@ -3684,7 +3687,9 @@ def no64():
 # Written from kernel/tfs3.c's description of the layout, not from its
 # code, so a test can see what the kernel left on the disk: a file a
 # program wrote, byte for byte, and which blocks the bitmap says are
-# taken. Read-only.
+# taken. Read-only. TFS3 is the format before TFS4, frozen: a disk that
+# holds it is moved to TFS4 at its first start, and the tests that
+# check that move (t_tfs3migrate, t_fsbounds) read what was there.
 
 TFS_BLOCK = _kernel_define("kernel/include/tfs3.h", "TFS3_BLOCK")
 TFS_FILES = _kernel_define("kernel/include/tfs3.h", "TFS3_MAX_FILES")
@@ -3719,7 +3724,8 @@ class TfsImage:
             ptrs = struct.unpack_from("<%dIII" % TFS_DIRECT, raw,
                                       TFS_NAME + 8)
             self.inodes.append(dict(name=name, size=size, used=used,
-                                    dir=typ & 1, parent=parent,
+                                    dir=typ & 1, owner=typ >> 1,
+                                    parent=parent,
                                     direct=ptrs[:TFS_DIRECT],
                                     indirect=ptrs[TFS_DIRECT],
                                     dindirect=ptrs[TFS_DIRECT + 1]))
@@ -3794,6 +3800,187 @@ class TfsImage:
         taken_not_held = [b for b in range(self.data_start, self.nblocks)
                           if self.taken(b) and b not in held]
         return taken_not_held, past, free_but_held
+
+
+# --- A TFS4 (ext2) image, read on the host ----------------------------
+#
+# TFS4 is the ext2 format, so the host has an implementation to read it
+# with that shares nothing with kernel/tfs4.c: Linux's e2fsprogs. What a
+# test asked of TfsImage it asks of debugfs, dumpe2fs and e2fsck here -
+# a file's bytes, its owner and mode, the orphan list - and whether the
+# blocks the bitmaps mark as taken are exactly those files hold (the
+# question TfsImage.leaks() answered) is e2fsck's pass 5, which also
+# finds a file holding blocks past its size.
+
+def e2fsprogs_missing():
+    """The e2fsprogs tool a TFS4 image cannot be read without, or None"""
+    for tool in ("debugfs", "e2fsck", "dumpe2fs"):
+        if shutil.which(tool) is None:
+            return tool
+    return None
+
+
+class Ext2Image:
+    """The TFS4 file system in an image: the whole of it (base 0), or
+    'sectors' long from sector 'base' (a partition, copied out to a file
+    of its own, since debugfs reads a file system from its first byte)"""
+
+    def __init__(self, path, base=0, sectors=None):
+        self.path = path
+        self._copy = None
+        if base or sectors:
+            fd, self._copy = tempfile.mkstemp(suffix=".ext2")
+            with open(path, "rb") as src, os.fdopen(fd, "wb") as dst:
+                src.seek(base * 512)
+                left = None if sectors is None else sectors * 512
+                while left is None or left > 0:
+                    chunk = src.read(1 << 20 if left is None
+                                     else min(1 << 20, left))
+                    if not chunk:
+                        break
+                    dst.write(chunk)
+                    if left is not None:
+                        left -= len(chunk)
+            self.path = self._copy
+            atexit.register(self.close)
+
+    def close(self):
+        if self._copy and os.path.exists(self._copy):
+            os.unlink(self._copy)
+
+    def debugfs(self, request, write=False):
+        cmd = ["debugfs"] + (["-w"] if write else []) + ["-R", request,
+                                                          self.path]
+        r = subprocess.run(cmd, capture_output=True)
+        return r.stdout.decode("utf-8", "replace"), \
+            r.stderr.decode("utf-8", "replace")
+
+    def stat(self, path):
+        """What debugfs says of a name (not following a link): type,
+        mode, uid, gid, size, links, mtime, dtime - or None when there
+        is no such name"""
+        out, err = self.debugfs("stat " + path)
+        if "Inode:" not in out:
+            return None
+        m = {}
+        for key, pat, base in [("type", r"Type:\s+(\w+)", None),
+                               ("mode", r"Mode:\s+(\d+)", 8),
+                               ("uid", r"User:\s+(\d+)", 10),
+                               ("gid", r"Group:\s+(\d+)", 10),
+                               ("size", r"Size:\s+(\d+)", 10),
+                               ("links", r"Links:\s+(\d+)", 10),
+                               ("mtime", r"mtime:\s+0x([0-9a-f]+)", 16),
+                               ("dtime", r"dtime:\s+0x([0-9a-f]+)", 16)]:
+            g = re.search(pat, out)
+            m[key] = (g.group(1) if base is None else int(g.group(1), base)) \
+                if g else None
+        return m
+
+    def exists(self, path):
+        return self.stat(path) is not None
+
+    def read(self, path):
+        """A file's bytes, as Linux reads them; None when it is not a
+        file there"""
+        st = self.stat(path)
+        if st is None or st["type"] != "regular":
+            return None
+        fd, out = tempfile.mkstemp(suffix=".dump")
+        os.close(fd)
+        try:
+            self.debugfs("dump %s %s" % (path, out))
+            with open(out, "rb") as fh:
+                return fh.read()
+        finally:
+            os.unlink(out)
+
+    def names(self, path):
+        """The names in a directory, "." and ".." left out"""
+        out, _ = self.debugfs("ls -p " + path)
+        names = []
+        for line in out.splitlines():
+            # /ino/mode/uid/gid/name/size/
+            parts = line.split("/")
+            if len(parts) >= 7 and parts[5] not in (".", ".."):
+                names.append(parts[5])
+        return names
+
+    def put(self, path, data, mode=0o100600, uid=0, gid=0):
+        """A file written in the image by debugfs: whatever was under
+        the name goes, and the new file gets the given mode and owner.
+        Whole-disk images only - a partition is read from a copy."""
+        if self._copy:
+            raise ValueError("put() writes the whole-disk image only")
+        fd, src = tempfile.mkstemp(suffix=".put")
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        fd, cmds = tempfile.mkstemp(suffix=".cmds")
+        with os.fdopen(fd, "w") as fh:
+            fh.write("rm %s\nwrite %s %s\nsif %s mode 0%o\n"
+                     "sif %s uid %d\nsif %s gid %d\n"
+                     % (path, src, path, path, mode, path, uid, path, gid))
+        try:
+            subprocess.run(["debugfs", "-w", "-f", cmds, self.path],
+                           capture_output=True)
+        finally:
+            os.unlink(src)
+            os.unlink(cmds)
+        return self.read(path) == data
+
+    def tree(self, top="/"):
+        """Every path under a directory, directories included, by
+        listing each in turn (lost+found left out)"""
+        found, todo = [], [top.rstrip("/") or "/"]
+        while todo and len(found) < 100000:
+            d = todo.pop()
+            out, _ = self.debugfs("ls -p " + d)
+            for line in out.splitlines():
+                parts = line.split("/")        # /ino/mode/uid/gid/name/size/
+                if len(parts) < 7 or parts[5] in (".", "..", "") or \
+                        (d == "/" and parts[5] == "lost+found"):
+                    continue
+                path = (d if d != "/" else "") + "/" + parts[5]
+                found.append(path)
+                if parts[2].startswith("04"):
+                    todo.append(path)
+        return sorted(found)
+
+    def orphans(self):
+        """The inodes on the superblock's orphan list - files removed
+        while open when the machine stopped - as (inode, stat) pairs,
+        following the chain through each one's dtime"""
+        out = subprocess.run(["dumpe2fs", "-h", self.path],
+                             capture_output=True, text=True).stdout
+        g = re.search(r"First orphan inode:\s+(\d+)", out)
+        found, ino = [], int(g.group(1)) if g else 0
+        while ino and len(found) < 1000:
+            st = self.stat("<%d>" % ino)
+            if st is None:
+                break
+            found.append((ino, st))
+            ino = st["dtime"] or 0
+        return found
+
+    def fsck(self):
+        """e2fsck -fn: (clean, the lines it would have fixed). Its exit
+        code is 0 even for a wrong free count, so the report is read
+        too; the guest's clock is fixed in 2030 (RTC_BASE), so e2fsck
+        is told not to trust the host's rather than call every time
+        stamp an error."""
+        fd, conf = tempfile.mkstemp(suffix=".conf")
+        with os.fdopen(fd, "w") as f:
+            f.write("[options]\n\tbroken_system_clock = 1\n")
+        try:
+            r = subprocess.run(["e2fsck", "-fn", self.path],
+                               capture_output=True, text=True,
+                               env=dict(os.environ, E2FSCK_CONFIG=conf))
+        finally:
+            os.unlink(conf)
+        report = r.stdout + r.stderr
+        problems = [l.strip() for l in report.splitlines() if "?" in l]
+        return r.returncode == 0 and not problems, problems
+
+
 # --- the ARM64 kernel -------------------------------------------------
 #
 # It is booted straight from its ELF image (QEMU's virt loads one with

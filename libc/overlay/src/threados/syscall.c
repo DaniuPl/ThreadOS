@@ -966,7 +966,21 @@ static long do_readlink(const char *path, char *buf, long size)
 static long do_access(const char *path, int mode)
 {
 	long r = path_call(T_ACCESS, path, mode & 7, 0, 1);
-	return r == 1 ? do_stat(path, &(struct kstat){0}) : r;
+	if (r == 1)
+		return do_stat(path, &(struct kstat){0});
+	if (r != -ENOENT)
+		return r;
+	/* Not on the disk - but perhaps one of the files the library makes
+	   up (/dev/null, the fonts, their configuration: socket.c), which
+	   the kernel has never heard of; fontconfig asks with access()
+	   before it opens its configuration */
+	struct kstat st;
+	if (do_stat(path, &st) < 0)
+		return r;
+	if (((mode & 2) && !(st.st_mode & 0222)) ||        /* W_OK */
+	    ((mode & 1) && !(st.st_mode & 0111)))          /* X_OK */
+		return -EACCES;
+	return 0;
 }
 
 static long do_rename(const char *from, const char *to)

@@ -793,6 +793,12 @@ static void rename_to(const char *what)
 {
     if (chosen < 0 || chosen >= count || !what[0])
         return;
+    /* the file system would put it in place of a file of that name (a
+       rename is POSIX's); here that is never what was meant */
+    if (listed(what)) {
+        ecopy(note, "the name is taken here", sizeof(note));
+        return;
+    }
     if (sys_rename(items[chosen].name, what) < 0) {
         ecopy(note, "cannot - is the name taken?", sizeof(note));
         return;

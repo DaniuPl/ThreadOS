@@ -150,8 +150,12 @@ def main():
             q.click_desktop()
             listing = ""
             m = None
-            end = time.time() + 20          # writing to the disk takes a while
-            while time.time() < end and not m:
+            whole = sw * sh * 3 + 4 + 2 + 2
+            # Writing to the disk takes a while - a row at a time, the file
+            # growing as it goes - so the listing is read again until the
+            # file stops short of nothing, or the time is up
+            end = time.time() + 40
+            while time.time() < end and not (m and int(m.group(1)) == whole):
                 time.sleep(1)
                 listing = q.command("fls", "Used:", timeout=10)
                 m = re.search(r"shot1\.psc\s+\((\d+) B\)", listing)
@@ -163,7 +167,7 @@ def main():
             # Three bytes a pixel of the screen, after "TSC2" and two sizes
             check("and it has exactly as many bytes as the screen in colours "
                   "(%s for %dx%d)" % (m.group(1), sw, sh),
-                  int(m.group(1)) == sw * sh * 3 + 4 + 2 + 2)
+                  int(m.group(1)) == whole)
 
             # --- and the viewer puts it back on the screen --------------
             said = view(q, "shot1.psc")

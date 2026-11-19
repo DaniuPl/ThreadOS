@@ -73,7 +73,7 @@ def main():
             # The disk was empty: the file system on it was WRITTEN
             # through the controller, not merely found there
             check("the TFS formatted the empty disk through AHCI",
-                  re.search(r"TFS: an empty disk formatted \(\d+ blocks",
+                  re.search(r"TFS4: an empty disk formatted \(\d+ blocks",
                             q23.serial()) is not None)
 
             # Writing a raw sector is the admin's to do: the shell

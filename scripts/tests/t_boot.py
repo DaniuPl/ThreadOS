@@ -62,8 +62,8 @@ def main():
 
         # The hardware: each line says what was found rather than that
         # something was
-        check("the empty disk was found and formatted with TFS",
-              re.search(r"TFS: an empty disk formatted \(\d+ blocks", log)
+        check("the empty disk was found and formatted with TFS4",
+              re.search(r"TFS4: an empty disk formatted \(\d+ blocks", log)
               is not None)
         check("the disk controller is named at boot (here the old ATA PIO)",
               re.search(r"Disk ATA PIO \+ TFS ready \(\d+ sectors\)", log)

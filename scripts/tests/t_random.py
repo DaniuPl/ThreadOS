@@ -53,7 +53,7 @@ import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64, TfsImage
+from ptest import check, summary, make_iso64, no64, Ext2Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROMPT = "thread64>"
@@ -270,7 +270,7 @@ def one_boot(work, tag, cpu_model):
         got, code = run(q, "run randtest rand.bin dev.bin", 300)
     finally:
         q.close()
-    img = TfsImage(disk)
+    img = Ext2Image(disk)
     return banner, got, code, img.read("/rand.bin"), img.read("/dev.bin")
 
 

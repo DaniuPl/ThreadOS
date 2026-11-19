@@ -341,7 +341,7 @@ def main():
             check("listing what it will do instead",
                   "partition table (GPT)" in text
                   and "EFI partition (FAT32)" in text
-                  and "ThreadOS partition (TFS)" in text)
+                  and "ThreadOS partition (TFS4)" in text)
             check("and still nothing on the disk has changed",
                   fat_get(target, ESP_START,
                           "/EFI/ThreadOS/threados64.bin") is None)

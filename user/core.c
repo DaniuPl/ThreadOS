@@ -299,6 +299,19 @@ static int c_mv(int argc, char **argv)
 {
     if (!need(argc, 3, "mv <from> <to>"))
         return 1;
+    /* The file system puts the file in place of one already under the
+       new name, as POSIX's rename does and the C library needs; from
+       the shell that would be a delete nobody asked for, so mv asks
+       first and leaves a taken name alone */
+    struct stat64k st;
+    if (sys_stat(argv[2], &st) >= 0) {
+        say("mv: cannot move '");
+        say(argv[1]);
+        say("' to '");
+        say(argv[2]);
+        say("' - that name is taken\n");
+        return 1;
+    }
     int32_t rc = (int32_t)sys_rename(argv[1], argv[2]);
     if (rc == -2) {
         refused("mv", argv[1]);

@@ -2,7 +2,7 @@
 """ThreadOS smoke test: what TFS4 writes, judged by Linux's e2fsck.
 
 TFS4 is the ext2 format (docs/tfs4-plan.md); this is its stage 3,
-writing. A blank disk is formatted by the kernel ('format4'), then
+writing. A disk is formatted by the kernel ('format'), then
 libc/tests/fswrite does a day's writing on it through musl - 5000 files
 made in one directory and every odd one removed, fifty moved into
 another directory which is itself moved under a third, a file written
@@ -91,10 +91,10 @@ def main():
                  serial=slog)
         try:
             q.wait_serial(PROMPT, timeout=90)
-            q.command("sudo format4", "password:", timeout=20)
+            q.command("sudo format", "password:", timeout=20)
             q.command("thread", "Type YES", timeout=20)
             out = q.command("YES", PROMPT, timeout=120)
-            check("'format4' makes the disk TFS4 and mounts it ('%s')"
+            check("'format' makes the disk TFS4 and mounts it ('%s')"
                   % next((l.strip() for l in out.splitlines()
                           if "formatted" in l), "no line"),
                   "TFS4: formatted" in out and "is a ThreadOS TFS4 now" in out)

@@ -11023,3 +11023,87 @@ works and is checked by `make test`.
       screen. Nothing is built yet, so nothing is tested; each part
       gets its test as it is built (t_desktop for the selvedge and the
       grain, t_arm64mobile for the thread).
+- [x] **TFS4 stage 5: every disk is TFS4, and TFS3 is moved over**
+      (kernel/fs.c, kernel/tfs3to4.c, kernel/include/tfs3to4.h,
+      kernel/tfs3.c, kernel/include/tfs3.h, kernel/tfs4.c, kernel/gpt.c,
+      kernel/include/gpt.h, kernel/include/fs.h, kernel/install.c,
+      kernel64/shell64.c, user/ginstal.c, Makefile, scripts/ptest.py,
+      scripts/tests/t_tfs3migrate.py, t_fsbounds.py and the disk tests)
+      The system no longer runs on TFS3. A blank disk is formatted with
+      TFS4, the installer's partition is TFS4 (GPT type THREADOS-TFS4;
+      THREADOS-TFS3 is still ours), and 'format' and 'format N' make
+      TFS4 - a partition becoming of ThreadOS's type, since that is how
+      TFS4 is found; an MBR partition is refused. A disk that holds TFS3
+      is moved at its first start, in place: TFS3's area (32 MiB at
+      most) is read into memory, copied to
+      \EFI\ThreadOS\tfs3-backup.img with a note beside it saying where
+      it came from, the partition is formatted with TFS4 and every
+      directory and file is made again with its owner (homes 0700,
+      swap.sys made anew), then the note goes. A start that finds the
+      note finishes the move from the copy, since the partition may be
+      half formatted; a move that cannot begin (no memory, no room on
+      the EFI partition) leaves TFS3 as it was and runs on it. A disk
+      with no EFI partition is moved from memory alone, and says so. A
+      file TFS3 cannot read whole is named. The format now clears its
+      first block before anything else, so a format cut short never
+      leaves an old superblock in front of a half-written disk. TFS3
+      stays as a reader of copies, and 'format3' writes it still, so
+      the move is tested on a disk the system itself made. Since every
+      test now runs on TFS4, the tests that read the disk on the host
+      moved from TfsImage to Ext2Image (scripts/ptest.py): Linux's
+      debugfs, dumpe2fs and e2fsck. What TfsImage.leaks() asked -
+      blocks taken that no file holds, blocks past a file's end - is
+      e2fsck's pass 1 and 5; the orphan t_libc leaves is found on the
+      superblock's orphan list; t_unlock rewrites the account file with
+      debugfs; t_http's largest page grew past 4 MiB so that it still
+      reaches the doubly indirect block with 4 KiB blocks. t_tfs3migrate
+      (new): an installed system with TFS3 in a THREADOS-TFS3 partition
+      and a FAT32 EFI partition, two accounts and their files (one of
+      2.4 MB), read on the host with TfsImage; after the next start
+      debugfs finds every directory and file with the same bytes and
+      owners, the homes 0700, e2fsck clean, the copy on the EFI
+      partition TFS3's bytes exactly (mtools), the note gone, the table
+      whole and the partition's type kept; the start after moves
+      nothing and alice signs in with her old password. A move cut
+      short (the copy and the note on the EFI partition, the
+      partition's first 4 MiB overwritten) is finished at the next
+      start, every file again. TFS3 in a Linux partition with no FAT on
+      the EFI partition is moved from memory and the partition becomes
+      THREADOS-TFS4 in both copies of the table. t_fsbounds: the TFS3
+      case now goes through the move (a block past TFS3's end is not
+      carried over, and the file is named); four TFS4 cases on an image
+      mke2fs made and the host damaged - a block pointer past the end
+      with a marker behind it, two directories each the other's parent,
+      a record length of 0, an entry naming an inode past the last -
+      the marker unseen, the loop and the listing ending, the bad entry
+      refused, the system answering. t_foreigndisk checks from the host
+      that 'format 3' made partition 3 ThreadOS's type in both copies.
+      Running everything on TFS4 found two changes of behaviour. A
+      rename onto a taken name now replaces it, as POSIX's does and the
+      C library needs; TFS3 refused it, and the shell's 'mv' (user/core.c)
+      and Files' rename relied on that - both now look first and leave a
+      taken name alone (t_tfs's check that 'mv' will not overwrite is
+      what failed). And TFS4 writes a large file a piece at a time more
+      slowly than TFS3, which kept its tables in memory: Print Screen's
+      1.4 MB, 600 rows, takes seconds in QEMU, and t_screenshot read the
+      file's size while it was still growing - it now waits for the
+      whole file, the check unchanged; stage 6's cache is the cure.
+      And t_multiuser found a hole stage 4 had opened: the machine's
+      files in the root (system.cfg, the accounts, the update key...)
+      belong to UID 0, and a session of UID 0 that had dropped the
+      admin role - a logout, a program's sys_drop - could still write
+      them as their owner, through a path or through a mapping flushed
+      at exit. TFS3 refused that; TFS4 now keeps the same rule: those
+      files are an administrator's to write and to chmod or chown,
+      whatever their bits say. Two more came from stage 4's real errno:
+      access() now asks the kernel, which has never heard of the files
+      the C library makes up (/etc/fonts/fonts.conf, the fonts), so
+      fontconfig found no configuration - access() asks the library's
+      own files when the kernel says ENOENT; and with no file system at
+      all (a machine started from a disc) a lookup failed with EIO, on
+      which musl's resolver gives up (getaddrinfo's "System error", so
+      t_socket and t_trust resolved nothing) - it is ENOENT now, there
+      being nothing to find. Print Screen writes its rows 64 at a time,
+      and t_terminal waits for a program to be done ("running... ^C"
+      gone), not only for the input line's prompt, which is always on
+      the screen.

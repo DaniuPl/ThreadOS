@@ -311,6 +311,17 @@ it, and to README's prerequisites.
   every assertion (AGENTS.md rule 2). `t_fsbounds` gets TFS4 cases: a
   block pointer past the end, a directory loop, `rec_len` 0, an inode
   number out of range.
+- **Done** (journal: "TFS4 stage 5"). Start-up decides in this order: a
+  move cut short (its note on the EFI partition), TFS4, TFS3 (moved),
+  a blank disk (TFS4), anything else left alone. The move keeps the
+  copy on the EFI partition when there is one, and goes from memory
+  alone when there is none (a test's image); a partition of another
+  system's type that held TFS3 becomes `THREADOS-TFS4`, as does one
+  `format N` takes - TFS4 is found by its type. `format4` is gone;
+  `format3` makes TFS3 still, so that the move can be tested on a disk
+  the system itself wrote. The host's reader is `Ext2Image` in
+  `scripts/ptest.py` (debugfs, dumpe2fs, e2fsck); `TfsImage` stays for
+  the two tests that read a TFS3 before it is moved.
 
 ### Stage 6 - a block cache and concurrency - about 2 days
 
@@ -326,6 +337,14 @@ it, and to README's prerequisites.
 - **Tests:** two processes on two cores write different files at once,
   then `e2fsck -fn` clean and the contents right; after `sync` and a
   hard power-off through QMP the data is there.
+- Why it matters, measured at stage 5: Print Screen writes 1.4 MB a row
+  at a time (600 calls of 2400 bytes), and without a cache each row is
+  about seven disk operations - the block read and written again, the
+  inode's table block, and when a block is taken the bitmap, the group
+  descriptors and the superblock - several seconds in QEMU, where TFS3
+  with its tables in memory took a fraction of that. `t_screenshot`
+  now waits for the file to be whole; a cache should make the wait
+  short again.
 
 ### Stage 7 - the journal (ext3, JBD2, ordered mode) - 2 to 3 days
 

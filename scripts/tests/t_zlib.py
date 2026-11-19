@@ -13,7 +13,7 @@ Checked against other implementations:
   included, so the deflate output itself is the same, not only what
   inflates from it
 
-  the .gz file zlibtest wrote is read off the disk image (ptest.TfsImage)
+  the .gz file zlibtest wrote is read off the disk image (ptest.Ext2Image)
   and decompressed by Python's gzip module; it is also byte for byte the
   file the host's build wrote
 
@@ -36,7 +36,7 @@ import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64, TfsImage
+from ptest import check, summary, make_iso64, no64, Ext2Image
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 PROMPT = "thread64>"
@@ -141,7 +141,7 @@ def main():
         check(f"a file Python's gzip made is read whole ({tagged})",
               tagged == [expect])
 
-        img = TfsImage(disk)
+        img = Ext2Image(disk)
         mine = img.read("/zt.gz")
         check("zt.gz is on the disk", mine is not None)
         if mine is not None:

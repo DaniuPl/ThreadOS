@@ -20,10 +20,27 @@
 
 extern const struct fs_backend tfs3_backend;
 
-/* Finds TFS3 on the disk (or formats a blank disk with it): 1 when it
-   is there to use, 0 when not */
-int tfs3_mount(void);
-/* Formats with TFS3: the whole disk (0) or partition N */
+/* Where a TFS3 is (tfs3_probe): from sector 'base', 'sectors' long,
+   'partition' counted from one (0: the whole disk), its blocks in use
+   'bytes' long from its start */
+struct tfs3_where {
+    uint32_t base, sectors;
+    int partition;
+    uint32_t blocks, bytes;
+};
+/* 1 when the disk holds a TFS3, the whole disk or a partition; nothing
+   is mounted or written */
+int tfs3_probe(struct tfs3_where *w);
+/* Mounts the TFS3 at base (to run on it, as before TFS4) */
+int tfs3_mount_at(uint32_t base, uint32_t sectors);
+/* The TFS3 of a copy in memory, 'len' bytes from its first block, to
+   read through tfs3_backend (the migration to TFS4); tfs3_close lets
+   it go */
+int tfs3_open_image(const void *img, uint32_t len);
+void tfs3_close(void);
+/* Formats with TFS3: the whole disk (0) or partition N. Kept so that
+   the migration can be tested on a TFS3 the system itself wrote
+   ('format3'); new disks are TFS4's. */
 int tfs3_format(int partition);
 
 #endif

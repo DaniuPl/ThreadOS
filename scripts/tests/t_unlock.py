@@ -180,28 +180,18 @@ ACC_V3 = ACC_V2 + 1 + 1 + 16 + 20
 
 
 def to_version2(disk):
-    """The account file on the image, rewritten in version 2. 1 = done."""
-    img = TfsImage(disk)
-    slot = next((i for i, ino in enumerate(img.inodes)
-                 if ino["used"] and not ino["dir"] and
-                 img.path(i) == "/.users"), None)
-    if slot is None:
-        return 0
+    """The account file on the image, rewritten in version 2 by Linux's
+    debugfs, the administrator's and private as the system keeps it.
+    1 = done."""
+    img = Ext2Image(disk)
     v3 = img.read("/.users")
-    if v3[:7] != b"THRUSR3" or len(v3) != 12 + USER_ACCOUNT_MAX * ACC_V3:
+    if not v3 or v3[:7] != b"THRUSR3" or \
+            len(v3) != 12 + USER_ACCOUNT_MAX * ACC_V3:
         return 0
     v2 = b"THRUSR2\0" + v3[8:12] + b"".join(
         v3[12 + i * ACC_V3:12 + i * ACC_V3 + ACC_V2]
         for i in range(USER_ACCOUNT_MAX))
-    data, _ = img.blocks_of(img.inodes[slot])
-    with open(disk, "r+b") as fh:
-        for k in range(0, len(v2), TFS_BLOCK):
-            fh.seek(data[k // TFS_BLOCK] * TFS_BLOCK)
-            fh.write(v2[k:k + TFS_BLOCK])
-        inode = TFS_BLOCK * (TFS_BITMAP + TFS_BITMAP_BLOCKS) + slot * 128
-        fh.seek(inode + TFS_NAME)
-        fh.write(struct.pack("<I", len(v2)))
-    return 1
+    return 1 if img.put("/.users", v2, 0o100600, 0, 0) else 0
 
 
 def main():
@@ -354,7 +344,7 @@ def main():
             check("which opens it", lock_says(q) == "")
         finally:
             q.close()
-        after = TfsImage(disk).read("/.users")
+        after = Ext2Image(disk).read("/.users") or b""
         check("and the file is version 3 again (%s, %d bytes)"
               % (after[:7], len(after)),
               after[:7] == b"THRUSR3" and

@@ -5855,6 +5855,7 @@ static void desktop_on_fkey(int fkey)
  * kilobytes and the kernel heap is one megabyte - a buffer that big
  * would be most of it, for a picture. */
 #define SHOT_HDR (4 + 2 + 2 + 256 * 3)
+#define SHOT_ROWS 64                 /* rows written at a time */
 
 static int shot_number;
 static volatile int shot_wanted;       /* Print Screen was pressed */
@@ -5899,24 +5900,38 @@ static void save_screenshot(void)
         uint8_t hdr2[8] = { 'T', 'S', 'C', '2', (uint8_t)(w & 0xFF),
                             (uint8_t)((w >> 8) & 0xFF), (uint8_t)(h & 0xFF),
                             (uint8_t)((h >> 8) & 0xFF) };
-        uint8_t *rgb = kmalloc((uint32_t)w * 3);
+        /* Rows gathered and written SHOT_ROWS at a time: a write of a
+           row's 2400 bytes or so costs the file system nearly what a
+           write of many blocks does (the block read back and written,
+           the inode, the bitmaps), and a row at a time made Print Screen
+           hold the desktop still for many seconds */
+        int per = SHOT_ROWS;
+        uint8_t *rgb = kmalloc((uint32_t)w * 3 * SHOT_ROWS);
+        if (!rgb) {
+            per = 1;
+            rgb = kmalloc((uint32_t)w * 3);
+        }
         if (!rgb || fs_write_at(slot, 0, hdr2, 8) != 8) {
             if (rgb)
                 kfree(rgb);
             kfree(row);
             return;
         }
-        uint32_t off = 8;
-        for (int y = 0; y < h; y++) {
-            for (int x = 0; x < w; x++) {
-                uint32_t c = video_pgetpixel_rgb(x, y);
-                rgb[x * 3] = (uint8_t)(c >> 16);
-                rgb[x * 3 + 1] = (uint8_t)(c >> 8);
-                rgb[x * 3 + 2] = (uint8_t)c;
-            }
-            if (fs_write_at(slot, off, rgb, (uint32_t)w * 3) != w * 3)
+        uint32_t off = 8, line = (uint32_t)w * 3;
+        for (int y0 = 0; y0 < h; y0 += per) {
+            int n = h - y0 < per ? h - y0 : per;
+            for (int j = 0; j < n; j++)
+                for (int x = 0; x < w; x++) {
+                    uint32_t c = video_pgetpixel_rgb(x, y0 + j);
+                    uint8_t *px = rgb + j * line + x * 3;
+                    px[0] = (uint8_t)(c >> 16);
+                    px[1] = (uint8_t)(c >> 8);
+                    px[2] = (uint8_t)c;
+                }
+            if (fs_write_at(slot, off, rgb, line * (uint32_t)n) !=
+                (int)(line * (uint32_t)n))
                 break;
-            off += (uint32_t)w * 3;
+            off += line * (uint32_t)n;
         }
         kfree(rgb);
     } else {

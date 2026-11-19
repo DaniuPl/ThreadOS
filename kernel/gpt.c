@@ -92,13 +92,19 @@ static const uint8_t GUID_ESP[16] = {
     0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B
 };
 
-/* Ours. Not borrowed from anybody: the bytes spell THREADOS-TFS3, so
+/* Ours. Not borrowed from anybody: the bytes spell THREADOS-TFS4, so
    a person looking at a table with a hex editor can tell whose it is,
-   and no other system will mistake it for one of its own. */
+   and no other system will mistake it for one of its own. (Installs
+   before TFS4 have THREADOS-TFS3; both are ours - kernel/tfs4.c.) */
 static const uint8_t GUID_TFS[16] = {
     'T', 'H', 'R', 'E', 'A', 'D', 'O', 'S',
-    '-', 'T', 'F', 'S', '3', 0, 0, 1
+    '-', 'T', 'F', 'S', '4', 0, 0, 1
 };
+
+const uint8_t *gpt_type_threados(void)
+{
+    return GUID_TFS;
+}
 
 /* Disk and partition identities. A GUID is supposed to be unique and
    we have no source of randomness worth the name at this point, so
@@ -148,6 +154,61 @@ static int write_header(uint64_t self, uint64_t other, uint64_t ent_lba,
        it already is */
     put32(sect + 16, crc32(sect, 92));
     return blk_write((uint32_t)self, 1, sect);
+}
+
+static uint64_t get64(const uint8_t *p)
+{
+    uint64_t v = 0;
+    for (int i = 7; i >= 0; i--)
+        v = v << 8 | p[i];
+    return v;
+}
+
+static uint32_t get32(const uint8_t *p)
+{
+    return p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 |
+           (uint32_t)p[3] << 24;
+}
+
+/* One header's table, entry 'slot' (from one) given a new type, the
+   table's CRC and then the header's written back. The entries go
+   before the header that vouches for them, as in gpt_make. */
+static int retype_one(uint64_t header_lba, uint32_t slot,
+                      const uint8_t type[16])
+{
+    if (blk_read((uint32_t)header_lba, 1, sect) < 0 ||
+        memcmp(sect, "EFI PART", 8) != 0)
+        return -1;
+    uint64_t ent = get64(sect + 72);
+    uint32_t n = get32(sect + 80), size = get32(sect + 84);
+    if (n != ENTRIES || size != ENT_SIZE || slot < 1 || slot > n)
+        return -1;                         /* not a table of our shape */
+    static uint8_t head[SECTOR];
+    memcpy(head, sect, SECTOR);
+    for (uint32_t i = 0; i < ENT_SECT; i++)
+        if (blk_read((uint32_t)ent + i, 1, table + i * SECTOR) < 0)
+            return -1;
+    memcpy(table + (slot - 1) * ENT_SIZE, type, 16);
+    for (uint32_t i = 0; i < ENT_SECT; i++)
+        if (blk_write((uint32_t)ent + i, 1, table + i * SECTOR) < 0)
+            return -1;
+    put32(head + 88, crc32(table, sizeof(table)));
+    put32(head + 16, 0);
+    put32(head + 16, crc32(head, 92));
+    return blk_write((uint32_t)header_lba, 1, head);
+}
+
+int gpt_set_type(uint32_t slot, const uint8_t type[16])
+{
+    if (blk_read(1, 1, sect) < 0 || memcmp(sect, "EFI PART", 8) != 0)
+        return -1;
+    uint64_t backup = get64(sect + 32);
+    if (retype_one(1, slot, type) < 0)
+        return -1;
+    /* the copy at the end, as the format requires both to agree */
+    return backup > 1 && backup < blk_sectors() ? retype_one(backup, slot,
+                                                             type)
+                                                : 0;
 }
 
 int gpt_make(uint32_t esp_mib)

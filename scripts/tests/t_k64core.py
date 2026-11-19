@@ -123,7 +123,7 @@ def main():
             # DMA, and the line about the disk names that controller
             dsk = q23.wait_serial("+ TFS", timeout=40)
             check("TFS formatted the blank disk through AHCI",
-                  "TFS: an empty disk formatted" in dsk
+                  "TFS4: an empty disk formatted" in dsk
                   and "Disk AHCI (SATA, DMA) + TFS ready" in dsk)
             # The machine is started without -smp: one core, and the
             # system says so instead of reporting cores it woke

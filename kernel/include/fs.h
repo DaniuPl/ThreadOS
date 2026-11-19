@@ -39,18 +39,20 @@
 int fs_errno(void);
 void fs_set_errno(int e);
 
-/* Detects the disk and reads the file system on it; formats an empty
-   disk. Returns 1 when ready, 0 when there is no disk. */
+/* Detects the disk and reads the file system on it: moves a TFS3 to
+   TFS4, formats an empty disk. Returns 1 when ready, 0 when there is
+   no disk or it is somebody else's. */
 int fs_init(void);
 int fs_ready(void);
-/* Formats because somebody asked in so many words: 0 for the whole
-   disk, or a partition number counted from one - and then the table
-   and every other partition are left exactly as they were. Startup
-   never does this to a disk that has anything on it - see tfs3.c. */
+/* Formats with TFS4 because somebody asked in so many words: 0 for the
+   whole disk, or a partition number counted from one - a GPT one, which
+   becomes of ThreadOS's type, and the rest of the table and every other
+   partition are left exactly as they were. Startup never does this to
+   a disk that has anything on it - see fs_init. */
 int fs_format_now(int partition);
-/* The same with TFS4, the whole disk only for now (the installer's
-   partitions follow it in stage 5 of docs/tfs4-plan.md) */
-int fs_format_tfs4(void);
+/* The same with TFS3, the format before TFS4: only so that the move
+   from it can be tested on a TFS3 this system wrote ('format3') */
+int fs_format_tfs3(int partition);
 
 /* --- Path operations (relative to the working directory cwd) ---
    cwd is a directory slot or FS_ROOT. A path may be absolute ("/a/b"),
