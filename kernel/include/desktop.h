@@ -97,6 +97,23 @@ int desktop_win_blit_hi(int winid, int owner, int x, int y, int w, int h,
    and what is drawn over it reach the screen together */
 #define WD_GLASS   13
 #define WD_HOLD    14
+/* Weave's marks (ProtonUI v2; kernel/gfx.c says exactly what each is):
+ *   WD_GRAIN   the grain's 3x3 tile over x, y, w, h in rgb at r of 255,
+ *              counted from the window's corner
+ *   WD_STITCH  a dashed line filling x, y, w, h along its longer side,
+ *              dashes r long (0: 4)
+ *   WD_KNOT    a knot w across at x, y: r 0 hollow, 1 ringed, 2 filled
+ *   WD_THREAD  a curve from (x, y) to (w, h), pulled towards the points
+ *              packed in font and px (x in the high half, y in the low,
+ *              each a signed 16-bit number), r sixteenths of a pixel wide
+ */
+#define WD_GRAIN   15
+#define WD_STITCH  16
+#define WD_KNOT    17
+#define WD_THREAD  18
+#define WD_PACK(x, y)   ((int)((uint32_t)(uint16_t)(x) << 16 | (uint16_t)(y)))
+#define WD_PACKED_X(v)  ((int)(int16_t)((uint32_t)(v) >> 16))
+#define WD_PACKED_Y(v)  ((int)(int16_t)((uint32_t)(v) & 0xFFFF))
 
 struct win_draw {
     int op;
@@ -112,7 +129,21 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
    theme as the desktop does - eleven words, in this order: */
 #define UI_LOOK_N 11   /* dark?, background, field, text, dim text, line,
                           row, accent, text on accent, danger, good */
-/* which: 0 the theme in use, 1 the dark one, 2 the light one */
+/* ProtonUI v2 (user/udraw.h) asks for more after those eleven: the
+   desktop's style, Weave's six dyes in the theme, the person's thread
+   colour, the grain's ink, a control's corners, the density */
+#define UI_LOOK_MAX 22
+#define UI_STYLE_BAR_DOCK 0
+#define UI_STYLE_TASKBAR  1
+#define UI_STYLE_WEAVE    2
+#define UI_STYLE_PHONE    3    /* the phone's shell, not a desktop style */
+/* SYS64_UI_LOOK's second argument: the theme in its low byte (0 the
+   one in use, 1 the dark one, 2 the light one) and in the byte above
+   it how many words the program knows - 0 for every program from
+   before v2, which gets exactly UI_LOOK_N and nothing past its array */
+#define UI_LOOK_THEME(a)  ((int)((a) & 0xFF))
+#define UI_LOOK_WORDS(a)  ((int)(((a) >> 8) & 0xFF))
+/* Fills UI_LOOK_MAX words */
 void desktop_ui_look(int which, uint32_t *out);
 
 /* A background as a w x h picture of 0x00RRGGBB, for a program to show

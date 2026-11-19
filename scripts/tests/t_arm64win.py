@@ -35,6 +35,9 @@ screen and its tablet:
   a tap in the corner ends the program; its window goes with it, the
   phone goes home, the tile is gone and every page is free again
 
+and ProtonUI v2's look as the phone hands it to a program
+(libc/tests/pulook, checked as t_protonui checks it on the PC);
+
 and the same program from an application package (.tapp,
 scripts/mktapp.py) handed over through fw_cfg, as the PC's loader hands
 packages over as modules: the kernel takes it - and passes over one
@@ -296,7 +299,23 @@ def main():
     finally:
         q.close()
     from_package()
+    phone_look()
     return summary()
+
+
+def phone_look():
+    """ProtonUI v2's look on the phone: the same program as on the PC
+    (t_protonui), whose answers the same checks read - the phone's own
+    style and a finger's density"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from t_protonui import check_look, STYLE_PHONE
+    q = Phone(cores=1, mib=512, append="run=pulook")
+    try:
+        out = q.wait_serial("[pulook] done", timeout=120)
+    finally:
+        q.close()
+    check_look(out, "the phone", STYLE_PHONE,
+               _kernel_define("kernel/include/look.h", "DENSITY_FINGER"))
 
 
 if __name__ == "__main__":

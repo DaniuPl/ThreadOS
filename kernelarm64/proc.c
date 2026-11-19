@@ -53,6 +53,7 @@
 #include "winmob.h"
 #include "mobapps.h"
 #include "../kernel/include/desktop.h"
+#include "../kernel/include/look.h"
 #include "mobile.h"
 #include "vsnd.h"
 #include "../kernel/include/mic_info.h"
@@ -2233,16 +2234,21 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
         return 0;
     }
     case SYS64_UI_LOOK: {
-        /* The phone's colours, in the order desktop.h gives the PC's */
-        uint32_t look[UI_LOOK_N];
+        /* The phone's colours, in the order desktop.h gives the PC's -
+           as many words as the program knows (UI_LOOK_WORDS), eleven
+           for one from before ProtonUI v2 */
+        uint32_t look[UI_LOOK_MAX];
+        int words = UI_LOOK_WORDS(x[1]) ? UI_LOOK_WORDS(x[1]) : UI_LOOK_N;
+        if (words > UI_LOOK_MAX)
+            words = UI_LOOK_MAX;
         struct mob_theme t;
-        if (!user_range(p, x[0], sizeof(look), 1))
+        if (!user_range(p, x[0], (uint64_t)words * sizeof(uint32_t), 1))
             return -1;
         /* (the theme asked for, worked out apart: setting the phone's
            own for a moment would show it to the shell, which tells
            every program the look changed) */
-        int dark = (int64_t)x[1] == 1 ? 1 : (int64_t)x[1] == 2 ? 0 :
-                   mob_prefs.dark;
+        int which = UI_LOOK_THEME(x[1]);
+        int dark = which == 1 ? 1 : which == 2 ? 0 : mob_prefs.dark;
         mob_theme_for(&t, dark);
         look[0] = (uint32_t)dark;
         look[1] = t.bg;
@@ -2255,7 +2261,19 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
         look[8] = 0xFFFFFF;
         look[9] = 0xFF453A;
         look[10] = 0x30D158;
-        memcpy((void *)(uintptr_t)x[0], look, sizeof(look));
+        look[11] = UI_STYLE_PHONE;
+        look[12] = dark ? DYE_INDIGO_N : DYE_INDIGO_L;
+        look[13] = dark ? DYE_MADDER_N : DYE_MADDER_L;
+        look[14] = dark ? DYE_SAFFRON_N : DYE_SAFFRON_L;
+        look[15] = dark ? DYE_WELD_N : DYE_WELD_L;
+        look[16] = dark ? DYE_WOAD_N : DYE_WOAD_L;
+        look[17] = dark ? DYE_COCHINEAL_N : DYE_COCHINEAL_L;
+        look[18] = mob_accent();
+        look[19] = 0;
+        look[20] = CONTROL_R;
+        look[21] = DENSITY_FINGER;
+        memcpy((void *)(uintptr_t)x[0], look,
+               (uint64_t)words * sizeof(uint32_t));
         return 0;
     }
     }

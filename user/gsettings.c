@@ -852,16 +852,17 @@ static void draw_desk(void)
 {
     static const char *const sides[3] = { "Left", "Bottom", "Right" };
     static const char *const side_values[3] = { "left", "bottom", "right" };
-    static const char *const styles[2] = { "macOS", "Windows" };
-    static const char *const style_values[2] = { "mac", "windows" };
+    static const char *const styles[3] = { "macOS", "Windows", "Weave" };
+    static const char *const style_values[3] = { "mac", "windows", "weave" };
     int y = PANE_Y0;
-    /* The whole desktop's way: a bar at the top and a dock, or a
-       taskbar along the bottom with Start */
+    /* The whole desktop's way: a bar at the top and a dock, a taskbar
+       along the bottom with Start, or ThreadOS's own - cloth and a
+       thread, the loom along the bottom (docs/WEAVE.md) */
     row_name(y, "Interface style");
     const char *style = setting("layout");
     if (!style[0])
         style = "mac";
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 3; i++) {
         int x = PANE_X + i * (LOCK_WAY_W + CHIP_GAP);
         int on = same(style, style_values[i]);
         ud_round(win, x, y + CTRL_DY, LOCK_WAY_W, CHIP_H, 8,
@@ -872,6 +873,11 @@ static void draw_desk(void)
             style_values[i]);
     }
     y += ROW_H;
+    if (same(style, "weave")) {
+        note(y, "In the Weave style the loom stands at the bottom:");
+        note(y + 14, "the programs on their thread, the desktops as knots.");
+        return;
+    }
     if (same(style, "windows")) {
         /* The rest is the dock's, and the taskbar is not a dock: it
            stays at the bottom, the same size, and does not hide */

@@ -1730,11 +1730,18 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_UI_LOOK: {
-        if (!paging64_user_writable(a1, UI_LOOK_N * sizeof(uint32_t))) {
+        /* as many words as the program knows, and never more: a
+           program from before ProtonUI v2 has room for eleven */
+        int n = UI_LOOK_WORDS(a2) ? UI_LOOK_WORDS(a2) : UI_LOOK_N;
+        if (n > UI_LOOK_MAX)
+            n = UI_LOOK_MAX;
+        if (!paging64_user_writable(a1, (uint64_t)n * sizeof(uint32_t))) {
             r->rax = (uint64_t)-1;
             return;
         }
-        desktop_ui_look((int)a2, (uint32_t *)(uintptr_t)a1);
+        uint32_t look[UI_LOOK_MAX];
+        desktop_ui_look(UI_LOOK_THEME(a2), look);
+        memcpy((void *)(uintptr_t)a1, look, (uint32_t)n * sizeof(uint32_t));
         r->rax = 0;
         return;
     }

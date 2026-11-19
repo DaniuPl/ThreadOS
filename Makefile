@@ -240,6 +240,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/aestest.elf \
+               $(BUILD)/user64/pumarks.elf \
                $(BUILD)/user64/wpatest.elf \
                $(BUILD)/user64/nslookup.elf \
                $(BUILD)/user64/httpget.elf \
@@ -535,6 +536,13 @@ $(BUILD)/user64/ipctest.elf: libc/tests/ipctest.c $(LIBC64) libc/libc64.ld \
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/ipctest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/ipctest.o) -o $@
 
+# ProtonUI v2's look as a program gets it (t_protonui, t_arm64win): the
+# raw call, so the same file says it on the phone
+$(BUILD)/user64/pulook.elf: libc/tests/pulook.c $(LIBC64) libc/libc64.ld \
+                            user64/usys64.h | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser64 -Wall -Wextra -c $< -o $(BUILD)/libc64/pulook.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/pulook.o) -o $@
+
 # Signals: handlers with siginfo_t and the interrupted registers, masks,
 # sigsuspend, waits that go on, WebKit's way of stopping a thread - the
 # same program the ARM64 kernel runs, and the tests compare both with
@@ -784,6 +792,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/fswrite.elf $(BUILD)/user64/permtest.elf \
                $(BUILD)/user64/bigmap.elf \
                $(BUILD)/user64/ipctest.elf $(BUILD)/user64/sigtest.elf \
+               $(BUILD)/user64/pulook.elf \
                $(BUILD)/user64/bigram.elf \
                $(BUILD)/user64/glibtest.elf \
                $(BUILD)/user64/imgtest.elf $(BUILD)/user64/xmltest.elf \
@@ -2033,6 +2042,8 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    aestest=$(BUILD)/user64/aestest.elf \
+	    pumarks=$(BUILD)/user64/pumarks.elf \
+	    pulook=$(BUILD)/user64/pulook.elf \
 	    wpatest=$(BUILD)/user64/wpatest.elf \
 	    nslookup=$(BUILD)/user64/nslookup.elf \
 	    httpget=$(BUILD)/user64/httpget.elf \
@@ -2401,7 +2412,7 @@ libcarm64: $(LIBCARM)
 # kernel's program address. The test programs of libc/tests are the
 # PC's, unchanged - the point of them is that they print the same.
 MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest randtest \
-                 sigtest notetest sndtest
+                 sigtest notetest sndtest pulook
 MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
 LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
                   -fno-stack-protector -fno-pic \
@@ -2417,7 +2428,8 @@ $(BUILD)/arm64/libc:
 	mkdir -p $@
 
 # ThreadOS's own calls, the PC's library of them (its AArch64 branch)
-USYSARM_ELFS := $(patsubst %,$(BUILD)/arm64/libc/%.elf,wintest notetest sndtest)
+USYSARM_ELFS := $(patsubst %,$(BUILD)/arm64/libc/%.elf,wintest notetest sndtest \
+                  pulook)
 $(USYSARM_ELFS): LIBCARM_CFLAGS += -Iuser64
 $(USYSARM_ELFS): user64/usys64.h
 

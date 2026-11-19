@@ -899,6 +899,121 @@ void gfx_line16_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1,
                  c, a);
 }
 
+/* --- Weave's marks (docs/WEAVE.md): what WD_GRAIN, WD_STITCH, WD_KNOT
+   and WD_THREAD draw, on the PC and the phone alike ------------------- */
+
+/* The grain: a 3x3 tile - a weft thread along its top row, a warp
+   thread down its left column - over a rectangle, in colour c at 'ink'
+   of 255. A copy, not a computation, so cloth costs nothing where glass
+   would cost a blur. The tile is counted from (ox, oy) in the
+   surface's own pixels, so that two rectangles side by side are one
+   cloth. Exactly, so that a test can draw it again: a pixel takes ink
+   on the weft (y % 3 == 0), three quarters of it on the warp alone
+   (x % 3 == 0), and is mixed as (old * (255 - i) + c * i + 127) / 255 in
+   each channel. */
+void gfx_grain_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                 int ox, int oy, uint32_t c, int ink)
+{
+    int k = k_of(t);
+    if (ink <= 0 || w <= 0 || h <= 0)
+        return;
+    if (ink > 255)
+        ink = 255;
+    int x0 = sc(x, k), y0 = sc(y, k), x1 = sc(x + w, k), y1 = sc(y + h, k);
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > tw(t)) x1 = tw(t);
+    if (y1 > th(t)) y1 = th(t);
+    uint32_t cr = (c >> 16) & 0xFF, cg = (c >> 8) & 0xFF, cb = c & 0xFF;
+    for (int py = y0; py < y1; py++) {
+        int weft = (py + oy) % 3 == 0;
+        /* a screen not four bytes a pixel (a firmware's 24-bit one)
+           goes a pixel at a time, as everything else drawn on it does */
+        uint32_t *row = row_of(t, py);
+        for (int px = x0; px < x1; px++) {
+            uint32_t i = weft ? (uint32_t)ink
+                       : (px + ox) % 3 == 0 ? (uint32_t)ink * 3 / 4 : 0;
+            if (!i)
+                continue;
+            uint32_t o = row ? row[px] : p_get(t, px, py);
+            uint32_t r = (((o >> 16) & 0xFF) * (255 - i) + cr * i + 127) / 255;
+            uint32_t g = (((o >> 8) & 0xFF) * (255 - i) + cg * i + 127) / 255;
+            uint32_t b = ((o & 0xFF) * (255 - i) + cb * i + 127) / 255;
+            if (row)
+                row[px] = (o & 0xFF000000u) | r << 16 | g << 8 | b;
+            else
+                p_put(t, px, py, r << 16 | g << 8 | b);
+        }
+    }
+}
+
+/* A stitch: a dashed line filling x, y, w, h along its longer side,
+   dashes 'dash' long with as much room between, the first at the
+   start - the line between the parts of one surface */
+void gfx_stitch_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                  int dash, uint32_t c, int a)
+{
+    if (dash <= 0)
+        dash = 4;
+    if (w >= h) {
+        for (int at = 0; at < w; at += 2 * dash)
+            gfx_fill_s(t, x + at, y, dash < w - at ? dash : w - at, h, c, a);
+    } else {
+        for (int at = 0; at < h; at += 2 * dash)
+            gfx_fill_s(t, x, y + at, w, dash < h - at ? dash : h - at, c, a);
+    }
+}
+
+/* A knot, d across with its top left at x, y: hollow (0, its edge two
+   pixels thick), ringed (1, the edge and a dot half its size in the
+   middle) or filled (2) - empty, something in it, here */
+void gfx_knot_s(const struct gfx_surface *t, int x, int y, int d, int state,
+                uint32_t c, int a)
+{
+    if (d <= 0)
+        return;
+    int cx = x * 16 + d * 8, cy = y * 16 + d * 8, rad = d * 8;
+    if (state >= 2) {
+        gfx_disc16_s(t, cx, cy, rad, c, a);
+        return;
+    }
+    gfx_circle16_s(t, cx, cy, rad, 32, c, a);
+    if (state == 1)
+        gfx_disc16_s(t, cx, cy, rad / 2, c, a);
+}
+
+/* A thread: the cubic curve from p0, pulled towards p1 and p2, to p3
+   (sixteenths of a pixel), 'thick' sixteenths wide with soft edges -
+   in straight pieces short enough not to show, each a soft line. The
+   points on it are B(i/n) in whole numbers, as a test computes them. */
+void gfx_thread_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1,
+                  int x2, int y2, int x3, int y3, int thick, uint32_t c, int a)
+{
+    /* the pieces: one per eight pixels of the control polygon, 4..256 */
+    long len = 0;
+    int px[4] = { x0, x1, x2, x3 }, py[4] = { y0, y1, y2, y3 };
+    for (int i = 0; i < 3; i++) {
+        long dx = px[i + 1] - px[i], dy = py[i + 1] - py[i];
+        len += (dx < 0 ? -dx : dx) + (dy < 0 ? -dy : dy);
+    }
+    long n = len / (8 * 16);
+    if (n < 4)
+        n = 4;
+    if (n > 256)
+        n = 256;
+    int lx = x0, ly = y0;
+    for (long i = 1; i <= n; i++) {
+        long u = n - i, v = i, n3 = n * n * n;
+        long bx = (u * u * u * x0 + 3 * u * u * v * x1 + 3 * u * v * v * x2 +
+                   v * v * v * x3) / n3;
+        long by = (u * u * u * y0 + 3 * u * u * v * y1 + 3 * u * v * v * y2 +
+                   v * v * v * y3) / n3;
+        gfx_line16_s(t, lx, ly, (int)bx, (int)by, thick, c, a);
+        lx = (int)bx;
+        ly = (int)by;
+    }
+}
+
 void gfx_shadow_s(const struct gfx_surface *t, int x, int y, int w, int h,
                   int r, int s, int a, int dy)
 {
@@ -1087,6 +1202,21 @@ void gfx_blend(int x, int y, uint32_t c, int a)
 void gfx_fill(int x, int y, int w, int h, uint32_t c, int a)
 {
     gfx_fill_s(cur(), x, y, w, h, c, a);
+}
+
+void gfx_grain(int x, int y, int w, int h, uint32_t c, int ink)
+{
+    gfx_grain_s(cur(), x, y, w, h, 0, 0, c, ink);
+}
+
+void gfx_stitch(int x, int y, int w, int h, int dash, uint32_t c, int a)
+{
+    gfx_stitch_s(cur(), x, y, w, h, dash, c, a);
+}
+
+void gfx_knot(int x, int y, int d, int state, uint32_t c, int a)
+{
+    gfx_knot_s(cur(), x, y, d, state, c, a);
 }
 
 void gfx_fill_grad(int x, int y, int w, int h, uint32_t top,

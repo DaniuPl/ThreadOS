@@ -139,6 +139,19 @@ void gfx_disc16_s(const struct gfx_surface *t, int cx, int cy, int rad,
                   uint32_t c, int a);
 void gfx_line16_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1,
                   int thick, uint32_t c, int a);
+/* Weave's marks (kernel/gfx.c says exactly what each draws), on the
+   target and on a surface said each time */
+void gfx_grain(int x, int y, int w, int h, uint32_t c, int ink);
+void gfx_stitch(int x, int y, int w, int h, int dash, uint32_t c, int a);
+void gfx_knot(int x, int y, int d, int state, uint32_t c, int a);
+void gfx_grain_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                 int ox, int oy, uint32_t c, int ink);
+void gfx_stitch_s(const struct gfx_surface *t, int x, int y, int w, int h,
+                  int dash, uint32_t c, int a);
+void gfx_knot_s(const struct gfx_surface *t, int x, int y, int d, int state,
+                uint32_t c, int a);
+void gfx_thread_s(const struct gfx_surface *t, int x0, int y0, int x1, int y1,
+                  int x2, int y2, int x3, int y3, int thick, uint32_t c, int a);
 
 /* The 'shape' shell command: shapes printed as numbers, for the test */
 void gfx_command(const char *arg);

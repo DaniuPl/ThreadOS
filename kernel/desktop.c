@@ -89,6 +89,9 @@
 static const struct look look_dark = LOOK_OF(DARK);
 static const struct look look_light = LOOK_OF(LIGHT);
 static struct look L = LOOK_OF(DARK);
+/* Weave's two (kernel/include/look.h): Night and Linen */
+static const struct look look_night = LOOK_OF(NIGHT);
+static const struct look look_linen = LOOK_OF(LINEN);
 
 /* The programs the dock starts: what each is called, what it runs and
  * which of the pictures below it wears.
@@ -937,6 +940,14 @@ static int dock_side = DOCK_SIDE_BOTTOM;
    bottom, there is no bar at the top, and a window's buttons are at the
    right end of its title bar. 0 = the Mac style everything was. */
 static int ui_win;
+/* Weave ('layout weave', docs/WEAVE.md): ThreadOS's own look. It stands
+   where the Windows style stands - nothing at the top, the loom along
+   the bottom in place of the taskbar, a window's buttons at the right -
+   so ui_win is on with it and only the drawing differs: opaque cloth
+   with the grain, and the window in front marked by one thread. */
+static int ui_weave;
+/* The theme in use: 1 dark (Night under Weave), 0 light (Linen) */
+static int theme_dark = 1;
 static int dock_magnify;
 static int dock_autohide;      /* out of the way until the pointer comes */
 static int bar_autohide;
@@ -954,6 +965,18 @@ static int bar_peek, dock_peek;
    Start first, then the programs, then the windows - each TB_SLOT wide
    with its picture in the middle of it */
 static int tb_start_x;
+static int tb_prog_x;                  /* where the first program's slot is */
+
+/* The strip the windows keep clear of: the taskbar, or Weave's loom,
+   which stands LOOM_GAP clear of the screen's edges */
+static int tb_bar_h(void) { return ui_weave ? LOOM_H : TB_H; }
+static int tb_top(void)
+{
+    return video_h() - tb_bar_h() - (ui_weave ? LOOM_GAP : 0);
+}
+static int tb_slot(void) { return ui_weave ? LOOM_SLOT : TB_SLOT; }
+/* the right end of what is on it: the tray and the clock end there */
+static int tb_right(void) { return video_w() - (ui_weave ? LOOM_GAP : 0); }
 
 static void taskbar_geom(struct dock *d)
 {
@@ -961,6 +984,24 @@ static void taskbar_geom(struct dock *d)
     if (n > DOCK_SLOTS)
         n = DOCK_SLOTS;
     d->side = DOCK_SIDE_BOTTOM;
+    if (ui_weave) {
+        /* the loom: the spool at its left end, the programs in the
+           middle on their thread */
+        d->x = LOOM_GAP;
+        d->w = video_w() - 2 * LOOM_GAP;
+        d->h = LOOM_H;
+        d->y = tb_top();
+        d->tile = LOOM_ICON;
+        d->ty = d->y + (LOOM_H - LOOM_ICON) / 2 - 2;
+        tb_start_x = d->x + 6;
+        tb_prog_x = (video_w() - n * LOOM_SLOT) / 2;
+        for (int k = 0; k < n; k++) {
+            d->kx[k] = tb_prog_x + k * LOOM_SLOT + (LOOM_SLOT - LOOM_ICON) / 2;
+            d->ky[k] = d->ty;
+            d->ks[k] = LOOM_ICON;
+        }
+        return;
+    }
     d->x = 0;
     d->w = video_w();
     d->h = TB_H;
@@ -969,6 +1010,7 @@ static void taskbar_geom(struct dock *d)
     d->ty = d->y + (TB_H - TB_ICON) / 2;
     int x0 = (video_w() - (n + 1) * TB_SLOT) / 2;
     tb_start_x = x0;
+    tb_prog_x = x0 + TB_SLOT;
     for (int k = 0; k < n; k++) {
         d->kx[k] = x0 + (k + 1) * TB_SLOT + (TB_SLOT - TB_ICON) / 2;
         d->ky[k] = d->ty;
@@ -1088,11 +1130,13 @@ static int dock_hit(int mx, int my)
     dock_geom(&d);
     int n = d.n_l + d.n_w;
     if (ui_win) {                  /* a whole slot takes the click */
-        if (my < d.y || my >= d.y + d.h || mx < tb_start_x)
+        if (my < d.y || my >= d.y + d.h)
             return -1;
-        int k = (mx - tb_start_x) / TB_SLOT - 1;
-        if (k == -1)
+        if (mx >= tb_start_x && mx < tb_start_x + tb_slot())
             return TB_START;
+        if (mx < tb_prog_x)
+            return -1;
+        int k = (mx - tb_prog_x) / tb_slot();
         if (k < 0 || k >= n || k >= DOCK_SLOTS)
             return -1;
         return k < d.n_l ? k : 100 + (k - d.n_l);
@@ -1124,7 +1168,8 @@ static int work_top(void) { return ui_win ? 0 : BAR_H; }
 static int work_bottom(void)
 {
     if (ui_win)
-        return dock_autohide ? video_h() : video_h() - TB_H;
+        return dock_autohide ? video_h()
+                             : tb_top() - (ui_weave ? LOOM_GAP : 0);
     if (dock_side != DOCK_SIDE_BOTTOM || dock_autohide)
         return video_h();
     struct dock d;
@@ -1211,7 +1256,7 @@ static void menu_at(int x, int y, int from_bar)
 static void menu_from_bar(void)
 {
     if (ui_win)
-        menu_at(tb_start_x, video_h() - TB_H - 8 - menu_h(), 1);
+        menu_at(tb_start_x, tb_top() - 8 - menu_h(), 1);
     else
         menu_at(6, MENU_Y, 1);
 }
@@ -2221,6 +2266,44 @@ static void draw_win_buttons(const struct window *win, int focused)
 {
     uint32_t ink = focused ? L.title_text : L.title_dim;
     int y = win->y;
+    if (ui_weave) {
+        /* one capsule for the three; close the only madder one, and
+           only under the pointer */
+        /* (minimise is the left one, close the right: light_x) */
+        int cx0 = light_x(win, 1) + (WB_W - CAPSULE_BTN) / 2 - 1;
+        int cw = 2 * WB_W + CAPSULE_BTN + 2;
+        int cy0 = y + SELVEDGE_H +
+                  (TITLE_H - SELVEDGE_H - CAPSULE_BTN - 2) / 2;
+        gfx_rrect(cx0, cy0, cw, CAPSULE_BTN + 2, (CAPSULE_BTN + 2) / 2,
+                  L.title_text, 10);
+        for (int k = 0; k < 3; k++) {
+            int bx = light_x(win, k) + (WB_W - CAPSULE_BTN) / 2;
+            int by = cy0 + 1;
+            int over = in_rect(mouse_x, mouse_y, light_x(win, k), y, WB_W,
+                               TITLE_H);
+            if (over)
+                gfx_disc16(bx * 16 + CAPSULE_BTN * 8, by * 16 + CAPSULE_BTN * 8,
+                           CAPSULE_BTN * 8, k == 0 ? (theme_dark ? DYE_MADDER_N
+                                                                 : DYE_MADDER_L)
+                                                   : L.title_text,
+                           k == 0 ? 255 : 30);
+            uint32_t c = over && k == 0 ? 0xFFFFFF : ink;
+            int mx = bx + CAPSULE_BTN / 2, my = by + CAPSULE_BTN / 2;
+            if (k == 0) {
+                gfx_line16((mx - 4) * 16, (my - 4) * 16, (mx + 4) * 16,
+                           (my + 4) * 16, 20, c, 255);
+                gfx_line16((mx - 4) * 16, (my + 4) * 16, (mx + 4) * 16,
+                           (my - 4) * 16, 20, c, 255);
+            } else if (k == 1) {
+                gfx_line16((mx - 5) * 16, my * 16, (mx + 5) * 16, my * 16, 20,
+                           c, 255);
+            } else {
+                gfx_rring16((mx - 5) * 16, (my - 5) * 16, 10 * 16, 10 * 16,
+                            2 * 16, 20, c, 255);
+            }
+        }
+        return;
+    }
     for (int k = 0; k < 3; k++) {
         int x = light_x(win, k);
         int over = in_rect(mouse_x, mouse_y, x, y, WB_W, TITLE_H);
@@ -2283,6 +2366,12 @@ static void draw_lights(const struct window *win, int focused)
     }
 }
 
+/* Where the screen's grain is counted from in what draw_body draws on:
+   nothing on the screen, the window's place on it in a picture of the
+   window - so that the picture's last frame on the way is the window
+   at rest to the pixel */
+static int grain_ox, grain_oy;
+
 /* Everything a window is but its shadow and its round corners, at
    win->x, win->y. 'off' says it goes into a picture of its own rather
    than onto the screen - the content then goes through gfx too. */
@@ -2295,7 +2384,16 @@ static void draw_body(const struct window *win, int focused, int off)
        colour when it has not - with the lights, that is the whole of
        how focus is shown. */
     gfx_fill(x, y, w, TITLE_H + 1, focused ? L.title_bg : L.title_off, 255);
-    gfx_fill(x, y + TITLE_H, w, 1, L.win_line, 150);
+    if (ui_weave) {
+        /* cloth: the grain over the bar, and along the top of the
+           window in front the selvedge, in the person's thread colour -
+           the one mark of focus there is */
+        gfx_grain_s(gfx_current(), x, y, w, TITLE_H, grain_ox, grain_oy,
+                    theme_dark ? 0xFFFFFF : 0x000000, GRAIN_INK);
+        if (focused && !kiosk)
+            gfx_fill(x, y, w, SELVEDGE_H, L.accent, 255);
+    }
+    gfx_fill(x, y + TITLE_H, w, 1, L.win_line, ui_weave ? 255 : 150);
     gfx_fill(x, y + TITLE_H + 1, w, h - TITLE_H - 1, L.win_bg, 255);
 
     /* The title in the middle of the bar, in bold - and kept clear of
@@ -2532,7 +2630,10 @@ static int draw_animated(const struct window *win, int focused)
     int pw = P(w), ph = P(h);
     struct gfx_surface s = { anim_px, pw, ph, pw, video_k() };
     gfx_target(&s);
+    grain_ox = P(x);
+    grain_oy = P(y);
     draw_body(&at0, focused, 1);
+    grain_ox = grain_oy = 0;
     gfx_target((const struct gfx_surface *)0);
 
     int r = WIN_R * cw / w;
@@ -2581,6 +2682,10 @@ static void draw_window(const struct window *win)
     gfx_round_apply(x, y, w, h, WIN_R, corner_keep);
     gfx_rring16(x * 16, y * 16, w * 16, h * 16, WIN_R * 16, 16, L.win_line,
                 focused ? 220 : 170);
+    /* the selvedge is the window's edge there, whole: over the line,
+       between the corners */
+    if (ui_weave && focused && !kiosk)
+        gfx_fill(x + WIN_R, y, w - 2 * WIN_R, SELVEDGE_H, L.accent, 255);
 }
 
 /* Over a full-screen window the bar, when it comes out, would cover the
@@ -3896,7 +4001,6 @@ static int wallpaper_refresh(void)
 static uint32_t *bg_buf, *bar_buf;
 static uint32_t bg_pages, bar_pages;
 static int bg_key = -1;            /* what they were drawn for */
-static int theme_dark = 1;
 static int look_wait;
 
 /* The six flat choices, from a little brighter at the top to a little
@@ -3974,7 +4078,10 @@ static void paint_background(uint32_t *buf, int w, int h, int bg)
         return;
     }
     if (bg == 0) {
-        aurora_draw(buf, w, h, w, theme_dark);
+        if (ui_weave)
+            warp_draw(buf, w, h, w, theme_dark, L.accent);
+        else
+            aurora_draw(buf, w, h, w, theme_dark);
         return;
     }
     paint_colour(buf, w, h, bg);
@@ -3985,7 +4092,10 @@ int desktop_bg_preview(int bg, int dark, int w, int h, uint32_t *out)
     if (bg < 0 || bg >= BG_N || w <= 0 || h <= 0 || w > BG_PREVIEW_SIDE ||
         h > BG_PREVIEW_SIDE || w * h > BG_PREVIEW_MAX)
         return -1;
-    if (bg == 0)
+    if (bg == 0 && ui_weave)
+        warp_draw(out, w, h, w, dark, dark ? look_night.accent
+                                            : look_linen.accent);
+    else if (bg == 0)
         aurora_draw(out, w, h, w, dark);
     else
         paint_colour(out, w, h, bg);
@@ -4027,7 +4137,7 @@ static void look_refresh(int force)
     const char *t = config_get("theme");
     int dark = !(t && !strcmp(t, "light"));
     int bg = background_choice();
-    int key = (dark << 8) | bg;
+    int key = (ui_weave << 9) | (dark << 8) | bg;
     if (!force && !wall_changed && key == bg_key)
         return;
     bg_key = key;
@@ -4038,7 +4148,8 @@ static void look_refresh(int force)
             if (wins[i].used)
                 win_enqueue(&wins[i], WEV_LOOK, 0, 0, 0);
     theme_dark = dark;
-    L = dark ? look_dark : look_light;
+    L = ui_weave ? (dark ? look_night : look_linen)
+                 : (dark ? look_dark : look_light);
     desk_palette(bg);
 
     if (!video_true_colour())
@@ -4302,9 +4413,15 @@ static void bt_search_thread(void *arg)
     bt_searching = 0;
 }
 
-static int tb_clock_x(void) { return video_w() - TB_SHOW_W - 6 - TB_CLOCK_W; }
+static int tb_clock_x(void) { return tb_right() - TB_SHOW_W - 6 - TB_CLOCK_W; }
 static int tb_net_x(void)   { return tb_clock_x() - TB_TRAY_W; }
 static int tb_bt_x(void)    { return tb_net_x() - TB_TRAY_W; }
+/* Weave's desktops: a knot each on the loom, left of the tray */
+#define LOOM_KNOT_STEP (LOOM_KNOT_D + 8)
+static int loom_knot_x(int i)
+{
+    return tb_bt_x() - 16 - (DESK_N - i) * LOOM_KNOT_STEP;
+}
 
 static int stat_card_x(void)
 {
@@ -4448,7 +4565,7 @@ static void draw_status_card(void)
     int with_button = stat_open == STAT_BT && bt_present();
     int h = STAT_PAD * 2 + STAT_ROW * (n + 1) + (with_button ? STAT_ROW + 6 : 0);
     if (ui_win)                         /* over the taskbar's tray */
-        y = video_h() - TB_H - 6 - h;
+        y = tb_top() - 6 - h;
     gfx_shadow(x, y, STAT_CARD_W, h, VOL_R, 14, theme_dark ? 150 : 90, 4);
     gfx_frost(x, y, STAT_CARD_W, h, VOL_R, 10, L.menu_bg, L.menu_a);
     gfx_rring16(x * 16, y * 16, STAT_CARD_W * 16, h * 16, VOL_R * 16, 16,
@@ -4939,22 +5056,142 @@ static void tb_clock_text(char *tm, char *dt)
    tray's (the clock takes its click and does nothing yet). */
 static int taskbar_tray_click(int mx, int my)
 {
-    int y = video_h() - TB_H;
-    if (my < y)
+    int y = tb_top(), bh = tb_bar_h();
+    if (my < y || my >= y + bh)
         return 0;
-    if (mx >= video_w() - TB_SHOW_W) {
+    if (mx >= tb_right() - TB_SHOW_W && mx < tb_right()) {
         toggle_show_desktop();
         return 1;
     }
-    if (in_rect(mx, my, tb_net_x(), y, TB_TRAY_W, TB_H)) {
+    if (in_rect(mx, my, tb_net_x(), y, TB_TRAY_W, bh)) {
         stat_open = stat_open == STAT_NET ? STAT_NONE : STAT_NET;
         return 1;
     }
-    if (in_rect(mx, my, tb_bt_x(), y, TB_TRAY_W, TB_H)) {
+    if (ui_weave)                       /* a desktop's knot takes it there */
+        for (int i = 0; i < DESK_N; i++)
+            if (in_rect(mx, my, loom_knot_x(i) - 4, y, LOOM_KNOT_STEP, bh)) {
+                desk_switch(i);
+                return 1;
+            }
+    if (in_rect(mx, my, tb_bt_x(), y, TB_TRAY_W, bh)) {
         stat_open = stat_open == STAT_BT ? STAT_NONE : STAT_BT;
         return 1;
     }
-    return mx >= tb_clock_x();
+    return mx >= tb_clock_x() && mx < tb_right();
+}
+
+/* Weave's grain over a rounded panel: the middle and the two sides
+   between the corners, so that nothing of it lands outside them */
+static void grain_rounded(int x, int y, int w, int h, int r)
+{
+    uint32_t ink = theme_dark ? 0xFFFFFF : 0x000000;
+    gfx_grain(x + r, y, w - 2 * r, h, ink, GRAIN_INK);
+    gfx_grain(x, y + r, r, h - 2 * r, ink, GRAIN_INK);
+    gfx_grain(x + w - r, y + r, r, h - 2 * r, ink, GRAIN_INK);
+}
+
+/* Weave's loom, in place of the taskbar: one opaque strip of cloth
+   clear of the screen's edges - the spool that opens the programs at
+   its left, the programs on their thread in the middle (a short piece
+   of it under one that runs, a long one in the person's thread colour
+   under the one in front), the desktops as knots, the tray and the
+   clock at the right */
+static void draw_loom(void)
+{
+    struct dock d;
+    dock_geom(&d);
+    int x = d.x, y = d.y, w = d.w, h = d.h;
+    gfx_shadow(x, y, w, h, LOOM_R, 14, L.shadow_a, 4);
+    gfx_rrect(x, y, w, h, LOOM_R, L.dock_tint, 255);
+    grain_rounded(x, y, w, h, LOOM_R);
+    gfx_rring16(x * 16, y * 16, w * 16, h * 16, LOOM_R * 16, 16, L.dock_line,
+                255);
+    int hover = dock_hit(mouse_x, mouse_y);
+
+    /* the spool: the system's mark on a tile of the thread colour */
+    int ss = LOOM_SLOT - 6, sx = tb_start_x + 3, sy = y + (h - ss) / 2;
+    gfx_rrect(sx, sy, ss, ss, 10, L.accent, 255);
+    if (hover == TB_START || menu_on_bar())
+        gfx_rrect(sx, sy, ss, ss, 10, 0xFFFFFF, 40);
+    draw_logo(sx + (ss - TB_LOGO_D) / 2, sy + (ss - TB_LOGO_D) / 2, TB_LOGO_D,
+              L.accent_text);
+    if (hover == TB_START && !menu_open)
+        hint_above(sx + ss / 2, y - 6, "Programs");
+
+    /* the programs on their thread */
+    int n = d.n_l + d.n_w;
+    if (n > DOCK_SLOTS)
+        n = DOCK_SLOTS;
+    int ty = y + h - 7;
+    if (n)
+        gfx_fill(tb_prog_x, ty + 1, n * LOOM_SLOT, 1, L.dock_line, 255);
+    for (int k = 0; k < n; k++) {
+        int is_hover = k < d.n_l ? hover == k : hover == 100 + k - d.n_l;
+        int sxk = tb_prog_x + k * LOOM_SLOT;
+        if (is_hover)
+            gfx_rrect(sxk + 2, y + 4, LOOM_SLOT - 4, h - 8, 8, L.bar_text, 30);
+        int art, alpha = 255, piece = 0;
+        char letter;
+        const char *name;
+        uint32_t pc = L.dot;
+        if (k < d.n_l) {
+            art = icons[k].art;
+            letter = icons[k].label[0];
+            name = icons[k].label;
+            piece = launcher_running(k) ? LOOM_THREAD_RUN : 0;
+        } else {
+            int wi = win_of_tile(100 + k - d.n_l);
+            if (wi < 0)
+                continue;
+            int from = launch_icon_of(&wins[wi]);
+            art = launch_art_of(&wins[wi]);
+            letter = from >= 0 ? icons[from].label[0] : wins[wi].title[0];
+            name = wins[wi].title;
+            alpha = wins[wi].minimized ? 110 : 255;
+            piece = wi == focus_idx ? LOOM_THREAD_FOCUS : LOOM_THREAD_RUN;
+            if (wi == focus_idx)
+                pc = L.accent;
+        }
+        draw_tile(art, d.kx[k], d.ky[k], LOOM_ICON, letter, alpha);
+        if (piece)
+            gfx_rrect(d.kx[k] + LOOM_ICON / 2 - piece / 2, ty, piece, 3, 1, pc,
+                      255);
+        if (is_hover && tmenu < 0)
+            hint_above(sxk + LOOM_SLOT / 2, y - 6, name);
+    }
+
+    /* the desktops: the one on screen filled, one with windows ringed,
+       an empty one hollow */
+    for (int i = 0; i < DESK_N; i++) {
+        int used = 0;
+        for (int wi = 0; wi < MAX_WIN; wi++)
+            if (wins[wi].used && wins[wi].desk == i)
+                used = 1;
+        int state = i == cur_desk ? 2 : used ? 1 : 0;
+        gfx_knot(loom_knot_x(i), y + (h - LOOM_KNOT_D) / 2, LOOM_KNOT_D,
+                 state, i == cur_desk ? L.accent : L.dot, 255);
+    }
+
+    /* the tray and the clock */
+    int gy = y + (h - 16) / 2;
+    draw_bt_glyph(tb_bt_x() + TB_TRAY_W / 2, gy);
+    if (uvc_streaming())
+        gfx_disc16((tb_bt_x() - TB_TRAY_W / 2) * 16, (y + h / 2) * 16,
+                   CAM_DOT_D * 8, CAM_DOT_RGB, 255);
+    if (hda_mic_on())
+        gfx_disc16((tb_bt_x() - TB_TRAY_W / 2 - CAM_DOT_W) * 16,
+                   (y + h / 2) * 16, CAM_DOT_D * 8, MIC_DOT_RGB, 255);
+    draw_net_glyph(tb_net_x() + (TB_TRAY_W - 16) / 2, gy);
+    char tm[16], dt[16];
+    tb_clock_text(tm, dt);
+    int cx = tb_clock_x();
+    int tw = ui_font_width(UI_BOLD, UI_PX, tm);
+    int dw = ui_font_width(UI_SANS, UI_PX, dt);
+    ui_font_text(UI_BOLD, UI_PX, cx + TB_CLOCK_W - tw, y + h / 2 - 3, tm,
+                 L.bar_text);
+    ui_font_text(UI_SANS, UI_PX, cx + TB_CLOCK_W - dw, y + h / 2 + 13, dt,
+                 L.bar_dim);
+    gfx_fill(tb_right() - TB_SHOW_W, y + 12, 1, h - 24, L.bar_text, 60);
 }
 
 /* The Windows style's taskbar, in place of the dock */
@@ -5040,7 +5277,10 @@ static void draw_taskbar(void)
 static void draw_dock(void)
 {
     if (ui_win) {
-        draw_taskbar();
+        if (ui_weave)
+            draw_loom();
+        else
+            draw_taskbar();
         return;
     }
     struct dock d;
@@ -7574,6 +7814,7 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
     struct gfx_surface t = { (uint32_t *)win->content, win->pcw, win->pch,
                              win->pcw, video_k() };
     struct win_draw moved = *d;
+    int ox = 0, oy = 0;                /* where t starts in the window */
     if (win->clip) {
         int x0 = P(win->clx), y0 = P(win->cly);
         int x1 = P(win->clx + win->clw), y1 = P(win->cly + win->clh);
@@ -7591,11 +7832,19 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
         t.px += (long)y0 * win->pcw + x0;
         t.w = x1 - x0;
         t.h = y1 - y0;
+        ox = x0;
+        oy = y0;
         moved.x -= win->clx;
         moved.y -= win->cly;
-        if (d->op == WD_LINE) {        /* (w and h are its other end) */
-            moved.w -= win->clx;
+        if (d->op == WD_LINE || d->op == WD_THREAD) {
+            moved.w -= win->clx;       /* (w and h are its other end) */
             moved.h -= win->cly;
+        }
+        if (d->op == WD_THREAD) {      /* ... and its two pulls */
+            moved.font = WD_PACK(WD_PACKED_X(d->font) - win->clx,
+                                 WD_PACKED_Y(d->font) - win->cly);
+            moved.px = WD_PACK(WD_PACKED_X(d->px) - win->clx,
+                               WD_PACKED_Y(d->px) - win->cly);
         }
         d = &moved;
     }
@@ -7606,9 +7855,13 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
         return 0;               /* the compositor takes a window whole */
     case WD_GLASS: {
         /* the window's own background, mostly opaque: the desktop has
-           no glass of its own for programs */
+           no glass of its own for programs - and under Weave cloth: the
+           background whole, and the grain over it */
         gfx_rrect16_s(&t, d->x * 16, d->y * 16, d->w * 16, d->h * 16,
-                      r * 16, L.win_bg, 230);
+                      r * 16, L.win_bg, ui_weave ? 255 : 230);
+        if (ui_weave)
+            gfx_grain_s(&t, d->x + r, d->y, d->w - 2 * r, d->h, ox, oy,
+                        theme_dark ? 0xFFFFFF : 0x000000, GRAIN_INK);
         uint32_t c = L.win_bg;
         return (int)((((c >> 16) & 0xFF) * 77 + ((c >> 8) & 0xFF) * 150 +
                       (c & 0xFF) * 29) >> 8);
@@ -7634,6 +7887,22 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
     case WD_LINE:
         gfx_line16_s(&t, d->x * 16 + 8, d->y * 16 + 8, d->w * 16 + 8,
                      d->h * 16 + 8, r ? r : 16, d->rgb, a);
+        return 0;
+    case WD_GRAIN:
+        gfx_grain_s(&t, d->x, d->y, d->w, d->h, ox, oy, d->rgb, r);
+        return 0;
+    case WD_STITCH:
+        gfx_stitch_s(&t, d->x, d->y, d->w, d->h, r, d->rgb, a);
+        return 0;
+    case WD_KNOT:
+        gfx_knot_s(&t, d->x, d->y, d->w, r, d->rgb, a);
+        return 0;
+    case WD_THREAD:
+        gfx_thread_s(&t, d->x * 16 + 8, d->y * 16 + 8,
+                     WD_PACKED_X(d->font) * 16 + 8,
+                     WD_PACKED_Y(d->font) * 16 + 8,
+                     WD_PACKED_X(d->px) * 16 + 8, WD_PACKED_Y(d->px) * 16 + 8,
+                     d->w * 16 + 8, d->h * 16 + 8, r ? r : 16, d->rgb, a);
         return 0;
     case WD_TEXT:
         return (s ? ui_font_text_s(&t, font, px, d->x, d->y, s, d->rgb) : d->x) +
@@ -7666,21 +7935,50 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
 
 void desktop_ui_look(int which, uint32_t *out)
 {
-    const struct look *lk = which == 1 ? &look_dark : which == 2 ? &look_light
-                                                                 : &L;
+    const struct look *lk =
+        which == 1 ? (ui_weave ? &look_night : &look_dark)
+        : which == 2 ? (ui_weave ? &look_linen : &look_light) : &L;
     int dark = which == 1 ? 1 : which == 2 ? 0 : theme_dark;
     int k = 0;
     out[k++] = (uint32_t)dark;
     out[k++] = lk->win_bg;
-    out[k++] = dark ? DARK_APP_FIELD : LIGHT_APP_FIELD;
-    out[k++] = dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
-    out[k++] = dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    if (ui_weave) {
+        out[k++] = dark ? NIGHT_APP_FIELD : LINEN_APP_FIELD;
+        out[k++] = dark ? NIGHT_APP_TEXT : LINEN_APP_TEXT;
+        out[k++] = dark ? NIGHT_APP_DIM : LINEN_APP_DIM;
+    } else {
+        out[k++] = dark ? DARK_APP_FIELD : LIGHT_APP_FIELD;
+        out[k++] = dark ? DARK_APP_TEXT : LIGHT_APP_TEXT;
+        out[k++] = dark ? DARK_APP_DIM : LIGHT_APP_DIM;
+    }
     out[k++] = lk->win_line;
-    out[k++] = dark ? DARK_APP_ROW : LIGHT_APP_ROW;
+    if (ui_weave) {
+        out[k++] = dark ? NIGHT_APP_ROW : LINEN_APP_ROW;
+        out[k++] = lk->accent;
+        out[k++] = lk->accent_text;
+        out[k++] = dark ? NIGHT_APP_DANGER : LINEN_APP_DANGER;
+        out[k++] = dark ? NIGHT_APP_GOOD : LINEN_APP_GOOD;
+    } else {
+        out[k++] = dark ? DARK_APP_ROW : LIGHT_APP_ROW;
+        out[k++] = lk->accent;
+        out[k++] = lk->accent_text;
+        out[k++] = dark ? DARK_APP_DANGER : LIGHT_APP_DANGER;
+        out[k++] = dark ? DARK_APP_GOOD : LIGHT_APP_GOOD;
+    }
+    /* ProtonUI v2's words, after the eleven every program knows */
+    out[k++] = ui_weave ? UI_STYLE_WEAVE
+             : ui_win ? UI_STYLE_TASKBAR : UI_STYLE_BAR_DOCK;
+    out[k++] = dark ? DYE_INDIGO_N : DYE_INDIGO_L;
+    out[k++] = dark ? DYE_MADDER_N : DYE_MADDER_L;
+    out[k++] = dark ? DYE_SAFFRON_N : DYE_SAFFRON_L;
+    out[k++] = dark ? DYE_WELD_N : DYE_WELD_L;
+    out[k++] = dark ? DYE_WOAD_N : DYE_WOAD_L;
+    out[k++] = dark ? DYE_COCHINEAL_N : DYE_COCHINEAL_L;
+    /* the person's own thread: the accent they chose */
     out[k++] = lk->accent;
-    out[k++] = lk->accent_text;
-    out[k++] = dark ? DARK_APP_DANGER : LIGHT_APP_DANGER;
-    out[k++] = dark ? DARK_APP_GOOD : LIGHT_APP_GOOD;
+    out[k++] = ui_weave ? GRAIN_INK : 0;  /* no grain but Weave's */
+    out[k++] = CONTROL_R;
+    out[k++] = DENSITY_POINTER;
 }
 
 int desktop_win_text(int winid, int owner, int x, int y, const char *s,
@@ -8111,11 +8409,19 @@ static void idle_settings(void)
     dock_magnify = config_get_num("dockmag", 0) != 0;
     bar_autohide = config_get_num("barhide", 0) != 0;
     const char *lay = config_get("layout");
-    int win_style = lay && !strcmp(lay, "windows");
-    if (win_style != ui_win) {
+    int weave = lay && !strcmp(lay, "weave");
+    int win_style = weave || (lay && !strcmp(lay, "windows"));
+    if (win_style != ui_win || weave != ui_weave) {
         ui_win = win_style;
+        ui_weave = weave;
         dock_moved = 1;
-        printk("[desktop] the %s style\n", ui_win ? "Windows" : "Mac");
+        printk("[desktop] the %s style\n",
+               ui_weave ? "Weave" : ui_win ? "Windows" : "Mac");
+        /* every window draws itself again in it: the look a program
+           reads names the style, and its panels become cloth */
+        for (int i = 0; i < MAX_WIN; i++)
+            if (wins[i].used)
+                win_enqueue(&wins[i], WEV_LOOK, 0, 0, 0);
     }
     int hide = config_get_num("dockhide", 0) != 0;
     if (hide != dock_autohide) {

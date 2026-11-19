@@ -45,6 +45,11 @@
 #define UD_OP_CLIP    12
 #define UD_OP_GLASS   13
 #define UD_OP_HOLD    14
+/* Weave's marks (ProtonUI v2) */
+#define UD_OP_GRAIN   15
+#define UD_OP_STITCH  16
+#define UD_OP_KNOT    17
+#define UD_OP_THREAD  18
 
 /* The theme's colours, as the desktop hands them out (in this order) */
 struct ud_look {
@@ -56,11 +61,39 @@ struct ud_look {
     uint32_t row;             /* a stripe, a row under the pointer */
     uint32_t accent, on_accent;
     uint32_t danger, good;
+    /* ProtonUI v2 (docs/protonui-plan.md): the desktop fills these only
+       for a program that says it knows them, so one built before them
+       still gets exactly the eleven words above */
+    uint32_t style;           /* UD_STYLE_*: the desktop's style */
+    uint32_t dye[6];          /* Weave's dyes in this theme: UD_INDIGO.. */
+    uint32_t thread;          /* the person's own focus colour */
+    uint32_t grain;           /* the grain tile's ink, 0..255 (0: none) */
+    uint32_t radius;          /* a control's corners */
+    uint32_t density;         /* UD_POINTER or UD_FINGER */
 };
+
+/* UI_LOOK_MAX words (kernel/include/desktop.h): the kernel fills no
+   more than the struct says, and a struct that grew without the kernel
+   would be filled short - this stops the build instead */
+typedef char ud_look_is_22_words[sizeof(struct ud_look) == 22 * 4 ? 1 : -1];
+
+/* What kernel/include/desktop.h and look.h call them */
+#define UD_STYLE_BAR_DOCK 0
+#define UD_STYLE_TASKBAR  1
+#define UD_STYLE_WEAVE    2
+#define UD_STYLE_PHONE    3
+#define UD_INDIGO    0       /* focus, the one thread; primary buttons */
+#define UD_MADDER    1       /* close, delete, errors */
+#define UD_SAFFRON   2       /* warnings, the microphone is on */
+#define UD_WELD      3       /* done, connected, the camera is on */
+#define UD_WOAD      4       /* links, the network */
+#define UD_COCHINEAL 5       /* media: music, pictures, sound */
+#define UD_POINTER   0
+#define UD_FINGER    1
 
 static inline void ud_look(struct ud_look *l)
 {
-    sys_ui_look((uint32_t *)l);
+    sys_ui_look_n(0, (uint32_t *)l, sizeof(*l) / sizeof(uint32_t));
 }
 
 /* The colours of a theme that may not be the one in use - to show it
@@ -69,7 +102,7 @@ static inline void ud_look(struct ud_look *l)
 #define UD_LIGHT 2
 static inline void ud_look_of(int which, struct ud_look *l)
 {
-    sys_ui_look_of(which, (uint32_t *)l);
+    sys_ui_look_n(which, (uint32_t *)l, sizeof(*l) / sizeof(uint32_t));
 }
 
 static inline int ud_op(int win, int op, int x, int y, int w, int h, int r,
@@ -223,6 +256,53 @@ static inline void ud_text_right_l(int win, int x, int y, const char *s,
                                    uint32_t rgb, int font, int px)
 {
     ud_text_l(win, x - ud_width_l(s, font, px), y, s, rgb, font, px);
+}
+
+/* --- Weave's marks (ProtonUI v2, docs/WEAVE.md) ------------------------ */
+
+/* The grain: the 3x3 woven tile over a rectangle, in the ink colour at
+   'ink' of 255 - struct ud_look's grain says how much the style wants
+   (0: none). Counted from the window's corner, so rectangles side by
+   side are one cloth. */
+static inline void ud_grain(int win, int x, int y, int w, int h,
+                            uint32_t rgb, int ink)
+{
+    ud_op(win, UD_OP_GRAIN, x, y, w, h, ink, rgb, 0, 0, 0, (const char *)0);
+}
+
+/* A stitch, two pixels across: the line between parts of one surface,
+   under a field at rest, the unset part of a slider */
+#define UD_STITCH_W 2
+static inline void ud_stitch(int win, int x, int y, int len, int vertical,
+                             uint32_t rgb)
+{
+    ud_op(win, UD_OP_STITCH, x, y, vertical ? UD_STITCH_W : len,
+          vertical ? len : UD_STITCH_W, 0, rgb, 0, 0, 0, (const char *)0);
+}
+
+/* A knot, d across: hollow is empty, ringed has something in it,
+   filled is here */
+#define UD_KNOT_HOLLOW 0
+#define UD_KNOT_RINGED 1
+#define UD_KNOT_FILLED 2
+static inline void ud_knot(int win, int x, int y, int d, int state,
+                           uint32_t rgb)
+{
+    ud_op(win, UD_OP_KNOT, x, y, d, d, state, rgb, 0, 0, 0, (const char *)0);
+}
+
+/* A thread: the curve from (x0, y0) to (x3, y3), pulled towards (x1, y1)
+   and (x2, y2), 'width' sixteenths of a pixel wide, at 'a' of 255 */
+static inline void ud_thread(int win, int x0, int y0, int x1, int y1,
+                             int x2, int y2, int x3, int y3, int width,
+                             uint32_t rgb, int a)
+{
+    struct win_draw_cmd c = {
+        UD_OP_THREAD, x0, y0, x3, y3, width, rgb, 0, a,
+        (int)((uint32_t)(uint16_t)x1 << 16 | (uint16_t)y1),
+        (int)((uint32_t)(uint16_t)x2 << 16 | (uint16_t)y2), (const char *)0
+    };
+    sys_win_draw(win, &c);
 }
 
 #endif

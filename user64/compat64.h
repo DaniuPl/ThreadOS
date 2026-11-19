@@ -172,6 +172,14 @@ static inline int32_t sys_ui_look(uint32_t *out)
     return sys_ui_look_of(0, out);
 }
 
+/* The same, 'words' of it (ProtonUI v2's look is longer than the
+   eleven words above, and the kernel fills no more than asked for) */
+static inline int32_t sys_ui_look_n(int which, uint32_t *out, int words)
+{
+    return (int32_t)syscall64(SYS64_UI_LOOK, (int64_t)(uintptr_t)out,
+                              (which & 0xFF) | (words & 0xFF) << 8);
+}
+
 static inline int32_t sys_notify(const char *title, const char *text)
 {
     return (int32_t)syscall64(SYS64_NOTIFY, (int64_t)(uintptr_t)title,

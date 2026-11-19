@@ -5,7 +5,11 @@ Weave is the third desktop style, next to the two ThreadOS already has
 other two borrow what people know from elsewhere; Weave is ThreadOS's
 own, and it takes its ideas from the name: a thread, cloth, a loom.
 
-This document is the design, not the code. Nothing of it is built yet.
+This document is the design. What is built, and how far, is in
+[protonui-plan.md](protonui-plan.md): the look programs read with the
+dyes, the grain, stitches, knots and threads as drawing operations, and
+the Weave style itself (`layout weave`: the loom, the selvedge, cloth
+for glass, the warp).
 The mock-ups are in `docs/weave/canvas/` (one `.dc.html` file per
 screen, laid out by `canvas.json`), and on the design canvas they were
 drawn on: https://claude.ai/artifact/AG3KVaL3nxBS3a3zosmn3B

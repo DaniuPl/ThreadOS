@@ -89,6 +89,34 @@
 #define LIGHT_MIN    0xFEBC2E
 #define LIGHT_ZOOM   0x28C840
 
+/* --- Weave's dyes (docs/WEAVE.md) ------------------------------------------
+   Six colours named after real dyes, each with one job, in the dark
+   theme (Night) and the light one (Linen). Programs get them through
+   SYS64_UI_LOOK (ProtonUI v2, user/udraw.h) in this order. */
+#define DYE_INDIGO_N     0x5B7CFA    /* focus, the one thread; primary buttons */
+#define DYE_INDIGO_L     0x3F5EE8
+#define DYE_MADDER_N     0xE5484D    /* close, delete, errors */
+#define DYE_MADDER_L     0xC9302C
+#define DYE_SAFFRON_N    0xF5A524    /* warnings, the microphone is on */
+#define DYE_SAFFRON_L    0xB86E00
+#define DYE_WELD_N       0x46C27A    /* done, connected, the camera is on */
+#define DYE_WELD_L       0x1E8A4C
+#define DYE_WOAD_N       0x2EC4C4    /* links, the network, Weft */
+#define DYE_WOAD_L       0x1E7F86
+#define DYE_COCHINEAL_N  0xD152A6    /* media: music, pictures, sound */
+#define DYE_COCHINEAL_L  0xC2366F
+
+/* The grain: a 3x3 tile copied over a flat fill, at this much ink of
+   255 (about 2 %) - under Weave only; the other styles have none */
+#define GRAIN_TILE       3
+#define GRAIN_INK        5
+/* A control's corners (UG_R in user/ugui.h) */
+#define CONTROL_R        6
+/* How a window is used: with a pointer, or with a finger (the phone,
+   a tablet in Touch mode) - rows and targets grow for a finger */
+#define DENSITY_POINTER  0
+#define DENSITY_FINGER   1
+
 /* --- the dock ----------------------------------------------------------- */
 #define DOCK_TILE_S  26      /* the 'dock' setting: 0 small */
 #define DOCK_TILE_M  34      /*                     1 medium */
@@ -240,6 +268,96 @@
 #define DARK_ACCENT        0x0A84FF
 #define DARK_ACCENT_TEXT   0xFFFFFF
 
+/* --- Weave (docs/WEAVE.md): cloth, not glass ---------------------------------
+ * The third style ('layout weave'): every surface opaque with the grain
+ * over it, the focus one thread of colour. Its two themes are Night and
+ * Linen; the fields are the same as the two above, so the compositor
+ * takes either set as it takes those. Nothing is see-through: the
+ * alphas are whole, which is what makes cloth cheap. */
+#define NIGHT_BAR_TINT     0x181A20
+#define NIGHT_BAR_A        255
+#define NIGHT_BAR_TEXT     0xECEDF2
+#define NIGHT_BAR_DIM      0x8A90A0
+#define NIGHT_TITLE_BG     0x21242C
+#define NIGHT_TITLE_OFF    0x1B1D24
+#define NIGHT_TITLE_TEXT   0xECEDF2
+#define NIGHT_TITLE_DIM    0x7D8391
+#define NIGHT_WIN_BG       0x1A1C23
+#define NIGHT_WIN_LINE     0x2E323D
+#define NIGHT_LIGHT_OFF    0x5F6573
+#define NIGHT_MENU_BG      0x1F2229
+#define NIGHT_MENU_A       255
+#define NIGHT_MENU_TEXT    0xECEDF2
+#define NIGHT_DOCK_TINT    0x181A20
+#define NIGHT_DOCK_A       255
+#define NIGHT_DOCK_LINE    0x2E323D
+#define NIGHT_DOCK_LINE_A  255
+#define NIGHT_DOT          0x9AA0AE
+#define NIGHT_HINT_BG      0x2A2D36
+#define NIGHT_HINT_TEXT    0xECEDF2
+#define NIGHT_SHADOW_A     140
+#define NIGHT_ACCENT       0x5B7CFA   /* Indigo */
+#define NIGHT_ACCENT_TEXT  0xFFFFFF
+#define NIGHT_GROUND       0x0D0F15   /* the warp's dark loom */
+
+#define LINEN_BAR_TINT     0xEFEBE3
+#define LINEN_BAR_A        255
+#define LINEN_BAR_TEXT     0x1D1C1A
+#define LINEN_BAR_DIM      0x6E6A62
+#define LINEN_TITLE_BG     0xEFEBE3
+#define LINEN_TITLE_OFF    0xF3F0E9
+#define LINEN_TITLE_TEXT   0x1D1C1A
+#define LINEN_TITLE_DIM    0x8E897F
+#define LINEN_WIN_BG       0xF6F3EC
+#define LINEN_WIN_LINE     0xCFC8BA
+#define LINEN_LIGHT_OFF    0xB4AEA2
+#define LINEN_MENU_BG      0xF6F3EC
+#define LINEN_MENU_A       255
+#define LINEN_MENU_TEXT    0x1D1C1A
+#define LINEN_DOCK_TINT    0xEFEBE3
+#define LINEN_DOCK_A       255
+#define LINEN_DOCK_LINE    0xCFC8BA
+#define LINEN_DOCK_LINE_A  255
+#define LINEN_DOT          0x6E6A62
+#define LINEN_HINT_BG      0xFFFFFF
+#define LINEN_HINT_TEXT    0x1D1C1A
+#define LINEN_SHADOW_A     80
+#define LINEN_ACCENT       0x3F5EE8
+#define LINEN_ACCENT_TEXT  0xFFFFFF
+#define LINEN_GROUND       0xE9E4DA
+
+/* Weave's wallpaper, the warp (kernel/aurora.c): the ground, a faint
+   6x6 weave over it (a warp thread down every sixth column at
+   WARP_COL_INK, a weft thread along every sixth row, from the third,
+   at WARP_ROW_INK - white on Night, black on Linen), and threads of
+   the dyes crossing it. Each thread: its dye (0..5 as DYE_*, 6 the
+   person's own thread colour), a glow's width (sixteenths of a pixel)
+   and strength (of 255, 0: none), its core's width and strength, then
+   two cubic curves joined smoothly - P0, C1, C2, P1, C2', P2 in
+   thousandths of the screen's width and height, the second curve's
+   first pull being the first's second mirrored through P1 */
+#define WARP_COL_INK       6
+#define WARP_ROW_INK       4
+#define WARP_N             5
+#define WARP_THREADS { \
+    { 3, 192, 20, 24,  89, { -28, 578, 264, 422, 319, 733, 528, 522, 833, 211, 1042, 256 } }, \
+    { 5, 224, 23, 32, 128, { -28, 644, 236, 500, 333, 800, 549, 589, 847, 278, 1042, 333 } }, \
+    { 6, 256, 31, 48, 191, { -28, 711, 208, 600, 361, 867, 569, 644, 861, 356, 1042, 411 } }, \
+    { 4, 192, 23, 32, 128, { -28, 778, 181, 689, 389, 933, 597, 700, 875, 433, 1042, 489 } }, \
+    { 2,   0,  0, 24,  82, { -28, 844, 208, 800, 417, 978, 625, 756, 889, 522, 1042, 567 } } }
+
+/* Weave's sizes */
+#define SELVEDGE_H         3       /* the thread along the window in front */
+#define LOOM_H             52      /* the loom along the bottom ... */
+#define LOOM_GAP           10      /* ... this far from the edges */
+#define LOOM_R             12
+#define LOOM_SLOT          44      /* one program on it */
+#define LOOM_ICON          32
+#define LOOM_THREAD_RUN    14      /* the thread under a program that runs */
+#define LOOM_THREAD_FOCUS  30      /* ... and under the one in front */
+#define LOOM_KNOT_D        10      /* a desktop's knot */
+#define CAPSULE_BTN        16      /* a window button in the capsule */
+
 /* --- the programs' own colours ----------------------------------------------
  * What a program draws its window in (desktop_ui_look): its background
  * is the window's body (..._WIN_BG); these are the rest. */
@@ -255,6 +373,19 @@
 #define DARK_APP_ROW       0x34343B
 #define DARK_APP_DANGER    0xFF453A
 #define DARK_APP_GOOD      0x30D158
+
+#define NIGHT_APP_FIELD    0x121419
+#define NIGHT_APP_TEXT     0xECEDF2
+#define NIGHT_APP_DIM      0x8A90A0
+#define NIGHT_APP_ROW      0x262A33
+#define NIGHT_APP_DANGER   0xE5484D   /* Madder */
+#define NIGHT_APP_GOOD     0x46C27A   /* Weld */
+#define LINEN_APP_FIELD    0xFFFFFF
+#define LINEN_APP_TEXT     0x1D1C1A
+#define LINEN_APP_DIM      0x6E6A62
+#define LINEN_APP_ROW      0xE6E1D6
+#define LINEN_APP_DANGER   0xC9302C
+#define LINEN_APP_GOOD     0x1E8A4C
 
 /* The colours of one theme, as the compositor uses them */
 struct look {

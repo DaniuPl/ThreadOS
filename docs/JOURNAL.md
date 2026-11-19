@@ -11107,3 +11107,81 @@ works and is checked by `make test`.
       and t_terminal waits for a program to be done ("running... ^C"
       gone), not only for the input line's prompt, which is always on
       the screen.
+- [x] **ProtonUI v2 stages 1-2: the longer look, and Weave's four marks**
+      (kernel/include/desktop.h, kernel/include/look.h, kernel/desktop.c,
+      kernel/gfx.c, kernel/include/gfx.h, kernel64/syscall64.c,
+      kernelarm64/proc.c, kernelarm64/winmob.c, user/udraw.h,
+      user64/compat64.h, user/pumarks.c, libc/tests/pulook.c,
+      scripts/tests/t_protonui.py, t_arm64win.py, docs/protonui-plan.md)
+      The first two stages of docs/protonui-plan.md, the toolkit Weave
+      (docs/WEAVE.md) needs. The look a program reads grows from eleven
+      words to twenty-two: the desktop's style, Weave's six dyes in the
+      theme (Indigo, Madder, Saffron, Weld, Woad, Cochineal; Night and
+      Linen, in look.h), the person's thread colour (their accent), the
+      grain's ink, a control's corners and the density (pointer on the
+      PC, finger on the phone). SYS64_UI_LOOK takes how many words the
+      program knows in the byte above the theme, so a program built
+      before - which asks with nothing there - gets exactly the eleven
+      it has room for; struct ud_look grows at its end and says its
+      size, and a build stops if the two drift apart. Four drawing
+      operations, in kernel/gfx.c so the PC and the phone draw them
+      alike: WD_GRAIN, the 3x3 woven tile laid over a rectangle as a
+      copy, counted from the window's corner so two rectangles are one
+      cloth; WD_STITCH, a dashed line; WD_KNOT, a circle hollow, ringed
+      or filled; WD_THREAD, a cubic curve with soft edges - and
+      ud_grain, ud_stitch, ud_knot, ud_thread in user/udraw.h. The
+      grain is laid on any screen: on one not four bytes a pixel (the
+      firmware's 24-bit screen the tests start with) a pixel at a time,
+      as everything else is drawn there.
+      t_protonui (new): libc/tests/pulook fills its arrays with a guard
+      word and asks the old way, for 22, for 64, for each theme; the
+      guard stands after the eleventh and the twenty-second word, the
+      dyes are look.h's; t_arm64win runs the same program on the phone.
+      user/pumarks draws the four marks on a colour only its window
+      has; the test finds the window by it and compares the grain pixel
+      for pixel with its definition (also through a clip), the
+      stitches' dashes, the three knots' middles and edges, and the
+      thread through its Bezier curve's points with the cloth beside it
+      untouched.
+- [x] **Weave, stage 3: ThreadOS's own desktop style** (kernel/desktop.c,
+      kernel/include/look.h, kernel/aurora.c, kernel/include/aurora.h,
+      kernel/gfx.c, kernel/config.c, user/gsettings.c,
+      scripts/tests/t_weave.py, docs/WEAVE.md, docs/protonui-plan.md)
+      'layout weave', the third style beside the bar and dock and the
+      taskbar (Settings, Desktop & Dock), as docs/WEAVE.md draws it.
+      Cloth, not glass: every surface opaque with the 3x3 grain over it -
+      the title bars, the loom, a program's panel (WD_GLASS answers with
+      cloth) - two themes of its own, Night and Linen, in look.h as the
+      other two are. One thread: the window in front carries the
+      selvedge, three pixels of the person's thread colour along its
+      top - over the window's outline, between its corners, so that it
+      is three whole pixels - and nothing else on the screen marks
+      focus. The loom stands
+      along the bottom clear of the edges, in place of the taskbar whose
+      places it keeps: the spool with the system's mark at its left, the
+      programs on their thread with a short piece under one that runs
+      and a long one in the thread colour under the one in front, the
+      four desktops as knots (filled the one on screen, ringed one with
+      windows, hollow an empty one - a click on a knot goes there), the
+      tray and the clock. A window's buttons sit at the right in one
+      capsule, close the only madder one. The wallpaper is the warp:
+      Night's or Linen's ground with a faint 6x6 weave and five threads
+      of the dyes crossing it, one in the person's own colour - each
+      thread gathered as the most any of its pieces covers a pixel, then
+      laid on once, so it does not bead where pieces meet. A program
+      asking for the look hears the Weave style, the grain's ink and
+      the theme's colours. Window sizes stay those of the other styles,
+      so no program's layout moves; loom view (the launcher full
+      screen) is still to come - the spool opens the programs' menu.
+      t_weave (new): the loom's cloth and grain read to the pixel
+      against their definitions computed in the test, the loom clear of
+      the screen's edges; the warp's ground and weave to the pixel on a
+      patch the test finds clear of every thread by drawing the threads'
+      curves itself from look.h, and the person's thread through its
+      curve's middle; the selvedge on a program started from the loom
+      and on the next one when it comes to the front, the first
+      window's bar then - the second dragged out of its way - the cloth
+      of one without focus where its selvedge was; the long piece of
+      thread under the program in front, a knot taking the screen to an
+      empty desktop, the style and colours pulook hears, and the Mac
+      style back with the warp gone.

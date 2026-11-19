@@ -351,6 +351,7 @@ static int64_t draw_into(const struct window *w, const struct win_draw *d,
 
     struct gfx_surface t = { snap.px, ww, wh, ww, video_k() };
     struct win_draw moved = *d;
+    int ox = 0, oy = 0;                  /* where t starts in the window */
     if (snap.clip) {
         /* the box's part of the pixels, and what is drawn moved by as
            much: nothing drawn can leave it */
@@ -370,11 +371,19 @@ static int64_t draw_into(const struct window *w, const struct win_draw *d,
         t.px += (long)y0 * ww + x0;
         t.w = x1 - x0;
         t.h = y1 - y0;
+        ox = x0;
+        oy = y0;
         moved.x -= snap.clx;
         moved.y -= snap.cly;
-        if (d->op == WD_LINE) {          /* (w and h are its other end) */
-            moved.w -= snap.clx;
+        if (d->op == WD_LINE || d->op == WD_THREAD) {
+            moved.w -= snap.clx;         /* (w and h are its other end) */
             moved.h -= snap.cly;
+        }
+        if (d->op == WD_THREAD) {        /* ... and its two pulls */
+            moved.font = WD_PACK(WD_PACKED_X(d->font) - snap.clx,
+                                 WD_PACKED_Y(d->font) - snap.cly);
+            moved.px = WD_PACK(WD_PACKED_X(d->px) - snap.clx,
+                               WD_PACKED_Y(d->px) - snap.cly);
         }
         d = &moved;
     }
@@ -407,6 +416,22 @@ static int64_t draw_into(const struct window *w, const struct win_draw *d,
     case WD_LINE:
         gfx_line16_s(&t, d->x * 16 + 8, d->y * 16 + 8, d->w * 16 + 8,
                      d->h * 16 + 8, r ? r : 16, d->rgb, a);
+        break;
+    case WD_GRAIN:
+        gfx_grain_s(&t, d->x, d->y, d->w, d->h, ox, oy, d->rgb, r);
+        break;
+    case WD_STITCH:
+        gfx_stitch_s(&t, d->x, d->y, d->w, d->h, r, d->rgb, a);
+        break;
+    case WD_KNOT:
+        gfx_knot_s(&t, d->x, d->y, d->w, r, d->rgb, a);
+        break;
+    case WD_THREAD:
+        gfx_thread_s(&t, d->x * 16 + 8, d->y * 16 + 8,
+                     WD_PACKED_X(d->font) * 16 + 8,
+                     WD_PACKED_Y(d->font) * 16 + 8,
+                     WD_PACKED_X(d->px) * 16 + 8, WD_PACKED_Y(d->px) * 16 + 8,
+                     d->w * 16 + 8, d->h * 16 + 8, r ? r : 16, d->rgb, a);
         break;
     case WD_TEXT:
     case WD_LTEXT:
