@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: the PIN</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <div style="height: 44px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600">12:36</div>
+  <div style="padding-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 12px">
+    <span style="width: 64px; height: 64px; box-sizing: border-box; border-radius: 50%; border: 3px solid #5B7CFA; padding: 3px"><span style="display: flex; width: 100%; height: 100%; border-radius: 50%; background: #5B7CFA; align-items: center; justify-content: center; font-size: 22px; font-weight: 800">A</span></span>
+    <div style="font-size: 17px; font-weight: 700">Alex</div>
+    <div style="font-size: 13.5px; color: #9AA0AE">{{hint}}</div>
+  </div>
+
+  <!-- six knots on a thread: each digit ties one -->
+  <div aria-label="{{count}} of 6 digits" style="position: relative; margin: 26px auto 0; width: 230px; height: 20px">
+    <div style="position: absolute; left: 0; right: 0; top: 9px; height: 2px; background: #2E323D"></div>
+    <div style="position: absolute; left: 0; top: 9px; height: 2px; width: {{lineW}}; background: #5B7CFA"></div>
+    <div style="position: absolute; inset: 0; display: flex; justify-content: space-between; align-items: center">
+      <sc-for list="{{knots}}" as="k" hint-placeholder-count="6"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{k.fill}}; border: 2px solid {{k.ring}}"></span></sc-for>
+    </div>
+  </div>
+
+  <div style="margin: 44px auto 0; width: 300px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); row-gap: 16px; justify-items: center">
+    <sc-for list="{{keys}}" as="k" hint-placeholder-count="12">
+      <button aria-label="{{k.label}}" onClick="{{k.press}}" style="width: 76px; height: 76px; border-radius: 50%; border: {{k.line}}; background: {{k.bg}}; color: #ECEDF2; font: 600 28px Inter, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 0; opacity: {{k.op}}">{{k.t}}<span style="font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em; color: #8A90A0">{{k.sub}}</span></button>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{done}}" hint-placeholder-val="{{ false }}">
+    <a href="Phone.dc.html" style="position: absolute; left: 20px; right: 20px; bottom: 40px; display: flex; align-items: center; justify-content: center; height: 54px; border-radius: 16px; background: #5B7CFA; color: #FFFFFF; font: 700 16px Inter, sans-serif; text-decoration: none">Open</a>
+  </sc-if>
+  <sc-if value="{{notDone}}" hint-placeholder-val="{{ true }}">
+    <a href="PhoneLock.dc.html" style="position: absolute; left: 0; right: 0; bottom: 52px; text-align: center; font-size: 14px; text-decoration: none">Cancel</a>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pin = (this.state && this.state.pin != null) ? this.state.pin : '48';
+    const n = pin.length;
+    const press = (d) => () => {
+      const p = (this.state && this.state.pin != null) ? this.state.pin : '48';
+      if (d === 'del') this.setState({ pin: p.slice(0, -1) });
+      else if (p.length < 6) this.setState({ pin: p + d });
+    };
+    const knots = [0, 1, 2, 3, 4, 5].map((i) => ({ fill: i < n ? '#5B7CFA' : '#0D0F15', ring: i < n ? '#5B7CFA' : (i === n ? '#ECEDF2' : '#4A4F5C') }));
+    const L = ['', 'ABC', 'DEF', 'GHI', 'JKL', 'MNO', 'PQRS', 'TUV', 'WXYZ'];
+    const keys = [];
+    for (let d = 1; d <= 9; d++) keys.push({ t: String(d), sub: L[d - 1], label: String(d), press: press(String(d)), bg: '#1A1C23', line: '1px solid #2E323D', op: 1 });
+    keys.push({ t: '', sub: '', label: 'Nothing here', press: () => {}, bg: 'transparent', line: '0', op: 0 });
+    keys.push({ t: '0', sub: '', label: '0', press: press('0'), bg: '#1A1C23', line: '1px solid #2E323D', op: 1 });
+    keys.push({ t: '⌫', sub: '', label: 'Delete', press: press('del'), bg: 'transparent', line: '0', op: 1 });
+    const done = n === 6;
+    return { knots, keys, count: n, lineW: (n === 0 ? 0 : Math.min(100, (n - 1) * 20)) + '%', done, notDone: !done, hint: done ? 'Six knots tied' : 'Your PIN' };
+  }
+}
+</script>
+</body>
+</html>

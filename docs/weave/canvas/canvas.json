@@ -376,6 +376,68 @@
       "h": 844,
       "title": "Phone: the shade",
       "page": "apps2"
+    },
+    "Sliders.dc.html": {
+      "x": 0,
+      "y": 3060,
+      "w": 1440,
+      "h": 900,
+      "title": "Sound and light sliders",
+      "page": "apps2",
+      "is_interactive": true
+    },
+    "PhoneDrawer.dc.html": {
+      "x": 1520,
+      "y": 3060,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: the drawer, every program",
+      "page": "apps2",
+      "is_interactive": true
+    },
+    "PhoneLock.dc.html": {
+      "x": 1990,
+      "y": 3060,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: locked",
+      "page": "apps2"
+    },
+    "PhoneUnlock.dc.html": {
+      "x": 2460,
+      "y": 3060,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: the PIN",
+      "page": "apps2",
+      "is_interactive": true
+    },
+    "Skein.dc.html": {
+      "x": 0,
+      "y": 4080,
+      "w": 1440,
+      "h": 900,
+      "title": "Skein: the music player — Night",
+      "page": "apps2",
+      "is_interactive": true
+    },
+    "Notify.dc.html": {
+      "x": 1520,
+      "y": 4080,
+      "w": 1440,
+      "h": 900,
+      "title": "Notifications: Threads",
+      "page": "apps2",
+      "is_interactive": true
+    },
+    "ProtonUI.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1280,
+      "h": 4200,
+      "title": "ProtonUI v2: technical page",
+      "page": "protonui",
+      "expand": "fill"
     }
   },
   "createdOnFiles": {
@@ -441,7 +503,7 @@
     "apps2": {
       "x": 0,
       "y": -300,
-      "text": "More apps: Strand, Purl, Settings, Market",
+      "text": "More apps: Strand, Purl, Settings, Market, and the phone",
       "kind": "title1",
       "maxW": 3430,
       "page": "apps2"
@@ -493,7 +555,14 @@
     "Market.dc.html",
     "MarketApp.dc.html",
     "Lock.dc.html",
-    "PhoneShade.dc.html"
+    "PhoneShade.dc.html",
+    "Sliders.dc.html",
+    "PhoneDrawer.dc.html",
+    "PhoneLock.dc.html",
+    "PhoneUnlock.dc.html",
+    "Skein.dc.html",
+    "Notify.dc.html",
+    "ProtonUI.dc.html"
   ],
   "pages": [
     {
@@ -515,6 +584,10 @@
     {
       "id": "apps2",
       "name": "More apps"
+    },
+    {
+      "id": "protonui",
+      "name": "ProtonUI v2"
     }
   ],
   "title": "Design"

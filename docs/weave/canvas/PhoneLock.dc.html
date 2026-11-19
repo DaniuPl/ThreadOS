@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: locked</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <svg aria-hidden="true" width="390" height="844" viewBox="0 0 390 844" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -20 330 C 80 270, 160 390, 240 330 S 360 250, 420 290" stroke="#5B7CFA" stroke-opacity="0.75" stroke-width="3"></path>
+    <path d="M -20 360 C 90 310, 170 420, 250 360 S 360 290, 420 320" stroke="#D152A6" stroke-opacity="0.45" stroke-width="2"></path>
+    <path d="M -20 390 C 100 350, 180 450, 260 390 S 370 330, 420 350" stroke="#2EC4C4" stroke-opacity="0.4" stroke-width="2"></path>
+  </svg>
+  <div style="position: relative; height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 13px; font-weight: 600"><span style="display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#ECEDF2" stroke-width="2.6" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>Locked</span><span>71%</span></div>
+  <div style="position: relative; padding-top: 30px; display: flex; flex-direction: column; align-items: center">
+    <div style="font-size: 16px; font-weight: 500; color: #C9CDD8">Thursday, 19 November</div>
+    <div style="font-size: 92px; font-weight: 800; letter-spacing: -0.05em; line-height: 1">12:36</div>
+  </div>
+
+  <!-- while locked, notifications say who, never what -->
+  <div style="position: relative; margin: 150px 16px 0; display: flex; flex-direction: column; gap: 8px">
+    <sc-for list="{{notes}}" as="n" hint-placeholder-count="2">
+      <div style="display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 18px; background: rgba(26,28,35,0.92); border: 1px solid #2E323D">
+        <span style="width: 34px; height: 34px; border-radius: 50%; background: {{n.dye}}; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px">{{n.glyph}}</span>
+        <span style="flex-grow: 1"><span style="display: block; font-size: 14px; font-weight: 700">{{n.title}}</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">{{n.sub}}</span></span>
+        <span style="font-size: 11.5px; color: #8A90A0">{{n.when}}</span>
+      </div>
+    </sc-for>
+  </div>
+
+  <!-- the shuttle rides the thread on the lock screen too -->
+  <div style="position: absolute; left: 50%; bottom: 120px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 8px 0 10px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 12px 30px rgba(0,0,0,0.5)">
+    <span style="width: 30px; height: 30px; border-radius: 50%; background: #B23D8C"></span>
+    <span style="font-size: 13.5px; font-weight: 600; white-space: nowrap">Warp and weft · Skein</span>
+    <button aria-label="Pause" style="width: 32px; height: 32px; border-radius: 50%; border: 0; background: #ECEDF2; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="#0D0F15"><rect x="6" y="5" width="4" height="14" rx="1"></rect><rect x="14" y="5" width="4" height="14" rx="1"></rect></svg></button>
+  </div>
+  <div style="position: absolute; left: 50%; bottom: 84px; width: 2px; height: 36px; background: #B23D8C"></div>
+
+  <button aria-label="Torch" style="position: absolute; left: 30px; bottom: 50px; width: 52px; height: 52px; border-radius: 50%; border: 1px solid #353A46; background: rgba(31,34,41,0.92); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ECEDF2" stroke-width="2" stroke-linejoin="round"><path d="M8 3h8l-1 6H9z"></path><path d="M9 9h6v12H9z"></path></svg></button>
+  <a href="#" aria-label="Camera" style="position: absolute; right: 30px; bottom: 50px; width: 52px; height: 52px; box-sizing: border-box; border-radius: 50%; border: 1px solid #353A46; background: rgba(31,34,41,0.92); display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#ECEDF2" stroke-width="2" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"></path><circle cx="12" cy="13" r="3.5"></circle></svg></a>
+  <a href="PhoneUnlock.dc.html" style="position: absolute; left: 0; right: 0; bottom: 34px; text-align: center; font-size: 13px; color: #C9CDD8; text-decoration: none">Swipe up to open</a>
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+    <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #3A3F4C"></div>
+    <div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #0D0F15; border: 2px solid #ECEDF2"></span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      notes: [
+        { glyph: 'N', dye: '#D152A6', title: 'Ania', sub: 'Purl · 2 messages', when: 'now' },
+        { glyph: 'F', dye: '#F5A524', title: 'Family', sub: 'Ola got somewhere', when: '1 h' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

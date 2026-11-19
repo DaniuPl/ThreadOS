@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ProtonUI v2</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0B0C10}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <div style="max-width: 1120px; margin: 0 auto; padding: 56px 24px 80px; display: flex; flex-direction: column; gap: 56px">
+
+    <header style="display: flex; flex-direction: column; gap: 14px">
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; font-size: 12px; font-weight: 700">
+        <span style="padding: 4px 10px; border-radius: 999px; background: #5B7CFA">ProtonUI v2</span>
+        <span style="padding: 4px 10px; border-radius: 999px; border: 1px dashed #4A4F5C; color: #C9CDD8">Proposal · not built</span>
+        <span style="padding: 4px 10px; border-radius: 999px; border: 1px solid #2E323D; color: #9AA0AE">for Weave, and the two other styles</span>
+      </div>
+      <h1 style="margin: 0; font-size: clamp(36px, 6vw, 60px); line-height: 1.05; font-weight: 800; letter-spacing: -0.03em">ProtonUI v2: the toolkit<br>every ThreadOS window is made of</h1>
+      <p style="margin: 0; font-size: 18px; line-height: 1.55; color: #B4B9C6; max-width: 820px">v1 is what programs use today: <code style="font-family: 'JetBrains Mono', monospace; font-size: 15px; color: #ECEDF2">user/udraw.h</code> (shapes and text, drawn by the desktop) and <code style="font-family: 'JetBrains Mono', monospace; font-size: 15px; color: #ECEDF2">user/ugui.h</code> (controls as a list of things). v2 keeps both - every v1 program builds unchanged - and adds what Weave needs: the dyes and the grain as theme values, knots, stitches and threads as drawing operations, the controls the mock-ups use, touch, and a way into the shuttle.</p>
+    </header>
+
+    <!-- the layers -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">Where it sits</h2>
+      <div style="display: flex; flex-direction: column; gap: 10px">
+        <sc-for list="{{layers}}" as="l" hint-placeholder-count="5">
+          <div style="display: flex; flex-wrap: wrap; align-items: stretch; gap: 0; border-radius: 14px; overflow: hidden; border: 1px solid {{l.line}}; background: {{l.bg}}">
+            <div style="flex: 0 0 8px; background: {{l.dye}}"></div>
+            <div style="flex: 1 1 260px; padding: 16px 20px"><div style="font-size: 16px; font-weight: 800">{{l.name}}</div><div style="font: 400 12.5px 'JetBrains Mono', monospace; color: #9AA0AE; margin-top: 4px">{{l.where}}</div></div>
+            <div style="flex: 2 1 420px; padding: 16px 20px; font-size: 14px; line-height: 1.55; color: #C9CDD8">{{l.what}}</div>
+          </div>
+        </sc-for>
+      </div>
+      <p style="margin: 0; font-size: 14px; color: #9AA0AE; line-height: 1.6">Drawing stays where it is in v1: a program sends shapes and text as commands (<code style="font-family: 'JetBrains Mono', monospace">SYS64_WIN_DRAW</code>), and the desktop draws them with the same code it draws itself with. That is what lets a style change reach every window at once: the program never knew whether its panel was glass or cloth.</p>
+    </section>
+
+    <!-- v1 to v2 -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">What v1 has, what v2 adds</h2>
+      <div style="overflow-x: auto; border-radius: 14px; border: 1px solid #262A33">
+        <div role="table" aria-label="v1 and v2 compared" style="min-width: 760px; display: flex; flex-direction: column; font-size: 14px">
+          <div role="row" style="display: grid; grid-template-columns: 180px minmax(0, 1fr) minmax(0, 1.3fr); background: #14161B; font-size: 11.5px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">
+            <div role="columnheader" style="padding: 12px 16px">Area</div><div role="columnheader" style="padding: 12px 16px">v1 today</div><div role="columnheader" style="padding: 12px 16px">v2</div>
+          </div>
+          <sc-for list="{{compare}}" as="c" hint-placeholder-count="8">
+            <div role="row" style="display: grid; grid-template-columns: 180px minmax(0, 1fr) minmax(0, 1.3fr); border-top: 1px dashed #262A33">
+              <div role="cell" style="padding: 12px 16px; font-weight: 700">{{c.a}}</div>
+              <div role="cell" style="padding: 12px 16px; color: #9AA0AE; line-height: 1.5">{{c.v1}}</div>
+              <div role="cell" style="padding: 12px 16px; color: #ECEDF2; line-height: 1.5">{{c.v2}}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+
+    <!-- the look -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">The look, as numbers</h2>
+      <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #B4B9C6; max-width: 820px">v1's <code style="font-family: 'JetBrains Mono', monospace">struct ud_look</code> is eleven colours (<code style="font-family: 'JetBrains Mono', monospace">SYS64_UI_LOOK</code> fills eleven words). v2 grows the same struct at its end, so a v1 program that asks for eleven words still gets exactly those eleven.</p>
+      <pre style="margin: 0; padding: 20px; border-radius: 14px; background: #0F1116; border: 1px solid #22252E; overflow-x: auto; font: 400 13px/1.65 'JetBrains Mono', monospace; color: #D6D9E2">{{lookCode}}</pre>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px">
+        <sc-for list="{{dyes}}" as="d" hint-placeholder-count="6">
+          <div style="border-radius: 12px; overflow: hidden; border: 1px solid #262A33"><div style="height: 46px; background: {{d.hex}}"></div><div style="padding: 8px 10px; font-size: 12.5px"><b>{{d.name}}</b> · <span style="font-family: 'JetBrains Mono', monospace; color: #9AA0AE">PU_{{d.key}}</span></div></div>
+        </sc-for>
+      </div>
+    </section>
+
+    <!-- drawing -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">Four new drawing operations</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px">
+        <sc-for list="{{ops}}" as="o" hint-placeholder-count="4">
+          <div style="padding: 18px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 10px">
+            <div style="height: 64px; border-radius: 10px; background: #0F1116; display: flex; align-items: center; justify-content: center; overflow: hidden">
+              <sc-if value="{{o.isGrain}}" hint-placeholder-val="{{ false }}"><span style="width: 100%; height: 100%; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.06) 0px, rgba(255,255,255,0.06) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.045) 0px, rgba(255,255,255,0.045) 1px, transparent 1px, transparent 3px)"></span></sc-if>
+              <sc-if value="{{o.isStitch}}" hint-placeholder-val="{{ false }}"><span style="width: 80%; border-top: 2px dashed #8A90A0"></span></sc-if>
+              <sc-if value="{{o.isKnot}}" hint-placeholder-val="{{ false }}"><span style="display: flex; gap: 14px"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid #4A4F5C"></span><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid #9AA0AE"></span><span style="width: 14px; height: 14px; border-radius: 50%; background: #5B7CFA"></span></span></sc-if>
+              <sc-if value="{{o.isThread}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="200" height="50" viewBox="0 0 200 50" fill="none"><path d="M4 36 C 50 4, 90 50, 140 18 S 186 10, 196 20" stroke="#D152A6" stroke-width="3" stroke-linecap="round"></path></svg></sc-if>
+            </div>
+            <div style="font: 600 14px 'JetBrains Mono', monospace">{{o.name}}</div>
+            <div style="font-size: 13.5px; line-height: 1.5; color: #B4B9C6">{{o.what}}</div>
+          </div>
+        </sc-for>
+      </div>
+      <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #9AA0AE">And one that changes meaning without changing its name: <code style="font-family: 'JetBrains Mono', monospace">ud_glass()</code> asks for "a panel in the system's look". Under the bar and dock it stays glass; under Weave the desktop answers it with cloth - a flat fill and the grain - and still returns how light it came out, so text on it keeps choosing the right ink.</p>
+    </section>
+
+    <!-- controls -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">Controls</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 10px">
+        <sc-for list="{{controls}}" as="c" hint-placeholder-count="12">
+          <div style="display: flex; gap: 12px; padding: 14px 16px; border-radius: 12px; background: #14161B; border: 1px solid #262A33">
+            <span style="flex-shrink: 0; margin-top: 3px; width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: {{c.fill}}; border: 2px solid {{c.ring}}"></span>
+            <div style="min-width: 0"><div style="font: 600 13.5px 'JetBrains Mono', monospace">{{c.name}} <span style="font-family: Inter, sans-serif; font-size: 11.5px; font-weight: 700; color: {{c.tagColor}}">{{c.tag}}</span></div><div style="font-size: 13px; line-height: 1.5; color: #B4B9C6; margin-top: 4px">{{c.what}}</div></div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="display: flex; flex-wrap: wrap; gap: 18px; font-size: 12.5px; color: #9AA0AE"><span style="display: flex; align-items: center; gap: 6px"><span style="width: 10px; height: 10px; border-radius: 50%; background: #5B7CFA"></span>new in v2</span><span style="display: flex; align-items: center; gap: 6px"><span style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; border: 2px solid #9AA0AE"></span>from v1, drawn in the style in use</span></div>
+    </section>
+
+    <!-- a program -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">A window, written with v2</h2>
+      <p style="margin: 0; font-size: 15px; line-height: 1.6; color: #B4B9C6; max-width: 820px">The same shape as a v1 program: say what is in the window, then hand every event to the toolkit and ask what happened. The items live in an array the program owns, so the header stays usable by freestanding programs in <code style="font-family: 'JetBrains Mono', monospace">user/</code> with no allocator - and v1's limit of 24 things in one window goes.</p>
+      <pre style="margin: 0; padding: 20px; border-radius: 14px; background: #0F1116; border: 1px solid #22252E; overflow-x: auto; font: 400 13px/1.65 'JetBrains Mono', monospace; color: #D6D9E2">{{progCode}}</pre>
+    </section>
+
+    <!-- the shell -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">Talking to the shell</h2>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px">
+        <sc-for list="{{shell}}" as="s" hint-placeholder-count="3">
+          <div style="padding: 18px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 8px">
+            <div style="font: 600 14px 'JetBrains Mono', monospace">{{s.name}}</div>
+            <div style="font-size: 13.5px; line-height: 1.55; color: #B4B9C6">{{s.what}}</div>
+            <div style="font: 400 12px 'JetBrains Mono', monospace; color: #8A90A0">{{s.under}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <!-- touch, a11y, tests -->
+    <section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px">
+      <div style="padding: 20px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 10px">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 800">Touch</h3>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.6; color: #B4B9C6"><code style="font-family: 'JetBrains Mono', monospace">pu_density()</code> says how the window is used: <b>pointer</b> (rows 28 px, targets 24 px) or <b>finger</b> (rows 48 px, targets 44 px). Layout asks it, so one program serves the desktop, the tablet and the phone. A long press is a right click; a swipe on a list row brings its actions out.</p>
+      </div>
+      <div style="padding: 20px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 10px">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 800">Keyboard and reading</h3>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.6; color: #B4B9C6">Tab goes in the order things were added; the focus is the thread, 2 px outside the control. Every item has a name (a button's caption, a field's label, <code style="font-family: 'JetBrains Mono', monospace">pu_name()</code> for an icon alone), which a screen reader can ask for. Text keeps 4.5 to 1 against its surface in both themes.</p>
+      </div>
+      <div style="padding: 20px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 10px">
+        <h3 style="margin: 0; font-size: 18px; font-weight: 800">Tests</h3>
+        <p style="margin: 0; font-size: 13.5px; line-height: 1.6; color: #B4B9C6">A new group, <code style="font-family: 'JetBrains Mono', monospace">t_protonui</code>, boots a demo window with every control and reads the screen through QMP: the selvedge's colour along the top, the grain's 3x3 pattern, each knot's three states, the thread under the focused control. Sizes come from plain <code style="font-family: 'JetBrains Mono', monospace">#define</code>s that <code style="font-family: 'JetBrains Mono', monospace">scripts/ptest.py</code> reads, as it does for v1. The groups that click v1 programs (<code style="font-family: 'JetBrains Mono', monospace">t_gcode</code> and the rest) must pass unchanged.</p>
+      </div>
+    </section>
+
+    <!-- plan -->
+    <section style="display: flex; flex-direction: column; gap: 18px">
+      <h2 style="margin: 0; font-size: 28px; font-weight: 800">In what order</h2>
+      <div style="position: relative; padding-left: 30px; display: flex; flex-direction: column; gap: 16px">
+        <div style="position: absolute; left: 9px; top: 8px; bottom: 8px; width: 2px; background: #5B7CFA"></div>
+        <sc-for list="{{plan}}" as="p" hint-placeholder-count="6">
+          <div style="position: relative">
+            <span style="position: absolute; left: -28px; top: 3px; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: #0B0C10; border: 3px solid #5B7CFA"></span>
+            <div style="font-size: 15.5px; font-weight: 700">{{p.t}}</div>
+            <div style="font-size: 13.5px; line-height: 1.55; color: #B4B9C6; margin-top: 3px">{{p.d}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":4200}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const layers = [
+      { name: 'A program', where: 'user/*.c, user64/*.c, apps/', what: 'Says what its window holds - a list, two buttons, a thread of progress - and what to do when one is used.', dye: '#C77F0A', bg: '#14161B', line: '#262A33' },
+      { name: 'ProtonUI v2', where: 'user/ugui.h + user/udraw.h, grown; pu_* names', what: 'Keeps the list of controls, lays them out, draws them in the style in use, turns a click, a key or a finger into "the third one was pressed". Header-only and static inline, as v1 is.', dye: '#5B7CFA', bg: 'rgba(91,124,250,0.08)', line: '#5B7CFA' },
+      { name: 'Draw commands', where: 'SYS64_WIN_DRAW (68), SYS64_UI_LOOK (69)', what: 'Shapes and text sent to the desktop, the theme read back. v2 adds four operations and a longer look; the call numbers stay.', dye: '#2EC4C4', bg: '#14161B', line: '#262A33' },
+      { name: 'The desktop', where: 'kernel/desktop.c, gfx.c, uitext.c, look.h', what: 'Draws each command with its own drawing code into the window, in the style the person chose: bar and dock, taskbar, or Weave.', dye: '#D152A6', bg: '#14161B', line: '#262A33' },
+      { name: 'The screen', where: 'kernel video, ramfb on the phone', what: 'One copy of what changed, per frame.', dye: '#4B505E', bg: '#14161B', line: '#262A33' }
+    ];
+    const compare = [
+      { a: 'Controls', v1: 'Eight: label, button, slider, check, field, list, line, tabs', v2: 'Those eight, and switch, segments, thread progress, spinner, knots, menu, card, avatar, side panel, sheet' },
+      { a: 'How many', v1: 'At most 24 in a window (UG_MAX), in a fixed array in struct ug', v2: 'As many as the array the program hands in' },
+      { a: 'Layout', v1: 'Pixel rectangles, ug_layout (fixed and flex), ug_workspace_layout for Code', v2: 'The same, plus pu_stack and pu_grid, and sizes that follow the density' },
+      { a: 'Look', v1: '11 colours in struct ud_look, asked every draw', v2: 'The same 11 first, then the style, six dyes, the person’s thread colour, grain, radius, density' },
+      { a: 'Drawing', v1: '14 operations, from FILL to GLASS and HOLD', v2: '18: GRAIN, STITCH, KNOT and THREAD added; GLASS draws cloth under Weave' },
+      { a: 'Input', v1: 'Mouse and keyboard, one finger on the phone as a mouse', v2: 'Long press, swipe on a row, and a finger’s larger target' },
+      { a: 'The shell', v1: 'SYS64_NOTIFY (a title and a line), SYS64_NOW_PLAYING', v2: 'Notifications with a weight and actions, and the shuttle for anything that goes on' },
+      { a: 'Old programs', v1: '', v2: 'Build and run unchanged: ug_* stays as names for pu_*' }
+    ];
+    const lookCode = [
+      'struct pu_look {',
+      '    /* v1: the eleven words SYS64_UI_LOOK has always filled */',
+      '    uint32_t dark, bg, field, text, dim, line, row;',
+      '    uint32_t accent, on_accent, danger, good;',
+      '',
+      '    /* v2 */',
+      '    uint32_t style;          /* PU_BAR_DOCK, PU_TASKBAR, PU_WEAVE */',
+      '    uint32_t dye[6];         /* PU_INDIGO .. PU_COCHINEAL, this theme */',
+      '    uint32_t thread;         /* the person’s own focus colour */',
+      '    uint32_t grain;          /* ink of the 3x3 tile, 0..255 (0: none) */',
+      '    uint32_t radius;         /* corners of a control */',
+      '    uint32_t density;        /* PU_POINTER or PU_FINGER */',
+      '};',
+      '',
+      '/* the program says how many words it knows; the desktop fills no more */',
+      'pu_look(&look, sizeof look / 4);'
+    ].join('\n');
+    const dyes = [['Indigo', '#5B7CFA', 'INDIGO'], ['Madder', '#E5484D', 'MADDER'], ['Saffron', '#F5A524', 'SAFFRON'], ['Weld', '#46C27A', 'WELD'], ['Woad', '#2EC4C4', 'WOAD'], ['Cochineal', '#D152A6', 'COCHINEAL']].map((d) => ({ name: d[0], hex: d[1], key: d[2] }));
+    const ops = [
+      { name: 'UD_OP_GRAIN', isGrain: true, what: 'Lays the 3x3 tile over a rectangle at the look’s grain. A copy, not a computation: why Weave costs nothing on a software compositor.' },
+      { name: 'UD_OP_STITCH', isStitch: true, what: 'A dashed line, 2 px: the line between parts of one surface, under a field at rest, the unset part of a slider.' },
+      { name: 'UD_OP_KNOT', isKnot: true, what: 'A circle in one of three states - hollow, ringed, filled - in a colour. Steps, desktops, unread, the chosen row.' },
+      { name: 'UD_OP_THREAD', isThread: true, what: 'A cubic curve with soft edges and a width: the warp wallpaper, waveforms, a branch in Strand, a route on the Map.' }
+    ];
+    const C = (name, isNew, what) => ({ name, what, tag: isNew ? 'new' : 'v1', tagColor: isNew ? '#8FA5FF' : '#8A90A0', fill: isNew ? '#5B7CFA' : 'transparent', ring: isNew ? '#5B7CFA' : '#9AA0AE' });
+    const controls = [
+      C('pu_button', false, 'Primary, quiet, danger. Pressed: one shade darker; focused: the thread around it.'),
+      C('pu_field', false, 'A stitch underneath at rest, pulled tight into the thread when it has focus, madder with a line of why when wrong.'),
+      C('pu_slider', false, 'A thread being spun: solid where set, a stitch beyond, a knot to hold.'),
+      C('pu_check', false, 'A square knot; filled with a tick when on.'),
+      C('pu_list', false, 'Rows; the chosen one tinted, with a knot before it.'),
+      C('pu_tabs', false, 'The chosen tab carries the thread under it.'),
+      C('pu_switch', true, 'On: the thread colour, the knob right. Off: a dashed track.'),
+      C('pu_segments', true, 'Two to five choices in a capsule; the chosen one raised, with the thread under it.'),
+      C('pu_progress', true, 'A thread winding along a stitch, a knot at its end. Unknown length: a short piece running like a shuttle.'),
+      C('pu_knots', true, 'A row of knots on a thread: setup steps, PIN digits, pages.'),
+      C('pu_menu', true, 'Rows and stitches between them; shortcuts in mono on the right; danger rows in madder.'),
+      C('pu_card', true, 'A surface with a selvedge on top - indigo, or madder for a question that destroys something.'),
+      C('pu_avatar', true, 'A person’s initial on their own colour, ringed in it.'),
+      C('pu_side', true, 'A panel that opens beside the content: a side thread in Purl, a file’s details in Files.'),
+      C('pu_sheet', true, 'On a phone, a panel that comes up from the bottom and can be pulled down.')
+    ];
+    const progCode = [
+      '#include "ugui.h"          /* ProtonUI v2: ugui.h and udraw.h, grown */',
+      '',
+      'static struct pu_item items[16];',
+      'static struct pu ui;',
+      '',
+      'int main(void)',
+      '{',
+      '    int win = win_create(420, 260, "Backup");',
+      '    pu_start(&ui, win, items, 16);',
+      '',
+      '    struct pu_stack s = pu_column(&ui, 20, 12);   /* margin, gap */',
+      '    pu_label(&s, "Copy my files every night");',
+      '    int when  = pu_segments(&s, "Never|Nightly|Weekly", 1);',
+      '    int bar   = pu_progress(&s, 0, 100);',
+      '    int go    = pu_button(&s, "Copy now", PU_PRIMARY);',
+      '',
+      '    for (;;) {',
+      '        struct win_event ev;',
+      '        win_wait(win, &ev);',
+      '        switch (pu_event(&ui, &ev)) {',
+      '        case PU_PRESSED:',
+      '            if (pu_which(&ui) == go)',
+      '                start_copy(pu_value(&ui, when));',
+      '            break;',
+      '        case PU_CLOSED:',
+      '            return 0;',
+      '        }',
+      '        pu_set_value(&ui, bar, copied_percent());',
+      '        pu_draw(&ui);           /* in the style in use, every time */',
+      '    }',
+      '}'
+    ].join('\n');
+    const shell = [
+      { name: 'pu_notify(weight, title, text)', what: 'A notification in Threads. Weight is PU_QUIET, PU_NORMAL or PU_URGENT; up to two actions come back as events.', under: 'grows SYS64_NOTIFY (70)' },
+      { name: 'pu_shuttle(&activity)', what: 'Something that goes on: a timer, a download, a call. A title, a progress or a count-down, and the program’s colour for the thread.', under: 'a new call beside SYS64_NOW_PLAYING' },
+      { name: 'pu_now_playing(&media)', what: 'What the program plays, for the shuttle’s play and pause - unchanged from today.', under: 'SYS64_NOW_PLAYING (115)' }
+    ];
+    const plan = [
+      { t: 'The look grows', d: 'struct ud_look gets the v2 fields at its end; SYS64_UI_LOOK fills as many words as the program asks for. Nothing else changes; every group must pass.' },
+      { t: 'Four operations', d: 'GRAIN, STITCH, KNOT and THREAD in the desktop’s command interpreter, with a test that draws each and reads the pixels back.' },
+      { t: 'Weave as the third style', d: 'look.h’s third set and the layout value; GLASS answered with cloth under Weave.' },
+      { t: 'The new controls', d: 'pu_switch, pu_segments, pu_progress first - the ones Settings needs - then the rest, each with its t_protonui check.' },
+      { t: 'Density and touch', d: 'pu_density from the phone and the tablet; the phone’s programs move from mouse emulation to fingers.' },
+      { t: 'The shell', d: 'Weights and actions on notifications; the shuttle call; the island becomes the shuttle under Weave.' }
+    ];
+    return { layers, compare, lookCode, dyes, ops, controls, progCode, shell, plan };
+  }
+}
+</script>
+</body>
+</html>

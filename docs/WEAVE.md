@@ -47,7 +47,10 @@ Every name comes from weaving, so the system reads as one thing.
 | **The shuttle** | What is going on (music, timers, downloads, calls, camera and microphone) in a capsule that slides up out of the loom - ThreadOS's answer to a "dynamic island" | The shuttle is what travels across the loom carrying the thread |
 | **Warp** | The wallpaper: threads of the dyes crossing a dark ground | The warp is the threads stretched on a loom |
 | **Threads** | Notifications, hung on one vertical line, newest at the top | |
-| **Game mode** | While a game holds the mouse, the loom steps aside and notifications wait | |
+| **Game mode** | While a game holds the mouse, the loom steps aside and notifications wait |
+| **Quiet** | Nothing rides the shuttle, nothing chimes; chosen people and Urgent still get through |
+| **Quiet, Normal, Urgent** | The three weights of a notification: straight into Threads; on the shuttle for a moment with a chime; on the shuttle until answered |
+| **Sliders** | Sound and light: a thread being spun - solid where set, a stitch beyond, a knot to hold. On the phone the volume keys bring a vertical thread out of the edge beside them | |
 
 ### Colours: the dyes
 
@@ -71,6 +74,9 @@ it becomes their focus colour and the ring around their picture.
 |---|---|
 | **The thread** (navigation) | The third way to get around a phone, next to *Gestures* and *Three buttons* (`nav_buttons` in `kernelarm64/mobile.c` today). A thin thread along the bottom edge with a knot for each running program. Tap a knot: that program. Slide along the thread: one program at a time. Swipe up: home; up and hold: loom view. From the left edge: back. |
 | **The shade** | What a pull down from the top shows: switches, light, sound, the shuttle opened, and the threads |
+| **The drawer** | Every program on the phone, swiped up from home: on threads by what they are for, or A to Z |
+| **The PIN knots** | Unlocking a phone: six knots on a thread, each digit ties one |
+| **Locked** | The lock screen says who and how many, never what; torch and camera in the corners; the shuttle still rides the thread |
 | **Touch** / **Windows** | The tablet's two modes; Windows comes on by itself when a keyboard is attached |
 
 ### Programs
@@ -85,6 +91,7 @@ it becomes their focus colour and the ring around their picture.
 | **Find** | Searches everything: files, what is inside files, settings, Weft's history | |
 | **Market** | The app store. Every app is built from source and signed, shows its licence and what it may use before you get it | A market is where cloth was sold |
 | **Map** | Maps and directions; the route is a thread with knots at the turns | |
+| **Skein** | The music player: albums, a queue that is a thread, the waveform as a thread being spun | A skein is a loose coil of yarn - a collection |
 | **Calendar**, **Gallery**, **Mixer**, **Recorder**, **Monitor**, **Settings**, **Files**, **Term** | The existing programs, drawn in Weave | |
 | **Loomflight** | A game made for the mock-ups: fly a shuttle through the warp and gather knots | |
 
@@ -94,6 +101,27 @@ it becomes their focus colour and the ring around their picture.
 |---|---|
 | **Install ThreadOS** | From the stick: try or install; beside another system or the whole disk, shown as a bar of the disk now and after; a list of what will be written and what will not be touched; typing YES (or ERASE for the whole disk) to go on; the partition filling like cloth on a loom; done, with the boot menu shown. The same steps `user/ginstal.c` takes today. |
 | **Welcome to ThreadOS** | The first start after installing: language and keyboard, network, your profile and thread colour, the desktop style (or, on a phone, how you get around), and a summary with "Change" by every line. The fields are those of the first-start card in `kernel/desktop.c` today. |
+
+## ProtonUI v2
+
+ProtonUI is the toolkit programs draw their windows with. v1 is what
+exists today: `user/udraw.h` (shapes and text, sent to the desktop with
+`SYS64_WIN_DRAW` and drawn there) and `user/ugui.h` (controls as a list
+of things). v2 is the proposal for Weave, written up as a technical page
+in `docs/weave/canvas/ProtonUI.dc.html`:
+
+- every v1 program builds unchanged (the `ug_*` names stay for `pu_*`);
+- `struct ud_look` grows at its end - the style, six dyes, the person's
+  thread colour, grain, radius and density - so a v1 program that asks
+  for eleven words still gets those eleven;
+- four drawing operations: `GRAIN`, `STITCH`, `KNOT`, `THREAD`; `GLASS`
+  is answered with cloth under Weave;
+- new controls: switch, segments, thread progress, spinner, knots, menu,
+  card, avatar, side panel, sheet; the items in an array the program
+  owns, so the limit of 24 goes;
+- touch through a density (pointer or finger), and calls into the
+  shell: notifications with a weight and actions, and the shuttle;
+- a test group, `t_protonui`, that reads every control off the screen.
 
 ## Type and shape
 
