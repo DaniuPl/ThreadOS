@@ -131,7 +131,15 @@ def make_files():
     g16.save(buf, "PNG")
     data = buf.getvalue()
     back = Image.open(io.BytesIO(data))
-    got = list(struct.unpack("<%dH" % (w * h), back.tobytes("raw", "I;16")))
+    # Pillow before 10.3 (Ubuntu's 10.2, on CI) opens 16-bit grey as mode
+    # "I", 32 bits a pixel, and has no packer from it to "I;16"; later
+    # ones open it as "I;16". The values are the same either way.
+    if back.mode == "I;16":
+        got = list(struct.unpack("<%dH" % (w * h),
+                                 back.tobytes("raw", "I;16")))
+    else:
+        got = list(struct.unpack("<%di" % (w * h),
+                                 back.tobytes("raw", "I;32S")))
     want = bytearray()
     for v in got:
         want += bytes((v >> 8, v >> 8, v >> 8, 255))
