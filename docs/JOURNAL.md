@@ -10773,3 +10773,18 @@ works and is checked by `make test`.
       typed wrong it does not and the reason says so. t_intelusb's host
       build of the drivers gets stand-ins for the file system, the
       task's rights and random bytes that bt.c now uses.
+- [x] **Mapped files, big programs and swap inside a partition**
+      (kernel/fs.c, scripts/tests/t_foreigndisk.py) Found while
+      planning TFS4. fs_block_lba() turned a block number into a sector
+      without the partition's start, and everything that reads or
+      writes a file's blocks straight through blk_* uses it: a file
+      mapped into memory, a program over 2 MiB loaded into its pages,
+      swap. On a disk where TFS has the whole disk the start is zero
+      and nothing showed; installed beside another system, in a
+      partition, a mapping read somebody else's sectors and msync wrote
+      over them - block 13 of the file system was sector 26, the GPT's
+      partition entries. t_foreigndisk, in its partition, now maps a
+      file, writes through the mapping, reads it back the ordinary way
+      and again after a restart (both failed before the fix), and the
+      table and the neighbouring partitions are still checked
+      untouched afterwards.
