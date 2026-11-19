@@ -151,7 +151,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.
              -Wl,--build-id=none -Wl,--no-warn-rwx-segments
 
 SHARED64 := string serial printk locale bootsplash mark mb2 fbcon vga pic pit pmm heap initrd \
-            kbdmap pci ata ahci nvme blk fs tfs3 rtl8139 net dhcp tcp video \
+            kbdmap pci ata ahci nvme blk fs tfs3 tfs4 rtl8139 net dhcp tcp video \
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 rtl8168 virtio_net netdev smp random hid iwlwifi acpios power \
@@ -499,6 +499,12 @@ $(BUILD)/user64/pathtest.elf: libc/tests/pathtest.c $(LIBC64) libc/libc64.ld \
 	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/pathtest.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/pathtest.o) -o $@
 
+# Every file under a directory with its SHA-256 (t_tfs4read)
+$(BUILD)/user64/fswalk.elf: libc/tests/fswalk.c user/usha256.h $(LIBC64) \
+                            libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/fswalk.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/fswalk.o) -o $@
+
 # The mapping area at 512 GiB: gigabytes of it, fork and threads there
 $(BUILD)/user64/bigmap.elf: libc/tests/bigmap.c $(LIBC64) libc/libc64.ld \
                             | $(BUILD)/user64 $(BUILD)/libc64
@@ -762,7 +768,7 @@ $(BUILD)/user64/js.elf: apps/js/js.c $(BUILD)/libc64/prelude.h $(QJS_OBJS) \
 
 USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/pthreadtest.elf $(BUILD)/user64/sqlite3.elf \
-               $(BUILD)/user64/pathtest.elf \
+               $(BUILD)/user64/pathtest.elf $(BUILD)/user64/fswalk.elf \
                $(BUILD)/user64/bigmap.elf \
                $(BUILD)/user64/ipctest.elf $(BUILD)/user64/sigtest.elf \
                $(BUILD)/user64/bigram.elf \
@@ -2031,6 +2037,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    libctest=$(BUILD)/user64/libctest.elf \
 	    pthreadtest=$(BUILD)/user64/pthreadtest.elf \
 	    pathtest=$(BUILD)/user64/pathtest.elf \
+	    fswalk=$(BUILD)/user64/fswalk.elf \
 	    longpath64=$(BUILD)/user64/longpath64.elf \
 	    bigmap=$(BUILD)/user64/bigmap.elf \
 	    ipctest=$(BUILD)/user64/ipctest.elf \

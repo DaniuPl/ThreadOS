@@ -2,9 +2,9 @@
  *
  * Everything in the kernel reaches files through the fs_* calls of
  * fs.h, and they arrive here. This picks the format on the disk at
- * mount and hands each call to it (struct fs_backend): TFS3 today
- * (kernel/tfs3.c); TFS4, the ext2 format, takes its place next
- * (docs/tfs4-plan.md), with TFS3 kept for the disks it is on.
+ * mount and hands each call to it (struct fs_backend): TFS4, the ext2
+ * format (kernel/tfs4.c, read-only for now), or TFS3 (kernel/tfs3.c),
+ * which stays for the disks it is on (docs/tfs4-plan.md).
  *
  * What does not depend on the format lives here: whether there is a
  * file system at all, the API's own limits (a path fits FS_PATH_MAX),
@@ -15,6 +15,7 @@
 #include "include/fs.h"
 #include "include/fsbackend.h"
 #include "include/tfs3.h"
+#include "include/tfs4.h"
 #include "include/string.h"
 #include "include/printk.h"
 
@@ -33,6 +34,12 @@ static int path_fits(const char *path)
 
 int fs_init(void)
 {
+    /* TFS4 first: a blank disk is one TFS3 formats, so it must not be
+       asked before TFS4 has had its look */
+    if (tfs4_mount()) {
+        be = &tfs4_backend;
+        return 1;
+    }
     if (tfs3_mount()) {
         be = &tfs3_backend;
         return 1;

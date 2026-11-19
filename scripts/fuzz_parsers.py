@@ -6,7 +6,8 @@ packet path in the kernel (net.c + tcp.c), the kernel's TrueType
 reader (ttf.c), because a font is a file and files come from anywhere,
 the kernel's HID report descriptor reader (hid.c), because a descriptor
 comes from whatever is plugged in, the kernel's WPA2 handshake (wpa.c)
-and 802.11 frame reader (wlan.c), because their frames come from the air, Mbed TLS's certificate and key
+and 802.11 frame reader (wlan.c), because their frames come from the air,
+TFS4 (tfs4.c, the ext2 format), because a disk is somebody else's too, Mbed TLS's certificate and key
 parsers, which curl hands whatever a server sends, and the ARM64
 kernel's device tree reader (kernelarm64/fdt.c), because the tree is
 the firmware's and the firmware is somebody else's - and GLib, under
@@ -193,6 +194,74 @@ def build_wlan(workdir):
           os.path.join(FUZZ, "wlan_harness.c"),
           os.path.join(ROOT, "kernel", "wlan.c")], "the 802.11 harness")
     return binary
+
+
+def build_tfs4(workdir):
+    """The kernel's tfs4.c, with stand-ins for what it reaches past the
+    disk: interrupts, the heap (the host's), the partition table and
+    the task's rights. The block layer is the harness's own."""
+    tree = os.path.join(workdir, "tfs4")
+    inc = os.path.join(tree, "kernel", "include")
+    os.makedirs(inc)
+    os.makedirs(os.path.join(tree, "kernel64"))
+    for name in ("tfs4.h", "fsbackend.h", "fs.h", "part.h"):
+        shutil.copy(os.path.join(ROOT, "kernel", "include", name), inc)
+    shutil.copy(os.path.join(ROOT, "kernel", "tfs4.c"),
+                os.path.join(tree, "kernel"))
+    stubs = {
+        "blk.h": "#include <stdint.h>\nint blk_present(void);\n"
+                 "uint32_t blk_sectors(void);\n"
+                 "int blk_read(uint32_t lba, uint32_t n, void *buf);\n",
+        "heap.h": "#include <stdlib.h>\n#define kmalloc malloc\n"
+                  "#define kfree free\n",
+        "string.h": "#include <string.h>\n",
+        "printk.h": "int printk(const char *fmt, ...);\n",
+        "io.h": "typedef unsigned long irqflags_t;\n"
+                "static inline irqflags_t irq_save(void) { return 0; }\n"
+                "static inline void irq_restore(irqflags_t f) { (void)f; }\n",
+        "user.h": "#define USER_ADMIN 2\n",
+    }
+    for name, text in stubs.items():
+        with open(os.path.join(inc, name), "w") as f:
+            f.write(text)
+    with open(os.path.join(tree, "kernel64", "task64.h"), "w") as f:
+        f.write("int task64_level(void);\nint task64_uid(void);\n")
+    binary = os.path.join(workdir, "t4harness")
+    must(["gcc", *SAN, "-w", "-I", os.path.join(tree, "kernel"), "-o", binary,
+          os.path.join(FUZZ, "tfs4_harness.c"),
+          os.path.join(tree, "kernel", "tfs4.c")], "the TFS4 harness")
+    return binary
+
+
+def tfs4_seeds(workdir):
+    """Small ext2 images made by Linux's mke2fs: 1 KiB and 4 KiB blocks,
+    a file past the direct blocks, a directory, symbolic links short and
+    long, a file with a hole"""
+    if not shutil.which("mke2fs"):
+        return []
+    tree = os.path.join(workdir, "tfs4-tree")
+    os.makedirs(os.path.join(tree, "dir", "sub"))
+    with open(os.path.join(tree, "dir", "sub", "f.txt"), "wb") as f:
+        f.write(b"a file two directories down\n")
+    with open(os.path.join(tree, "big"), "wb") as f:
+        f.write(bytes(range(256)) * 80)
+    with open(os.path.join(tree, "holey"), "wb") as f:
+        f.write(b"x")
+        f.seek(40000)
+        f.write(b"y")
+    os.symlink("dir/sub/f.txt", os.path.join(tree, "link"))
+    os.symlink("./dir/./sub/./f.txt/../../../dir/sub/f.txt" + "/." * 20,
+               os.path.join(tree, "longlink"))
+    seeds = []
+    for bs, size in ((1024, "160K"), (4096, "512K")):
+        img = os.path.join(workdir, "seed-%d.img" % bs)
+        subprocess.run(["truncate", "-s", size, img], check=True)
+        subprocess.run(["mke2fs", "-q", "-F", "-t", "ext2", "-b", str(bs),
+                        "-N", "32", "-L", "ThreadOS", "-d", tree, img],
+                       check=True)
+        with open(img, "rb") as f:
+            seeds.append(f.read())
+    return seeds
 
 
 def wlan_seeds():
@@ -1556,6 +1625,7 @@ def main():
         hbinary = build_hid(workdir)
         mbinaries["wpa"] = build_wpa(workdir)
         mbinaries["wlan"] = build_wlan(workdir)
+        mbinaries["tfs4"] = build_tfs4(workdir)
         fbinary = build_fdt(workdir)
         corpus = seeds(workdir)
         corpus["frames"] = frames()
@@ -1563,6 +1633,7 @@ def main():
         corpus["hid"] = hid_seeds()
         corpus["wpa"] = wpa_seeds()
         corpus["wlan"] = wlan_seeds()
+        corpus["tfs4"] = tfs4_seeds(workdir)
         corpus["fdt"] = [t for _, t, want in FDT_TREES
                          if want.startswith("r=0")]
         corpus["mbedtls-x509crt"] = list(corpus["x509"])

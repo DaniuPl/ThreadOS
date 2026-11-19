@@ -153,9 +153,10 @@ HUGE_PAGE = b"<p>ThreadOS TFS3: an indirect block, then a doubly indirect one.</
 BIG_PAGE = b"<p>ThreadOS TFS3: block after block.</p>\n" * 3000
 
 
-def make_gpt_disk(path, mib=800, esp_mib=100):
+def make_gpt_disk(path, mib=800, esp_mib=100, third_type=None):
     """A disk image with a GPT partition table on it: an EFI system
-    partition, a Windows one and a Linux one.
+    partition, a Windows one and a Linux one - or, with third_type (the
+    sixteen raw bytes of a type GUID), a third partition of that type.
 
     This is what a laptop's disk looks like, and the reason the test
     needs one is not the table itself - it is what must NOT happen to
@@ -182,7 +183,8 @@ def make_gpt_disk(path, mib=800, esp_mib=100):
     ent = bytearray(128 * 128)
     for i, (t, a, b, name) in enumerate(parts):
         e = bytearray(128)
-        e[0:16] = guid(t)
+        e[0:16] = (third_type if i == 2 and third_type is not None
+                   else guid(t))
         e[16:32] = guid("11111111-2222-3333-4444-%012d" % i)
         e[32:40] = struct.pack("<Q", a)
         e[40:48] = struct.pack("<Q", b)

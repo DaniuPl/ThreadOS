@@ -80,6 +80,7 @@ static const char *gpt_kind(const uint8_t *guid)
     case 0x0657FD6D: return "Linux swap";
     case 0xE3C9E316: return "Microsoft reserved";
     case 0xDE94BBA4: return "Windows recovery";
+    case 0x45524854: return "ThreadOS";      /* "THRE": kernel/gpt.c's */
     default:         return "unknown";
     }
 }
@@ -129,6 +130,7 @@ static int scan_gpt(void)
         if (!lo && !hi)
             continue;
         memcpy(parts[count].guid, e + 16, 16);
+        memcpy(parts[count].type, e, 16);
         parts[count].slot = i + 1;
         parts[count].start = le64(e + 32);
         parts[count].sectors = le64(e + 40) - le64(e + 32) + 1;
@@ -166,6 +168,7 @@ int part_scan(void)
         say(parts[count].kind, mbr_kind(type));
         parts[count].label[0] = '\0';
         memset(parts[count].guid, 0, 16);
+        memset(parts[count].type, 0, 16);
         parts[count].slot = 0;
         count++;
     }

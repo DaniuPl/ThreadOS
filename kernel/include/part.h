@@ -27,6 +27,7 @@ struct partition {
     char kind[PART_NAME];      /* what it is, as far as we can tell */
     char label[PART_NAME];     /* the name it carries, when GPT gives one */
     uint8_t guid[16];          /* GPT: the partition's own GUID */
+    uint8_t type[16];          /* GPT: its type GUID (what it is for) */
     uint32_t slot;             /* GPT: its entry's number, from 1 */
 };
 

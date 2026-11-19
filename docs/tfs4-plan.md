@@ -238,6 +238,9 @@ it, and to README's prerequisites.
   memory behind a stub of `blk_read`, mount, walk the whole tree, read
   every file; seed corpus from `mke2fs`; registered in
   `scripts/fuzz_parsers.py`.
+- **Done** (journal: "TFS4 stage 2"). Symbolic links are followed in
+  paths already; their own type, `readlink` and making them are
+  stage 4's.
 
 ### Stage 3 - TFS4 read-write - about 2 days
 

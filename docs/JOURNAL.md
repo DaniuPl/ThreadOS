@@ -10878,3 +10878,38 @@ works and is checked by `make test`.
       listing and stat'ing a subdirectory 70 000 times while another
       opens a relative path 200 000 times, none missing. On the kernel
       before this the first long mkdir already fails.
+- [x] **TFS4 stage 2: reading the ext2 format** (kernel/tfs4.c,
+      kernel/include/tfs4.h, kernel/fs.c, kernel/part.c,
+      kernel/include/part.h, libc/tests/fswalk.c,
+      scripts/tests/t_tfs4read.py, tests/fuzz/tfs4_harness.c,
+      scripts/fuzz_parsers.py, scripts/ptest.py)
+      TFS4 is the ext2 format (revision 1) in our own implementation,
+      written from the format's documentation, not from Linux's code.
+      This stage reads it: the superblock and the group descriptors,
+      inodes of any size the superblock names, a file's direct, indirect,
+      doubly and triply indirect blocks (holes read as zeros), 1, 2 and
+      4 KiB blocks, directories as files of entries (an htree directory
+      read as the plain list it also is), symbolic links in the inode
+      and in a block, followed on the way through a path. The handle the
+      kernel holds is the inode number; the root, inode 2, is FS_ROOT.
+      Every block and inode number from the disk is checked against the
+      file system's bounds before it is used, and a disk with a feature
+      this reader does not know (a journal, extents) is not mounted. Which
+      ext2 is ours: a partition of ThreadOS's GPT type (part.c now keeps
+      each partition's type GUID and names ThreadOS's), or a whole disk
+      without a table whose ext2 is labelled ThreadOS - anybody else's
+      Linux partition is left alone, label or not. The front asks TFS4
+      before TFS3, since TFS3 formats a blank disk. Still read-only:
+      writing is stage 3. t_tfs4read (new): the host builds a tree and
+      Linux's mke2fs puts it into an image; libc/tests/fswalk lists it
+      through musl and prints a SHA-256 of every file, which hashlib
+      checks - 10 000 files in one directory, 25 nested directories, a
+      255-byte UTF-8 name, a 20 MiB sparse file, a 70 MiB file (on 1 KiB
+      blocks past the doubly indirect block), symbolic links of both
+      kinds - with 4 KiB and with 1 KiB blocks; then a GPT disk: the ext2
+      in a partition of ThreadOS's type is mounted from its first
+      sector, the same in a partition of Linux's type is not and the
+      disk's bytes are unchanged. tests/fuzz/tfs4_harness.c mounts
+      damaged images (mke2fs's, then corrupted) under ASan and UBSan and
+      walks all of each: 1500 cases, none failed, about two thirds still
+      mounting.
