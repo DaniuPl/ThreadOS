@@ -119,7 +119,15 @@ holds all 32.
 Each setting has one home: **Appearance** - theme, thread colour, grain,
 wallpaper; **Desktop** - style, window buttons, selvedge, the loom, desktops,
 the shuttle; **Easier to use** - text size, contrast, patterns on threads,
-motion, keys, reading aloud. Other pages may point to it, never repeat it.
+motion, keys, reading aloud. Other pages may point to it, never repeat it. Each program's own volume
+lives in Mixer alone; the card under the loom's clock has the overall
+volume and light, and a way to Mixer.
+
+### One flow, three sizes
+
+Installing and the first start are one flow each, drawn for the desktop,
+the tablet and the phone. A step changed on one is changed on all three;
+notes on the canvas say which board is which step.
 
 ## ProtonUI v2
 

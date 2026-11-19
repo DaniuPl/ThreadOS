@@ -51,7 +51,7 @@ a{color:#8FA5FF}a:hover{color:#B7C5FF}
 
       <!-- the card from the loom's clock: everything at once -->
       <div style="margin-top: auto; align-self: center; width: 420px; padding: 16px; border-radius: 16px; background: #1A1C23; border: 1px solid #2E323D; display: flex; flex-direction: column; gap: 14px">
-        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE"><span>From the clock on the loom</span><span>Speakers</span></div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE"><span>From the clock on the loom</span><span>Out: Speakers</span></div>
         <sc-for list="{{rows}}" as="r" hint-placeholder-count="3">
           <div style="display: grid; grid-template-columns: 100px minmax(0, 1fr) 40px; gap: 12px; align-items: center; font-size: 13px">
             <span style="display: flex; align-items: center; gap: 8px"><span style="width: 10px; height: 10px; border-radius: 3px; background: {{r.dye}}"></span>{{r.name}}</span>
@@ -59,6 +59,7 @@ a{color:#8FA5FF}a:hover{color:#B7C5FF}
             <span style="font: 600 12px 'JetBrains Mono', monospace; color: #9AA0AE; text-align: right">{{r.w}}</span>
           </div>
         </sc-for>
+        <a href="Media.dc.html" style="display: flex; align-items: center; justify-content: space-between; height: 34px; padding: 0 12px; border-radius: 9px; border: 1px dashed #3A3F4C; color: #C9CDD8; font-size: 13px; text-decoration: none">Each program's own level<span style="color: #8FA5FF; font-weight: 600">Open Mixer</span></a>
       </div>
     </section>
 
@@ -87,7 +88,7 @@ a{color:#8FA5FF}a:hover{color:#B7C5FF}
       </div>
       <div style="display: flex; flex-direction: column; gap: 10px; width: 240px">
         <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">In the shade</h2>
-        <p style="margin: 0; font-size: 13.5px; color: #B4B9C6; line-height: 1.5">Wide bars a whole finger can hold. A long press opens one sound per program, and the light's warmth at night.</p>
+        <p style="margin: 0; font-size: 13.5px; color: #B4B9C6; line-height: 1.5">Wide bars a whole finger can hold. A long press on Sound opens Mixer, with each program's level; on Light, the warmth at night.</p>
         <sc-for list="{{shade}}" as="s" hint-placeholder-count="4">
           <div style="position: relative; height: 54px; border-radius: 18px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden">
             <div style="position: absolute; left: 0; top: 0; bottom: 0; width: {{s.w}}; background: {{s.dye}}; opacity: 0.9"></div>
@@ -115,9 +116,8 @@ class Component extends DCLogic {
       { name: 'Brightness', isSound: false, isLight: true, v: lit, dye: '#F5A524', label: String(lit), note: 'Brightness keys; the screen follows as you move it', iconColor: '#F5A524', wave2: 1, down: () => this.setState({ lit: clamp(lit - 10) }), up: () => this.setState({ lit: clamp(lit + 10) }) }
     ].map((b) => Object.assign(b, { w: b.v + '%', ring: b.dye, ticks }));
     const rows = [
-      { name: 'Everything', dye: '#5B7CFA', w: snd + '%' },
-      { name: 'Weft', dye: '#1FA3A3', w: '55%' },
-      { name: 'Recorder', dye: '#C77F0A', w: '80%' }
+      { name: 'Volume', dye: '#5B7CFA', w: snd + '%' },
+      { name: 'Light', dye: '#F5A524', w: lit + '%' }
     ];
     const shade = [
       { name: 'Light', dye: '#C77F0A', w: lit + '%' },

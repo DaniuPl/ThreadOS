@@ -722,6 +722,33 @@
       "kind": "title1",
       "maxW": 2960,
       "page": "identity"
+    },
+    "welcome-variants": {
+      "x": 0,
+      "y": 1000,
+      "w": 720,
+      "size": "m",
+      "color": "blue",
+      "page": "welcome",
+      "text": "The same first start on other devices (page \"Phone and tablet\"):\n- Phone: M1 Language, M2 Network, M3 You, M4 Getting around (in place of Style), M5 Ready\n- Tablet: \"Tablet · how it should work\" is step 4 here, with the navigation choice\nOne flow, three sizes: the steps and their order are the same."
+    },
+    "install-variants": {
+      "x": 0,
+      "y": 1000,
+      "w": 720,
+      "size": "m",
+      "color": "blue",
+      "page": "install",
+      "text": "The same install on other devices (page \"Phone and tablet\"):\n- Tablet: \"Tablet · install, confirm by touch\" is steps 2 and 3 here; a tablet has one system, so the word is ERASE, typed on the screen keyboard\n- Phone: \"Phone · installing\" is step 4 here, as a bobbin filling\nAfter step 5 every device goes on to \"Welcome to ThreadOS\"."
+    },
+    "mobile-variants": {
+      "x": 4810,
+      "y": 0,
+      "w": 440,
+      "size": "m",
+      "color": "blue",
+      "page": "mobile",
+      "text": "Each board here is a step of a desktop flow, made for a finger:\n- \"Welcome to ThreadOS\", steps 1 to 5\n- \"Install ThreadOS\", steps 2 to 4\nChange a step in one place, change it in all three."
     }
   },
   "order": [

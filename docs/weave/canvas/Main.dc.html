@@ -129,32 +129,27 @@ a{color:#8FA5FF}a:hover{color:#B7C5FF}
     <div style="height: 30px; display: flex; align-items: center; padding: 0 14px; border-top: 1px solid #262A33; font-size: 12px; color: #8A90A0">9 items · 1 selected</div>
   </section>
 
-  <!-- Threads: notifications hang off one line, newest at the top -->
-  <aside aria-label="Notifications" style="position: absolute; left: 1176px; top: 24px; width: 248px">
-    <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 0 10px 22px">
-      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Threads</div>
-      <button style="border: 0; background: transparent; color: #9AA0AE; font: 500 12px Inter, sans-serif; padding: 4px 6px">Clear</button>
+  <!-- Threads, opened from the knot by the clock: each program's notes on a thread of its own -->
+  <aside aria-label="Threads" style="position: absolute; right: 16px; bottom: 86px; width: 320px; border-radius: 14px; overflow: hidden; background: #1A1C23; border: 1px solid #2E323D; box-shadow: 0 20px 50px rgba(0,0,0,0.5)">
+    <div style="height: 3px; background: {{accent}}"></div>
+    <div style="display: flex; align-items: center; justify-content: space-between; padding: 12px 14px 8px">
+      <span style="font-size: 16px; font-weight: 800">Threads</span>
+      <button style="border: 0; background: transparent; color: #9AA0AE; font: 500 12px Inter, sans-serif; padding: 4px 6px">Clear all</button>
     </div>
-    <div style="position: relative; display: flex; flex-direction: column; gap: 10px; padding-left: 22px">
-      <div style="position: absolute; left: 6px; top: 6px; bottom: 26px; width: 2px; background: linear-gradient(#5B7CFA, #2E323D)"></div>
-      <div style="position: relative; background: #1A1C23; border: 1px solid #2E323D; border-radius: 10px; padding: 10px 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.35)">
-        <div style="position: absolute; left: -21px; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: {{accent}}; border: 2px solid #0D0F15"></div>
-        <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9AA0AE"><span style="width: 8px; height: 8px; border-radius: 2px; background: #F5A524"></span>Recorder · now</div>
-        <div style="font-size: 13px; font-weight: 600; margin-top: 4px">Recording saved</div>
-        <div style="font-size: 12px; color: #9AA0AE; margin-top: 2px">recording-3.wav, 1:42</div>
+    <div style="padding: 0 10px 10px; display: flex; flex-direction: column; gap: 8px">
+      <div style="position: relative; border-radius: 12px; background: #20232B; border: 1px solid #F5A524; padding: 8px 12px 10px 34px">
+        <div style="position: absolute; left: 16px; top: 34px; bottom: 12px; width: 2px; background: #F5A524"></div>
+        <div style="position: absolute; left: 10px; top: 10px; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #F5A524"></div>
+        <div style="display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 700"><span>Recorder</span><span style="color: #8A90A0; font-weight: 600">1 note</span></div>
+        <div style="font-size: 13px; font-weight: 600; margin-top: 6px">Recording saved</div>
+        <div style="font-size: 12px; color: #9AA0AE; margin-top: 2px">recording-3.wav, 1:42 · now</div>
       </div>
-      <div style="position: relative; background: #1A1C23; border: 1px solid #2E323D; border-radius: 10px; padding: 10px 12px">
-        <div style="position: absolute; left: -21px; top: 12px; width: 10px; height: 10px; border-radius: 50%; background: #2EC4C4; border: 2px solid #0D0F15"></div>
-        <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: #9AA0AE"><span style="width: 8px; height: 8px; border-radius: 2px; background: #2EC4C4"></span>Weft · 4 min</div>
-        <div style="font-size: 13px; font-weight: 600; margin-top: 4px">Download finished</div>
-        <div style="font-size: 12px; color: #9AA0AE; margin-top: 2px">musl-1.2.6.tar.gz</div>
-      </div>
-      <div style="position: relative; background: #16181E; border: 1px solid #262A33; border-radius: 10px; padding: 10px 12px">
-        <div style="position: absolute; left: -19px; top: 14px; width: 6px; height: 6px; border-radius: 50%; background: #3A3F4C"></div>
-        <div style="font-size: 12px; color: #9AA0AE">2 earlier from Mail and Tasks</div>
-      </div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 12px; background: #20232B; border: 1px solid #2E323D; font-size: 12.5px; font-weight: 700"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid #2EC4C4"></span><span style="flex-grow: 1">Weft</span><span style="color: #8A90A0; font-weight: 600">1 note</span></div>
+      <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 12px; background: #20232B; border: 1px solid #2E323D; font-size: 12.5px; font-weight: 700"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid #3B5BDB"></span><span style="flex-grow: 1">Mail</span><span style="color: #8A90A0; font-weight: 600">2 notes</span></div>
     </div>
   </aside>
+  <!-- the short thread from the panel down to the clock it opened from -->
+  <div aria-hidden="true" style="position: absolute; right: 60px; bottom: 72px; width: 2px; height: 14px; background: {{accent}}"></div>
 
   <!-- The loom: launcher, programs as tiles, the thread under what runs, desktops as knots -->
   <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border: 1px solid #2E323D; box-shadow: 0 12px 32px rgba(0,0,0,0.45); display: flex; align-items: center; padding: 0 10px; gap: 14px">
@@ -195,7 +190,8 @@ a{color:#8FA5FF}a:hover{color:#B7C5FF}
       </div>
     </div>
 
-    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 8px; border-left: 1px dashed #2E323D; line-height: 1.15">
+    <div style="position: relative; display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 8px; border-left: 1px dashed #2E323D; line-height: 1.15">
+      <span aria-label="4 notes waiting" style="position: absolute; left: -12px; top: -6px; width: 18px; height: 18px; border-radius: 50%; background: {{accent}}; color: #FFFFFF; font: 700 10.5px Inter, sans-serif; display: flex; align-items: center; justify-content: center">4</span>
       <div style="font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums">12:36</div>
       <div style="font-size: 11px; color: #9AA0AE">Thu 19 Nov</div>
     </div>
