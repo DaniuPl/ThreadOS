@@ -155,7 +155,7 @@ SHARED64 := string serial printk locale bootsplash mark mb2 fbcon vga pic pit pm
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 rtl8168 virtio_net netdev smp random hid iwlwifi acpios power \
-            devices uvc ipc
+            devices uvc ipc wpa
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -2105,6 +2105,8 @@ $(BUILD)/64/acpios.o $(BUILD)/64/power.o: \
 $(BUILD)/64/%.o: kernel/%.c $(ACPICA_STAMP) kernel/acpica/acthreados.h \
                  $(KERNEL_HEADERS) | $(BUILD)/64
 	$(CC) $(ACPICA_OWN) -c $< -o $@
+
+$(BUILD)/64/wpa.o: user/uwpa.h user/uaes.h user/usha1.h
 
 $(KERNEL64): $(OBJS64) $(ACPICA_LIB) kernel64/linker64.ld
 	$(CC) $(LDFLAGS64) $(OBJS64) $(ACPICA_LIB) -o $@

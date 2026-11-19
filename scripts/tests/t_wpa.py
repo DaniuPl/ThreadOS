@@ -18,7 +18,17 @@ not our code.
     PBKDF2 and HMAC;
   * the frame is then attacked: one changed address, one changed byte
     of the data, a different key - each has to end with the frame being
-    dropped.
+    dropped;
+  * the kernel's side of the four-way handshake (kernel/wpa.c), compiled
+    on the host as it is with the sanitizers, against an access point
+    written with OpenSSL (tests/hw/wpa_ap.c, tests/hw/wpa_model.c): the
+    PSKs of 802.11 J.4 and OpenSSL's PBKDF2, RFC 3394's unwrap, every
+    message the access point checks as one would, the pairwise and
+    group keys the two agree on, the group handshake - and what must be
+    refused: another password, a replayed or changed message 3, another
+    ANonce, an RSN element that is not the beacon's (a downgrade), key
+    data past the frame's end, any frame cut short, a stranger's
+    message 1 taking over the keys in use.
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -27,6 +37,8 @@ import hashlib
 import hmac
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 
@@ -56,9 +68,50 @@ def host_prf(key, label, data, nbytes):
     return out[:nbytes]
 
 
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+HW = os.path.join(ROOT, "tests", "hw")
+# the checks tests/hw/wpa_model.c makes: fewer means it stopped early
+HANDSHAKE_CHECKS = 27
+
+
+def handshake_model():
+    work = tempfile.mkdtemp()
+    try:
+        binary = os.path.join(work, "wpa_model")
+        out = subprocess.run(
+            ["gcc", "-std=gnu11", "-Wall", "-Wextra",
+             "-Wno-builtin-declaration-mismatch", "-g", "-O1",
+             "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+             "-I", ROOT, "-o", binary, os.path.join(ROOT, "kernel", "wpa.c"),
+             os.path.join(HW, "wpa_model.c"), os.path.join(HW, "wpa_ap.c"),
+             "-lcrypto"], capture_output=True, text=True)
+        check("the kernel's handshake builds on the host, with the "
+              "sanitizers and OpenSSL's access point", out.returncode == 0)
+        if out.returncode != 0:
+            print(out.stderr[:3000])
+            return
+        run = subprocess.run([binary], capture_output=True, text=True,
+                             timeout=300)
+        lines = [ln for ln in run.stdout.splitlines()
+                 if ln.startswith(("ok: ", "FAIL: "))]
+        for ln in lines:
+            check("handshake: " + ln.split(": ", 1)[1], ln.startswith("ok"))
+        text = run.stdout + run.stderr
+        sane = "runtime error" not in text and "Sanitizer" not in text
+        check(f"handshake: every check ran, and nothing the sanitizers saw "
+              f"({len(lines)} checks)",
+              len(lines) >= HANDSHAKE_CHECKS and sane and
+              run.returncode in (0, 1))
+        if not sane:
+            print(text[-4000:])
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
 def main():
     print()
     print("--- WPA2: the keys and encrypting a frame ---")
+    handshake_model()
 
     reason = no64()
     if reason:

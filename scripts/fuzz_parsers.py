@@ -5,7 +5,8 @@ Six fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
 packet path in the kernel (net.c + tcp.c), the kernel's TrueType
 reader (ttf.c), because a font is a file and files come from anywhere,
 the kernel's HID report descriptor reader (hid.c), because a descriptor
-comes from whatever is plugged in, Mbed TLS's certificate and key
+comes from whatever is plugged in, the kernel's WPA2 handshake (wpa.c),
+because its frames come from the air, Mbed TLS's certificate and key
 parsers, which curl hands whatever a server sends, and the ARM64
 kernel's device tree reader (kernelarm64/fdt.c), because the tree is
 the firmware's and the firmware is somebody else's - and GLib, under
@@ -173,6 +174,36 @@ def hid_seeds():
             case(media, [2, 0xE9, 0], [2, 0, 0], [1, 1], [3, 1, 2]),
             case(bits, [1], [0xFF], [0]),
             case(u.BOOT_KEYBOARD + media, [2, 0xE2, 0], [0] * 8)]
+
+
+def build_wpa(workdir):
+    """The kernel's wpa.c, with the programs' WPA and AES headers it
+    builds on (user/uwpa.h, user/uaes.h)"""
+    binary = os.path.join(workdir, "wharness")
+    must(["gcc", *SAN, "-w", "-I", ROOT, "-o", binary,
+          os.path.join(FUZZ, "wpa_harness.c"),
+          os.path.join(ROOT, "kernel", "wpa.c")], "the WPA harness")
+    return binary
+
+
+def wpa_seeds():
+    """What message 3 and the group handshake carry - the access point's
+    RSN element and the group key in its KDE, padded - after the byte
+    that picks the key information; and a message 1 and a message 3 as
+    whole frames"""
+    rsn = bytes([0x30, 20, 1, 0, 0, 0x0F, 0xAC, 4, 1, 0, 0, 0x0F, 0xAC, 4,
+                 1, 0, 0, 0x0F, 0xAC, 2, 0x0C, 0])
+    gtk = bytes([0xDD, 22, 0, 0x0F, 0xAC, 1, 1, 0]) + bytes(range(16))
+    m1 = (bytes([2, 3, 0, 95, 2, 0, 0x8A, 0, 16]) + bytes(7) + b"\x01" +
+          b"\x99" * 32 + bytes(16 + 8 + 8 + 16) + bytes(2))
+    m3 = (bytes([2, 3, 0, 95 + 56, 2, 0x13, 0xCA, 0, 16]) + bytes(7) +
+          b"\x02" + b"\x99" * 32 + bytes(48) + bytes([0, 56]) +
+          bytes(range(56)))
+    return [b"\x00" + rsn + gtk + b"\xdd\x00",
+            b"\x01" + gtk + rsn,
+            b"\x02" + rsn,
+            b"\x00" + bytes([0xDD, 6, 0, 0x0F, 0xAC, 1, 3, 0]) + rsn,
+            m1, m3]
 
 
 MBED_FUZZERS = ("x509crt", "pubkey", "privkey")
@@ -1486,11 +1517,13 @@ def main():
         nbinaries, ndirs = build_net(workdir)
         mbinaries.update(nbinaries)
         hbinary = build_hid(workdir)
+        mbinaries["wpa"] = build_wpa(workdir)
         fbinary = build_fdt(workdir)
         corpus = seeds(workdir)
         corpus["frames"] = frames()
         corpus["ttf"] = fonts()
         corpus["hid"] = hid_seeds()
+        corpus["wpa"] = wpa_seeds()
         corpus["fdt"] = [t for _, t, want in FDT_TREES
                          if want.startswith("r=0")]
         corpus["mbedtls-x509crt"] = list(corpus["x509"])

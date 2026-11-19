@@ -10577,3 +10577,42 @@ works and is checked by `make test`.
       paused and left, the island goes after its five seconds. The
       phone's card builds with the ARM64 kernel; its test comes with
       the next aarch64 Weft build.
+- [x] **Wi-Fi stage 3a: the station's side of WPA2's four-way handshake**
+      (kernel/wpa.c, kernel/include/wpa.h, tests/hw/wpa_ap.c,
+      tests/hw/wpa_model.c, tests/fuzz/wpa_harness.c,
+      scripts/tests/t_wpa.py, scripts/fuzz_parsers.py)
+      Joining a protected network needs, after the card has associated,
+      the handshake that turns the password into the keys the card
+      encrypts with. kernel/wpa.c is that protocol, apart from the card:
+      EAPOL key frames in, answers out. Message 1's ANonce gives a PTK
+      to try; message 2 carries our SNonce and RSN element, signed;
+      message 3 must repeat the ANonce, carry a larger replay counter,
+      hold up under the MIC, unwrap with the KEK and carry the RSN
+      element the beacon had (a man in the middle offering a weaker
+      cipher shows there) and the group key; message 4 answers, and the
+      pairwise and group keys are handed over to be installed. The
+      group handshake replaces the group key later. Message 1 is
+      unsigned, so its PTK stays a candidate until a message 3 signed
+      with it holds up - a stranger's message 1 does not take over the
+      keys in use. CCMP and PSK only. The cryptography is the one the
+      programs already have and t_wpa and t_aes check against the
+      standards' vectors (user/uwpa.h's PRF, PTK and MIC over
+      user/usha1.h, user/uaes.h's key unwrap); the kernel includes the
+      headers without the programs' system calls, as kernel/user.c
+      does.
+      t_wpa now also builds kernel/wpa.c on the host with the
+      sanitizers against an access point written from the standard
+      with OpenSSL (tests/hw/wpa_ap.c, which the card's model will use
+      to play the access point): the PMKs of 802.11 J.4 and of 56
+      passwords against OpenSSL's PBKDF2, RFC 3394's unwrap, a whole
+      handshake the access point accepts at every step, the TK and the
+      group key both sides hold, the group handshake; and refused,
+      keys untouched: another password, a replayed message 3, changed
+      key data, a changed MIC, another ANonce, no Install bit, key data
+      past the frame, an RSN element not the beacon's, every cut of
+      message 3, a group key before the handshake, a stranger's message
+      1 (which failed at first: it reset the handshake's state, and the
+      next real group key was refused). The fuzzer feeds the input as a
+      frame and as message 3's and a group key's key data, wrapped and
+      signed so that it reaches the element parser: 3000 cases, nothing
+      found.
