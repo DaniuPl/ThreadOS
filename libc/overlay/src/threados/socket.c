@@ -433,6 +433,72 @@ static long open_font(int i)
 	return n < 0 ? n : vfile_of_buffer(buf, n);
 }
 
+/* --- Which type a file is: /usr/share/mime/globs2 ------------------
+ *
+ * GLib (g_content_type_guess) and WebKit (its MIME registry - a video's
+ * controls make their icons with it, "image/svg+xml" for "Play.svg")
+ * ask shared-mime-info's database which type a file's name says it is.
+ * ThreadOS has none, so they heard "unknown" and the controls drew no
+ * icons. This is the part of one they need: the web's types, by their
+ * extensions, in the database's own globs2 format (weight, type,
+ * pattern) - the types freedesktop.org's database gives them. */
+#define MIME_GLOBS "/usr/share/mime/globs2"
+
+static const char mime_globs[] =
+	"# ThreadOS's types by name (libc/overlay/src/threados/socket.c)\n"
+	"50:image/svg+xml:*.svg\n"
+	"50:image/png:*.png\n"
+	"50:image/jpeg:*.jpg\n"
+	"50:image/jpeg:*.jpeg\n"
+	"50:image/gif:*.gif\n"
+	"50:image/webp:*.webp\n"
+	"50:image/vnd.microsoft.icon:*.ico\n"
+	"50:image/bmp:*.bmp\n"
+	"50:image/avif:*.avif\n"
+	"50:video/mp4:*.mp4\n"
+	"50:video/mp4:*.m4v\n"
+	"50:video/webm:*.webm\n"
+	"50:video/x-matroska:*.mkv\n"
+	"50:video/quicktime:*.mov\n"
+	"50:audio/mpeg:*.mp3\n"
+	"50:audio/mp4:*.m4a\n"
+	"50:audio/aac:*.aac\n"
+	"50:audio/ogg:*.ogg\n"
+	"50:audio/ogg:*.oga\n"
+	"50:audio/ogg:*.opus\n"
+	"50:audio/flac:*.flac\n"
+	"50:audio/vnd.wave:*.wav\n"
+	"50:text/html:*.html\n"
+	"50:text/html:*.htm\n"
+	"50:application/xhtml+xml:*.xhtml\n"
+	"50:text/css:*.css\n"
+	"50:text/javascript:*.js\n"
+	"50:text/javascript:*.mjs\n"
+	"50:application/json:*.json\n"
+	"50:application/xml:*.xml\n"
+	"50:text/plain:*.txt\n"
+	"50:text/csv:*.csv\n"
+	"50:text/markdown:*.md\n"
+	"50:text/vtt:*.vtt\n"
+	"50:application/pdf:*.pdf\n"
+	"50:application/wasm:*.wasm\n"
+	"50:font/woff:*.woff\n"
+	"50:font/woff2:*.woff2\n"
+	"50:font/ttf:*.ttf\n"
+	"50:font/otf:*.otf\n"
+	"50:application/zip:*.zip\n"
+	"50:application/gzip:*.gz\n"
+	;
+
+static long open_mime_globs(void)
+{
+	char *buf = malloc(sizeof(mime_globs));
+	if (!buf)
+		return -ENOMEM;
+	memcpy(buf, mime_globs, sizeof(mime_globs) - 1);
+	return vfile_of_buffer(buf, sizeof(mime_globs) - 1);
+}
+
 static long open_fonts_conf(void)
 {
 	char *buf = malloc(sizeof(fonts_conf));
@@ -442,9 +508,24 @@ static long open_fonts_conf(void)
 	return vfile_of_buffer(buf, sizeof(fonts_conf) - 1);
 }
 
+/* A path as Linux reads it, every run of slashes one: what asks for a
+   made-up file may build its name from parts that each end in one
+   (GLib's xdgmime asks for "/usr/share//mime//globs2") */
+static const char *one_slash(const char *path, char *out, size_t cap)
+{
+	size_t n = 0;
+	for (; *path && n + 1 < cap; path++)
+		if (*path != '/' || !n || out[n - 1] != '/')
+			out[n++] = *path;
+	out[n] = 0;
+	return out;
+}
+
 /* stat() of the fonts, their directory and the configuration */
 NET_HIDDEN long __tos_stat_virtual(const char *path, struct kstat *st)
 {
+	char tidy[256];
+	path = one_slash(path, tidy, sizeof(tidy));
 	long size;
 	unsigned mode = S_IFREG | 0444;
 	int i = font_of(path);
@@ -459,13 +540,16 @@ NET_HIDDEN long __tos_stat_virtual(const char *path, struct kstat *st)
 		free(buf);
 	} else if (!strcmp(path, FONTS_CONF)) {
 		size = sizeof(fonts_conf) - 1;
+	} else if (!strcmp(path, MIME_GLOBS)) {
+		size = sizeof(mime_globs) - 1;
 	} else {
 		return -ENOENT;
 	}
 	memset(st, 0, sizeof(*st));
 	st->st_mode = mode;
 	st->st_nlink = 1;
-	st->st_ino = 6000 + (i >= 0 ? i : is_font_dir(path) ? 10 : 11);
+	st->st_ino = 6000 + (i >= 0 ? i : is_font_dir(path) ? 10 :
+	                     !strcmp(path, MIME_GLOBS) ? 12 : 11);
 	st->st_size = size;
 	st->st_blksize = 4096;
 	st->st_blocks = (size + 511) / 512;
@@ -667,6 +751,8 @@ static long open_bundle(void)
 
 NET_HIDDEN long __tos_open_virtual(const char *path)
 {
+	char tidy[256];
+	path = one_slash(path, tidy, sizeof(tidy));
 	if (!strcmp(path, "/dev/urandom") || !strcmp(path, "/dev/random"))
 		return vfile_new(1);
 	if (is_bundle(path))
@@ -675,6 +761,8 @@ NET_HIDDEN long __tos_open_virtual(const char *path)
 		return open_font(font_of(path));
 	if (!strcmp(path, FONTS_CONF))
 		return open_fonts_conf();
+	if (!strcmp(path, MIME_GLOBS))
+		return open_mime_globs();
 	if (strcmp(path, "/etc/resolv.conf"))
 		return -ENOENT;
 	unsigned info[4];

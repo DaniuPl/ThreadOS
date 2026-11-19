@@ -518,6 +518,26 @@ static void gio(void)
         count++;
     }
     printf("lines read from a memory stream (%d):%s\n", count, seen->str);
+    /* Which type a file's name says it is - shared-mime-info's database
+       on the test machine, ThreadOS's made-up one (libc's socket.c) -
+       for the web's files; "uncertain" is left out, since a fuller
+       database knows more types a name might be */
+    static const char *const names[] = {
+        "a.svg", "a.png", "a.jpg", "a.gif", "a.webp", "a.ico", "a.mp4",
+        "a.webm", "a.mkv", "a.mp3", "a.m4a", "a.flac", "a.wav", "a.html",
+        "a.css", "a.js", "a.json", "a.xml", "a.txt", "a.pdf", "a.wasm",
+        "a.woff2", "a.ttf", "a.zip", "a.vtt",
+    };
+    GString *types = g_string_new("");
+    for (size_t i = 0; i < G_N_ELEMENTS(names); i++) {
+        char *t = g_content_type_guess(names[i], NULL, 0, NULL);
+        char *m = g_content_type_get_mime_type(t);
+        g_string_append_printf(types, " %s=%s", names[i] + 2, m ? m : "?");
+        g_free(m);
+        g_free(t);
+    }
+    printf("types by name:%s\n", types->str);
+    g_string_free(types, TRUE);
     g_string_free(seen, TRUE);
     g_object_unref(lines);
     g_object_unref(mem);

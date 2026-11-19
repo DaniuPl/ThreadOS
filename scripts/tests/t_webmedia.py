@@ -17,6 +17,11 @@ one - a browser lets a page make sound only after one:
   RGB; the page's script says it ended, three seconds in, at the size
   FFmpeg says the video is
 
+  WebKit's own controls on a video (controls): paused, the play button
+  in its middle has its icon - drawn white over the red frame - and a
+  click on it plays the video; with the pointer over it as it plays,
+  the bar of buttons along its foot has theirs
+
   Media Source Extensions, which YouTube streams through: the page asks
   which types it can be fed (VP9 and Opus in WebM, H.264 and AAC in
   MP4), fetches the same colours as VP9 in WebM, appends them to a
@@ -90,6 +95,19 @@ v.addEventListener('ended', () => {
                    v.videoWidth + 'x' + v.videoHeight; done(); });
 v.addEventListener('error', () => {
   document.title = 'error ' + (v.error ? v.error.code : '?'); });
+</script></body></html>""").encode()
+
+# WebKit's own controls (controls), not the page's: a button with a
+# play icon over the paused video, a bar of buttons when the pointer is
+# over it playing. The icons are the theme's SVGs, typed by their names
+# (libc's made-up /usr/share/mime/globs2).
+CONTROLS = (PAGE_HEAD + """
+<video id="v" src="/colours.mp4" controls muted preload="auto"></video>
+<script>
+const v = document.getElementById('v');
+v.addEventListener('canplaythrough', () => { document.title = 'controls ready'; },
+                   { once: true });
+v.addEventListener('playing', () => { document.title = 'controls playing'; });
 </script></body></html>""").encode()
 
 TYPES = ['video/webm; codecs="vp9"', 'audio/webm; codecs="opus"',
@@ -323,6 +341,50 @@ def video_page(q, port, files, name, path, ended):
     close_weft(q, seen)
 
 
+def white(at, x0, y0, x1, y1):
+    """How many pixels of the box are nearly white - an icon's, over a
+    video of red, green and blue"""
+    return sum(1 for y in range(y0, y1) for x in range(x0, x1)
+               if min(at(x, y)) >= 215)
+
+
+def controls_page(q, port):
+    """WebKit's own controls on a video: their icons drawn, their play
+    button playing it, their bar of buttons over it as it plays"""
+    seen, done = open_page(q, port, "/controls.html")
+    ready = wait_line(q, seen, "[weft] title controls ready", 120)
+    org = video_origin(q)
+    check(f"/controls.html: the video with WebKit's controls loads ({ready})",
+          ready is not None and org is not None)
+    if org is None:
+        tell(q, seen)
+        close_weft(q, seen)
+        return
+    cx, cy = org[0] + 160, org[1] + 120
+    n = 0
+    end = time.time() + 30
+    while n < 20 and time.time() < end:
+        _, _, at = q.screen_raw()
+        n = white(at, cx - 30, cy - 30, cx + 30, cy + 30)
+        time.sleep(0.5)
+    check(f"paused, the play button in its middle has its icon ({n} white "
+          f"pixels; none without the icons)", n >= 20)
+    q.click(cx, cy)
+    line = wait_line(q, seen, "[weft] title controls playing", 30)
+    check(f"a click on it plays the video ({line})", line is not None)
+    q.mouse_goto(cx - 40, cy + 40)
+    n = 0
+    end = time.time() + 30
+    while n < 20 and time.time() < end:
+        q.mouse_goto(cx - 40 + int(time.time()) % 2, cy + 40)
+        _, _, at = q.screen_raw()
+        n = white(at, org[0] + 4, org[1] + 200, org[0] + 120, org[1] + 238)
+        time.sleep(0.3)
+    check(f"and with the pointer over it, the bar of buttons along its foot "
+          f"({n} white pixels of its icons)", n >= 20)
+    close_weft(q, seen)
+
+
 def mse_page(q, port, files):
     seen, done = open_page(q, port, "/mse.html")
     types = wait_line(q, seen, "[weft] title types", 60)
@@ -403,7 +465,8 @@ def main():
                   kinds[name.rsplit(".", 1)[1]])
         for path, body in (("/video.html", VIDEO), ("/mse.html", MSE),
                            ("/audio.html", AUDIO),
-                           ("/webaudio.html", WEBAUDIO)):
+                           ("/webaudio.html", WEBAUDIO),
+                           ("/controls.html", CONTROLS)):
             ROUTES[path] = (lambda b: lambda h, body: (
                 200, [("Content-Type", "text/html; charset=utf-8")], b))(body)
         port, stop = start_http_server()
@@ -425,6 +488,7 @@ def main():
                 q.mouse_home()
                 video_page(q, port, files, "colours.mp4", "/video.html",
                            "[weft] title ended")
+                controls_page(q, port)
                 mse_page(q, port, files)
                 sound_page(q, port, wav, "/audio.html",
                            "[weft] title audio ready",

@@ -16,6 +16,16 @@
 
 set(_threados_dir ${THREADOS_REPO}/apps/webkit)
 
+# WebKit's resources - the web process's theme for form controls
+# (wpe-theme.css), the media controls' icons, the picture of a missing
+# image, Web Audio's spatial sound - are GResource bundles that register
+# themselves from a constructor. Nothing calls into them, so a static
+# link leaves them out, and pages went without: a video's controls had
+# no icons. Each is asked for by name (-u), which brings its object in.
+set(_threados_resources
+    "LINKER:-u,WebKitResourcesGResourceBundle_get_resource"
+    "LINKER:-u,ModernMediaControlsGResourceBundle_get_resource")
+
 foreach (_threados_program IN ITEMS wpewebproc wpenetproc)
     set(${_threados_program}_SOURCES ${_threados_dir}/${_threados_program}.cpp)
     set(${_threados_program}_LIBRARIES WebKit)
@@ -23,6 +33,7 @@ foreach (_threados_program IN ITEMS wpewebproc wpenetproc)
         $<TARGET_PROPERTY:WebKit,INCLUDE_DIRECTORIES>)
     WEBKIT_EXECUTABLE_DECLARE(${_threados_program})
     WEBKIT_EXECUTABLE(${_threados_program})
+    target_link_options(${_threados_program} PRIVATE ${_threados_resources})
 endforeach ()
 
 set(weft_SOURCES
@@ -46,3 +57,4 @@ set(weft_PRIVATE_LIBRARIES
 )
 WEBKIT_EXECUTABLE_DECLARE(weft)
 WEBKIT_EXECUTABLE(weft)
+target_link_options(weft PRIVATE ${_threados_resources})

@@ -10512,3 +10512,30 @@ works and is checked by `make test`.
       the phone with taps, the status bar's and the home strip's places
       red too, the second tap leaving it (document.exitFullscreen); it
       runs with the aarch64 WebKit build.
+- [x] **A video's own controls in Weft: their icons, and WebKit's
+      resources and file types** (apps/webkit/programs.cmake,
+      libc/overlay/src/threados/socket.c, libc/tests/glibtest.c,
+      scripts/tests/t_webmedia.py)
+      <video controls> showed its play button as an empty circle and its
+      bar with times and a slider but no buttons. Two things were
+      missing. WebKit's resources - the media controls' icons, the web
+      process's theme for form controls (wpe-theme.css), the picture of
+      a missing image, Web Audio's spatial sound - are GResource bundles
+      that register themselves from a constructor; nothing calls into
+      them, so a static link left them out, and now each is asked for by
+      name (-u). And WebKit makes the icons' images with the type their
+      names say (Play.svg is image/svg+xml), which in a GLib port is
+      shared-mime-info's database - ThreadOS had none, and every type
+      was unknown, to GLib's g_content_type_guess as well. The C library
+      makes up /usr/share/mime/globs2 now, the web's types in that
+      format, as it makes up fonts.conf; and a made-up file is found
+      under any number of slashes, as Linux finds a path (xdgmime asks
+      for "/usr/share//mime//globs2"). The controls now have a play
+      button with its icon, and as a video plays under the pointer a bar
+      with 15 s back and forward, pause, the times and slider, volume
+      and settings, and full screen. glibtest prints the types GLib
+      gives 25 file names, held to the test machine's GLib and its full
+      database (t_glib). t_webmedia: a video with controls has the icon
+      in its play button (white pixels where there were none), a click
+      on it plays it, and with the pointer over it the bar's icons are
+      there.
