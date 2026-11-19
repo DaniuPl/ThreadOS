@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Swatch</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <section aria-label="Swatch window" style="position: absolute; left: 30px; top: 24px; width: 1380px; height: 800px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px)">
+      <dc-import name="Icon" app="swatch" size="{{ 18 }}" hint-size="18px,18px"></dc-import><span style="font-size: 13px; font-weight: 700">Swatch</span><span style="font-size: 13px; color: #8A90A0">ProtonUI v2 · every control, live</span>
+      <span style="flex-grow: 1"></span>
+      <div role="group" aria-label="Theme" style="display: inline-flex; padding: 3px; border-radius: 9px; background: #17191F; border: 1px solid #2E323D"><sc-for list="{{themes}}" as="t" hint-placeholder-count="2"><button onClick="{{t.pick}}" style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: 600 12.5px Inter, sans-serif">{{t.name}}</button></sc-for></div>
+    </div>
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <nav aria-label="Controls" style="width: 220px; flex-shrink: 0; box-sizing: border-box; padding: 12px 8px; border-right: 1px solid #262A33; background: #17191F; display: flex; flex-direction: column; gap: 2px">
+        <sc-for list="{{list}}" as="c" hint-placeholder-count="10">
+          <button onClick="{{c.pick}}" style="display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 7px; border: 0; background: {{c.bg}}; color: {{c.fg}}; font: {{c.w}} 13px 'JetBrains Mono', monospace; text-align: left"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{c.knot}}"></span>{{c.name}}</button>
+        </sc-for>
+      </nav>
+
+      <!-- the control itself, on the ground the program will have -->
+      <main style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column">
+        <div style="flex-grow: 1; display: flex; align-items: center; justify-content: center; background: {{ground}}; background-image: repeating-linear-gradient(0deg, {{grid}} 0px, {{grid}} 1px, transparent 1px, transparent 8px), repeating-linear-gradient(90deg, {{grid}} 0px, {{grid}} 1px, transparent 1px, transparent 8px)">
+          <div style="display: flex; flex-direction: column; gap: 22px; align-items: center">
+            <span style="font-size: 12px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: {{dim}}">{{cur.name}} · states</span>
+            <div style="display: flex; gap: 26px; align-items: center">
+              <sc-for list="{{cur.states}}" as="s" hint-placeholder-count="4">
+                <div style="display: flex; flex-direction: column; align-items: center; gap: 10px">
+                  <sc-if value="{{s.isSwitch}}" hint-placeholder-val="{{ false }}"><span style="width: 46px; height: 26px; border-radius: 999px; box-sizing: border-box; padding: 0 3px; background: {{s.track}}; border: {{s.line}}; display: flex; align-items: center; justify-content: {{s.just}}; outline: {{s.focus}}; outline-offset: 3px; opacity: {{s.op}}"><span style="width: 20px; height: 20px; border-radius: 50%; background: {{s.knob}}"></span></span></sc-if>
+                  <sc-if value="{{s.isButton}}" hint-placeholder-val="{{ true }}"><span style="height: 34px; padding: 0 16px; border-radius: 8px; display: flex; align-items: center; background: {{s.track}}; border: {{s.line}}; color: {{s.knob}}; font-size: 13px; font-weight: 600; outline: {{s.focus}}; outline-offset: 3px; opacity: {{s.op}}">Install</span></sc-if>
+                  <sc-if value="{{s.isProgress}}" hint-placeholder-val="{{ false }}"><span style="position: relative; width: 160px; height: 12px; opacity: {{s.op}}"><span style="position: absolute; left: 0; right: 0; top: 5px; border-top: 2px dashed {{s.line}}"></span><span style="position: absolute; left: 0; top: 4px; height: 4px; width: {{s.just}}; border-radius: 2px; background: {{s.track}}"></span><span style="position: absolute; left: {{s.just}}; top: 0; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%; background: {{s.knob}}"></span></span></sc-if>
+                  <sc-if value="{{s.isField}}" hint-placeholder-val="{{ false }}"><span style="width: 180px; height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px 8px 3px 3px; background: {{s.track}}; border-bottom: {{s.line}}; display: flex; align-items: center; font-size: 13px; color: {{s.knob}}; opacity: {{s.op}}">{{s.text}}</span></sc-if>
+                  <span style="font-size: 12px; color: {{dim}}">{{s.label}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+        <div style="height: 180px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; border-top: 1px solid #262A33">
+          <pre style="margin: 0; padding: 14px 18px; background: #0F1116; font: 400 12.5px/1.6 'JetBrains Mono', monospace; color: #C9CDD8; overflow: hidden">{{cur.code}}</pre>
+          <div style="padding: 14px 16px; background: #14161B; border-left: 1px solid #262A33; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px">
+            <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">What it sends</span>
+            <sc-for list="{{cur.events}}" as="e" hint-placeholder-count="2"><span style="font-family: 'JetBrains Mono', monospace; color: #8FA5FF">{{e}}</span></sc-for>
+            <span style="margin-top: auto; color: #8A90A0">Copy the line on the left into your program; Code knows the names.</span>
+          </div>
+        </div>
+      </main>
+
+      <!-- starting a program from one of these -->
+      <aside aria-label="A new program" style="width: 300px; flex-shrink: 0; box-sizing: border-box; padding: 16px; border-left: 1px solid #262A33; background: #14161B; display: flex; flex-direction: column; gap: 12px">
+        <span style="font-size: 16px; font-weight: 800">Start a program</span>
+        <span style="font-size: 12.5px; color: #9AA0AE; line-height: 1.5">Opens a new project in Code, with a window that already runs.</span>
+        <sc-for list="{{templates}}" as="t" hint-placeholder-count="4">
+          <button onClick="{{t.pick}}" style="display: flex; gap: 12px; align-items: center; padding: 10px; border-radius: 10px; border: {{t.line}}; background: {{t.bg}}; color: #ECEDF2; text-align: left; font-family: Inter, sans-serif">
+            <dc-import name="Icon" app="{{t.app}}" size="{{ 32 }}" hint-size="32px,32px"></dc-import>
+            <span><span style="display: block; font-size: 13.5px; font-weight: 700">{{t.name}}</span><span style="display: block; font-size: 11.5px; color: #9AA0AE">{{t.what}}</span></span>
+          </button>
+        </sc-for>
+        <label style="display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: #9AA0AE">Name<input value="backup-check" style="height: 34px; box-sizing: border-box; padding: 0 10px; border-radius: 8px 8px 3px 3px; border: 0; border-bottom: 2px solid #5B7CFA; background: #20232B; color: #ECEDF2; font: 400 13px 'JetBrains Mono', monospace; outline: none"></label>
+        <button style="margin-top: auto; height: 38px; border-radius: 9px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 700 13.5px Inter, sans-serif">Make it, and open in Code</button>
+      </aside>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const pick = st.c || 'pu_switch';
+    const light = st.light === true;
+    const A = light ? '#3F5EE8' : '#5B7CFA';
+    const C = {
+      pu_switch: { kind: 'isSwitch', code: 'int wifi = pu_switch(&s, "Wi-Fi", 1);\n\n/* later */\nif (pu_value(&ui, wifi))\n    join_network();', events: ['PU_CHANGED'], states: [['Off', 0], ['On', 1], ['Focused', 2], ['Unavailable', 3]] },
+      pu_button: { kind: 'isButton', code: 'int go = pu_button(&s, "Install", PU_PRIMARY);\n\n/* PU_QUIET, PU_DANGER for the others */', events: ['PU_PRESSED'], states: [['Rest', 1], ['Pressed', 4], ['Focused', 2], ['Unavailable', 3]] },
+      pu_progress: { kind: 'isProgress', code: 'int bar = pu_progress(&s, 0, 100);\npu_set_value(&ui, bar, done_percent());\n\n/* -1: the length is not known */', events: ['nothing: it only shows'], states: [['Starting', 0], ['Half', 1], ['Almost', 2], ['Unknown', 3]] },
+      pu_field: { kind: 'isField', code: 'static char name[64];\nint f = pu_field(&s, "Name", name, sizeof name);', events: ['PU_TYPED', 'PU_ENTER'], states: [['Rest', 0], ['Focused', 1], ['Wrong', 2], ['Unavailable', 3]] }
+    };
+    const names = ['pu_button', 'pu_field', 'pu_switch', 'pu_segments', 'pu_progress', 'pu_knots', 'pu_menu', 'pu_card', 'pu_avatar', 'pu_side', 'pu_sheet'];
+    const list = names.map((n) => { const has = !!C[n]; const on = n === pick; return { name: n, bg: on ? 'rgba(91,124,250,0.18)' : 'transparent', fg: on ? '#FFFFFF' : (has ? '#C9CDD8' : '#6A7080'), w: on ? 600 : 400, knot: on ? '#5B7CFA' : 'transparent', pick: () => { if (has) this.setState({ c: n }); } }; });
+    const c = C[pick];
+    const line = light ? '#CFC8BA' : '#3A3F4C';
+    const states = c.states.map((s) => {
+      const k = s[1];
+      const base = { label: s[0], isSwitch: c.kind === 'isSwitch', isButton: c.kind === 'isButton', isProgress: c.kind === 'isProgress', isField: c.kind === 'isField', focus: '0px solid transparent', op: k === 3 ? 0.4 : 1, text: '' };
+      if (c.kind === 'isSwitch') return Object.assign(base, { track: k === 0 || k === 3 ? (light ? '#EFEBE3' : '#2A2D36') : A, line: k === 0 || k === 3 ? '1px dashed ' + line : '0', just: k === 0 || k === 3 ? 'flex-start' : 'flex-end', knob: k === 0 || k === 3 ? '#8A90A0' : '#FFFFFF', focus: k === 2 ? '2px solid ' + A : '0px solid transparent' });
+      if (c.kind === 'isButton') return Object.assign(base, { track: k === 4 ? (light ? '#2A45C0' : '#4A68E0') : A, line: '0', knob: '#FFFFFF', focus: k === 2 ? '2px solid ' + A : '0px solid transparent' });
+      if (c.kind === 'isProgress') return Object.assign(base, { track: k === 3 ? 'transparent' : A, line: line, just: ['8%', '50%', '92%', '0%'][k], knob: k === 3 ? 'transparent' : '#FFFFFF' });
+      return Object.assign(base, { track: light ? '#FFFFFF' : '#20232B', line: k === 1 ? '2px solid ' + A : (k === 2 ? '2px solid #E5484D' : '2px dashed ' + line), knob: light ? '#1D1C1A' : '#ECEDF2', text: k === 2 ? '80800' : 'threados-pc' });
+    });
+    const T = [['files', 'A window with a list', 'Rows, a toolbar, a detail side'], ['settings', 'Settings-like', 'Sections on the left, rows on the right'], ['phone', 'A phone program', 'Finger density, a sheet, the thread'], ['loomflight', 'A game', 'A loop at 60 frames, the mouse held']];
+    const tp = st.tp == null ? 0 : st.tp;
+    const templates = T.map((t, i) => ({ app: t[0], name: t[1], what: t[2], bg: i === tp ? 'rgba(91,124,250,0.14)' : '#1A1C23', line: i === tp ? '1px solid #5B7CFA' : '1px solid #2E323D', pick: () => this.setState({ tp: i }) }));
+    const themes = [['Night', false], ['Linen', true]].map((t) => ({ name: t[0], bg: t[1] === light ? '#2A2D36' : 'transparent', fg: t[1] === light ? '#FFFFFF' : '#B4B9C6', pick: () => this.setState({ light: t[1] }) }));
+    return { list, cur: { name: pick, code: c.code, events: c.events, states }, templates, themes, ground: light ? '#F6F3EC' : '#1A1C23', grid: light ? 'rgba(0,0,0,0.035)' : 'rgba(255,255,255,0.03)', dim: light ? '#6B675F' : '#9AA0AE' };
+  }
+}
+</script>
+</body>
+</html>

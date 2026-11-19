@@ -157,7 +157,7 @@ class Component extends DCLogic {
       ['+', '    gfx_fill(x, y + SELVEDGE_H, w, TITLE_H,'],
       ['+', '             L.title_bg, 255);'],
       [' ', '    draw_title(win, x, y);'],
-      [' ', '    draw_spool(win, x + w, y);']
+      [' ', '    draw_window_buttons(win, x + w, y);']
     ];
     const diff = D.map((d) => ({ sign: d[0] === ' ' ? '' : d[0], text: d[1], bg: d[0] === '+' ? 'rgba(70,194,122,0.12)' : (d[0] === '-' ? 'rgba(229,72,77,0.12)' : 'transparent'), fg: d[0] === ' ' ? '#9AA0AE' : '#ECEDF2', signColor: d[0] === '+' ? '#7AD69B' : '#FF8A8D' }));
     return { commits, changes, branches, files, diff };

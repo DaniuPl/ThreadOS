@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>System questions</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 36px 44px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; gap: 22px">
+  <header style="display: flex; justify-content: space-between; align-items: flex-end; gap: 40px">
+    <div>
+      <h1 style="margin: 0; font-size: 34px; font-weight: 800; letter-spacing: -0.03em">When the system has to ask</h1>
+      <p style="margin: 8px 0 0; font-size: 14.5px; color: #B4B9C6; max-width: 860px; line-height: 1.5">A question is a card with a selvedge: indigo when nothing is lost either way, saffron when the answer reaches past one program, madder when it destroys something. The safe answer is on the left, the one that does the thing on the right; Esc is always the safe one. The window behind dims, the rest of the desktop does not.</p>
+    </div>
+  </header>
+
+  <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: 1fr 1fr; gap: 20px; flex-grow: 1; min-height: 0">
+
+    <!-- a program asks for the camera -->
+    <section aria-label="A program asks for the camera" style="position: relative; border-radius: 16px; background: #0D0F15; border: 1px solid #1F2229; overflow: hidden; display: flex; align-items: center; justify-content: center">
+      <span style="position: absolute; left: 16px; top: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">1 · Permission</span>
+      <div role="dialog" aria-label="Purl wants to use the camera" style="width: 420px; border-radius: 14px; overflow: hidden; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 24px 60px rgba(0,0,0,0.6)">
+        <div style="height: 3px; background: #5B7CFA"></div>
+        <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; gap: 14px; align-items: center">
+            <dc-import name="Icon" app="purl" size="{{ 44 }}" hint-size="44px,44px"></dc-import>
+            <div><div style="font-size: 16px; font-weight: 800">Purl wants to use the camera</div><div style="font-size: 12.5px; color: #9AA0AE; margin-top: 2px">For a video call with Ania</div></div>
+          </div>
+          <div role="radiogroup" aria-label="How long" style="display: flex; flex-direction: column; gap: 6px">
+            <sc-for list="{{perm}}" as="p" hint-placeholder-count="3">
+              <button role="radio" aria-checked="{{p.checked}}" onClick="{{p.pick}}" style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; border-radius: 9px; border: {{p.border}}; background: {{p.bg}}; color: #ECEDF2; font: 500 13.5px Inter, sans-serif; text-align: left"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{p.ring}}; background: {{p.dot}}"></span>{{p.name}}</button>
+            </sc-for>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9AA0AE"><span style="width: 8px; height: 8px; border-radius: 50%; background: #46C27A"></span>While it is on, the shuttle shows a green knot.</div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px">
+            <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Don't allow</button>
+            <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 13px Inter, sans-serif">Allow</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- the kernel wants an administrator -->
+    <section aria-label="An administrator is needed" style="position: relative; border-radius: 16px; background: #0D0F15; border: 1px solid #1F2229; overflow: hidden; display: flex; align-items: center; justify-content: center">
+      <span style="position: absolute; left: 16px; top: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">2 · An administrator</span>
+      <div role="dialog" aria-label="Install needs an administrator" style="width: 440px; border-radius: 14px; overflow: hidden; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 24px 60px rgba(0,0,0,0.6)">
+        <div style="height: 3px; background: #F5A524"></div>
+        <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; gap: 14px; align-items: center">
+            <dc-import name="Icon" app="install" size="{{ 44 }}" hint-size="44px,44px"></dc-import>
+            <div><div style="font-size: 16px; font-weight: 800">Install needs an administrator</div><div style="font-size: 12.5px; color: #9AA0AE; margin-top: 2px">The kernel refused this until someone allowed it:</div></div>
+          </div>
+          <div style="padding: 10px 12px; border-radius: 9px; background: #14161B; border: 1px dashed #3A3F4C; font: 400 12.5px 'JetBrains Mono', monospace; color: #C9CDD8">write 3 files to EFI partition #1</div>
+          <div style="display: flex; gap: 10px">
+            <span style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px; border-radius: 9px; background: #14161B; border: 1px solid #2E323D; font-size: 13.5px; font-weight: 600"><span style="width: 22px; height: 22px; border-radius: 50%; background: #5B7CFA; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800">A</span>Alex</span>
+            <label style="flex-grow: 1; display: flex; align-items: center; height: 40px; box-sizing: border-box; padding: 0 12px; border-radius: 9px 9px 4px 4px; background: #14161B; border-bottom: 2px solid #5B7CFA"><input type="password" aria-label="Password for Alex" value="loom-and-thread" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #ECEDF2; font: 400 14px Inter, sans-serif; outline: none"></label>
+          </div>
+          <div style="font-size: 12px; color: #9AA0AE">Allowed for this one task; Install asks again next time.</div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px">
+            <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Cancel</button>
+            <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 13px Inter, sans-serif">Allow</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- a program that stopped answering -->
+    <section aria-label="A program is not answering" style="position: relative; border-radius: 16px; background: #0D0F15; border: 1px solid #1F2229; overflow: hidden">
+      <span style="position: absolute; left: 16px; top: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0; z-index: 1">3 · Not answering</span>
+      <!-- the window behind, faded, its selvedge grey -->
+      <div aria-hidden="true" style="position: absolute; left: 40px; top: 40px; right: 40px; bottom: 30px; border-radius: 10px; background: #16181E; border: 1px solid #262A33; opacity: 0.55; overflow: hidden"><div style="height: 3px; background: #4A4F5C"></div><div style="height: 30px; background: #1B1D24"></div></div>
+      <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center">
+        <div role="dialog" aria-label="Paint is not answering" style="width: 430px; border-radius: 14px; overflow: hidden; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 24px 60px rgba(0,0,0,0.6)">
+          <div style="height: 3px; background: #E5484D"></div>
+          <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; gap: 14px; align-items: center">
+              <dc-import name="Icon" app="paint" size="{{ 44 }}" hint-size="44px,44px"></dc-import>
+              <div><div style="font-size: 16px; font-weight: 800">Paint is not answering</div><div style="font-size: 12.5px; color: #9AA0AE; margin-top: 2px">For 12 seconds. It may be busy with a large picture.</div></div>
+            </div>
+            <div style="display: flex; align-items: center; gap: 12px"><svg aria-hidden="true" width="26" height="26" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="14" stroke="#2E323D" stroke-width="3" stroke-dasharray="3 4"></circle><path d="M18 4a14 14 0 0 1 14 14" stroke="#5B7CFA" stroke-width="3" stroke-linecap="round"></path></svg><span style="font-size: 13px; color: #C9CDD8">Still waiting. Monitor shows it at 99 % of one core.</span></div>
+            <div style="display: flex; justify-content: flex-end; gap: 8px">
+              <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Wait</button>
+              <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: #E5484D; color: #FFFFFF; font: 600 13px Inter, sans-serif">Close it</button>
+            </div>
+            <div style="font-size: 12px; color: #8A90A0">Closing loses what it has not saved.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- closing with something not saved -->
+    <section aria-label="Closing with changes" style="position: relative; border-radius: 16px; background: #0D0F15; border: 1px solid #1F2229; overflow: hidden; display: flex; align-items: center; justify-content: center">
+      <span style="position: absolute; left: 16px; top: 12px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">4 · Not saved</span>
+      <div role="dialog" aria-label="Save notes.txt before closing" style="width: 440px; border-radius: 14px; overflow: hidden; background: #1F2229; border: 1px solid #353A46; box-shadow: 0 24px 60px rgba(0,0,0,0.6)">
+        <div style="height: 3px; background: #5B7CFA"></div>
+        <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 12px">
+          <div style="display: flex; gap: 14px; align-items: center">
+            <dc-import name="Icon" app="editor" size="{{ 44 }}" hint-size="44px,44px"></dc-import>
+            <div><div style="font-size: 16px; font-weight: 800">Save notes.txt before closing?</div><div style="font-size: 12.5px; color: #9AA0AE; margin-top: 2px">14 lines changed since 12:02</div></div>
+          </div>
+          <div style="display: flex; justify-content: space-between; gap: 8px">
+            <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid rgba(229,72,77,0.5); background: rgba(229,72,77,0.1); color: #FF8A8D; font: 600 13px Inter, sans-serif">Close without saving</button>
+            <span style="display: flex; gap: 8px">
+              <button style="height: 34px; padding: 0 14px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Cancel</button>
+              <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 13px Inter, sans-serif">Save</button>
+            </span>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pick = (this.state && this.state.p) || 'open';
+    const perm = [['open', 'While Purl is open'], ['once', 'Only this time'], ['always', 'Always, even in the background']].map((p) => {
+      const on = p[0] === pick;
+      return { name: p[1], checked: on ? 'true' : 'false', border: on ? '1px solid #5B7CFA' : '1px solid #2E323D', bg: on ? 'rgba(91,124,250,0.12)' : '#1A1C23', ring: on ? '#5B7CFA' : '#4A4F5C', dot: on ? '#5B7CFA' : 'transparent', pick: () => this.setState({ p: p[0] }) };
+    });
+    return { perm };
+  }
+}
+</script>
+</body>
+</html>

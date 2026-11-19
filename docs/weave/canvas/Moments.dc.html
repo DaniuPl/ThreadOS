@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Start, stop, update, fail</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 30px 36px; background: #050608; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: repeat(2, minmax(0, 1fr)); gap: 18px">
+
+  <!-- starting: the threads gather into the mark -->
+  <section aria-label="Starting" style="position: relative; border-radius: 14px; overflow: hidden; background: #000000; border: 1px solid #1A1C23">
+    <span style="position: absolute; left: 14px; top: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6A7080">Starting</span>
+    <svg aria-hidden="true" width="100%" height="100%" viewBox="0 0 680 410" preserveAspectRatio="xMidYMid meet" style="position: absolute; inset: 0" fill="none" stroke-linecap="round">
+      <path d="M-10 120 C 150 120, 250 200, 340 200" stroke="#5B7CFA" stroke-width="2.5"></path>
+      <path d="M-10 300 C 150 300, 250 205, 340 205" stroke="#D152A6" stroke-width="2"></path>
+      <path d="M690 110 C 530 110, 430 198, 340 198" stroke="#2EC4C4" stroke-width="2"></path>
+      <path d="M690 310 C 530 310, 430 208, 340 208" stroke="#F5A524" stroke-width="1.6"></path>
+      <path d="M340 -10 C 340 80, 345 150, 342 196" stroke="#46C27A" stroke-width="1.6"></path>
+    </svg>
+    <div style="position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 72px; height: 72px; border-radius: 20px; background: #5B7CFA; display: flex; align-items: center; justify-content: center; font: 800 30px Inter, sans-serif; box-shadow: 0 0 60px rgba(91,124,250,0.45)">T</div>
+    <div style="position: absolute; left: 0; right: 0; bottom: 34px; display: flex; flex-direction: column; align-items: center; gap: 10px">
+      <span aria-label="Step 3 of 5" style="display: flex; align-items: center"><span style="width: 8px; height: 8px; border-radius: 50%; background: #ECEDF2"></span><span style="width: 20px; height: 2px; background: #ECEDF2"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #ECEDF2"></span><span style="width: 20px; height: 2px; background: #ECEDF2"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #ECEDF2"></span><span style="width: 20px; height: 2px; background: #3A3F4C"></span><span style="width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 2px solid #3A3F4C"></span><span style="width: 20px; height: 2px; background: #3A3F4C"></span><span style="width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 2px solid #3A3F4C"></span></span>
+      <span style="font-size: 12px; color: #6A7080">Each knot is a part of the system up: memory, disks, network, desktop, you</span>
+    </div>
+  </section>
+
+  <!-- stopping -->
+  <section aria-label="Shutting down" style="position: relative; border-radius: 14px; overflow: hidden; background: #000000; border: 1px solid #1A1C23">
+    <span style="position: absolute; left: 14px; top: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6A7080">Shutting down</span>
+    <svg aria-hidden="true" width="100%" height="100%" viewBox="0 0 680 410" preserveAspectRatio="xMidYMid meet" style="position: absolute; inset: 0" fill="none" stroke-linecap="round"><path d="M180 205 H500" stroke="#3A3F4C" stroke-width="2" stroke-dasharray="4 6"></path><path d="M300 205 H380" stroke="#5B7CFA" stroke-width="3"></path></svg>
+    <div style="position: absolute; left: 0; right: 0; top: 50%; transform: translateY(26px); display: flex; flex-direction: column; align-items: center; gap: 8px">
+      <span style="font-size: 17px; font-weight: 700">Putting things away</span>
+      <span style="font-size: 13px; color: #8A90A0">Editor saved notes.txt · Weft closed 3 tabs · writing the disk</span>
+    </div>
+    <div style="position: absolute; left: 50%; bottom: 30px; transform: translateX(-50%); font-size: 12px; color: #6A7080">The thread unwinds to its middle, then the screen goes dark.</div>
+  </section>
+
+  <!-- an update after the restart -->
+  <section aria-label="Updating" style="position: relative; border-radius: 14px; overflow: hidden; background: #0D0F15; border: 1px solid #1A1C23; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px">
+    <span style="position: absolute; left: 14px; top: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #6A7080">Updating</span>
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #8A90A0">0.1.0-alpha → 0.1.0-alpha.2</div>
+    <div style="font-size: 24px; font-weight: 800">Weaving in the update</div>
+    <div style="position: relative; width: 420px; height: 14px">
+      <div style="position: absolute; left: 0; right: 0; top: 6px; border-top: 2px dashed #3A3F4C"></div>
+      <div style="position: absolute; left: 0; top: 5px; width: 64%; height: 4px; border-radius: 2px; background: #5B7CFA"></div>
+      <div style="position: absolute; left: 64%; top: 0; width: 14px; height: 14px; margin-left: -7px; border-radius: 50%; background: #FFFFFF"></div>
+    </div>
+    <div style="display: flex; gap: 18px; font-size: 12.5px; color: #B4B9C6">
+      <span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #46C27A"></span>Signature checked</span>
+      <span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #5B7CFA"></span>Kernel written</span>
+      <span style="display: flex; align-items: center; gap: 6px"><span style="width: 8px; height: 8px; box-sizing: border-box; border-radius: 50%; border: 2px solid #4A4F5C"></span>Programs</span>
+    </div>
+    <div style="font-size: 12px; color: #6A7080">The old version stays on the disk until this one has started once.</div>
+  </section>
+
+  <!-- the kernel stopped -->
+  <section aria-label="The kernel stopped" style="position: relative; border-radius: 14px; overflow: hidden; background: #160A0B; border: 1px solid #3A1A1C; padding: 34px 40px; display: flex; flex-direction: column; gap: 12px">
+    <span style="position: absolute; left: 14px; top: 10px; font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A5A5C">When it fails</span>
+    <svg aria-hidden="true" width="120" height="30" viewBox="0 0 120 30" fill="none" stroke-linecap="round"><path d="M2 15 H48" stroke="#E5484D" stroke-width="3"></path><path d="M72 15 H118" stroke="#E5484D" stroke-width="3"></path><path d="M48 15 C 54 4, 58 26, 60 12" stroke="#E5484D" stroke-width="3"></path><path d="M72 15 C 66 26, 63 6, 62 18" stroke="#E5484D" stroke-width="3"></path></svg>
+    <div style="font-size: 22px; font-weight: 800">The thread broke: ThreadOS had to stop</div>
+    <div style="font-size: 13.5px; line-height: 1.55; color: #E8C9CA">Something in the kernel went wrong and continuing could damage your files, so it stopped instead. Nothing was lost that was saved. Restarting is safe.</div>
+    <div style="padding: 10px 12px; border-radius: 9px; background: #0C0506; border: 1px solid #3A1A1C; font: 400 12px/1.6 'JetBrains Mono', monospace; color: #C9A4A6">page fault at 0x0000000000000018 in hda_wake+0x41<br>cpu 2 · task 'desktop' · build 0.1.0-alpha (7c1e04a)<br>the full report was written to /system/crash/2026-11-19-1236.txt</div>
+    <div style="display: flex; align-items: center; gap: 14px; margin-top: auto">
+      <span style="display: flex; align-items: center; height: 36px; padding: 0 16px; border-radius: 9px; background: #E5484D; font-size: 13.5px; font-weight: 700">Enter: restart</span>
+      <span style="font-size: 12.5px; color: #C9A4A6">S: write the report to a stick · the three lines above are for the developers</span>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

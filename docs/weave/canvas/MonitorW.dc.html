@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Monitor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <section aria-label="Monitor window" style="position: absolute; left: 30px; top: 24px; width: 1380px; height: 800px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px)">
+      <dc-import name="Icon" app="monitor" size="{{ 18 }}" hint-size="18px,18px"></dc-import><span style="font-size: 13px; font-weight: 700">Monitor</span>
+      <div role="tablist" aria-label="Show" style="margin-left: 16px; display: inline-flex; padding: 3px; border-radius: 9px; background: #17191F; border: 1px solid #2E323D">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4"><button role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: 600 12.5px Inter, sans-serif; box-shadow: {{t.sh}}">{{t.name}}</button></sc-for>
+      </div>
+    </div>
+    <div style="flex-grow: 1; min-height: 0; padding: 18px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: auto minmax(0, 1fr); gap: 14px">
+      <sc-for list="{{cards}}" as="c" hint-placeholder-count="4">
+        <div style="padding: 14px 16px; border-radius: 12px; background: #1F2229; border: 1px solid #2E323D; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">{{c.name}}</span><span style="font: 700 20px 'JetBrains Mono', monospace; color: {{c.dye}}">{{c.value}}</span></div>
+          <svg role="img" aria-label="{{c.name}} over the last minute" width="100%" height="54" viewBox="0 0 300 54" preserveAspectRatio="none" fill="none"><path d="M0 27 H300" stroke="#2E323D" stroke-dasharray="2 4"></path><polyline points="{{c.pts}}" stroke="{{c.dye}}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></polyline></svg>
+          <span style="font-size: 12px; color: #9AA0AE">{{c.sub}}</span>
+        </div>
+      </sc-for>
+      <div style="grid-column: span 4; border-radius: 12px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden; display: flex; flex-direction: column">
+        <div style="display: grid; grid-template-columns: minmax(0, 1fr) 90px 100px 90px 80px 120px; gap: 12px; height: 34px; align-items: center; padding: 0 16px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0; border-bottom: 1px dashed #2E323D"><span>Program</span><span style="text-align: right">CPU</span><span style="text-align: right">Memory</span><span style="text-align: right">Network</span><span style="text-align: right">Threads</span><span></span></div>
+        <sc-for list="{{procs}}" as="p" hint-placeholder-count="8">
+          <div style="display: grid; grid-template-columns: minmax(0, 1fr) 90px 100px 90px 80px 120px; gap: 12px; height: 40px; align-items: center; padding: 0 16px; background: {{p.bg}}; font-size: 13.5px; border-bottom: 1px dashed #22252E">
+            <span style="display: flex; align-items: center; gap: 10px; font-weight: {{p.w}}"><dc-import name="Icon" app="{{p.app}}" size="{{ 22 }}" hint-size="22px,22px"></dc-import>{{p.name}}</span>
+            <span style="text-align: right; font-family: 'JetBrains Mono', monospace; color: {{p.cpuC}}">{{p.cpu}}</span>
+            <span style="text-align: right; font-family: 'JetBrains Mono', monospace; color: #C9CDD8">{{p.mem}}</span>
+            <span style="text-align: right; font-family: 'JetBrains Mono', monospace; color: #9AA0AE">{{p.net}}</span>
+            <span style="text-align: right; font-family: 'JetBrains Mono', monospace; color: #9AA0AE">{{p.th}}</span>
+            <span style="display: flex; justify-content: flex-end"><button style="height: 28px; padding: 0 10px; border-radius: 7px; border: {{p.endLine}}; background: transparent; color: {{p.endFg}}; font: 600 12px Inter, sans-serif; opacity: {{p.endOp}}">End it</button></span>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const tab = (this.state && this.state.t) || 'Programs';
+    const tabs = ['Programs', 'Cores', 'Disks', 'Network'].map((n) => ({ name: n, sel: n === tab ? 'true' : 'false', bg: n === tab ? '#2A2D36' : 'transparent', fg: n === tab ? '#FFFFFF' : '#B4B9C6', sh: n === tab ? 'inset 0 -2px 0 #5B7CFA' : 'none', pick: () => this.setState({ t: n }) }));
+    const line = (seed, amp, base) => { const p = []; for (let i = 0; i <= 30; i++) { const v = base + Math.sin(i * 0.7 + seed) * amp + Math.sin(i * 1.9 + seed * 2) * amp * 0.4; p.push((i * 10) + ',' + Math.max(3, Math.min(51, 54 - v)).toFixed(1)); } return p.join(' '); };
+    const cards = [
+      { name: 'Cores', value: '46 %', dye: '#5B7CFA', pts: line(1, 10, 28), sub: '4 cores · 312 threads' },
+      { name: 'Memory', value: '5.1 GB', dye: '#D152A6', pts: line(2, 3, 26), sub: 'of 16 GB · 2.4 GB in files' },
+      { name: 'Disk', value: '12 MB/s', dye: '#F5A524', pts: line(3, 12, 16), sub: 'NVMe · Mend is copying' },
+      { name: 'Network', value: '2.1 MB/s', dye: '#2EC4C4', pts: line(4, 9, 20), sub: 'Home-5G · Weft, Purl' }
+    ];
+    const P = [['loomflight', 'Loomflight', '38 %', '212 MB', '0', '6'], ['weft', 'Weft', '12 %', '388 MB', '1.8 MB/s', '24'], ['code', 'Code', '4 %', '96 MB', '0', '5'], ['mend', 'Mend', '3 %', '40 MB', '0', '2'], ['purl', 'Purl', '1 %', '58 MB', '12 KB/s', '4'], ['skein', 'Skein', '1 %', '44 MB', '0', '3'], ['term', 'Term', '0 %', '6 MB', '0', '1'], ['settings', 'Settings', '0 %', '9 MB', '0', '1']];
+    const procs = P.map((p, i) => ({ app: p[0], name: p[1], cpu: p[2], mem: p[3], net: p[4], th: p[5], bg: i === 0 ? 'rgba(91,124,250,0.12)' : 'transparent', w: i === 0 ? 700 : 500, cpuC: i === 0 ? '#F5A524' : '#C9CDD8', endLine: i === 0 ? '1px solid rgba(229,72,77,0.5)' : '1px solid #2E323D', endFg: i === 0 ? '#FF8A8D' : '#9AA0AE', endOp: i === 0 ? 1 : 0.6 }));
+    return { tabs, cards, procs };
+  }
+}
+</script>
+</body>
+</html>

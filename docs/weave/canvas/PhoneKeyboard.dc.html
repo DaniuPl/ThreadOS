@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: the keyboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column">
+  <div style="height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600">12:38</div>
+  <div style="height: 54px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #262A33"><span style="width: 34px; height: 34px; border-radius: 50%; background: #D152A6; display: flex; align-items: center; justify-content: center; font-weight: 800">N</span><span style="font-size: 16px; font-weight: 700">Ania</span></div>
+  <div style="flex-grow: 1; padding: 12px 14px; display: flex; flex-direction: column; justify-content: flex-end; gap: 8px">
+    <div style="align-self: flex-start; max-width: 260px; padding: 10px 13px; border-radius: 18px 18px 18px 5px; background: #20232B; font-size: 15px">Is the new build on the stick yet?</div>
+  </div>
+  <div style="flex-shrink: 0; padding: 8px 10px; display: flex; align-items: center; gap: 8px; border-top: 1px solid #262A33">
+    <label style="flex-grow: 1; display: flex; align-items: center; min-height: 40px; box-sizing: border-box; padding: 0 14px; border-radius: 14px 14px 5px 5px; background: #1A1C23; border-bottom: 2px solid #5B7CFA; font-size: 15px">{{typed}}<span style="display: inline-block; width: 2px; height: 18px; background: #5B7CFA; margin-left: 1px"></span></label>
+    <button aria-label="Send" style="width: 40px; height: 40px; border-radius: 50%; border: 0; background: #5B7CFA; color: #FFFFFF; font: 700 16px Inter, sans-serif">↑</button>
+  </div>
+  <!-- the keyboard: keys on cloth, words offered on a thread above them -->
+  <div role="group" aria-label="Keyboard" style="flex-shrink: 0; padding: 6px 4px 36px; background-color: #14161B; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.02) 0px, rgba(255,255,255,0.02) 1px, transparent 1px, transparent 3px); border-top: 1px solid #262A33; display: flex; flex-direction: column; gap: 9px">
+    <div style="position: relative; height: 36px; display: flex; align-items: center; justify-content: space-around">
+      <div aria-hidden="true" style="position: absolute; left: 10px; right: 10px; top: 17px; height: 1px; background: #2E323D"></div>
+      <sc-for list="{{words}}" as="w" hint-placeholder-count="3"><button onClick="{{w.pick}}" style="position: relative; height: 30px; padding: 0 14px; border-radius: 999px; border: {{w.line}}; background: #14161B; color: {{w.fg}}; font: {{w.wt}} 14.5px Inter, sans-serif">{{w.t}}</button></sc-for>
+    </div>
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+      <div style="display: flex; justify-content: center; gap: 6px; padding: 0 {{r.pad}}">
+        <sc-for list="{{r.keys}}" as="k" hint-placeholder-count="10">
+          <button onClick="{{k.press}}" style="position: relative; flex: {{k.flex}}; height: 44px; border-radius: 8px; border: 0; background: {{k.bg}}; color: #ECEDF2; font: {{k.w}} {{k.size}} Inter, sans-serif; box-shadow: 0 1px 0 rgba(0,0,0,0.5)">{{k.t}}<span style="position: absolute; right: 4px; top: 2px; font-size: 9px; color: #6A7080">{{k.alt}}</span></button>
+        </sc-for>
+      </div>
+    </sc-for>
+  </div>
+  <!-- held down, a key offers its Polish letter above it -->
+  <div aria-hidden="true" style="position: absolute; left: 28px; bottom: 214px; display: flex; gap: 4px; padding: 5px; border-radius: 12px; background: #2A2D36; border: 1px solid #3A3F4C; box-shadow: 0 10px 24px rgba(0,0,0,0.6)"><span style="width: 36px; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #C9CDD8">a</span><span style="width: 36px; height: 40px; border-radius: 8px; background: #5B7CFA; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 700">ą</span></div>
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px"><div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #3A3F4C"></div><div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #4A6BE0"></span><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #1FA3A3; border: 2px solid #FFFFFF"></span></div></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const typed = (this.state && this.state.s != null) ? this.state.s : 'Almost, it is writ';
+    const add = (t) => () => { const s = (this.state && this.state.s != null) ? this.state.s : 'Almost, it is writ'; this.setState({ s: t === 'del' ? s.slice(0, -1) : s + t }); };
+    const last = typed.split(' ').pop();
+    const W = last.startsWith('wri') ? ['writing', 'written', 'write'] : ['the', 'it', 'and'];
+    const words = W.map((w, i) => ({ t: w, line: i === 0 ? '1px solid #5B7CFA' : '1px solid transparent', fg: i === 0 ? '#FFFFFF' : '#B4B9C6', wt: i === 0 ? 700 : 500, pick: () => { const s = typed.split(' '); s[s.length - 1] = w; this.setState({ s: s.join(' ') + ' ' }); } }));
+    const PL = { a: 'ą', c: 'ć', e: 'ę', l: 'ł', n: 'ń', o: 'ó', s: 'ś', z: 'ż', x: 'ź' };
+    const key = (t) => ({ t, alt: PL[t] || '', flex: '1 1 0', bg: '#2A2D36', w: 400, size: '19px', press: add(t) });
+    const rows = [
+      { pad: '0', keys: 'qwertyuiop'.split('').map(key) },
+      { pad: '16px', keys: 'asdfghjkl'.split('').map(key) },
+      { pad: '0', keys: [{ t: '⇧', alt: '', flex: '1.4 1 0', bg: '#3A3F4C', w: 600, size: '16px', press: () => {} }].concat('zxcvbnm'.split('').map(key), [{ t: '⌫', alt: '', flex: '1.4 1 0', bg: '#3A3F4C', w: 600, size: '16px', press: add('del') }]) },
+      { pad: '0', keys: [{ t: '123', alt: '', flex: '1.3 1 0', bg: '#3A3F4C', w: 600, size: '14px', press: () => {} }, { t: 'EN · PL', alt: '', flex: '1.3 1 0', bg: '#3A3F4C', w: 600, size: '12px', press: () => {} }, { t: 'space', alt: '', flex: '4 1 0', bg: '#2A2D36', w: 500, size: '14px', press: add(' ') }, { t: 'return', alt: '', flex: '1.8 1 0', bg: '#5B7CFA', w: 600, size: '14px', press: () => {} }] }
+    ];
+    return { typed, words, rows };
+  }
+}
+</script>
+</body>
+</html>

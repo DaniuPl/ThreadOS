@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desktops and side by side</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <!-- the four desktops, as four lengths of cloth on one thread -->
+  <section aria-label="Desktops" style="position: absolute; left: 0; right: 0; top: 30px; display: flex; flex-direction: column; align-items: center; gap: 14px">
+    <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #8A90A0">Four desktops · Super and a number, or drag a window onto one</div>
+    <div style="position: relative; display: flex; gap: 22px; padding: 0 10px">
+      <div aria-hidden="true" style="position: absolute; left: 0; right: 0; top: 64px; height: 2px; background: #3A3F4C"></div>
+      <sc-for list="{{desks}}" as="d" hint-placeholder-count="4">
+        <button onClick="{{d.pick}}" aria-label="Desktop {{d.n}}" style="position: relative; width: 230px; height: 130px; border-radius: 12px; border: {{d.border}}; background: #0D0F15; padding: 0; overflow: hidden; box-shadow: {{d.glow}}">
+          <svg aria-hidden="true" width="230" height="130" viewBox="0 0 230 130" style="position: absolute; inset: 0" fill="none"><path d="M-5 100 C 50 80, 100 120, 150 90 S 220 70, 240 80" stroke="{{d.dye}}" stroke-width="2" stroke-opacity="0.6"></path></svg>
+          <sc-for list="{{d.wins}}" as="w" hint-placeholder-count="2"><span style="position: absolute; left: {{w.x}}; top: {{w.y}}; width: {{w.w}}; height: {{w.h}}; border-radius: 4px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden"><span style="display: block; height: 2px; background: {{w.sel}}"></span></span></sc-for>
+          <span style="position: absolute; left: 8px; bottom: 6px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 700; color: #C9CDD8"><span style="width: 9px; height: 9px; box-sizing: border-box; border-radius: 50%; background: {{d.knot}}; border: 2px solid {{d.ring}}"></span>{{d.name}}</span>
+        </button>
+      </sc-for>
+      <button aria-label="Add a desktop" style="width: 60px; height: 130px; border-radius: 12px; border: 1px dashed #3A3F4C; background: transparent; color: #8A90A0; font: 600 22px Inter, sans-serif">+</button>
+    </div>
+  </section>
+
+  <!-- this desktop, with two windows side by side -->
+  <section aria-label="Side by side" style="position: absolute; left: 60px; right: 60px; top: 230px; bottom: 90px; border-radius: 14px; background: #0D0F15; border: 1px solid #1F2229; overflow: hidden">
+    <svg aria-hidden="true" width="100%" height="100%" viewBox="0 0 1320 580" preserveAspectRatio="none" style="position: absolute; inset: 0" fill="none"><path d="M -40 470 C 300 380, 520 560, 820 420 S 1240 260, 1400 300" stroke="#5B7CFA" stroke-opacity="0.35" stroke-width="3"></path></svg>
+    <div style="position: absolute; left: 10px; top: 10px; bottom: 10px; width: calc(50% - 15px); border-radius: 10px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden">
+      <div style="height: 3px; background: #5B7CFA"></div>
+      <div style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #21242C"><dc-import name="Icon" app="code" size="{{ 16 }}" hint-size="16px,16px"></dc-import><span style="font-size: 12.5px; font-weight: 700">Code</span></div>
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 8px"><span style="height: 8px; width: 60%; border-radius: 4px; background: #2E323D"></span><span style="height: 8px; width: 80%; border-radius: 4px; background: #2E323D"></span><span style="height: 8px; width: 45%; border-radius: 4px; background: #2E323D"></span></div>
+    </div>
+    <!-- the seam between them: drag it, both follow -->
+    <div aria-label="The seam" style="position: absolute; left: 50%; top: 10px; bottom: 10px; width: 10px; margin-left: -5px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px">
+      <span style="width: 2px; flex-grow: 1; border-left: 2px dashed #4A4F5C"></span><span style="width: 10px; height: 40px; border-radius: 5px; background: #5B7CFA"></span><span style="width: 2px; flex-grow: 1; border-left: 2px dashed #4A4F5C"></span>
+    </div>
+    <div style="position: absolute; right: 10px; top: 10px; bottom: 10px; width: calc(50% - 15px); border-radius: 10px; background: #16181E; border: 1px solid #262A33; overflow: hidden">
+      <div style="height: 3px; background: #16181E"></div>
+      <div style="height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: #1B1D24"><dc-import name="Icon" app="term" size="{{ 16 }}" hint-size="16px,16px"></dc-import><span style="font-size: 12.5px; font-weight: 600; color: #8D93A1">Term</span></div>
+    </div>
+    <!-- what a window dragged to an edge would do -->
+    <div style="position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 10px">
+      <sc-for list="{{snaps}}" as="s" hint-placeholder-count="4">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 12px; border-radius: 12px; background: rgba(26,28,35,0.95); border: 1px solid #2E323D">
+          <span style="position: relative; width: 64px; height: 40px; border-radius: 5px; border: 1px solid #4A4F5C"><span style="position: absolute; left: {{s.x}}; top: {{s.y}}; width: {{s.w}}; height: {{s.h}}; border-radius: 3px; background: #5B7CFA"></span></span>
+          <span style="font-size: 11.5px; color: #C9CDD8">{{s.name}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </section>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 30px; text-align: center; font-size: 13px; color: #8A90A0">Drag a window to an edge: it takes that half; to a corner: a quarter. Super with the arrows does the same from the keyboard.</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = (this.state && this.state.d) || 1;
+    const W = (x, y, w, h, sel) => ({ x: x + 'px', y: y + 'px', w: w + 'px', h: h + 'px', sel: sel ? '#5B7CFA' : '#1A1C23' });
+    const D = [
+      { n: 1, name: 'Work', dye: '#5B7CFA', wins: [W(10, 10, 102, 90, true), W(118, 10, 102, 90)] },
+      { n: 2, name: 'Weft', dye: '#2EC4C4', wins: [W(30, 14, 170, 86)] },
+      { n: 3, name: 'Music', dye: '#D152A6', wins: [W(50, 20, 120, 70)] },
+      { n: 4, name: 'Empty', dye: '#4A4F5C', wins: [] }
+    ];
+    const desks = D.map((d) => {
+      const on = d.n === cur;
+      const has = d.wins.length > 0;
+      return Object.assign({}, d, { border: on ? '2px solid #5B7CFA' : '2px solid #262A33', glow: on ? '0 14px 34px rgba(91,124,250,0.25)' : 'none', knot: on ? '#5B7CFA' : 'transparent', ring: on ? '#5B7CFA' : (has ? '#9AA0AE' : '#4A4F5C'), pick: () => this.setState({ d: d.n }) });
+    });
+    const S = (name, x, y, w, h) => ({ name, x: x + 'px', y: y + 'px', w: w + 'px', h: h + 'px' });
+    const snaps = [S('Left half', 2, 2, 29, 34), S('Right half', 31, 2, 29, 34), S('A quarter', 2, 2, 29, 16), S('All of it', 2, 2, 58, 34)];
+    return { desks, snaps };
+  }
+}
+</script>
+</body>
+</html>

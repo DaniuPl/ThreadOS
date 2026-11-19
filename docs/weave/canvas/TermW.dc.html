@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Term, with tabs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round"><path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="#5B7CFA" stroke-opacity="0.4" stroke-width="3"></path></svg>
+  <section aria-label="Term window" style="position: absolute; left: 110px; top: 50px; width: 1220px; height: 740px; border-radius: 10px; overflow: hidden; background: #0F1116; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.55); display: flex; flex-direction: column">
+    <div style="height: 3px; background: {{cur.dye}}"></div>
+    <div style="height: 40px; display: flex; align-items: flex-end; gap: 2px; padding: 0 8px 0 10px; background-color: #1B1D24; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px)">
+      <div role="tablist" aria-label="Sessions" style="display: flex; align-items: flex-end; gap: 2px; flex-grow: 1">
+        <sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+          <button role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="display: flex; align-items: center; gap: 8px; height: 33px; padding: 0 14px; border-radius: 8px 8px 0 0; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: {{t.w}} 12.5px 'JetBrains Mono', monospace; box-shadow: {{t.sh}}"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{t.dye}}"></span>{{t.name}}<span style="width: 6px; height: 6px; border-radius: 50%; background: {{t.busy}}"></span></button>
+        </sc-for>
+        <button aria-label="New tab" style="width: 30px; height: 30px; margin-bottom: 2px; border: 0; border-radius: 8px; background: transparent; color: #8A90A0; font: 600 18px Inter, sans-serif">+</button>
+      </div>
+      <div style="display: flex; gap: 2px; padding: 3px; margin-bottom: 5px; border-radius: 999px; background: rgba(255,255,255,0.05)"><span style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 2px; background: #B4B9C6"></span></span><span style="width: 24px; height: 24px; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 10px; box-sizing: border-box; border: 2px solid #B4B9C6; border-radius: 2px"></span></span><span style="width: 24px; height: 24px; border-radius: 50%; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; color: #FF6B6F; font-weight: 800; font-size: 13px">×</span></div>
+    </div>
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <pre style="flex-grow: 1; margin: 0; padding: 16px 20px; font: 400 13.5px/1.6 'JetBrains Mono', monospace; color: #C9CDD8; white-space: pre; overflow: hidden"><sc-for list="{{lines}}" as="l" hint-placeholder-count="14"><span style="display: block; color: {{l.c}}; font-weight: {{l.w}}">{{l.t}}</span></sc-for><span style="display: inline-block; width: 9px; height: 17px; background: {{cur.dye}}; vertical-align: -3px"></span></pre>
+      <aside aria-label="Long commands" style="width: 260px; flex-shrink: 0; box-sizing: border-box; padding: 14px; border-left: 1px solid #22252E; background: #121419; display: flex; flex-direction: column; gap: 10px">
+        <span style="font-size: 11px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">Commands that took a while</span>
+        <sc-for list="{{runs}}" as="r" hint-placeholder-count="3">
+          <div style="padding: 10px 12px; border-radius: 10px; background: #1A1C23; border: 1px solid #2E323D; display: flex; flex-direction: column; gap: 4px">
+            <span style="font: 600 12px 'JetBrains Mono', monospace">{{r.cmd}}</span>
+            <span style="display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: {{r.c}}"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{r.c}}"></span>{{r.what}}</span>
+          </div>
+        </sc-for>
+        <span style="font-size: 11.5px; color: #8A90A0; line-height: 1.5">A command running longer than ten seconds goes to the shuttle, and tells Threads when it ends - even if Term is out of sight.</span>
+      </aside>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const sel = (this.state && this.state.t) || 'src';
+    const T = {
+      src: { name: '~/src/threados', dye: '#5B7CFA', busy: 'transparent', lines: [
+        ['$ git status', '#ECEDF2', 600], ['On branch weave-theme', '#9AA0AE'], ['Changes not staged:', '#9AA0AE'], ['    modified:   kernel/desktop.c', '#F5A524'], ['    modified:   kernel/include/look.h', '#F5A524'], [''], ['$ make -j8', '#ECEDF2', 600], ['  CC      kernel/desktop.c', '#9AA0AE'], ['  CC      kernel/aurora.c', '#9AA0AE'], ['  LD      build/threados64.bin', '#9AA0AE'], ['  INITRD  build/initrd64.img', '#9AA0AE'], ['done in 41 s', '#46C27A'], [''], ['$ ', '#ECEDF2', 600]
+      ] },
+      test: { name: 'tests', dye: '#F5A524', busy: '#F5A524', lines: [
+        ['$ make test T=desktop1,winstyle,dock', '#ECEDF2', 600], ['[desktop1] the desktop came up ........ ok', '#46C27A'], ['[desktop1] the bar shows the time ..... ok', '#46C27A'], ['[winstyle] no bar at the top any more . ok', '#46C27A'], ['[winstyle] its close button closes it . ok', '#46C27A'], ['[dock] magnifies under the pointer .... ok', '#46C27A'], ['[dock] position moves to the left ....', '#F5A524'], ['  running 3 of 3 groups, 1 min 12 s', '#9AA0AE']
+      ] },
+      notes: { name: 'notes', dye: '#46C27A', busy: 'transparent', lines: [
+        ['$ cat ~/notes.txt', '#ECEDF2', 600], ['Things to take to the market on Saturday', '#C9CDD8'], ['- the linen, folded', '#C9CDD8'], ['- the dyes for Ola', '#C9CDD8'], [''], ['$ ', '#ECEDF2', 600]
+      ] }
+    };
+    const tabs = Object.keys(T).map((k) => { const on = k === sel; return { name: T[k].name, dye: T[k].dye, busy: T[k].busy, sel: on ? 'true' : 'false', bg: on ? '#0F1116' : 'transparent', fg: on ? '#ECEDF2' : '#8A90A0', w: on ? 600 : 400, sh: on ? 'inset 0 2px 0 ' + T[k].dye : 'none', pick: () => this.setState({ t: k }) }; });
+    const cur = T[sel];
+    const lines = cur.lines.map((l) => ({ t: l[0] || ' ', c: l[1] || '#C9CDD8', w: l[2] || 400 }));
+    const runs = [{ cmd: 'make test', what: 'running · 1 min 12 s', c: '#F5A524' }, { cmd: 'make -j8', what: 'done · 41 s', c: '#46C27A' }, { cmd: 'make weft-arm64', what: 'stopped · exit 2', c: '#E5484D' }];
+    return { tabs, cur, lines, runs };
+  }
+}
+</script>
+</body>
+</html>

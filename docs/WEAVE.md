@@ -42,11 +42,11 @@ Every name comes from weaving, so the system reads as one thing.
 | **Grain** | The faint woven texture on title bars and the loom | The grain of a fabric |
 | **The loom** | The bar along the bottom: the launcher button, programs, desktops, clock | Where the cloth is made |
 | **The thread** (on the loom) | The line under the programs; a coloured segment under each that runs | |
-| **Spool** | The launcher button at the left end of the loom; also the window buttons' capsule (minimise, maximise, close) | Thread is wound on a spool |
+| **Spool** | The launcher button at the left end of the loom; it opens loom view | Thread is wound on a spool |
 | **Loom view** | The launcher, full screen: open windows on top, programs below, threaded on four threads by what they are for | |
 | **The shuttle** | What is going on (music, timers, downloads, calls, camera and microphone) in a capsule that slides up out of the loom - ThreadOS's answer to a "dynamic island" | The shuttle is what travels across the loom carrying the thread |
 | **Warp** | The wallpaper: threads of the dyes crossing a dark ground | The warp is the threads stretched on a loom |
-| **Threads** | Notifications, hung on one vertical line, newest at the top | |
+| **Threads** | Notifications, each program's on a thread of its own, newest at the top; opened from the knot by the clock. The only thing called Threads - file labels are *Tags* | |
 | **Game mode** | While a game holds the mouse, the loom steps aside and notifications wait |
 | **Quiet** | Nothing rides the shuttle, nothing chimes; chosen people and Urgent still get through |
 | **Quiet, Normal, Urgent** | The three weights of a notification: straight into Threads; on the shuttle for a moment with a chime; on the shuttle until answered |
@@ -75,6 +75,7 @@ it becomes their focus colour and the ring around their picture.
 | **The thread** (navigation) | The third way to get around a phone, next to *Gestures* and *Three buttons* (`nav_buttons` in `kernelarm64/mobile.c` today). A thin thread along the bottom edge with a knot for each running program. Tap a knot: that program. Slide along the thread: one program at a time. Swipe up: home; up and hold: loom view. From the left edge: back. |
 | **The shade** | What a pull down from the top shows: switches, light, sound, the shuttle opened, and the threads |
 | **The drawer** | Every program on the phone, swiped up from home: on threads by what they are for, or A to Z |
+| **The drawer** sort | By use (on threads) or A to Z | |
 | **The PIN knots** | Unlocking a phone: six knots on a thread, each digit ties one |
 | **Locked** | The lock screen says who and how many, never what; torch and camera in the corners; the shuttle still rides the thread |
 | **Touch** / **Windows** | The tablet's two modes; Windows comes on by itself when a keyboard is attached |
@@ -93,6 +94,9 @@ it becomes their focus colour and the ring around their picture.
 | **Map** | Maps and directions; the route is a thread with knots at the turns | |
 | **Skein** | The music player: albums, a queue that is a thread, the waveform as a thread being spun | A skein is a loose coil of yarn - a collection |
 | **Calendar**, **Gallery**, **Mixer**, **Recorder**, **Monitor**, **Settings**, **Files**, **Term** | The existing programs, drawn in Weave | |
+| **Notes** | Notes and lists, shareable; a list's items tick off as knots | |
+| **Mend** | The backup: a copy every night to a stick or disk, a day chosen on a thread to bring a file back - beside the one you have, never over it | To mend is to repair cloth |
+| **Swatch** | For developers: every ProtonUI control, live, in both themes, with the line of C that makes it; and new programs from a template | A swatch is a sample of cloth |
 | **Loomflight** | A game made for the mock-ups: fly a shuttle through the warp and gather knots | |
 
 ### Setting up
@@ -101,6 +105,21 @@ it becomes their focus colour and the ring around their picture.
 |---|---|
 | **Install ThreadOS** | From the stick: try or install; beside another system or the whole disk, shown as a bar of the disk now and after; a list of what will be written and what will not be touched; typing YES (or ERASE for the whole disk) to go on; the partition filling like cloth on a loom; done, with the boot menu shown. The same steps `user/ginstal.c` takes today. |
 | **Welcome to ThreadOS** | The first start after installing: language and keyboard, network, your profile and thread colour, the desktop style (or, on a phone, how you get around), and a summary with "Change" by every line. The fields are those of the first-start card in `kernel/desktop.c` today. |
+
+### Icons
+
+One family: a tile in the program's dye with the grain, one white drawing in a
+single stroke on a 48 grid, and the thread along the bottom. Lines and
+circles only, so the kernel draws them at any size the way it draws its
+icons today (`ART_*` in `kernel/desktop.c`). `docs/weave/canvas/Icon.dc.html`
+holds all 32.
+
+### Where each setting lives
+
+Each setting has one home: **Appearance** - theme, thread colour, grain,
+wallpaper; **Desktop** - style, window buttons, selvedge, the loom, desktops,
+the shuttle; **Easier to use** - text size, contrast, patterns on threads,
+motion, keys, reading aloud. Other pages may point to it, never repeat it.
 
 ## ProtonUI v2
 
@@ -130,7 +149,7 @@ in `docs/weave/canvas/ProtonUI.dc.html`:
   Inter and JetBrains Mono are under the SIL Open Font Licence; bringing them in would need the owner's yes and an entry in `third_party/README.md`, like any library.
 - Window corners 10 px; the selvedge and the focus thread 3 px; the grain
   tile 3 px.
-- Window buttons sit on the right, in one capsule (the spool); close is
+- Window buttons sit on the right, in one capsule; close is
   the only madder one.
 
 ## Where it would go in the code

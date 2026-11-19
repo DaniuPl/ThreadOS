@@ -102,7 +102,10 @@ class Component extends DCLogic {
           T('Game mode holds notifications', 'They wait until you stop playing', true) ] } ] },
       { id: 'appearance', name: 'Appearance', glyph: 'A', dye: '#C77F0A', sub: 'Light, colour and grain.', groups: [
         { title: 'Light', rows: [ S('Theme', '', ['Linen', 'Night', 'Follow the sun'], 1), V('Thread colour', 'Focus, the selvedge and the loom', 'Indigo', { vKnot: A }) ] },
-        { title: 'Text', rows: [ S('Size', '13 px everywhere by default', ['13', '15', '17'], 0), T('Less motion', 'Windows appear without unrolling', true) ] } ] },
+        { title: 'Ground', rows: [ V('Grain', 'The weave on title bars and the loom', '2 %'), V('Wallpaper', 'Warp, from the thread colour', 'Warp') ] } ] },
+      { id: 'access', name: 'Easier to use', glyph: 'E', dye: '#3B5BDB', sub: 'For seeing, hearing and moving.', groups: [
+        { title: 'Seeing', rows: [ S('Text size', '', ['13', '15', '17', '20'], 0), T('More contrast', 'No grain, stronger lines', false), T('Threads told apart by pattern too', 'Each dye gets its own stitch', true) ] },
+        { title: 'Moving', rows: [ T('Less motion', 'Windows appear without unrolling', false), T('Keys stay pressed', 'Ctrl, then C', false) ] } ] },
       { id: 'privacy', name: 'Privacy and location', glyph: 'P', dye: '#D152A6', sub: 'Who may use the camera, the microphone and where you are. Nothing is shared without a yes.', groups: [
         { title: 'Lately', rows: [
           V('Recorder used the microphone', 'Today, 12:10 to 12:12', 'Microphone', { vKnot: '#F5A524', hasDye: true, dye: '#C77F0A', glyph: 'R' }),
@@ -141,7 +144,7 @@ class Component extends DCLogic {
     ];
     const pick = (this.state && this.state.s) || 'desktop';
     const sections = data.map((d, i) => ({
-      name: d.name, glyph: d.glyph, dye: d.dye, gap: (i === 2 || i === 6 || i === 9) ? '10px' : '0px',
+      name: d.name, glyph: d.glyph, dye: d.dye, gap: (i === 3 || i === 7 || i === 10) ? '10px' : '0px',
       bg: d.id === pick ? 'rgba(91,124,250,0.18)' : 'transparent', fg: d.id === pick ? '#FFFFFF' : '#C9CDD8', weight: d.id === pick ? 600 : 400,
       knot: d.id === pick ? A : (d.knot || 'transparent'), pick: () => this.setState({ s: d.id })
     }));

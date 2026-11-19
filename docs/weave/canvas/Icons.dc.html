@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weave icons</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 1100px; box-sizing: border-box; padding: 44px 52px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 40px">
+  <div style="display: flex; flex-direction: column; gap: 26px; min-width: 0">
+    <header>
+      <h1 style="margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -0.03em">Icons</h1>
+      <p style="margin: 8px 0 0; font-size: 15px; color: #B4B9C6; line-height: 1.5; max-width: 760px">One family for every program: a tile in the program's dye with the grain on it, one white drawing in a single stroke, and the thread along the bottom - the same thread the loom has.</p>
+    </header>
+    <div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); row-gap: 22px; column-gap: 10px">
+      <sc-for list="{{apps}}" as="a" hint-placeholder-count="32">
+        <div style="display: flex; flex-direction: column; align-items: center; gap: 8px">
+          <dc-import name="Icon" app="{{a.key}}" size="{{ 64 }}" hint-size="64px,64px"></dc-import>
+          <span style="font-size: 12.5px; color: #C9CDD8">{{a.label}}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+
+  <aside style="display: flex; flex-direction: column; gap: 20px">
+    <section style="padding: 20px; border-radius: 16px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">How one is made</h2>
+      <div style="display: flex; gap: 16px; align-items: center">
+        <div style="position: relative; width: 144px; height: 144px; flex-shrink: 0">
+          <dc-import name="Icon" app="strand" size="{{ 144 }}" hint-size="144px,144px"></dc-import>
+          <svg aria-hidden="true" width="144" height="144" viewBox="0 0 48 48" style="position: absolute; inset: 0" fill="none" stroke="#F5A524" stroke-width="0.3" stroke-dasharray="1 1"><rect x="10" y="10" width="28" height="28"></rect><path d="M6 42.5H42"></path><circle cx="24" cy="24" r="14"></circle></svg>
+        </div>
+        <ul style="margin: 0; padding-left: 16px; font-size: 13px; line-height: 1.6; color: #C9CDD8">
+          <li>48 grid, drawing inside 10 to 38</li>
+          <li>One stroke, 3 at 64 px; heavier when small</li>
+          <li>Corners 26 % of the side</li>
+          <li>The thread at 42.5, in a light tint</li>
+          <li>Fill only for knots: a commit, a slider's grip</li>
+        </ul>
+      </div>
+    </section>
+
+    <section style="padding: 20px; border-radius: 16px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 14px">
+      <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Where and how large</h2>
+      <div style="display: flex; align-items: flex-end; gap: 16px">
+        <sc-for list="{{sizes}}" as="s" hint-placeholder-count="4">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+            <dc-import name="Icon" app="purl" size="{{s.size}}" hint-size="{{s.hint}}"></dc-import>
+            <span style="font: 400 11px 'JetBrains Mono', monospace; color: #8A90A0">{{s.size}}</span>
+            <span style="font-size: 11.5px; color: #C9CDD8">{{s.where}}</span>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <section style="padding: 20px; border-radius: 16px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.55; color: #C9CDD8">
+      <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">For the kernel</h2>
+      <p style="margin: 0">The desktop draws today's icons in code (<code style="font-family: 'JetBrains Mono', monospace">ART_*</code> in kernel/desktop.c). These are lines and circles only, so they go the same way: <code style="font-family: 'JetBrains Mono', monospace">gfx_line16</code> and <code style="font-family: 'JetBrains Mono', monospace">gfx_disc16</code> on a rounded tile, at any size, with no picture files.</p>
+      <p style="margin: 0">Linen and Night use the same tiles: the dyes are strong enough for both grounds.</p>
+    </section>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const keys = ['files', 'weft', 'term', 'code', 'strand', 'purl', 'skein', 'market', 'family', 'find', 'map', 'calendar', 'clock', 'settings', 'monitor', 'gallery', 'camera', 'recorder', 'mixer', 'paint', 'editor', 'tasks', 'calculator', 'accounts', 'install', 'updates', 'mail', 'phone', 'notes', 'mend', 'loomflight', 'swatch'];
+    const label = (k) => k.charAt(0).toUpperCase() + k.slice(1);
+    const apps = keys.map((k) => ({ key: k, label: label(k) }));
+    const sizes = [[24, 'Menus'], [38, 'The loom'], [56, 'Phone'], [104, 'Market']].map((s) => ({ size: s[0], where: s[1], hint: s[0] + 'px,' + s[0] + 'px' }));
+    return { apps, sizes };
+  }
+}
+</script>
+</body>
+</html>

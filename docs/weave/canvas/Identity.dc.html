@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wallpapers and sounds</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 34px 40px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 28px">
+  <section aria-label="Wallpapers" style="display: flex; flex-direction: column; gap: 16px">
+    <div><h1 style="margin: 0; font-size: 32px; font-weight: 800; letter-spacing: -0.02em">Warp, in every dye</h1><p style="margin: 6px 0 0; font-size: 14px; color: #B4B9C6; line-height: 1.5">The wallpaper is drawn, not stored: five threads from one dye's family, crossing at whatever size the screen is. Whole-number arithmetic only, like the aurora, so a test can draw it again and expect the same pixels.</p></div>
+    <div style="position: relative; height: 300px; border-radius: 16px; overflow: hidden; background: {{ground}}; border: 1px solid #262A33">
+      <svg role="img" aria-label="The {{cur}} warp, large" width="100%" height="100%" viewBox="0 0 900 300" preserveAspectRatio="none" fill="none" stroke-linecap="round">
+        <sc-for list="{{big}}" as="b" hint-placeholder-count="5"><path d="{{b.d}}" stroke="{{b.c}}" stroke-width="{{b.w}}" stroke-opacity="{{b.o}}"></path></sc-for>
+      </svg>
+      <span style="position: absolute; left: 16px; bottom: 12px; font-size: 13px; font-weight: 700; color: {{label}}">{{cur}} · {{lightName}}</span>
+    </div>
+    <div style="display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px">
+      <sc-for list="{{thumbs}}" as="t" hint-placeholder-count="6">
+        <button onClick="{{t.pick}}" aria-label="{{t.name}}" style="display: flex; flex-direction: column; gap: 6px; border: 0; background: transparent; padding: 0; color: {{t.fg}}; font: {{t.w}} 12px Inter, sans-serif; text-align: left">
+          <span style="display: block; height: 70px; border-radius: 10px; overflow: hidden; background: {{ground}}; outline: {{t.outline}}; outline-offset: 2px"><svg aria-hidden="true" width="100%" height="70" viewBox="0 0 160 70" preserveAspectRatio="none" fill="none"><path d="M-5 50 C 40 30, 80 70, 120 40 S 160 25, 170 30" stroke="{{t.a}}" stroke-width="3"></path><path d="M-5 58 C 40 42, 80 75, 120 52 S 160 40, 170 44" stroke="{{t.b}}" stroke-width="2" stroke-opacity="0.7"></path></svg></span>
+          {{t.name}}
+        </button>
+      </sc-for>
+    </div>
+    <div role="group" aria-label="Light" style="align-self: flex-start; display: inline-flex; padding: 3px; border-radius: 9px; background: #14161B; border: 1px solid #2E323D"><sc-for list="{{lights}}" as="l" hint-placeholder-count="2"><button onClick="{{l.pick}}" style="height: 28px; padding: 0 14px; border-radius: 6px; border: 0; background: {{l.bg}}; color: {{l.fg}}; font: 600 12.5px Inter, sans-serif">{{l.name}}</button></sc-for></div>
+  </section>
+
+  <section aria-label="Sounds" style="display: flex; flex-direction: column; gap: 14px">
+    <div><h2 style="margin: 0; font-size: 26px; font-weight: 800">Sounds</h2><p style="margin: 6px 0 0; font-size: 13.5px; color: #B4B9C6; line-height: 1.5">Plucked, not beeped: each one a string of the same instrument, short, and quieter than what you are listening to.</p></div>
+    <sc-for list="{{sounds}}" as="s" hint-placeholder-count="6">
+      <div style="display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: {{s.bg}}; border: 1px solid {{s.line}}">
+        <button onClick="{{s.pick}}" aria-label="Play {{s.name}}" style="width: 34px; height: 34px; border-radius: 50%; border: 0; background: {{s.dye}}; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M7 4l13 8-13 8z"></path></svg></button>
+        <span style="width: 120px"><span style="display: block; font-size: 14px; font-weight: 700">{{s.name}}</span><span style="display: block; font-size: 11.5px; color: #9AA0AE">{{s.when}}</span></span>
+        <svg aria-hidden="true" width="140" height="30" viewBox="0 0 140 30" fill="none" stroke-linecap="round"><path d="{{s.wave}}" stroke="{{s.dye}}" stroke-width="2"></path></svg>
+        <span style="margin-left: auto; font: 400 12px 'JetBrains Mono', monospace; color: #9AA0AE">{{s.len}}</span>
+      </div>
+    </sc-for>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const fam = {
+      Indigo: ['#5B7CFA', '#8FA5FF', '#3A55C8', '#2EC4C4', '#B7C5FF'],
+      Madder: ['#E5484D', '#FF8A8D', '#B8323A', '#F5A524', '#FFC2C3'],
+      Saffron: ['#F5A524', '#FFD27A', '#C77F0A', '#E5484D', '#FFE7B0'],
+      Weld: ['#46C27A', '#9BE3B8', '#2F9A5C', '#2EC4C4', '#C9F0D8'],
+      Woad: ['#2EC4C4', '#9FECEC', '#1FA3A3', '#5B7CFA', '#CFF6F6'],
+      Cochineal: ['#D152A6', '#F2A6D6', '#B23D8C', '#5B7CFA', '#F8D0EA']
+    };
+    const cur = st.c || 'Indigo';
+    const light = st.light === true;
+    const f = fam[cur];
+    const D = ['M -40 220 C 200 120, 330 300, 520 180 S 820 80, 960 110', 'M -40 250 C 180 170, 360 320, 540 210 S 840 130, 960 150', 'M -40 190 C 220 90, 300 260, 500 150 S 800 50, 960 70', 'M -40 280 C 200 230, 380 330, 560 250 S 860 190, 960 200', 'M -40 160 C 240 60, 320 240, 480 130 S 780 30, 960 40'];
+    const W = [3.5, 2, 2, 1.5, 1.5];
+    const O = light ? [0.9, 0.6, 0.55, 0.45, 0.4] : [0.85, 0.55, 0.5, 0.4, 0.35];
+    const big = D.map((d, i) => ({ d, c: f[i], w: W[i], o: O[i] }));
+    const thumbs = Object.keys(fam).map((k) => ({ name: k, a: fam[k][0], b: fam[k][2], outline: k === cur ? '2px solid ' + fam[k][0] : '0px solid transparent', fg: k === cur ? '#FFFFFF' : '#9AA0AE', w: k === cur ? 700 : 500, pick: () => this.setState({ c: k }) }));
+    const lights = [['Night', false], ['Linen', true]].map((l) => ({ name: l[0], bg: l[1] === light ? '#2A2D36' : 'transparent', fg: l[1] === light ? '#FFFFFF' : '#B4B9C6', pick: () => this.setState({ light: l[1] }) }));
+    const wave = (n, decay) => { let p = 'M0 15'; for (let i = 1; i <= 28; i++) { const a = 13 * Math.exp(-i / decay) * (i % 2 ? 1 : -1); p += ' L' + (i * 5) + ' ' + (15 + a).toFixed(1); } return p; };
+    const S = [['Message', 'a notification', '0.4 s', '#5B7CFA', 4], ['Start', 'after the PIN or password', '1.2 s', '#46C27A', 12], ['Shut down', 'putting things away', '1.0 s', '#9AA0AE', 9], ['Question', 'a card that asks', '0.5 s', '#F5A524', 5], ['Error', 'something did not work', '0.6 s', '#E5484D', 3], ['Alarm', 'until you answer it', 'repeats', '#D152A6', 30]];
+    const sp = st.s == null ? 0 : st.s;
+    const sounds = S.map((s, i) => ({ name: s[0], when: s[1], len: s[2], dye: s[3], wave: wave(i, s[4]), bg: i === sp ? 'rgba(91,124,250,0.12)' : '#14161B', line: i === sp ? '#5B7CFA' : '#262A33', pick: () => this.setState({ s: i }) }));
+    return { big, thumbs, lights, sounds, cur, ground: light ? '#E9E4DA' : '#0D0F15', label: light ? '#1D1C1A' : '#ECEDF2', lightName: light ? 'Linen' : 'Night' };
+  }
+}
+</script>
+</body>
+</html>

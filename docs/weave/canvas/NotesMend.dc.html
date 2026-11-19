@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Notes and Mend</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Source+Serif+4:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <!-- Notes -->
+  <section aria-label="Notes window" style="position: absolute; left: 24px; top: 24px; width: 760px; height: 780px; border-radius: 10px; overflow: hidden; background: #FAF8F4; border: 1px solid #D3CCBE; box-shadow: 0 22px 56px rgba(60,50,30,0.2); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #EDE8DE"><dc-import name="Icon" app="notes" size="{{ 18 }}" hint-size="18px,18px"></dc-import><span style="font-size: 13px; font-weight: 700">Notes</span></div>
+    <div style="flex-grow: 1; display: flex; min-height: 0">
+      <nav aria-label="Notes" style="width: 230px; flex-shrink: 0; box-sizing: border-box; padding: 10px; border-right: 1px solid #E3DDD1; background: #F6F3EC; display: flex; flex-direction: column; gap: 4px">
+        <sc-for list="{{notes}}" as="n" hint-placeholder-count="5">
+          <div style="padding: 10px; border-radius: 9px; background: {{n.bg}}"><div style="display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 700"><span style="width: 8px; height: 8px; border-radius: 2px; background: {{n.dye}}"></span>{{n.title}}</div><div style="font-size: 12px; color: #6B675F; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{n.first}}</div></div>
+        </sc-for>
+      </nav>
+      <article style="flex-grow: 1; padding: 30px 36px; display: flex; flex-direction: column; gap: 14px">
+        <div style="font-size: 12px; color: #6B675F">Thursday, 19 November · in Home</div>
+        <h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 30px; font-weight: 700">For the market on Saturday</h1>
+        <div style="display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{todo}}" as="t" hint-placeholder-count="4">
+            <button onClick="{{t.toggle}}" style="display: flex; align-items: center; gap: 12px; border: 0; background: transparent; padding: 4px 0; text-align: left; font-family: 'Source Serif 4', Georgia, serif; font-size: 18px; color: {{t.fg}}; text-decoration: {{t.dec}}">
+              <span style="width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 2px solid #3F5EE8; background: {{t.fill}}"></span>{{t.text}}
+            </button>
+          </sc-for>
+        </div>
+        <p style="margin: 6px 0 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 17px; line-height: 1.6; color: #2B2A27">Ask at the dyers' stall whether the indigo comes in a smaller jar. Ola wants to try the cochineal.</p>
+        <div style="margin-top: auto; display: flex; gap: 8px; font-size: 12.5px; color: #6B675F"><span style="padding: 3px 10px; border-radius: 999px; background: rgba(63,94,232,0.12); color: #3F5EE8; font-weight: 600">Shared with Ania</span><span style="padding: 3px 10px; border-radius: 999px; border: 1px dashed #CFC8BA">Saved</span></div>
+      </article>
+    </div>
+  </section>
+
+  <!-- Mend: the backup -->
+  <section aria-label="Mend window" style="position: absolute; left: 810px; top: 70px; width: 606px; height: 690px; border-radius: 10px; overflow: hidden; background: #F6F3EC; border: 1px solid #D9D3C7; box-shadow: 0 12px 32px rgba(60,50,30,0.15); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #F6F3EC"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #EFEBE3"><dc-import name="Icon" app="mend" size="{{ 18 }}" hint-size="18px,18px"></dc-import><span style="font-size: 13px; font-weight: 600; color: #6B675F">Mend</span></div>
+    <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; align-items: center; gap: 14px">
+        <span style="width: 50px; height: 50px; border-radius: 50%; background: #1E8A4C; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></span>
+        <div><div style="font-size: 20px; font-weight: 800">Your files are copied</div><div style="font-size: 13px; color: #6B675F">Last night at 2:00, to the USB stick · next tonight</div></div>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 8px">
+        <span style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6B675F">Go back to a day</span>
+        <div style="position: relative; height: 70px">
+          <div style="position: absolute; left: 10px; right: 10px; top: 20px; height: 2px; background: #1E8A4C"></div>
+          <div style="position: absolute; left: 0; right: 0; top: 13px; display: flex; justify-content: space-between">
+            <sc-for list="{{days}}" as="d" hint-placeholder-count="8">
+              <button onClick="{{d.pick}}" aria-label="{{d.name}}" style="display: flex; flex-direction: column; align-items: center; gap: 8px; border: 0; background: transparent; padding: 0; font: {{d.w}} 11.5px Inter, sans-serif; color: {{d.fg}}"><span style="width: {{d.size}}; height: {{d.size}}; box-sizing: border-box; border-radius: 50%; background: {{d.fill}}; border: 2px solid #1E8A4C"></span>{{d.name}}</button>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      <div style="border-radius: 12px; background: #FCFBF8; border: 1px solid #E3DDD1; overflow: hidden">
+        <div style="padding: 10px 14px; font-size: 13px; font-weight: 700; border-bottom: 1px dashed #DDD6C9">Documents, as it was on {{dayName}}</div>
+        <sc-for list="{{files}}" as="f" hint-placeholder-count="4">
+          <div style="display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 14px; font-size: 13.5px; border-bottom: 1px dashed #EFEBE3"><span style="width: 16px; height: 12px; border-radius: 3px; background: {{f.dye}}"></span><span style="flex-grow: 1">{{f.name}}</span><span style="font-size: 12px; color: {{f.stateColor}}">{{f.state}}</span></div>
+        </sc-for>
+      </div>
+      <div style="display: flex; gap: 10px"><button style="height: 38px; padding: 0 18px; border-radius: 9px; border: 0; background: #1E8A4C; color: #FFFFFF; font: 600 13.5px Inter, sans-serif">Bring back notes.txt</button><button style="height: 38px; padding: 0 14px; border-radius: 9px; border: 1px solid #DDD6C9; background: #FCFBF8; color: #1D1C1A; font: 500 13.5px Inter, sans-serif">Copy now</button></div>
+      <div style="font-size: 12px; color: #6B675F; line-height: 1.5">Bringing a file back never writes over the one you have: it comes back beside it, as "notes (Tuesday).txt".</div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const notes = [['For the market on Saturday', 'the linen, folded', '#3F5EE8', true], ['Weave: open questions', 'Does the loom hide in…', '#C2366F'], ['Books Ola asked for', 'The one about dyes', '#B86E00'], ['Router password', 'in the drawer, not here', '#6B675F'], ['Recipes', 'Plum cake, the old way', '#1E8A4C']].map((n) => ({ title: n[0], first: n[1], dye: n[2], bg: n[3] ? 'rgba(63,94,232,0.12)' : 'transparent' }));
+    const done = st.done || { 0: true };
+    const T = ['the linen, folded', 'the dyes for Ola', 'a bag for the plums', 'cash for the dyers'];
+    const todo = T.map((t, i) => { const v = !!done[i]; return { text: t, fg: v ? '#8A857B' : '#1D1C1A', dec: v ? 'line-through' : 'none', fill: v ? '#3F5EE8' : 'transparent', toggle: () => this.setState({ done: Object.assign({}, done, { [i]: !v }) }) }; });
+    const D = ['Thu 12', 'Fri 13', 'Sat 14', 'Sun 15', 'Mon 16', 'Tue 17', 'Wed 18', 'Today'];
+    const pick = st.d == null ? 5 : st.d;
+    const days = D.map((d, i) => ({ name: d, size: i === pick ? '18px' : '14px', fill: i === pick ? '#1E8A4C' : '#F6F3EC', fg: i === pick ? '#1D1C1A' : '#6B675F', w: i === pick ? 700 : 500, pick: () => this.setState({ d: i }) }));
+    const files = [['notes.txt', '#C77F0A', 'changed since', '#B86E00'], ['market-list.txt', '#C77F0A', 'the same', '#6B675F'], ['budget.csv', '#2F9A5C', 'deleted since', '#C9302C'], ['letters', '#4A6BE0', 'the same', '#6B675F']].map((f) => ({ name: f[0], dye: f[1], state: f[2], stateColor: f[3] }));
+    return { notes, todo, days, files, dayName: D[pick] };
+  }
+}
+</script>
+</body>
+</html>

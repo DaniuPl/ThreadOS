@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tablet: two side by side</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=Source+Serif+4:wght@400;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1180px; height: 820px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <div style="height: 32px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 13px; font-weight: 600"><span>12:36</span><span>Home-5G · 64%</span></div>
+  <div style="position: absolute; left: 12px; right: 12px; top: 36px; bottom: 44px; display: flex; gap: 0">
+    <!-- left: Weft, reading -->
+    <section aria-label="Weft" style="width: {{leftW}}; border-radius: 16px; overflow: hidden; background: #FCFBF8; border: 1px solid #D3CCBE; display: flex; flex-direction: column">
+      <div style="height: 3px; background: #3F5EE8"></div>
+      <div style="height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #E3DDD1"><dc-import name="Icon" app="weft" size="{{ 24 }}" hint-size="24px,24px"></dc-import><span style="flex-grow: 1; height: 34px; border-radius: 10px; background: #F1EDE5; display: flex; align-items: center; padding: 0 12px; font-size: 14px; color: #4A4740">journal.local/compositor</span></div>
+      <article style="padding: 26px 32px; display: flex; flex-direction: column; gap: 14px">
+        <h1 style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 30px; line-height: 1.15">How the compositor draws a frame</h1>
+        <p style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 18px; line-height: 1.6; color: #2B2A27">Every window draws into memory of its own. The desktop only copies: it takes what changed since the last frame and lays the windows over the wallpaper from the back to the front.</p>
+        <p style="margin: 0; font-family: 'Source Serif 4', Georgia, serif; font-size: 18px; line-height: 1.6; color: #2B2A27">There is no graphics card doing this for us, so every effect is paid for by the processor.</p>
+      </article>
+    </section>
+    <!-- the seam: drag it with a finger; the knot is the handle -->
+    <div role="group" aria-label="The seam" style="width: 22px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px">
+      <button onClick="{{less}}" aria-label="Give the left less" style="width: 22px; height: 22px; border: 0; background: transparent; color: #6B675F; font: 700 14px Inter, sans-serif; padding: 0">‹</button>
+      <span style="width: 8px; height: 70px; border-radius: 4px; background: #3F5EE8"></span>
+      <button onClick="{{more}}" aria-label="Give the left more" style="width: 22px; height: 22px; border: 0; background: transparent; color: #6B675F; font: 700 14px Inter, sans-serif; padding: 0">›</button>
+    </div>
+    <!-- right: Notes, writing -->
+    <section aria-label="Notes" style="flex-grow: 1; min-width: 0; border-radius: 16px; overflow: hidden; background: #FCFBF8; border: 1px solid #D3CCBE; display: flex; flex-direction: column">
+      <div style="height: 3px; background: #FCFBF8"></div>
+      <div style="height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid #E3DDD1"><dc-import name="Icon" app="notes" size="{{ 24 }}" hint-size="24px,24px"></dc-import><span style="font-size: 15px; font-weight: 700">Notes</span></div>
+      <div style="padding: 22px 24px; display: flex; flex-direction: column; gap: 12px; font-family: 'Source Serif 4', Georgia, serif; font-size: 17px; line-height: 1.6; color: #2B2A27">
+        <b style="font-size: 22px">Reading notes</b>
+        <span>- the desktop only copies</span>
+        <span>- a tile instead of a blur</span>
+        <span style="display: flex; align-items: center; gap: 10px; font-family: Inter, sans-serif; font-size: 13px; color: #6B675F; padding: 10px 12px; border-radius: 10px; border: 1px dashed #CFC8BA">Drag a sentence from Weft and drop it here: it comes with a link back.</span>
+      </div>
+    </section>
+  </div>
+  <!-- the loom and the thread at the bottom, larger for fingers -->
+  <div aria-label="The thread" style="position: absolute; left: 30%; right: 30%; bottom: 12px; height: 22px"><div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #CFC8BA"></div><div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 18px"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #1E7F86; border: 2px solid #FFFFFF"></span><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #B86E00; border: 2px solid #FFFFFF"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #3F5EE8"></span></div></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1180,"height":820}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const split = (this.state && this.state.p) || 58;
+    return { leftW: 'calc((100% - 22px) * ' + (split / 100) + ')', less: () => this.setState({ p: Math.max(34, split - 8) }), more: () => this.setState({ p: Math.min(74, split + 8) }) };
+  }
+}
+</script>
+</body>
+</html>

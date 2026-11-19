@@ -156,7 +156,7 @@ a{color:#8FA5FF}a:hover{color:#B7C5FF}
     </div>
   </aside>
 
-  <!-- The loom: launcher, programs as spools, the thread under what runs, desktops as knots -->
+  <!-- The loom: launcher, programs as tiles, the thread under what runs, desktops as knots -->
   <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border: 1px solid #2E323D; box-shadow: 0 12px 32px rgba(0,0,0,0.45); display: flex; align-items: center; padding: 0 10px; gap: 14px">
 
     <button aria-label="Open the spool (all programs)" style="width: 40px; height: 40px; border-radius: 10px; border: 0; background: {{accent}}; display: flex; align-items: center; justify-content: center; padding: 0">
@@ -173,7 +173,7 @@ a{color:#8FA5FF}a:hover{color:#B7C5FF}
         <div style="position: absolute; left: 0; right: 0; bottom: 3px; height: 1px; background: #2E323D"></div>
         <sc-for list="{{apps}}" as="a" hint-placeholder-count="8">
           <div style="position: relative; display: flex; flex-direction: column; align-items: center">
-            <button aria-label="{{a.name}}" style="width: 38px; height: 38px; border-radius: 10px; border: 0; padding: 0; background: {{a.dye}}; display: flex; align-items: center; justify-content: center; font: 700 15px Inter, sans-serif; color: #FFFFFF">{{a.glyph}}</button>
+            <button aria-label="{{a.name}}" style="width: 38px; height: 38px; border: 0; padding: 0; background: transparent"><dc-import name="Icon" app="{{a.key}}" size="{{ 38 }}" hint-size="38px,38px"></dc-import></button>
             <div style="position: absolute; bottom: -9px; height: 3px; width: {{a.threadW}}; border-radius: 2px; background: {{a.thread}}"></div>
           </div>
         </sc-for>
@@ -243,6 +243,7 @@ class Component extends DCLogic {
       { name: 'Settings', glyph: 'S', dye: '#4B505E', run: 'no' }
     ].map((a) => ({
       ...a,
+      key: a.name.toLowerCase(),
       thread: a.run === 'focus' ? accent : (a.run === 'yes' ? '#9AA0AE' : 'transparent'),
       threadW: a.run === 'focus' ? '30px' : '14px'
     }));

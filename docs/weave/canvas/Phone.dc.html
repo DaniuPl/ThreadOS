@@ -55,7 +55,7 @@ a{color:#3F5EE8}a:hover{color:#2A45C0}
   <section aria-label="Programs" style="position: relative; margin: 22px 20px 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); row-gap: 14px; column-gap: 8px">
     <sc-for list="{{apps}}" as="a" hint-placeholder-count="8">
       <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 6px; text-decoration: none; color: #1D1C1A">
-        <span style="width: 58px; height: 58px; border-radius: 16px; background: {{a.dye}}; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font-size: 22px; font-weight: 700; box-shadow: inset 0 -3px 0 rgba(0,0,0,0.12)">{{a.glyph}}</span>
+        <dc-import name="Icon" app="{{a.key}}" size="{{ 58 }}" hint-size="58px,58px"></dc-import>
         <span style="font-size: 12px; font-weight: 500">{{a.name}}</span>
       </a>
     </sc-for>
@@ -65,7 +65,7 @@ a{color:#3F5EE8}a:hover{color:#2A45C0}
     <div style="position: absolute; left: 22px; right: 22px; bottom: 12px; height: 1px; background: #DAD5CA"></div>
     <sc-for list="{{dock}}" as="d" hint-placeholder-count="4">
       <div style="position: relative; display: flex; flex-direction: column; align-items: center">
-        <button aria-label="{{d.name}}" style="width: 52px; height: 52px; border-radius: 15px; border: 0; padding: 0; background: {{d.dye}}; color: #FFFFFF; font: 700 20px Inter, sans-serif">{{d.glyph}}</button>
+        <button aria-label="{{d.name}}" style="width: 52px; height: 52px; border: 0; padding: 0; background: transparent"><dc-import name="Icon" app="{{d.key}}" size="{{ 52 }}" hint-size="52px,52px"></dc-import></button>
         <div style="position: absolute; bottom: -10px; height: 3px; width: {{d.threadW}}; border-radius: 2px; background: {{d.thread}}"></div>
       </div>
     </sc-for>
@@ -101,6 +101,9 @@ class Component extends DCLogic {
       thread: d.run === 'focus' ? '#3F5EE8' : (d.run === 'yes' ? '#8A857B' : 'transparent'),
       threadW: d.run === 'focus' ? '28px' : '12px'
     }));
+    const K = (n) => ({ messages: 'purl', 'skein': 'skein' }[n.toLowerCase()] || n.toLowerCase());
+    apps.forEach((a) => { a.key = K(a.name); });
+    dock.forEach((d) => { d.key = K(d.name); });
     return { apps, dock };
   }
 }

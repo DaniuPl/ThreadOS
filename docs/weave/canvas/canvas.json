@@ -438,6 +438,189 @@
       "title": "ProtonUI v2: technical page",
       "page": "protonui",
       "expand": "fill"
+    },
+    "Icons.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 1100,
+      "title": "The icon family",
+      "page": "icons"
+    },
+    "Icon.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 64,
+      "h": 64,
+      "title": "Icon (component: app, size)",
+      "page": "icons"
+    },
+    "Dialogs.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "When the system has to ask",
+      "page": "system",
+      "is_interactive": true
+    },
+    "FilePicker.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Open and save",
+      "page": "system",
+      "is_interactive": true
+    },
+    "PhonePermission.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: a program asks",
+      "page": "system",
+      "is_interactive": true
+    },
+    "Moments.dc.html": {
+      "x": 0,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "title": "Start, stop, update, fail",
+      "page": "system"
+    },
+    "Desks.dc.html": {
+      "x": 1520,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "title": "Desktops and side by side",
+      "page": "system",
+      "is_interactive": true
+    },
+    "Capture.dc.html": {
+      "x": 0,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "title": "Capture, clipboard and keys",
+      "page": "system",
+      "is_interactive": true
+    },
+    "Access.dc.html": {
+      "x": 1520,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "title": "Easier to use, and for children",
+      "page": "system",
+      "is_interactive": true
+    },
+    "FilesW.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Files — Linen",
+      "page": "apps3",
+      "is_interactive": true
+    },
+    "TermW.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Term, with tabs — Night",
+      "page": "apps3",
+      "is_interactive": true
+    },
+    "CameraClock.dc.html": {
+      "x": 0,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "title": "Camera and Clock — Night",
+      "page": "apps3",
+      "is_interactive": true
+    },
+    "NotesMend.dc.html": {
+      "x": 1520,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "title": "Notes and Mend (backup) — Linen",
+      "page": "apps3"
+    },
+    "MonitorW.dc.html": {
+      "x": 0,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "title": "Monitor — Night",
+      "page": "apps3",
+      "is_interactive": true
+    },
+    "Swatch.dc.html": {
+      "x": 1520,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "title": "Swatch: every control, and a new program",
+      "page": "apps3",
+      "is_interactive": true
+    },
+    "PhoneCall.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: a call",
+      "page": "phone2",
+      "is_interactive": true
+    },
+    "PhoneKeyboard.dc.html": {
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: the keyboard",
+      "page": "phone2",
+      "is_interactive": true
+    },
+    "PhoneWidgets.dc.html": {
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: home with widgets",
+      "page": "phone2"
+    },
+    "TabletSplit.dc.html": {
+      "x": 1410,
+      "y": 0,
+      "w": 1180,
+      "h": 820,
+      "title": "Tablet: two side by side",
+      "page": "phone2",
+      "is_interactive": true
+    },
+    "Identity.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Wallpapers and sounds",
+      "page": "identity",
+      "is_interactive": true
+    },
+    "Hero.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "The project, on its page",
+      "page": "identity"
     }
   },
   "createdOnFiles": {
@@ -507,6 +690,38 @@
       "kind": "title1",
       "maxW": 3430,
       "page": "apps2"
+    },
+    "system": {
+      "x": 0,
+      "y": -300,
+      "text": "System: questions and moments",
+      "kind": "title1",
+      "maxW": 3430,
+      "page": "system"
+    },
+    "apps3": {
+      "x": 0,
+      "y": -300,
+      "text": "Even more apps",
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "apps3"
+    },
+    "phone2": {
+      "x": 0,
+      "y": -300,
+      "text": "Phone and tablet, more",
+      "kind": "title1",
+      "maxW": 2590,
+      "page": "phone2"
+    },
+    "identity": {
+      "x": 0,
+      "y": -300,
+      "text": "Identity",
+      "kind": "title1",
+      "maxW": 2960,
+      "page": "identity"
     }
   },
   "order": [
@@ -562,7 +777,28 @@
     "PhoneUnlock.dc.html",
     "Skein.dc.html",
     "Notify.dc.html",
-    "ProtonUI.dc.html"
+    "ProtonUI.dc.html",
+    "Icon.dc.html",
+    "Icons.dc.html",
+    "Dialogs.dc.html",
+    "FilePicker.dc.html",
+    "PhonePermission.dc.html",
+    "Moments.dc.html",
+    "Desks.dc.html",
+    "Capture.dc.html",
+    "Access.dc.html",
+    "FilesW.dc.html",
+    "TermW.dc.html",
+    "CameraClock.dc.html",
+    "NotesMend.dc.html",
+    "MonitorW.dc.html",
+    "Swatch.dc.html",
+    "PhoneCall.dc.html",
+    "PhoneKeyboard.dc.html",
+    "PhoneWidgets.dc.html",
+    "TabletSplit.dc.html",
+    "Identity.dc.html",
+    "Hero.dc.html"
   ],
   "pages": [
     {
@@ -588,6 +824,26 @@
     {
       "id": "protonui",
       "name": "ProtonUI v2"
+    },
+    {
+      "id": "icons",
+      "name": "Icons"
+    },
+    {
+      "id": "system",
+      "name": "System: questions and moments"
+    },
+    {
+      "id": "apps3",
+      "name": "Even more apps"
+    },
+    {
+      "id": "phone2",
+      "name": "Phone and tablet, more"
+    },
+    {
+      "id": "identity",
+      "name": "Identity"
     }
   ],
   "title": "Design"

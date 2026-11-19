@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Files, in Weave</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #E6E1D6; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <section aria-label="Files window" style="position: absolute; left: 16px; top: 14px; width: 1408px; height: 800px; border-radius: 10px; overflow: hidden; background: #FAF8F4; border: 1px solid #D3CCBE; box-shadow: 0 22px 56px rgba(60,50,30,0.22); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #3F5EE8"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #EDE8DE; background-image: repeating-linear-gradient(0deg, rgba(0,0,0,0.022) 0px, rgba(0,0,0,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(0,0,0,0.015) 0px, rgba(0,0,0,0.015) 1px, transparent 1px, transparent 3px)">
+      <dc-import name="Icon" app="files" size="{{ 18 }}" hint-size="18px,18px"></dc-import>
+      <span style="font-size: 13px; font-weight: 700">Files</span><span style="font-size: 13px; color: #6B675F">Pictures / November</span>
+      <span style="flex-grow: 1"></span>
+      <span style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(0,0,0,0.05)"><span style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 2px; background: #4A4740"></span></span><span style="width: 26px; height: 26px; display: flex; align-items: center; justify-content: center"><span style="width: 10px; height: 10px; box-sizing: border-box; border: 2px solid #4A4740; border-radius: 2px"></span></span><span style="width: 26px; height: 26px; border-radius: 50%; background: rgba(201,48,44,0.12); display: flex; align-items: center; justify-content: center; color: #C9302C; font-weight: 800; font-size: 13px">×</span></span>
+    </div>
+    <div style="height: 50px; display: flex; align-items: center; gap: 8px; padding: 0 14px; border-bottom: 1px solid #E3DDD1">
+      <span style="display: flex; align-items: center; gap: 6px; font-size: 13.5px"><span style="color: #6B675F">Home</span><span style="color: #B3AC9F">/</span><span style="color: #6B675F">Pictures</span><span style="color: #B3AC9F">/</span><span style="font-weight: 700">November</span></span>
+      <span style="flex-grow: 1"></span>
+      <div role="group" aria-label="View" style="display: inline-flex; padding: 3px; border-radius: 9px; background: #EFEBE3; border: 1px solid #DDD6C9">
+        <sc-for list="{{views}}" as="v" hint-placeholder-count="3"><button onClick="{{v.pick}}" style="height: 28px; padding: 0 12px; border-radius: 6px; border: 0; background: {{v.bg}}; color: #1D1C1A; font: {{v.w}} 12.5px Inter, sans-serif; box-shadow: {{v.sh}}">{{v.name}}</button></sc-for>
+      </div>
+      <button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #DDD6C9; background: #FCFBF8; font: 500 13px Inter, sans-serif; color: #1D1C1A">New folder</button>
+      <label style="display: flex; align-items: center; gap: 8px; width: 200px; height: 32px; box-sizing: border-box; padding: 0 10px; border-radius: 8px 8px 3px 3px; background: #FFFFFF; border: 1px solid #E3DDD1; border-bottom: 2px dashed #CFC8BA"><svg aria-hidden="true" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#6B675F" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg><input aria-label="Find in this folder" placeholder="Find here" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font: 400 12.5px Inter, sans-serif; outline: none"></label>
+    </div>
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <nav aria-label="Places" style="width: 210px; flex-shrink: 0; box-sizing: border-box; padding: 12px 8px; border-right: 1px solid #E3DDD1; background: #F6F3EC; display: flex; flex-direction: column; gap: 2px; font-size: 13px">
+        <sc-for list="{{places}}" as="p" hint-placeholder-count="12">
+          <div style="display: flex; align-items: center; gap: 9px; min-height: 28px; padding: 0 10px; border-radius: 7px; background: {{p.bg}}; font-weight: {{p.w}}; color: {{p.fg}}; font-size: {{p.size}}; letter-spacing: {{p.ls}}; text-transform: {{p.tt}}; margin-top: {{p.gap}}"><span style="width: {{p.kw}}; height: 8px; border-radius: 4px; background: {{p.knot}}"></span>{{p.name}}</div>
+        </sc-for>
+      </nav>
+      <main style="flex-grow: 1; min-width: 0; padding: 16px; overflow: hidden">
+        <sc-if value="{{isIcons}}" hint-placeholder-val="{{ true }}">
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 14px">
+            <sc-for list="{{items}}" as="f" hint-placeholder-count="12">
+              <div style="display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px 6px; border-radius: 10px; background: {{f.bg}}; outline: {{f.outline}}">
+                <span style="position: relative; width: 92px; height: 70px; border-radius: 8px; overflow: hidden; background: {{f.thumb}}"><span style="position: absolute; left: -10%; right: -10%; bottom: -24px; height: 50px; border-radius: 50%; background: {{f.hill}}"></span><span style="position: absolute; left: 8px; top: 8px; width: 7px; height: 7px; border-radius: 50%; background: {{f.tag}}"></span></span>
+                <span style="font-size: 12.5px; font-weight: {{f.w}}; max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{f.name}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{isList}}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column">
+            <div style="display: grid; grid-template-columns: minmax(0, 1fr) 110px 90px 110px; gap: 12px; height: 28px; align-items: center; padding: 0 12px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #6B675F; border-bottom: 1px dashed #DDD6C9"><span>Name</span><span>Kind</span><span>Size</span><span>Changed</span></div>
+            <sc-for list="{{items}}" as="f" hint-placeholder-count="12">
+              <div style="display: grid; grid-template-columns: minmax(0, 1fr) 110px 90px 110px; gap: 12px; height: 34px; align-items: center; padding: 0 12px; border-radius: 7px; background: {{f.bg}}; font-size: 13.5px"><span style="display: flex; align-items: center; gap: 10px; font-weight: {{f.w}}"><span style="width: 6px; height: 6px; border-radius: 50%; background: {{f.tag}}"></span><span style="width: 18px; height: 14px; border-radius: 3px; background: {{f.thumb}}"></span>{{f.name}}</span><span style="color: #6B675F; font-size: 12.5px">Picture</span><span style="color: #6B675F; font-size: 12.5px">{{f.size}}</span><span style="color: #6B675F; font-size: 12.5px">{{f.when}}</span></div>
+            </sc-for>
+          </div>
+        </sc-if>
+      </main>
+      <aside aria-label="About the chosen file" style="width: 280px; flex-shrink: 0; box-sizing: border-box; padding: 16px; border-left: 1px solid #E3DDD1; background: #F6F3EC; display: flex; flex-direction: column; gap: 12px">
+        <span style="position: relative; display: block; height: 170px; border-radius: 12px; overflow: hidden; background: #A8C4E8"><span style="position: absolute; right: 40px; top: 30px; width: 34px; height: 34px; border-radius: 50%; background: #FFFFFF"></span><span style="position: absolute; left: -10%; right: -10%; bottom: -40px; height: 110px; border-radius: 50%; background: #6E8EC0"></span><span style="position: absolute; left: -10%; right: 30%; bottom: -60px; height: 100px; border-radius: 50%; background: #2F4A7A"></span></span>
+        <div><div style="font-size: 15px; font-weight: 800">lake-morning.jpg</div><div style="font-size: 12.5px; color: #6B675F; margin-top: 2px">Picture · 4032 × 3024 · 3.4 MB</div></div>
+        <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12.5px">
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed #DDD6C9; padding-bottom: 4px"><span style="color: #6B675F">Taken</span><span>Mon 16 Nov, 7:12</span></div>
+          <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed #DDD6C9; padding-bottom: 4px"><span style="color: #6B675F">Where</span><span>NVMe disk</span></div>
+          <div style="display: flex; justify-content: space-between"><span style="color: #6B675F">Tags</span><span style="display: flex; gap: 4px"><span style="padding: 1px 8px; border-radius: 999px; background: rgba(30,127,134,0.15); color: #1E7F86; font-weight: 600">Trips</span><span style="padding: 1px 8px; border-radius: 999px; background: rgba(194,54,111,0.12); color: #C2366F; font-weight: 600">Family</span></span></div>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: auto"><button style="flex: 1; height: 34px; border-radius: 8px; border: 0; background: #3F5EE8; color: #FFFFFF; font: 600 13px Inter, sans-serif">Open in Gallery</button><button style="height: 34px; padding: 0 12px; border-radius: 8px; border: 1px solid #DDD6C9; background: #FCFBF8; font: 500 13px Inter, sans-serif; color: #1D1C1A">Share</button></div>
+      </aside>
+    </div>
+    <div style="height: 28px; display: flex; align-items: center; padding: 0 14px; border-top: 1px solid #E3DDD1; font-size: 12px; color: #6B675F">12 pictures · 1 chosen · 29 GB used of 131.7 GB</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const view = (this.state && this.state.v) || 'Icons';
+    const views = ['List', 'Icons', 'Columns'].map((n) => ({ name: n, bg: n === view ? '#FCFBF8' : 'transparent', w: n === view ? 600 : 500, sh: n === view ? 'inset 0 -2px 0 #3F5EE8' : 'none', pick: () => this.setState({ v: n === 'Columns' ? 'List' : n }) }));
+    const P = (name, o) => Object.assign({ name, bg: 'transparent', w: 400, fg: '#1D1C1A', knot: 'transparent', kw: '6px', size: '13px', ls: '0', tt: 'none', gap: '0px' }, o || {});
+    const H = (name, gap) => P(name, { fg: '#6B675F', size: '11px', ls: '0.08em', tt: 'uppercase', w: 600, gap: gap || '0px', kw: '0px' });
+    const places = [H('Places'), P('Home'), P('Documents'), P('Pictures', { bg: 'rgba(63,94,232,0.12)', w: 700, knot: '#3F5EE8' }), P('Projects'), P('Trash'), H('Disks', '10px'), P('NVMe disk'), P('USB stick'), H('Tags', '10px'), P('Trips', { knot: '#1E7F86', kw: '14px' }), P('Family', { knot: '#C2366F', kw: '14px' }), P('Work', { knot: '#3F5EE8', kw: '14px' })];
+    const T = [['lake-morning.jpg', '#A8C4E8', '#2F4A7A', '#1E7F86'], ['dunes.jpg', '#F4C9A0', '#7A4E3E', 'transparent'], ['market-day.jpg', '#E8D9B8', '#6E5E3E', '#C2366F'], ['night-tram.jpg', '#2B2350', '#1B1338', 'transparent'], ['fern.jpg', '#CDE6D3', '#2F6E4E', 'transparent'], ['ola-school.jpg', '#F0CFC0', '#7A5446', '#C2366F'], ['harbour.jpg', '#BFD8E8', '#3E6475', '#1E7F86'], ['loom.jpg', '#E8C8E0', '#6E3E66', '#3F5EE8'], ['snow.jpg', '#E6EEF8', '#8AA6AC', 'transparent'], ['dyes.jpg', '#F6E3B4', '#8A6A2A', '#3F5EE8'], ['bridge.jpg', '#C2D4D8', '#3E5E64', '#1E7F86'], ['tea.jpg', '#D6CCF0', '#4E3E7A', 'transparent']];
+    const items = T.map((t, i) => ({ name: t[0], thumb: t[1], hill: t[2], tag: t[3], bg: i === 0 ? 'rgba(63,94,232,0.12)' : 'transparent', outline: i === 0 ? '2px solid #3F5EE8' : '0px solid transparent', w: i === 0 ? 700 : 500, size: (1.8 + (i * 0.37) % 2).toFixed(1) + ' MB', when: i < 4 ? 'Mon 16 Nov' : 'Sun 15 Nov' }));
+    return { views, places, items, isIcons: view === 'Icons', isList: view !== 'Icons' };
+  }
+}
+</script>
+</body>
+</html>
