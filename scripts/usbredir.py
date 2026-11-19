@@ -161,6 +161,8 @@ class Redir:
         self.configured = threading.Event()
         self.alts = {}               # interface -> the alternate in force
         self.iso_on = {}             # IN endpoint -> streaming
+        self.bulk_wait = {}          # IN endpoint -> reads waiting
+        self.bulk_have = {}          # IN endpoint -> data waiting
         if hasattr(device, "attach"):
             device.attach(self)
         threading.Thread(target=self.serve, daemon=True).start()
@@ -273,12 +275,28 @@ class Redir:
                 self.device.after_control()
         elif kind == BULK_PACKET:
             ep, _, length, stream = struct.unpack("<BBHI", body[:8])
+            if len(body) >= 10:
+                length |= struct.unpack("<H", body[8:10])[0] << 16
             if not ep & 0x80:
-                # OUT: taken. IN is never answered - there is nothing to
-                # read - and QEMU cancels it when the guest gives up.
+                # OUT: taken, and handed to a device that reads it
+                if hasattr(self.device, "bulk_out"):
+                    self.device.bulk_out(ep, bytes(body[10:10 + length]))
                 self.send(BULK_PACKET, struct.pack("<BBHIH", ep, SUCCESS,
                                                    length & 0xFFFF, stream,
                                                    length >> 16), pid=pid)
+            else:
+                # IN: answered when the device has something to send -
+                # until then it waits, and QEMU cancels it when the
+                # guest gives up
+                with self.lock:
+                    self.bulk_wait.setdefault(ep, []).append((pid, length,
+                                                              stream))
+                self.bulk_pump(ep)
+        elif kind == CANCEL_DATA:
+            with self.lock:
+                for ep in self.bulk_wait:
+                    self.bulk_wait[ep] = [w for w in self.bulk_wait[ep]
+                                          if w[0] != pid]
         elif kind == SET_CONFIGURATION:
             self.configured.set()
             self.send(CONFIGURATION_STATUS, struct.pack("<BB", SUCCESS,
@@ -331,6 +349,26 @@ class Redir:
             # what the system that reset the device asked)
             self.device.requests.append(("reset",))
         # CANCEL_DATA needs no answer
+
+    def bulk_in(self, ep, data):
+        """Data the device has for the host on bulk IN endpoint ep: sent
+        as the answer to the host's next read"""
+        with self.lock:
+            self.bulk_have.setdefault(0x80 | ep, []).append(bytes(data))
+        self.bulk_pump(0x80 | ep)
+
+    def bulk_pump(self, ep):
+        while True:
+            with self.lock:
+                waits = self.bulk_wait.get(ep)
+                have = self.bulk_have.get(ep)
+                if not waits or not have:
+                    return
+                pid, length, stream = waits.pop(0)
+                data = have.pop(0)[:length]
+            self.send(BULK_PACKET, struct.pack("<BBHIH", ep, SUCCESS,
+                                               len(data) & 0xFFFF, stream,
+                                               len(data) >> 16), data, pid)
 
     def iso_sender(self, ep):
         """One packet an interval, sent ten milliseconds' worth at a

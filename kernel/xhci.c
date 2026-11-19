@@ -219,6 +219,16 @@ static int slot_speed[SLOTS];  /* what speed the device answered at */
    64 KiB line one TRB may not cross. */
 static uint8_t buf[SLOTS][4096] __attribute__((aligned(4096)));
 static uint8_t ibuf[SLOTS][INT_EPS][64] __attribute__((aligned(64)));
+/* A bulk IN endpoint read the way an interrupt one is - a transfer left
+   waiting and looked at, never waited on (xhci_bulk_in_poll): a
+   Bluetooth adapter's data in, which comes whenever the other device
+   speaks, beside the events. Its completions are its own: a control or
+   bulk transfer waiting for its answer must not take them. */
+#define POLL_BUF 1100
+static int poll_dci[SLOTS];
+static int poll_armed[SLOTS];
+static int poll_len[SLOTS];
+static uint8_t pbuf[SLOTS][POLL_BUF] __attribute__((aligned(64)));
 
 /* Transfers that have finished, waiting for the device they belong to.
  *
@@ -441,7 +451,7 @@ static int is_int_dci(int slot, int dci)
     for (int k = 0; k < INT_EPS; k++)
         if (int_dci[slot - 1][k] == dci)
             return 1;
-    return 0;
+    return poll_dci[slot - 1] && poll_dci[slot - 1] == dci;
 }
 
 /* Takes one finished transfer of this slot's on endpoint 'dci', or with
@@ -1341,6 +1351,35 @@ static int bulk_transfer(int slot, int ep, void *data, int len, int in)
     return total;
 }
 
+int xhci_bulk_in_poll(int slot, int ep, void *data, int len)
+{
+    if (!base || slot < 1 || slot > SLOTS || len <= 0 || len > POLL_BUF)
+        return -1;
+    int number = dci_dir(ep, 1);
+    poll_dci[slot - 1] = number;
+    if (!poll_armed[slot - 1]) {
+        insert(&ep_pier[slot - 1][2], fiz(pbuf[slot - 1]), (uint32_t)len,
+               ((uint32_t)TRB_NORMAL << 10) | TRB_IOC | TRB_ISP);
+        doorbells[slot] = (uint32_t)number;
+        poll_armed[slot - 1] = 1;
+        poll_len[slot - 1] = len;
+        return 0;                        /* nothing yet */
+    }
+    sort_events();
+    struct comp c;
+    if (!take_comp(slot, number, &c))
+        return 0;
+    poll_armed[slot - 1] = 0;
+    if (c.code != CODE_OK && c.code != CODE_SHORT)
+        return -1;
+    int passed = poll_len[slot - 1] - c.left;
+    if (passed > len)
+        passed = len;
+    if (passed > 0)
+        memcpy(data, pbuf[slot - 1], (uint32_t)passed);
+    return passed;
+}
+
 int xhci_bulk_out(int slot, int ep, const void *data, int len)
 {
     return bulk_transfer(slot, ep, (void *)(uintptr_t)data, len, 0);
@@ -1647,6 +1686,7 @@ int xhci_release(int slot)
     dcbaa[slot] = 0;
     for (int k = 0; k < INT_EPS; k++)
         armed[slot - 1][k] = int_dci[slot - 1][k] = 0;
+    poll_dci[slot - 1] = poll_armed[slot - 1] = 0;
     done[slot - 1].head = done[slot - 1].tail = 0;
     return 0;
 }

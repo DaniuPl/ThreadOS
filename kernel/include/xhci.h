@@ -79,6 +79,8 @@ int xhci_bulk_endpoint(int slot, int in_ep, int out_ep, int maxpacket);
    memory it can reach. */
 int xhci_bulk_out(int slot, int ep, const void *data, int len);
 int xhci_bulk_in(int slot, int ep, void *data, int len);
+/* A bulk IN read as an interrupt one is: 0 nothing yet, n bytes, -1 */
+int xhci_bulk_in_poll(int slot, int ep, void *data, int len);
 
 /* An isochronous IN endpoint - a camera's - for one stream at a time.
    open: declares it ('raw_mps' as the descriptor writes it, extra

@@ -98,7 +98,12 @@ def with_adapter(eir):
                   % found.get("c0:ff:ee:00:11:22"),
                   found.get("c0:ff:ee:00:11:22", "").startswith(
                       "ThreadOS Watch  -61 dBm"))
-            check("two devices, and nothing else", "devices heard: 2" in out)
+            check("the keyboard, by its name too (%s)"
+                  % found.get("d0:0d:fe:ed:00:33"),
+                  found.get("d0:0d:fe:ed:00:33", "").startswith(
+                      "ThreadOS Keyboard  -55 dBm"))
+            check("three devices, and nothing else",
+                  "devices heard: 3" in out)
 
             inq = bt.sent(INQUIRY)
             check("an inquiry of the general access code (%s)"
@@ -124,6 +129,74 @@ def with_adapter(eir):
         for f in os.listdir(work):
             os.unlink(os.path.join(work, f))
         os.rmdir(work)
+
+
+WATCH, KEYBOARD = "c0:ff:ee:00:11:22", "d0:0d:fe:ed:00:33"
+
+
+def said(q, mark, text, timeout):
+    """What the port said from 'mark' on, once 'text' is in it (or the
+    time is up)"""
+    end = time.time() + timeout
+    out = q.serial()[mark:]
+    while text not in out and time.time() < end:
+        time.sleep(0.3)
+        out = q.serial()[mark:]
+    return out
+
+
+def le_pairing(q, bt):
+    """LE legacy pairing against the made-up controller's watch and
+    keyboard, which run their side of the Security Manager Protocol
+    from the specification with OpenSSL's AES"""
+    mark = len(q.serial())
+    q.type_line("bt pair " + WATCH)
+    out = said(q, mark, "[bt] paired with ThreadOS Watch", 60)
+    check("the watch (no input, no output) pairs over LE without a "
+          "question - Just Works - the link encrypted with the short term "
+          "key both worked out, its long term key and identity kept",
+          "[bt] paired with ThreadOS Watch, encrypted, its identity kept"
+          in out and "type " not in out and bt.watch.addr in bt.le_keys)
+    req = bt.smp_log[0] if bt.smp_log else b""
+    check("our Pairing Request: a display with yes/no, bonding with MITM, "
+          "16-byte keys, the device to give its key and identity (%s)"
+          % req.hex(), req == bytes([1, 1, 0, 5, 16, 0, 3]))
+    sent = len(bt.smp_log)
+    mark = len(q.serial())
+    q.type_line("bt pair " + WATCH)
+    out = said(q, mark, "[bt] paired with ThreadOS Watch", 60)
+    check("paired again: the link encrypted with the long term key kept, "
+          "no pairing at all", "(the key kept from before)" in out and
+          len(bt.smp_log) == sent)
+
+    # The keyboard: six digits shown here, typed there
+    mark = len(q.serial())
+    q.type_line("bt pair " + KEYBOARD)
+    out = said(q, mark, "on it, then Enter", 60)
+    m = re.search(r"type (\d{6}) on it", out)
+    check("the keyboard is shown six digits to type (%s)"
+          % (m.group(1) if m else None), m is not None)
+    if m:
+        bt.typed = int(m.group(1))
+    out = said(q, mark, "ThreadOS Keyboard, encrypted", 60)
+    check("typed right, the keyboard is paired - the confirm values held "
+          "up on both sides", "[bt] paired with ThreadOS Keyboard" in out and
+          bt.keyboard.addr in bt.le_keys)
+
+    # And typed wrong
+    q.command("bt forget " + KEYBOARD, "bt:", timeout=20)
+    bt.typed = None
+    mark = len(q.serial())
+    q.type_line("bt pair " + KEYBOARD)
+    out = said(q, mark, "on it, then Enter", 60)
+    m = re.search(r"type (\d{6}) on it", out)
+    bt.typed = (int(m.group(1)) + 1) % 1000000 if m else 0
+    out = said(q, mark, "not paired with ThreadOS Keyboard", 60)
+    line = next((l.strip() for l in out.splitlines() if "not paired" in l),
+                "")
+    check("typed wrong, it is not paired, and the reason says so ('%s')"
+          % line, "not paired with ThreadOS Keyboard" in line and
+          ("typed" in line or "confirm" in line))
 
 
 def pairing():
@@ -198,6 +271,7 @@ def pairing():
                   "(the key kept from before)" in out and
                   "does it show" not in out and len(replies) == 1 and
                   replies[0][6:] == bt.link_key)
+            le_pairing(q, bt)
         finally:
             q.close()
             r.close()
@@ -232,7 +306,8 @@ def pairing():
                   "not paired with Pixel 8: refused here" in out and
                   len(bt.sent(USER_CONFIRM_NEG)) == 1)
             out = q.command("bt", "( 'bt scan'", timeout=20)
-            check("and not listed as paired", "paired:" not in out)
+            check("and not listed as paired",
+                  "paired:  %s" % PHONE not in out)
         finally:
             q.close()
             r.close()
@@ -303,6 +378,10 @@ def main():
                   and "-59 dBm" in out)
             check("a classic device from an inquiry result",
                   "66:55:44:33:22:11" in out)
+            check("LE pairing's c1 and s1 give the Core specification's "
+                  "example values (vol 3 part H 2.2.3, 2.2.4)",
+                  "SMP c1 (the Core specification's example): OK" in out and
+                  "SMP s1 (the Core specification's example): OK" in out)
             check("and the test says outright what it does NOT check",
                   "not a conversation with an adapter" in out)
 

@@ -10742,3 +10742,34 @@ works and is checked by `make test`.
       run clicked Pair while the search still ran - the list fills as
       devices answer, Pair waits for the search's end - and the row's
       Paired ran past the window's edge.)
+- [x] **Bluetooth LE pairing: watches and keyboards** (kernel/bt.c,
+      kernel/xhci.c, kernel/usbhc.c, scripts/btadapter.py,
+      scripts/usbredir.py, scripts/tests/t_bt.py, scripts/tests/t_intelusb.py)
+      Pairing stopped at classic devices; a watch, a mouse or a
+      keyboard speaks only LE and pairs through the Security Manager
+      over L2CAP channel 6. bt.c now connects over LE (the LE
+      Connection Complete event), sends the Pairing Request (a display
+      with yes/no, bonding with MITM), works out the confirm values with
+      c1 and the short term key with s1 on the kernel's AES, starts
+      encryption with it and keeps what the device hands out (the long
+      term key with its EDIV and Rand, the identity key and address)
+      next to the classic link keys in .btkeys. A device with no input
+      pairs "just works"; a keyboard gets six digits to type, shown in
+      the log and the pairing's info. Paired again, the link is
+      encrypted with the long term key and nothing is asked. SMP's
+      packets arrive in ACL fragments that bt.c puts back together.
+      LE needed bulk IN that does not block: the xHCI driver gets a
+      polled bulk IN endpoint (xhci_bulk_in_poll) whose completions are
+      kept apart from endpoint zero's, so a waiting read no longer
+      takes another transfer's event. The usbredir server of the tests
+      now passes bulk OUT to the device, answers bulk IN from a queue
+      and drops reads the guest cancels. The made-up controller gains a
+      watch and a keyboard advertising over LE and does the responder's
+      side of SMP from the Core specification on Python's own AES;
+      'bt test' checks c1 and s1 against the specification's sample
+      values. t_bt: the watch pairs without a question, our request
+      says what it should, the reconnect uses the kept key; the keyboard
+      is shown digits, typed right it pairs (both confirm values held),
+      typed wrong it does not and the reason says so. t_intelusb's host
+      build of the drivers gets stand-ins for the file system, the
+      task's rights and random bytes that bt.c now uses.

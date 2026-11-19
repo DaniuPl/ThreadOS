@@ -67,6 +67,17 @@ int ehci_bulk(int a, int e, int m, void *d, int n, int i, int *t)
 int ehci_int_endpoint(int a, int e, int m) { (void)a; (void)e; (void)m; return -1; }
 int ehci_int_in(int h, void *d, int n) { (void)h; (void)d; (void)n; return -1; }
 void ehci_int_release(int h) { (void)h; }
+/* No disk, one task, and random bytes that are not */
+int fs_ready(void) { return 0; }
+int fs_read(const char *n, void *b, uint32_t m) { (void)n; (void)b; (void)m; return -1; }
+int fs_write(const char *n, const void *d, uint32_t l)
+{ (void)n; (void)d; (void)l; return -1; }
+int task64_level(void) { return 2; }
+int task64_uid(void) { return 0; }
+void task64_set_level(int l) { (void)l; }
+void task64_set_uid(int u) { (void)u; }
+void random_bytes(void *o, uint32_t n)
+{ for (uint32_t i = 0; i < n; i++) ((uint8_t *)o)[i] = (uint8_t)(i * 37 + 11); }
 """
 
 
@@ -83,6 +94,12 @@ def build(work):
         shutil.copy(os.path.join(ROOT, "kernel", "include", name), inc)
     shutil.copy(os.path.join(HW, "xhci", "paging64.h"),
                 os.path.join(work, "kernel64"))
+    shutil.copy(os.path.join(HW, "xhci", "task64.h"),
+                os.path.join(work, "kernel64"))
+    os.makedirs(os.path.join(work, "user"))
+    for name in ("uaes.h", "uapi.h"):          # bt.c's AES, for LE pairing
+        shutil.copy(os.path.join(ROOT, "user", name),
+                    os.path.join(work, "user"))
     for name in DRIVERS:
         shutil.copy(os.path.join(ROOT, "kernel", name), kdir)
     shutil.copy(os.path.join(HW, "xhci_model.c"), work)
