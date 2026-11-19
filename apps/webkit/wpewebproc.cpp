@@ -10,6 +10,12 @@
 // is a path where the libraries were built; the system's is the one
 // the C library makes up out of the initrd's fonts
 // (libc/overlay/src/threados/socket.c).
+//
+// A page's <video> and <audio> are played as they arrive, from memory:
+// WebKit would otherwise download a whole file to the user's cache
+// directory first (GStreamer's on-disk buffering, for preload="auto"),
+// and ThreadOS has none - no $HOME, and the system may be running from
+// a read-only disc - so the player failed before it began.
 
 #include <stdlib.h>
 
@@ -20,5 +26,6 @@ int WebProcessMain(int argc, char** argv);
 int main(int argc, char** argv)
 {
     setenv("FONTCONFIG_FILE", "/etc/fonts/fonts.conf", 0);
+    setenv("WPE_SHELL_DISABLE_MEDIA_DISK_CACHE", "1", 0);
     return WebKit::WebProcessMain(argc, argv);
 }

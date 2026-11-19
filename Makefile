@@ -1468,6 +1468,24 @@ $(FFMPEG_MEDIA_A): $(FFMPEG_MEDIA_TAR) $(TOS_CC)
 	    > $(BUILD)/ffmpeg-media/make.log 2>&1 \
 	    || { tail -40 $(BUILD)/ffmpeg-media/make.log; exit 1; }
 
+# libopus: Opus's reference library. A page's Opus is decoded by FFmpeg;
+# GStreamer's opusparse (gst-plugins-bad, below) reads each packet's
+# framing with libopus, and WebKit's Media Source Extensions take Opus
+# only with that parser - which is how YouTube sends its sound, in WebM.
+OPUS_TAR := third_party/opus/opus-1.5.2.tar.gz
+OPUS_A   := $(LIBS64)/lib/libopus.a
+$(OPUS_A): $(OPUS_TAR) $(MESON_CROSS) $(TOS_CC)
+	rm -rf $(BUILD)/opus && mkdir -p $(BUILD)/opus
+	tar -xzf $(OPUS_TAR) -C $(BUILD)/opus --strip-components=1
+	cd $(BUILD)/opus && meson setup build \
+	    --cross-file $(abspath $(MESON_CROSS)) --wrap-mode=nodownload \
+	    --prefix=$(abspath $(LIBS64)) --libdir=lib --buildtype=release \
+	    -Ddefault_library=static -Dextra-programs=disabled \
+	    -Dtests=disabled -Ddocs=disabled -Dasm=disabled \
+	    > setup.log 2>&1 || { tail -30 setup.log; exit 1; }
+	ninja -C $(BUILD)/opus/build install > $(BUILD)/opus/ninja.log 2>&1 \
+	    || { grep -A20 FAILED $(BUILD)/opus/ninja.log | head -60; exit 1; }
+
 # GStreamer: the core, and of its plugins only what WebKit plays media
 # with - everything else is off (auto_features=disabled), each module
 # built static by meson into BUILD/libs64. The plugins are static too:
@@ -1534,10 +1552,10 @@ $(GST_GOOD_A): $(GST_DIR)/gst-plugins-good-$(GST_VER).tar.xz $(GST_BASE_A)
 # and the codec parsers library they are built on
 GST_BAD_A := $(LIBS64)/lib/gstreamer-1.0/libgstvideoparsersbad.a
 $(GST_BAD_A): $(GST_DIR)/gst-plugins-bad-$(GST_VER).tar.xz $(GST_BASE_A) \
-              $(MESON_CROSS_CXX)
+              $(MESON_CROSS_CXX) $(OPUS_A)
 	$(call GST_BUILD,gst-plugins-bad,$(GST_PLAIN) $(GST_NO_GIR) \
 	    --cross-file $(abspath $(MESON_CROSS_CXX)) \
-	    -Dvideoparsers=enabled \
+	    -Dvideoparsers=enabled -Dopus=enabled \
 	    -Dgpl=disabled -Dorc=disabled -Dtools=disabled)
 
 # gst-libav: FFmpeg's decoders as GStreamer elements (avdec_h264...)
@@ -1554,7 +1572,8 @@ $(GST_LIBAV_A): $(GST_DIR)/gst-libav-$(GST_VER).tar.xz $(GST_BASE_A) \
 # for by name, -u, before its library is reached.)
 GST_PLUGINS := coreelements app audioconvert audioresample playback \
                typefindfunctions videoconvertscale volume pbtypes isomp4 \
-               matroska audioparsers autodetect audiofx videoparsersbad libav
+               matroska audioparsers autodetect audiofx videoparsersbad \
+               opusparse libav
 GST_THREADOS_A := $(LIBS64)/lib/libgstthreados.a
 GST_THREADOS_PC := gstreamer-threados-1.0
 $(GST_THREADOS_A): apps/webkit/media/gststatic.c \
@@ -1568,7 +1587,7 @@ $(GST_THREADOS_A): apps/webkit/media/gststatic.c \
 	        || exit 1; done
 	rm -f $@ && $(AR) rcs $@ $(BUILD)/gstthreados/gststatic.o \
 	    $(BUILD)/gstthreados/gstthreadossink.o
-	printf 'prefix=%s\nlibdir=$${prefix}/lib\nplugindir=$${libdir}/gstreamer-1.0\n\nName: %s\nDescription: GStreamer and its plugins, built in, for ThreadOS\nVersion: %s\nRequires: gstreamer-1.0 gstreamer-base-1.0 gstreamer-app-1.0 gstreamer-audio-1.0 gstreamer-video-1.0 gstreamer-pbutils-1.0 gstreamer-tag-1.0 gstreamer-riff-1.0 gstreamer-rtp-1.0 gstreamer-fft-1.0 gstreamer-codecparsers-1.0 libavfilter libavformat libavcodec libswresample libswscale libavutil zlib\nLibs: -Wl,-u,gst_init_static_plugins -L$${libdir} -lgstthreados -L$${plugindir} %s\n' \
+	printf 'prefix=%s\nlibdir=$${prefix}/lib\nplugindir=$${libdir}/gstreamer-1.0\n\nName: %s\nDescription: GStreamer and its plugins, built in, for ThreadOS\nVersion: %s\nRequires: gstreamer-1.0 gstreamer-base-1.0 gstreamer-app-1.0 gstreamer-audio-1.0 gstreamer-video-1.0 gstreamer-pbutils-1.0 gstreamer-tag-1.0 gstreamer-riff-1.0 gstreamer-rtp-1.0 gstreamer-fft-1.0 gstreamer-codecparsers-1.0 opus libavfilter libavformat libavcodec libswresample libswscale libavutil zlib\nLibs: -Wl,-u,gst_init_static_plugins -L$${libdir} -lgstthreados -L$${plugindir} %s\n' \
 	    $(abspath $(LIBS64)) $(GST_THREADOS_PC) $(GST_VER) \
 	    "$(foreach p,$(GST_PLUGINS),-lgst$(p))" \
 	    > $(LIBS64)/lib/pkgconfig/$(GST_THREADOS_PC).pc
@@ -1775,10 +1794,14 @@ $(WPE_PATCHED): $(WEBKIT_SRC)/CMakeLists.txt $(WPE_PATCHES)
 	touch $@
 
 # CMake is run again in the same directory, never in a fresh one: the
-# objects stay, and ninja rebuilds what the new configuration changed
+# objects stay, and ninja rebuilds what the new configuration changed.
+# The programs' link line is worked out here from the libraries'
+# pkg-config files, so a change in GStreamer's plugins - its pkg-config
+# file is written with libgstthreados - configures again.
 $(WPE_DIR)/build.ninja: $(WPE_PATCHED) apps/webkit/threados.cmake \
                         apps/webkit/static.cmake apps/webkit/programs.cmake \
-                        $(ICU_STAMP) $(BUILD)/libc64/cxxrt.o | $(WPE_LIBS)
+                        $(ICU_STAMP) $(BUILD)/libc64/cxxrt.o \
+                        $(GST_THREADOS_A) | $(WPE_LIBS)
 	mkdir -p $(WPE_DIR)
 	cd $(WPE_DIR) && PKG_CONFIG_LIBDIR=$(WPE_PKGPATH) cmake -G Ninja \
 	    $(abspath $(WEBKIT_SRC)) -Wno-dev \

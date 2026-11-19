@@ -26,6 +26,7 @@ GST_PLUGIN_STATIC_DECLARE(audioparsers);
 GST_PLUGIN_STATIC_DECLARE(autodetect);
 GST_PLUGIN_STATIC_DECLARE(audiofx);
 GST_PLUGIN_STATIC_DECLARE(videoparsersbad);
+GST_PLUGIN_STATIC_DECLARE(opusparse);
 GST_PLUGIN_STATIC_DECLARE(libav);
 GST_PLUGIN_STATIC_DECLARE(threados);
 
@@ -51,6 +52,7 @@ void gst_init_static_plugins(void)
     GST_PLUGIN_STATIC_REGISTER(autodetect);
     GST_PLUGIN_STATIC_REGISTER(audiofx);
     GST_PLUGIN_STATIC_REGISTER(videoparsersbad);
+    GST_PLUGIN_STATIC_REGISTER(opusparse);
     GST_PLUGIN_STATIC_REGISTER(libav);
     GST_PLUGIN_STATIC_REGISTER(threados);
     g_once_init_leave(&done, 1);

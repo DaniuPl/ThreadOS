@@ -440,6 +440,67 @@ def build_media(workdir):
     return binaries
 
 
+def build_opus(workdir):
+    """libopus (third_party/opus) built for the host by meson under the
+    sanitizers, and the harness (tests/fuzz/opus_harness.c) linked to
+    it; and seeds made by that same libopus: a tone encoded, mono and
+    stereo, at a few bit rates and frame lengths, as the harness reads
+    them - packets after their lengths"""
+    src = unpack("OPUS_TAR", workdir, "opus")
+    prefix = os.path.join(workdir, "opus-root")
+    must(["meson", "setup", "build", "--wrap-mode=nodownload",
+          "--prefix=" + prefix, "--libdir=lib", "--buildtype=debugoptimized",
+          "-Ddefault_library=static", "-Db_sanitize=address,undefined",
+          "-Dextra-programs=disabled", "-Dtests=disabled", "-Ddocs=disabled"],
+         "libopus", cwd=src)
+    must(["ninja", "-C", "build", "install"], "libopus", cwd=src)
+    inc = "-I" + os.path.join(prefix, "include", "opus")
+    lib = os.path.join(prefix, "lib", "libopus.a")
+    binary = os.path.join(workdir, "fz-opus")
+    must(["gcc", *SAN, "-w", inc, "-o", binary,
+          os.path.join(ROOT, "tests", "fuzz", "opus_harness.c"),
+          os.path.join(ROOT, "tests", "fuzz", "onefile.c"), lib, "-lm"],
+         "the Opus harness")
+    maker = os.path.join(workdir, "opus-seeds.c")
+    with open(maker, "w") as fh:
+        fh.write(r"""
+#include <math.h>
+#include <stdio.h>
+#include <opus.h>
+int main(int argc, char **argv)
+{
+    int channels = argv[1][0] - '0', rate = atoi(argv[2]);
+    int frame = atoi(argv[3]), err;
+    OpusEncoder *e = opus_encoder_create(48000, channels,
+                                         OPUS_APPLICATION_AUDIO, &err);
+    opus_encoder_ctl(e, OPUS_SET_BITRATE(rate));
+    static opus_int16 pcm[2880 * 2];
+    unsigned char out[4000];
+    putchar(channels - 1);
+    for (int k = 0, t = 0; k < 6; k++) {
+        for (int i = 0; i < frame; i++, t++)
+            for (int c = 0; c < channels; c++)
+                pcm[i * channels + c] =
+                    (opus_int16)(8000 * sin(t * 2 * 3.14159265 * 1000 / 48000));
+        int n = opus_encode(e, pcm, frame, out, sizeof out);
+        putchar(n >> 8), putchar(n & 255);
+        fwrite(out, 1, n, stdout);
+    }
+    opus_encoder_destroy(e);
+    return 0;
+}
+""")
+    must(["gcc", *SAN, "-include", "stdlib.h", inc, "-o", maker[:-2], maker,
+          lib, "-lm"], "the Opus seed maker")
+    seeds = []
+    for args in (("1", "16000", "960"), ("2", "96000", "960"),
+                 ("2", "32000", "480"), ("1", "64000", "2880")):
+        out = subprocess.run([maker[:-2], *args], capture_output=True)
+        if out.returncode == 0:
+            seeds.append(out.stdout)
+    return {"opus": binary}, {"opus": seeds}
+
+
 def gst_tarball(module):
     """A GStreamer module's archive, as the Makefile names its version"""
     with open(os.path.join(ROOT, "Makefile")) as f:
@@ -1420,6 +1481,8 @@ def main():
         mbinaries.update(build_media(workdir))
         mbinaries.update(build_wpe(workdir))
         mbinaries.update(build_gst(workdir))
+        obinaries, oseeds = build_opus(workdir)
+        mbinaries.update(obinaries)
         nbinaries, ndirs = build_net(workdir)
         mbinaries.update(nbinaries)
         hbinary = build_hid(workdir)
@@ -1437,6 +1500,7 @@ def main():
         corpus.update(media_seeds(corpus))
         corpus.update(wpe_seeds(corpus))
         corpus.update(gst_seeds(workdir))
+        corpus.update(oseeds)
         corpus.update(net_seeds(workdir, corpus, ndirs))
         print("the harness is built, cases per parser: %d" % CASES)
         wrong = fdt_layouts(fbinary, workdir)

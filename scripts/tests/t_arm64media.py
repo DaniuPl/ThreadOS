@@ -6,7 +6,8 @@ media (`make weft-arm64`), GStreamer and FFmpeg's aarch64 code playing
 it, the frames painted into the page at the phone's 200%, the sound
 through threadosaudiosink to the virtio-sound speaker - SDL's disk
 driver writing what it plays to a file. One Weft goes through the four
-pages in turn (each goes on to the next when it is done):
+pages in turn (each goes on to the next when it is done), each
+started by a tap on it, as a person starts a page's video or sound:
 
   <video>, H.264 in MP4: its three colours on the phone's screen in
   turn, where the page puts the video, as FFmpeg on the host decodes
@@ -77,16 +78,27 @@ def tones(path):
     return found
 
 
-def video(q, seen, files, name, ended):
+def start(q, ready, seen):
+    """When the page says it is ready, a tap on it - as a person starts
+    a page's video or sound: the video's place on the screen, or None"""
+    line = wait_line(q, seen, ready, 300)
+    org = wm.video_origin(q, K, timeout=180) if line else None
+    check(f"the page is on the phone's screen, ready to play ({line}; its "
+          f"video at {org}, at the phone's 200%)",
+          line is not None and org is not None)
+    if org is not None:
+        x, y = wm.click_spot(org, K)
+        q.tap(x // K, y // K)
+    return org
+
+
+def video(q, seen, files, name, org, ended):
     """The video's colours in turn on the screen, and its end, said"""
     want = [wm.host_colour(files[name], t) for t in (0.5, 1.5, 2.5)]
-    org = wm.video_origin(q, K, timeout=180)
-    check(f"the page is on the phone's screen (its video at {org}, at "
-          f"the phone's 200%)", org is not None)
     shown = wm.colours_in_turn(q, org[0] + 160 * K, org[1] + 120 * K, want,
                                timeout=180) if org else []
-    check(f"the video plays: its colours on the screen in turn, as the "
-          f"host's FFmpeg decodes them ({shown}; FFmpeg {want})",
+    check(f"tapped, the video plays: its colours on the screen in turn, as "
+          f"the host's FFmpeg decodes them ({shown}; FFmpeg {want})",
           len(shown) == 3)
     line = wait_line(q, seen, ended, 180)
     size = wm.host_size(files[name])
@@ -140,21 +152,26 @@ def main():
         done = wait_line(q, seen, "[weft] load finished", 600)
         check(f"Weft loads the video's page ({done})",
               done is not None and "/video.html" in done)
-        video(q, seen, files, "colours.mp4", "[weft] title ended")
+        org = start(q, "[weft] title video ready", seen)
+        video(q, seen, files, "colours.mp4", org, "[weft] title ended")
 
         types = wait_line(q, seen, "[weft] title types", 180)
         check(f"Media Source Extensions take VP9 and Opus in WebM, H.264 "
               f"and AAC in MP4 ({types})",
               types == "[weft] title types yes yes yes yes")
-        app = wait_line(q, seen, "[weft] title appended", 180)
+        org = start(q, "[weft] title appended", seen)
+        app = wait_line(q, seen, "[weft] title appended", 10)
         check(f"the WebM appended to a SourceBuffer is three seconds of "
               f"video ({app})", app == "[weft] title appended 3.0")
-        video(q, seen, files, "colours.webm", "[weft] title mse ended")
+        video(q, seen, files, "colours.webm", org, "[weft] title mse ended")
 
-        for start, end in (("audio playing", "audio ended"),
-                           ("oscillator running", "oscillator ended")):
-            line = wait_line(q, seen, "[weft] title " + start, 180)
-            check(f"the page's sound starts ({line})", line is not None)
+        for ready, begun, end in (
+                ("audio ready", "audio playing", "audio ended"),
+                ("webaudio ready", "oscillator running", "oscillator ended")):
+            start(q, "[weft] title " + ready, seen)
+            line = wait_line(q, seen, "[weft] title " + begun, 180)
+            check(f"tapped, the page's sound starts ({line})",
+                  line is not None)
             line = wait_line(q, seen, "[weft] title " + end, 120)
             check(f"and ends ({line})", line is not None)
         time.sleep(2)

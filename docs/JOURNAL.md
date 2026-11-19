@@ -10418,3 +10418,44 @@ works and is checked by `make test`.
       samples; and the tone played through threadosaudiosink comes out
       of the virtio-sound speaker (SDL's disk driver) as 1000 Hz for its
       two seconds.
+- [x] **Weft plays video and sound: WebKit with media, on GStreamer**
+      (Makefile, apps/webkit/patches/gstreamer-components.patch,
+      apps/webkit/wpewebproc.cpp, third_party/opus/,
+      scripts/tests/t_webmedia.py, t_arm64media.py,
+      tests/fuzz/opus_harness.c, scripts/fuzz_parsers.py)
+      WebKit is now built with ENABLE_VIDEO, ENABLE_MEDIA_SOURCE and
+      ENABLE_WEB_AUDIO on USE_GSTREAMER - the GStreamer, FFmpeg and sound
+      sink of the last two entries - for YouTube and the rest of the web's
+      video and sound. With video on, WebKit insisted on GStreamer's GL
+      and MPEG-TS libraries even though it uses them only when their own
+      options are on; a patch asks for each only with its option. Its
+      frames are painted by Skia with the page: WebKit's own video sink,
+      the one it uses where there is no GL. Three things it took on
+      ThreadOS: the web process turns off the media disk cache
+      (WPE_SHELL_DISABLE_MEDIA_DISK_CACHE), because for preload="auto"
+      GStreamer downloaded a whole file into the user's cache directory
+      first, which here is "/.cache" - no $HOME - so a page's <video> and
+      <audio> failed before playing (MEDIA_ERR_SRC_NOT_SUPPORTED) while
+      Media Source Extensions, which do not download, played; WebKit's
+      Media Source Extensions take Opus only with GStreamer's opusparse,
+      which reads packets with libopus, so libopus 1.5.2 comes in
+      (third_party/opus, BSD) and with it opusparse - YouTube's sound is
+      Opus in WebM; and, as in Safari and Chrome, a page may begin sound
+      only after a person's click or tap (WebKit's default autoplay
+      policy), so the tests start each page as a person would. Found on
+      the way, and left as WebKit has it: an AudioContext made before
+      the page has a media session manager reports "interrupted" rather
+      than "suspended" until the click. t_webmedia (PC) plays, each page
+      started by a click: <video> with H.264 in MP4, three colours a
+      second each, seen on the screen in turn in the colours FFmpeg on
+      the host decodes the frames to (within 14 of each channel), ending
+      at 3.0 s at FFmpeg's size; Media Source Extensions saying yes to VP9
+      and Opus in WebM and H.264 and AAC in MP4, a WebM of the same
+      colours appended to a SourceBuffer (3.0 s buffered) and played
+      the same way; <audio> with Opus - 1000 Hz out of QEMU's HDA for
+      2.0 s; Web Audio's oscillator - 440 Hz for 2.0 s. t_arm64media is
+      the same on the phone in one Weft, the pages going on to the next
+      when done, each tapped; it runs once WebKit is rebuilt for aarch64
+      with media, the next step. The fuzz run builds libopus under ASan and UBSan and
+      feeds mutated runs of Opus packets (made by libopus's own encoder)
+      through opus_packet_parse and the decoder.

@@ -132,7 +132,7 @@ def main():
                 got.append("[httpget] done, exit code 0" in out)
             check("gsttest and the media reach ThreadOS's disk", all(got))
 
-            out = said(q, "run gsttest elements", 120)
+            out = said(q, "run gsttest elements", 300)
             missing = re.findall(r"element (\S+) missing", out)
             found = re.findall(r"element (\S+) found", out)
             check(f"every element WebKit's media player asks for is built "

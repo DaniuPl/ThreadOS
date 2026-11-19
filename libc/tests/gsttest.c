@@ -162,8 +162,8 @@ static int elements(void)
         "appsrc", "appsink", "queue", "audioconvert", "audioresample",
         "videoconvert", "volume", "scaletempo", "autoaudiosink",
         "threadosaudiosink", "qtdemux", "matroskademux", "h264parse",
-        "vp9parse", "aacparse", "avdec_h264", "avdec_vp9", "avdec_aac",
-        "avdec_opus",
+        "vp9parse", "aacparse", "opusparse", "avdec_h264", "avdec_vp9",
+        "avdec_aac", "avdec_opus",
     };
     int missing = 0;
     for (size_t i = 0; i < G_N_ELEMENTS(names); i++) {

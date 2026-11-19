@@ -7,7 +7,8 @@ demuxers and parsers, FFmpeg's decoders through gst-libav - in the web
 process, paints the frames with the rest of the page, and plays the
 sound through threadosaudiosink (apps/webkit/media/). Every file here
 is made by FFmpeg on the host and served by the test, and each page is
-opened in its own Weft:
+opened in its own Weft and started by a click on it, as a person starts
+one - a browser lets a page make sound only after one:
 
   <video> with H.264 in MP4 - what a page's video most often is - a
   second of red, one of green, one of blue: the screen shows each of
@@ -72,10 +73,17 @@ PAGE_HEAD = (
     ' if (c.length) setTimeout(() => { location.href = "/" + c[0] +'
     '   ".html?chain=" + c.slice(1).join(","); }, 1500); }</script>')
 
+# Each page says in its title when it can play, and plays when the page
+# is clicked: a browser lets a page start sound only from a person's
+# click or tap (WebKit's autoplay policy, as Safari's and Chrome's), and
+# a video started by the test is seen from its first frame.
 VIDEO = (PAGE_HEAD + """
-<video id="v" src="/colours.mp4" muted autoplay playsinline></video>
+<video id="v" src="/colours.mp4" muted playsinline preload="auto"></video>
 <script>
 const v = document.getElementById('v');
+v.addEventListener('canplaythrough', () => { document.title = 'video ready'; },
+                   { once: true });
+document.addEventListener('click', () => { v.play(); });
 v.addEventListener('playing', () => { document.title = 'playing'; });
 v.addEventListener('ended', () => {
   document.title = 'ended ' + v.currentTime.toFixed(1) + ' ' +
@@ -101,12 +109,12 @@ ms.addEventListener('sourceopen', async () => {
   const sb = ms.addSourceBuffer(types[0]);
   const data = await (await fetch('/colours.webm')).arrayBuffer();
   sb.addEventListener('updateend', () => {
-    document.title = 'appended ' + sb.buffered.end(0).toFixed(1);
     ms.endOfStream();
-    v.play();
+    document.title = 'appended ' + sb.buffered.end(0).toFixed(1);
   }, { once: true });
   sb.appendBuffer(data);
 });
+document.addEventListener('click', () => { v.play(); });
 v.addEventListener('ended', () => {
   document.title = 'mse ended ' + v.currentTime.toFixed(1) + ' ' +
                    v.videoWidth + 'x' + v.videoHeight; done(); });
@@ -115,9 +123,13 @@ v.addEventListener('error', () => {
 </script></body></html>""" % json.dumps(TYPES)).encode()
 
 AUDIO = (PAGE_HEAD + """
-<audio id="a" src="/tone.webm" autoplay></audio>
+<audio id="a" src="/tone.webm" preload="auto"></audio>
 <script>
 const a = document.getElementById('a');
+a.addEventListener('canplaythrough', () => { document.title = 'audio ready'; },
+                   { once: true });
+document.addEventListener('click', () => {
+  a.play().catch(e => { document.title = 'refused ' + e.name; }); });
 a.addEventListener('playing', () => { document.title = 'audio playing'; });
 a.addEventListener('ended', () => { document.title = 'audio ended';
                                      done(); });
@@ -127,19 +139,23 @@ a.addEventListener('error', () => {
 
 WEBAUDIO = (PAGE_HEAD + """
 <script>
+// what happened, in the title, when it did not: the test says it
+const said = what => { document.title = what; };
 const c = new AudioContext();
-const o = c.createOscillator();
-const g = c.createGain();
-o.frequency.value = 440;
-g.gain.value = 0.5;
-o.connect(g).connect(c.destination);
-o.onended = () => { document.title = 'oscillator ended ' + c.sampleRate;
-                    done(); };
-c.resume().then(() => {
-  document.title = 'oscillator ' + c.state;
-  o.start();
-  o.stop(c.currentTime + 2);
-});
+said('webaudio ready');
+document.addEventListener('click', () => {
+  const o = c.createOscillator();
+  const g = c.createGain();
+  o.frequency.value = 440;
+  g.gain.value = 0.5;
+  o.connect(g).connect(c.destination);
+  o.onended = () => { said('oscillator ended ' + c.sampleRate); done(); };
+  c.resume().then(() => {
+    said('oscillator ' + c.state);
+    o.start();
+    o.stop(c.currentTime + 2);
+  }, e => said('resume failed ' + e));
+}, { once: true });
 </script></body></html>""").encode()
 
 
@@ -270,21 +286,32 @@ def colours_in_turn(q, x, y, want, timeout=60):
     return seen
 
 
+def click_spot(org, k=1):
+    """Where the test clicks a page to start it: on the page, clear of
+    the video and the marker (CSS 200, 300)"""
+    return org[0] + 180 * k, org[1] + 280 * k
+
+
 def video_page(q, port, files, name, path, ended):
-    """A page whose video plays the three colours: they show in turn, in
-    FFmpeg's colours, and the page says the video ended"""
+    """A page whose video plays the three colours when clicked: they
+    show in turn, in FFmpeg's colours, and the page says it ended"""
     want = [host_colour(files[name], t) for t in (0.5, 1.5, 2.5)]
     seen, done = open_page(q, port, path)
     check(f"{path}: Weft loads the page ({done})", done is not None)
     if done is None:
         return
+    ready = wait_line(q, seen, "[weft] title video ready", 120)
     org = video_origin(q)
-    check(f"the page is on the screen (its video at {org})", org is not None)
-    if org is None:
+    check(f"the page is on the screen, its video ready to play ({ready}; "
+          f"its video at {org})", ready is not None and org is not None)
+    if ready is None or org is None:
+        tell(q, seen)
+        close_weft(q, seen)
         return
+    q.click(*click_spot(org))
     shown = colours_in_turn(q, org[0] + 160, org[1] + 120, want)
-    check(f"the video plays: its colours on the screen in turn, as the "
-          f"host's FFmpeg decodes them ({shown}; FFmpeg {want})",
+    check(f"clicked, the video plays: its colours on the screen in turn, "
+          f"as the host's FFmpeg decodes them ({shown}; FFmpeg {want})",
           len(shown) == 3)
     line = wait_line(q, seen, ended, 60)
     size = host_size(files[name])
@@ -305,16 +332,16 @@ def mse_page(q, port, files):
     app = wait_line(q, seen, "[weft] title appended", 120)
     check(f"the WebM appended to a SourceBuffer is three seconds of video "
           f"({app})", app == "[weft] title appended 3.0")
-    if app is None:
+    org = video_origin(q) if app else None
+    if org is None:
         tell(q, seen)
         close_weft(q, seen)
         return
-    org = video_origin(q)
     want = [host_colour(files["colours.webm"], t) for t in (0.5, 1.5, 2.5)]
-    shown = colours_in_turn(q, org[0] + 160, org[1] + 120, want) \
-        if org else []
-    check(f"and plays: its colours in turn ({shown}; FFmpeg {want})",
-          len(shown) == 3)
+    q.click(*click_spot(org))
+    shown = colours_in_turn(q, org[0] + 160, org[1] + 120, want)
+    check(f"and clicked, plays: its colours in turn ({shown}; FFmpeg "
+          f"{want})", len(shown) == 3)
     line = wait_line(q, seen, "[weft] title mse ended", 60)
     size = host_size(files["colours.webm"])
     check(f"to its end ({line}; FFmpeg {size})",
@@ -322,12 +349,22 @@ def mse_page(q, port, files):
     close_weft(q, seen)
 
 
-def sound_page(q, port, wav, path, started, ended, hz):
-    """A page that plays a tone of 'hz' for two seconds: out of the card"""
-    before = max(os.path.getsize(wav) - 44, 0) if os.path.exists(wav) else 0
+def sound_page(q, port, wav, path, ready, started, ended, hz):
+    """A page that plays a tone of 'hz' for two seconds when clicked:
+    out of the card"""
     seen, done = open_page(q, port, path)
-    line = wait_line(q, seen, started, 120)
-    check(f"{path}: the page's sound starts ({line})", line is not None)
+    line = wait_line(q, seen, ready, 120)
+    org = video_origin(q)
+    check(f"{path}: the page is ready to play ({line})",
+          line is not None and org is not None)
+    if line is None or org is None:
+        tell(q, seen)
+        close_weft(q, seen)
+        return
+    before = max(os.path.getsize(wav) - 44, 0) if os.path.exists(wav) else 0
+    q.click(*click_spot(org))
+    line = wait_line(q, seen, started, 60)
+    check(f"clicked, its sound starts ({line})", line is not None)
     line = wait_line(q, seen, ended, 60)
     check(f"and ends ({line})", line is not None)
     if line is None:
@@ -390,9 +427,11 @@ def main():
                            "[weft] title ended")
                 mse_page(q, port, files)
                 sound_page(q, port, wav, "/audio.html",
+                           "[weft] title audio ready",
                            "[weft] title audio playing",
                            "[weft] title audio ended", 1000)
                 sound_page(q, port, wav, "/webaudio.html",
+                           "[weft] title webaudio ready",
                            "[weft] title oscillator running",
                            "[weft] title oscillator ended", 440)
             finally:
