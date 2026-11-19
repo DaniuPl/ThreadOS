@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Install: check and confirm</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; align-items: center; padding-top: 30px; box-sizing: border-box">
+  <div style="position: absolute; left: 32px; top: 30px; display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700"><span style="width: 22px; height: 22px; border-radius: 6px; background: #5B7CFA"></span>Install ThreadOS</div>
+
+  <nav aria-label="Install steps" style="position: relative; display: flex; width: 520px">
+    <sc-for list="{{steps}}" as="st" hint-placeholder-count="4">
+      <div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <div style="position: absolute; top: 7px; right: 50%; width: 100%; height: 2px; background: {{st.line}}"></div>
+        <span style="position: relative; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{st.fill}}; border: 2px solid {{st.ring}}"></span>
+        <span style="font-size: 12px; color: {{st.fg}}; font-weight: {{st.weight}}">{{st.label}}</span>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center">
+    <h1 style="margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -0.03em">This is everything that will change</h1>
+    <p style="margin: 0; font-size: 16px; color: #B4B9C6">Beside the other system · NVMe disk, 512 GB</p>
+  </div>
+
+  <div style="margin-top: 30px; display: grid; grid-template-columns: 500px 400px; gap: 24px">
+    <section aria-label="Will be written" style="padding: 20px 22px 20px 46px; border-radius: 16px; background: #14161B; border: 1px solid #262A33; position: relative">
+      <h2 style="margin: 0 0 12px -24px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8FA5FF">Will be written</h2>
+      <div style="position: absolute; left: 26px; top: 58px; bottom: 34px; width: 2px; background: #5B7CFA"></div>
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <sc-for list="{{write}}" as="w" hint-placeholder-count="4">
+          <div style="position: relative">
+            <span style="position: absolute; left: -26px; top: 4px; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; background: #5B7CFA; border: 2px solid #14161B"></span>
+            <div style="font-size: 14.5px; font-weight: 600">{{w.what}}</div>
+            <div style="font: 400 12.5px 'JetBrains Mono', monospace; color: #9AA0AE; margin-top: 3px">{{w.where}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+    <section aria-label="Will not be touched" style="padding: 20px 22px 20px 46px; border-radius: 16px; background: #14161B; border: 1px solid #262A33; position: relative">
+      <h2 style="margin: 0 0 12px -24px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #7AD69B">Will not be touched</h2>
+      <div style="position: absolute; left: 26px; top: 58px; bottom: 34px; width: 2px; border-left: 2px dashed #46C27A"></div>
+      <div style="display: flex; flex-direction: column; gap: 14px">
+        <sc-for list="{{keep}}" as="k" hint-placeholder-count="3">
+          <div style="position: relative">
+            <span style="position: absolute; left: -27px; top: 4px; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; background: #14161B; border: 2px solid #46C27A"></span>
+            <div style="font-size: 14.5px; font-weight: 600">{{k.what}}</div>
+            <div style="font-size: 12.5px; color: #9AA0AE; margin-top: 3px">{{k.why}}</div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </div>
+
+  <div style="margin-top: 26px; width: 924px; box-sizing: border-box; padding: 18px 22px; border-radius: 16px; background: #111318; border: 1px solid #22252E; display: flex; align-items: center; gap: 22px">
+    <label style="flex-grow: 1; display: flex; flex-direction: column; gap: 8px">
+      <span style="font-size: 14px; font-weight: 600">Type YES, in capitals, to install</span>
+      <span style="font-size: 12.5px; color: #9AA0AE">A word instead of a button: a click is a reflex, and reflexes are how disks get written over.</span>
+    </label>
+    <input aria-label="Type YES to install" value="{{typed}}" onChange="{{onType}}" placeholder="YES" style="width: 160px; height: 44px; box-sizing: border-box; padding: 0 14px; border-radius: 10px 10px 4px 4px; border: 0; border-bottom: 2px solid {{fieldLine}}; background: #1B1D24; color: #ECEDF2; font: 700 18px 'JetBrains Mono', monospace; letter-spacing: 0.12em; outline: none; text-align: center">
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 48px; display: flex; justify-content: center; gap: 12px">
+    <a href="Install2.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 22px; border-radius: 11px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 15px Inter, sans-serif; text-decoration: none">Back</a>
+    <sc-if value="{{ok}}" hint-placeholder-val="{{ false }}">
+      <a href="Install4.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 28px; border-radius: 11px; background: #5B7CFA; color: #FFFFFF; font: 600 15px Inter, sans-serif; text-decoration: none">Install</a>
+    </sc-if>
+    <sc-if value="{{notOk}}" hint-placeholder-val="{{ true }}">
+      <span aria-disabled="true" style="display: flex; align-items: center; height: 44px; padding: 0 28px; border-radius: 11px; border: 1px dashed #3A3F4C; color: #6A7080; font: 600 15px Inter, sans-serif">Install</span>
+    </sc-if>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = 1;
+    const steps = ['Where', 'Check', 'Write', 'Done'].map((label, i) => ({
+      label,
+      line: i === 0 ? 'transparent' : (i <= cur ? '#5B7CFA' : '#2E323D'),
+      fill: i <= cur ? '#5B7CFA' : '#08090D',
+      ring: i <= cur ? '#5B7CFA' : '#4A4F5C',
+      fg: i === cur ? '#FFFFFF' : (i < cur ? '#B4B9C6' : '#6A7080'),
+      weight: i === cur ? 700 : 500
+    }));
+    const typed = (this.state && this.state.typed) || '';
+    const ok = typed === 'YES';
+    return {
+      steps, typed, ok, notOk: !ok,
+      fieldLine: ok ? '#46C27A' : (typed ? '#F5A524' : '#5B7CFA'),
+      onType: (e) => this.setState({ typed: e.target.value }),
+      write: [
+        { what: 'threadboot, the loader', where: 'EFI partition #1, beside what is there' },
+        { what: 'A new partition, ThreadOS (TFS)', where: '131.7 GB, the free space at the end' },
+        { what: 'The system: kernel, initrd, Weft', where: 'onto the new partition, about 420 MB' },
+        { what: 'A boot entry, ThreadOS', where: 'first in the firmware menu' }
+      ],
+      keep: [
+        { what: 'Another system, NTFS, 380 GB', why: 'Not read, not moved, not resized' },
+        { what: 'Its loader on the EFI partition', why: 'It stays in the boot menu, second' },
+        { what: 'The USB stick', why: 'It stays as it is and can install again' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Code, the IDE</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:ital,wght@0,400;0,600;1,400&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+
+  <section aria-label="Code window" style="position: absolute; left: 16px; top: 14px; width: 1408px; height: 800px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #2B2F3A">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #B23D8C; display: flex; align-items: center; justify-content: center; font: 700 11px 'JetBrains Mono', monospace; color: #FFFFFF">{}</div>
+      <div style="font-size: 13px; font-weight: 700">Code</div>
+      <div style="font-size: 13px; color: #8A90A0">threados / kernel / weave.c</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <!-- toolbar: the project on the left, Run on the right -->
+    <div style="height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid #262A33; background: #1A1C23">
+      <button style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 13px Inter, sans-serif">
+        <span style="width: 8px; height: 8px; border-radius: 50%; background: #5B7CFA"></span>threados
+        <svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2.4" stroke-linecap="round"><path d="M7 10l5 5 5-5"></path></svg>
+      </button>
+      <div style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #9AA0AE">
+        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9AA0AE" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="2.5"></circle><circle cx="6" cy="18" r="2.5"></circle><circle cx="18" cy="8" r="2.5"></circle><path d="M6 8.5v7M18 10.5c0 4-6 3-10 6"></path></svg>weave-theme
+      </div>
+      <div style="flex-grow: 1"></div>
+      <label style="display: flex; align-items: center; gap: 8px; height: 30px; box-sizing: border-box; padding: 0 10px; border-radius: 8px; background: #14161B; border: 1px solid #2E323D; font: 400 12.5px 'JetBrains Mono', monospace; color: #C9CDD8">
+        <span style="font-family: Inter, sans-serif; color: #8A90A0">Run</span>make -j8 &amp;&amp; make run
+      </label>
+      <button aria-label="Run" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 14px; border-radius: 8px; border: 0; background: #2F9A5C; color: #FFFFFF; font: 600 13px Inter, sans-serif"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="#FFFFFF"><path d="M7 4l13 8-13 8z"></path></svg>Run</button>
+      <button aria-label="Stop" style="width: 30px; height: 30px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; display: flex; align-items: center; justify-content: center; padding: 0"><span style="width: 10px; height: 10px; border-radius: 2px; background: #6A7080"></span></button>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; min-height: 0">
+      <!-- the stripe of tool windows -->
+      <nav aria-label="Tool windows" style="width: 44px; box-sizing: border-box; padding: 8px 0; display: flex; flex-direction: column; align-items: center; gap: 4px; border-right: 1px solid #262A33; background: #14161B">
+        <button aria-label="Project" style="position: relative; width: 34px; height: 34px; border-radius: 8px; border: 0; background: rgba(91,124,250,0.18); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="2" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg><span style="position: absolute; left: -5px; top: 9px; width: 3px; height: 16px; border-radius: 2px; background: #5B7CFA"></span></button>
+        <button aria-label="Outline" style="width: 34px; height: 34px; border-radius: 8px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2" stroke-linecap="round"><path d="M5 6h14M8 12h11M8 18h11"></path></svg></button>
+        <button aria-label="Find in project" style="width: 34px; height: 34px; border-radius: 8px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg></button>
+        <button aria-label="Changes" style="width: 34px; height: 34px; border-radius: 8px; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2" stroke-linecap="round"><circle cx="6" cy="6" r="2.5"></circle><circle cx="6" cy="18" r="2.5"></circle><circle cx="18" cy="8" r="2.5"></circle><path d="M6 8.5v7M18 10.5c0 4-6 3-10 6"></path></svg></button>
+      </nav>
+
+      <!-- the project's tree -->
+      <aside aria-label="Project" style="width: 236px; box-sizing: border-box; padding: 10px 8px; border-right: 1px solid #262A33; background: #17191F; display: flex; flex-direction: column; gap: 1px; font-size: 13px">
+        <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0; padding: 2px 8px 8px">Project</div>
+        <sc-for list="{{tree}}" as="t" hint-placeholder-count="16">
+          <div style="display: flex; align-items: center; gap: 7px; height: 26px; padding-left: {{t.pad}}; padding-right: 8px; border-radius: 6px; background: {{t.bg}}; color: {{t.fg}}; font-weight: {{t.weight}}">
+            <span style="width: 10px; color: #6A7080; font-size: 10px">{{t.arrow}}</span>
+            <span style="width: 12px; height: 10px; border-radius: 2px; background: {{t.swatch}}"></span>
+            <span style="flex-grow: 1; white-space: nowrap">{{t.name}}</span>
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: {{t.knot}}"></span>
+          </div>
+        </sc-for>
+      </aside>
+
+      <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column">
+        <!-- tabs over the editor -->
+        <div role="tablist" aria-label="Open files" style="height: 36px; display: flex; align-items: flex-end; gap: 2px; padding: 0 8px; background: #14161B; border-bottom: 1px solid #262A33">
+          <div role="tab" aria-selected="true" style="position: relative; display: flex; align-items: center; gap: 8px; height: 35px; padding: 0 14px; background: #16181E; font-size: 13px; font-weight: 600; box-shadow: inset 0 2px 0 #5B7CFA"><span style="width: 10px; height: 8px; border-radius: 2px; background: #4A6BE0"></span>weave.c<span style="width: 7px; height: 7px; border-radius: 50%; background: #ECEDF2"></span></div>
+          <div role="tab" aria-selected="false" style="display: flex; align-items: center; gap: 8px; height: 35px; padding: 0 14px; font-size: 13px; color: #9AA0AE"><span style="width: 10px; height: 8px; border-radius: 2px; background: #9C6FE0"></span>look.h</div>
+          <div role="tab" aria-selected="false" style="display: flex; align-items: center; gap: 8px; height: 35px; padding: 0 14px; font-size: 13px; color: #9AA0AE"><span style="width: 10px; height: 8px; border-radius: 2px; background: #4A6BE0"></span>desktop.c</div>
+        </div>
+        <div style="height: 26px; display: flex; align-items: center; gap: 6px; padding: 0 16px; font-size: 12px; color: #8A90A0; border-bottom: 1px dashed #262A33">kernel <span style="color: #4A4F5C">/</span> weave.c <span style="color: #4A4F5C">/</span> <span style="color: #C9CDD8">weave_fill()</span></div>
+
+        <!-- the editor -->
+        <div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 8px 0; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 20px">
+          <sc-for list="{{code}}" as="l" hint-placeholder-count="24">
+            <div style="display: flex; background: {{l.bg}}">
+              <span style="width: 18px; display: flex; align-items: center; justify-content: center"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{l.mark}}"></span></span>
+              <span style="width: 34px; padding-right: 16px; text-align: right; color: {{l.numColor}}">{{l.n}}</span>
+              <span style="white-space: pre"><sc-for list="{{l.t}}" as="k" hint-placeholder-count="3"><span style="color: {{k.c}}; font-style: {{k.i}}; text-decoration: {{k.u}}; text-decoration-color: #E5484D; text-decoration-style: wavy">{{k.s}}</span></sc-for></span>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- Run, Terminal, Problems: under the editor -->
+        <div style="height: 196px; display: flex; flex-direction: column; border-top: 1px solid #2E323D; background: #121419">
+          <div role="tablist" aria-label="Panels" style="height: 34px; display: flex; align-items: center; gap: 4px; padding: 0 10px; border-bottom: 1px dashed #262A33">
+            <div role="tab" aria-selected="true" style="height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 12.5px; font-weight: 600; box-shadow: inset 0 -2px 0 #5B7CFA">Run</div>
+            <div role="tab" aria-selected="false" style="height: 34px; display: flex; align-items: center; padding: 0 10px; font-size: 12.5px; color: #9AA0AE">Terminal</div>
+            <div role="tab" aria-selected="false" style="height: 34px; display: flex; align-items: center; gap: 6px; padding: 0 10px; font-size: 12.5px; color: #9AA0AE">Problems<span style="min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: rgba(229,72,77,0.2); color: #FF8A8D; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center">1</span></div>
+          </div>
+          <div style="flex-grow: 1; padding: 10px 16px; font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 20px; color: #9AA0AE; white-space: pre"><span style="color: #46C27A">$</span> make -j8
+  CC      kernel/aurora.c
+  CC      kernel/weave.c
+<span style="color: #FF8A8D">kernel/weave.c:24:22: error: implicit declaration of function 'mix'</span>
+<span style="color: #FF8A8D">make: *** [build/kernel/weave.o] Error 1</span>
+<span style="color: #6A7080">Finished with code 2 after 4.1 s</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="height: 26px; display: flex; align-items: center; gap: 18px; padding: 0 14px; border-top: 1px solid #262A33; font-size: 12px; color: #9AA0AE; background: #1A1C23">
+      <span style="display: flex; align-items: center; gap: 6px; color: #FF8A8D"><span style="width: 6px; height: 6px; border-radius: 50%; background: #E5484D"></span>1 problem</span>
+      <span>weave-theme</span>
+      <div style="flex-grow: 1"></div>
+      <span>Ln 24, Col 22</span><span>C</span><span>UTF-8</span><span>4 spaces</span>
+    </div>
+  </section>
+
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border: 1px solid #2E323D; display: flex; align-items: center; padding: 0 10px; gap: 14px">
+    <button aria-label="Open the spool" style="width: 40px; height: 40px; border-radius: 10px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 800 16px Inter, sans-serif">T</button>
+    <div style="flex-grow: 1; display: flex; justify-content: center">
+      <div style="position: relative; display: flex; gap: 10px; padding: 0 4px 10px">
+        <div style="position: absolute; left: 0; right: 0; bottom: 3px; height: 1px; background: #2E323D"></div>
+        <sc-for list="{{apps}}" as="a" hint-placeholder-count="7">
+          <div style="position: relative; display: flex; flex-direction: column; align-items: center">
+            <button aria-label="{{a.name}}" style="width: 38px; height: 38px; border-radius: 10px; border: 0; padding: 0; background: {{a.dye}}; color: #FFFFFF; font: 700 15px Inter, sans-serif">{{a.glyph}}</button>
+            <div style="position: absolute; bottom: -9px; height: 3px; width: {{a.threadW}}; border-radius: 2px; background: {{a.thread}}"></div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 12px; border-left: 1px dashed #2E323D; line-height: 1.15">
+      <div style="font-size: 15px; font-weight: 700">21:47</div>
+      <div style="font-size: 11px; color: #9AA0AE">Thu 19 Nov</div>
+    </div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const C = { kw: '#E58BC9', ty: '#5FD4D4', st: '#7AD69B', nu: '#F5B954', cm: '#6E7585', fn: '#8FA5FF', tx: '#D6D9E2', pp: '#E58BC9' };
+    const raw = [
+      [['cm', '/* The weave: the grain under title bars and the loom']],
+      [['cm', ' *']],
+      [['cm', ' * A tile of three by three pixels over a flat fill. It is copied,']],
+      [['cm', ' * never computed: blur would cost a pass over every pixel under']],
+      [['cm', ' * the glass in every frame, and there is no GPU to pay for it. */']],
+      [],
+      [['pp', '#include '], ['st', '<stdint.h>']],
+      [['pp', '#include '], ['st', '"include/weave.h"']],
+      [['pp', '#include '], ['st', '"include/look.h"']],
+      [],
+      [['kw', 'static const '], ['ty', 'uint8_t'], ['tx', ' grain[3][3] = {']],
+      [['tx', '    { '], ['nu', '6'], ['tx', ', '], ['nu', '6'], ['tx', ', '], ['nu', '6'], ['tx', ' },']],
+      [['tx', '    { '], ['nu', '6'], ['tx', ', '], ['nu', '0'], ['tx', ', '], ['nu', '0'], ['tx', ' },']],
+      [['tx', '    { '], ['nu', '6'], ['tx', ', '], ['nu', '0'], ['tx', ', '], ['nu', '0'], ['tx', ' },']],
+      [['tx', '};']],
+      [],
+      [['cm', '/* Fill a surface in its colour, with the grain laid over it */']],
+      [['kw', 'void '], ['fn', 'weave_fill'], ['tx', '('], ['ty', 'uint32_t'], ['tx', ' *buf, '], ['kw', 'int'], ['tx', ' w, '], ['kw', 'int'], ['tx', ' h, '], ['kw', 'int'], ['tx', ' stride,']],
+      [['tx', '                '], ['ty', 'uint32_t'], ['tx', ' base)']],
+      [['tx', '{']],
+      [['tx', '    '], ['kw', 'for'], ['tx', ' ('], ['kw', 'int'], ['tx', ' y = '], ['nu', '0'], ['tx', '; y < h; y++) {']],
+      [['tx', '        '], ['ty', 'uint32_t'], ['tx', ' *row = buf + y * stride;']],
+      [['tx', '        '], ['kw', 'for'], ['tx', ' ('], ['kw', 'int'], ['tx', ' x = '], ['nu', '0'], ['tx', '; x < w; x++)']],
+      [['tx', '            row[x] = '], ['err', 'mix'], ['tx', '(base, WEAVE_INK, grain[y % '], ['nu', '3'], ['tx', '][x % '], ['nu', '3'], ['tx', ']);']],
+      [['tx', '    }']],
+      [['tx', '}']],
+      [],
+      [['kw', 'void '], ['fn', 'weave_selvedge'], ['tx', '('], ['kw', 'int'], ['tx', ' x, '], ['kw', 'int'], ['tx', ' y, '], ['kw', 'int'], ['tx', ' w, '], ['ty', 'uint32_t'], ['tx', ' dye)']],
+      [['tx', '{']],
+      [['tx', '    '], ['fn', 'gfx_fill'], ['tx', '(x, y, w, SELVEDGE_H, dye, '], ['nu', '255'], ['tx', ');']],
+      [['tx', '}']]
+    ];
+    const code = raw.map((toks, i) => {
+      const n = i + 1;
+      const err = n === 24;
+      return {
+        n,
+        bg: err ? 'rgba(229,72,77,0.09)' : 'transparent',
+        mark: err ? '#E5484D' : 'transparent',
+        numColor: err ? '#FF8A8D' : '#4A4F5C',
+        t: (toks.length ? toks : [['tx', ' ']]).map((k) => ({
+          s: k[1],
+          c: k[0] === 'err' ? C.fn : C[k[0]],
+          i: k[0] === 'cm' ? 'italic' : 'normal',
+          u: k[0] === 'err' ? 'underline' : 'none'
+        }))
+      };
+    });
+    const tr = (name, depth, kind, opts) => Object.assign({
+      name, pad: (8 + depth * 14) + 'px',
+      arrow: kind === 'open' ? 'v' : (kind === 'dir' ? '>' : ''),
+      swatch: kind === 'file' ? '#3A3F4C' : '#4A6BE0',
+      bg: 'transparent', fg: '#C9CDD8', weight: kind === 'file' ? 400 : 500, knot: 'transparent'
+    }, opts || {});
+    const tree = [
+      tr('threados', 0, 'open', { weight: 700 }),
+      tr('boot64', 1, 'dir'),
+      tr('kernel', 1, 'open'),
+      tr('include', 2, 'dir'),
+      tr('aurora.c', 2, 'file'),
+      tr('desktop.c', 2, 'file'),
+      tr('gfx.c', 2, 'file'),
+      tr('weave.c', 2, 'file', { bg: 'rgba(91,124,250,0.18)', fg: '#FFFFFF', weight: 600, swatch: '#4A6BE0', knot: '#E5484D' }),
+      tr('kernel64', 1, 'dir'),
+      tr('kernelarm64', 1, 'dir'),
+      tr('user', 1, 'dir'),
+      tr('user64', 1, 'dir'),
+      tr('scripts', 1, 'dir'),
+      tr('AGENTS.md', 1, 'file'),
+      tr('Makefile', 1, 'file'),
+      tr('README.md', 1, 'file')
+    ];
+    const run = (r) => ({ thread: r === 'focus' ? '#5B7CFA' : (r === 'yes' ? '#9AA0AE' : 'transparent'), threadW: r === 'focus' ? '30px' : '14px' });
+    const apps = [
+      { name: 'Files', glyph: 'F', dye: '#4A6BE0', r: 'yes' },
+      { name: 'Weft', glyph: 'W', dye: '#1FA3A3', r: 'yes' },
+      { name: 'Term', glyph: '>', dye: '#2A2D36', r: 'yes' },
+      { name: 'Code', glyph: '{', dye: '#B23D8C', r: 'focus' },
+      { name: 'Monitor', glyph: 'M', dye: '#2F9A5C', r: 'no' },
+      { name: 'Recorder', glyph: 'R', dye: '#C77F0A', r: 'no' },
+      { name: 'Settings', glyph: 'S', dye: '#4B505E', r: 'no' }
+    ].map((a) => ({ ...a, ...run(a.r) }));
+    return { code, tree, apps };
+  }
+}
+</script>
+</body>
+</html>

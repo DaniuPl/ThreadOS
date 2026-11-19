@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Loom view, the launcher</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+
+  <!-- what is open now: the windows, shrunk, each with its selvedge -->
+  <section aria-label="Open windows" style="position: absolute; left: 0; right: 0; top: 34px; display: flex; flex-direction: column; align-items: center; gap: 14px">
+    <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: #8A90A0">On the loom now · desktop 1</div>
+    <div style="display: flex; gap: 24px; align-items: flex-end">
+      <sc-for list="{{wins}}" as="w" hint-placeholder-count="3">
+        <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 8px; text-decoration: none; color: #C9CDD8">
+          <span style="display: block; width: {{w.w}}; height: 128px; border-radius: 8px; overflow: hidden; background: #1A1C23; border: 1px solid {{w.border}}; box-shadow: 0 12px 30px rgba(0,0,0,0.5)">
+            <span style="display: block; height: 3px; background: {{w.selvedge}}"></span>
+            <span style="display: block; height: 16px; background: #21242C"></span>
+            <span style="display: flex; flex-direction: column; gap: 6px; padding: 12px">
+              <span style="display: block; width: 70%; height: 6px; border-radius: 3px; background: #2E323D"></span>
+              <span style="display: block; width: 90%; height: 6px; border-radius: 3px; background: #2E323D"></span>
+              <span style="display: block; width: 55%; height: 6px; border-radius: 3px; background: #2E323D"></span>
+            </span>
+          </span>
+          <span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: {{w.weight}}"><span style="width: 10px; height: 10px; border-radius: 3px; background: {{w.dye}}"></span>{{w.name}}</span>
+        </a>
+      </sc-for>
+    </div>
+  </section>
+
+  <!-- the field: typing pulls the matching knots forward -->
+  <label style="position: absolute; left: 50%; top: 252px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: 560px; height: 50px; box-sizing: border-box; padding: 0 18px; border-radius: 999px; background: #14161B; border: 1px solid #2E323D; border-bottom: 2px solid #5B7CFA">
+    <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8FA5FF" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg>
+    <input aria-label="Find a program, a file or a setting" placeholder="Type to find a program, a file, a setting" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #ECEDF2; font: 400 16px Inter, sans-serif; outline: none">
+  </label>
+
+  <!-- the programs, threaded on four threads by what they are for -->
+  <section aria-label="Programs" style="position: absolute; left: 0; right: 0; top: 336px; display: flex; flex-direction: column; gap: 22px">
+    <sc-for list="{{rows}}" as="r" hint-placeholder-count="4">
+      <div style="position: relative; height: 92px; display: flex; align-items: flex-start">
+        <div style="position: absolute; left: 0; right: 0; top: 27px; height: 3px; background: {{r.dye}}; opacity: 0.85"></div>
+        <svg aria-hidden="true" width="18" height="16" viewBox="0 0 18 16" style="position: absolute; right: 24px; top: 21px"><path d="M0 4h10V0l8 8-8 8v-4H0z" fill="{{r.dye}}"></path></svg>
+        <div style="position: relative; width: 210px; padding-left: 48px; box-sizing: border-box; margin-top: 4px">
+          <span style="display: inline-flex; align-items: center; height: 26px; padding: 0 12px; border-radius: 999px; background: #08090D; border: 1px solid {{r.dye}}; font-size: 12px; font-weight: 700; letter-spacing: 0.04em; color: {{r.label}}">{{r.name}}</span>
+        </div>
+        <div style="position: relative; display: flex; gap: 30px">
+          <sc-for list="{{r.apps}}" as="a" hint-placeholder-count="6">
+            <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 9px; width: 74px; text-decoration: none; color: #D6D9E2">
+              <span style="width: 56px; height: 56px; box-sizing: border-box; border-radius: 50%; background: {{a.dye}}; border: 4px solid #08090D; box-shadow: 0 0 0 2px {{a.ring}}; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font: 700 18px Inter, sans-serif">{{a.glyph}}</span>
+              <span style="font-size: 12.5px; font-weight: 500; white-space: nowrap">{{a.name}}</span>
+            </a>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </section>
+
+  <!-- the person, and the end of the day -->
+  <div style="position: absolute; right: 24px; top: 24px; display: flex; align-items: center; gap: 8px">
+    <span style="width: 30px; height: 30px; box-sizing: border-box; border-radius: 50%; border: 2px solid #5B7CFA; padding: 2px"><span style="display: flex; width: 100%; height: 100%; border-radius: 50%; background: #5B7CFA; align-items: center; justify-content: center; font-size: 11px; font-weight: 800">A</span></span>
+    <span style="font-size: 13px; font-weight: 600; margin-right: 6px">Alex</span>
+    <button aria-label="Lock" style="width: 34px; height: 34px; border-radius: 50%; border: 1px solid #2E323D; background: #14161B; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9CDD8" stroke-width="2" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></button>
+    <button aria-label="Restart" style="width: 34px; height: 34px; border-radius: 50%; border: 1px solid #2E323D; background: #14161B; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#C9CDD8" stroke-width="2" stroke-linecap="round"><path d="M19 12a7 7 0 1 1-2.1-5"></path><path d="M19 4v4h-4"></path></svg></button>
+    <button aria-label="Shut down" style="width: 34px; height: 34px; border-radius: 50%; border: 1px solid rgba(229,72,77,0.5); background: rgba(229,72,77,0.1); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#FF8A8D" stroke-width="2.2" stroke-linecap="round"><path d="M12 4v8"></path><path d="M7 7a7 7 0 1 0 10 0"></path></svg></button>
+  </div>
+
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border: 1px solid #2E323D; display: flex; align-items: center; padding: 0 10px; gap: 14px">
+    <button aria-label="Close loom view" style="width: 40px; height: 40px; border-radius: 10px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 800 16px Inter, sans-serif; outline: 2px solid #5B7CFA; outline-offset: 3px">T</button>
+    <span style="font-size: 12.5px; color: #9AA0AE">Esc or the spool again to go back · arrows move along a thread, Tab to the next</span>
+    <div style="flex-grow: 1"></div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 12px; border-left: 1px dashed #2E323D; line-height: 1.15">
+      <div style="font-size: 15px; font-weight: 700">09:12</div>
+      <div style="font-size: 11px; color: #9AA0AE">Fri 20 Nov</div>
+    </div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const wins = [
+      { name: 'Files', dye: '#4A6BE0', w: '220px', selvedge: '#5B7CFA', border: '#5B7CFA', weight: 700 },
+      { name: 'Weft · Start', dye: '#1FA3A3', w: '260px', selvedge: '#1A1C23', border: '#2E323D', weight: 500 },
+      { name: 'Term', dye: '#2A2D36', w: '180px', selvedge: '#1A1C23', border: '#2E323D', weight: 500 }
+    ];
+    const mk = (list) => list.map((a) => ({ name: a[0], glyph: a[1], dye: a[2], ring: a[3] ? '#FFFFFF' : 'transparent' }));
+    const rows = [
+      { name: 'Work', dye: '#5B7CFA', label: '#B7C5FF', apps: mk([['Files', 'F', '#4A6BE0', 1], ['Editor', 'E', '#C77F0A'], ['Code', '{', '#B23D8C'], ['Term', '>', '#2A2D36', 1], ['Tasks', 'T', '#C9302C'], ['Calendar', '20', '#C9302C'], ['Calculator', '=', '#4B505E']]) },
+      { name: 'Web and people', dye: '#2EC4C4', label: '#9FECEC', apps: mk([['Weft', 'W', '#1FA3A3', 1], ['Mail', '@', '#3B5BDB'], ['Messages', 'M', '#6A4FD6'], ['Map', 'P', '#2F9A5C'], ['Find', '?', '#4A6BE0']]) },
+      { name: 'Pictures and sound', dye: '#D152A6', label: '#F2A6D6', apps: mk([['Gallery', 'G', '#2F9A5C'], ['Camera', 'C', '#4B505E'], ['Paint', 'P', '#D152A6'], ['Recorder', 'R', '#C77F0A'], ['Mixer', 'M', '#6A4FD6'], ['Loomflight', 'L', '#3A2A8F']]) },
+      { name: 'This computer', dye: '#F5A524', label: '#FFD48A', apps: mk([['Settings', 'S', '#4B505E'], ['Monitor', 'M', '#2F9A5C'], ['Accounts', 'A', '#6A4FD6'], ['Clock', 'K', '#2A2D36'], ['Install', 'I', '#1FA3A3'], ['Updates', 'U', '#C77F0A']]) }
+    ];
+    return { wins, rows };
+  }
+}
+</script>
+</body>
+</html>

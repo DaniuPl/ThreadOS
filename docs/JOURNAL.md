@@ -10878,3 +10878,25 @@ works and is checked by `make test`.
       listing and stat'ing a subdirectory 70 000 times while another
       opens a relative path 200 000 times, none missing. On the kernel
       before this the first long mkdir already fails.
+
+- [ ] **Weave, a look of ThreadOS's own (design only)**
+      (docs/WEAVE.md, docs/weave/canvas/)
+      ThreadOS can look like two other systems - the bar and dock, or
+      the taskbar - but has no look of its own. Weave is the design for
+      one, as a third desktop style beside those two: opaque surfaces
+      with a woven grain instead of blurred glass (a copied tile is
+      cheap on a software compositor, a blur is not), one colour for
+      focus drawn as a thread - the selvedge on the window in front,
+      its segment on the loom along the bottom - and six colours named
+      after dyes, each with one job. It covers the desktop, the
+      launcher (loom view), the shuttle in place of the island,
+      installing from the stick, the first start, the phone and the
+      tablet - with a third way to get around a phone, the thread,
+      beside gestures and three buttons - and programs in it: Weft,
+      Code, Strand (version control), Purl (a messenger), Family,
+      Find, Market (an app store), Map, Calendar and Settings.
+      docs/WEAVE.md says what every name means and where it would go
+      in the code; docs/weave/canvas/ holds the mock-ups, one file per
+      screen. Nothing is built yet, so nothing is tested; each part
+      gets its test as it is built (t_desktop for the selvedge and the
+      grain, t_arm64mobile for the thread).

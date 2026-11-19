@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone: installing</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <div style="height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 13px; color: #9AA0AE">
+    <span>Installer</span>
+    <span style="display: flex; align-items: center; gap: 6px"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="#46C27A"><path d="M13 2L4 14h7l-1 8 9-12h-7z"></path></svg>78 %, plugged in</span>
+  </div>
+
+  <div style="padding: 26px 24px 0; text-align: center">
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: #8A90A0">Installing ThreadOS</div>
+    <h1 style="margin: 8px 0 0; font-size: 26px; font-weight: 800; letter-spacing: -0.02em">Winding it onto the phone</h1>
+  </div>
+
+  <!-- a bobbin filling with thread: each ring is a layer wound on -->
+  <a href="M1.dc.html" aria-label="{{pct}} percent written" style="display: block; position: relative; margin: 30px auto 0; width: 240px; height: 240px; text-decoration: none; color: #ECEDF2">
+    <svg aria-hidden="true" width="240" height="240" viewBox="0 0 240 240" fill="none">
+      <circle cx="120" cy="120" r="108" stroke="#1F2229" stroke-width="10" stroke-dasharray="3 5"></circle>
+      <circle cx="120" cy="120" r="108" stroke="#5B7CFA" stroke-width="10" stroke-linecap="round" stroke-dasharray="{{dash}}" transform="rotate(-90 120 120)"></circle>
+      <circle cx="120" cy="120" r="92" stroke="#5B7CFA" stroke-opacity="0.55" stroke-width="6"></circle>
+      <circle cx="120" cy="120" r="82" stroke="#5B7CFA" stroke-opacity="0.4" stroke-width="6"></circle>
+      <circle cx="120" cy="120" r="72" stroke="#5B7CFA" stroke-opacity="0.28" stroke-width="6"></circle>
+      <circle cx="120" cy="120" r="62" fill="#14161B" stroke="#2E323D" stroke-width="2"></circle>
+    </svg>
+    <span style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center"><span style="font-size: 40px; font-weight: 800; letter-spacing: -0.03em">{{pct}}<span style="font-size: 20px; color: #8A90A0"> %</span></span><span style="font: 400 11.5px 'JetBrains Mono', monospace; color: #8A90A0">Weft · 112 / 180 MB</span></span>
+  </a>
+
+  <div style="margin: 30px 28px 0; position: relative; padding-left: 24px">
+    <div style="position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: linear-gradient(#5B7CFA 70%, #2E323D 70%)"></div>
+    <div style="display: flex; flex-direction: column; gap: 11px; font-size: 14px">
+      <sc-for list="{{log}}" as="l" hint-placeholder-count="5">
+        <div style="position: relative; color: {{l.fg}}; font-weight: {{l.weight}}"><span style="position: absolute; left: -24px; top: 3px; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; background: {{l.fill}}; border: 2px solid {{l.ring}}"></span>{{l.what}}</div>
+      </sc-for>
+    </div>
+  </div>
+
+  <div style="position: absolute; left: 24px; right: 24px; bottom: 36px; display: flex; align-items: center; gap: 10px; justify-content: center; font-size: 13.5px; font-weight: 600; color: #FF8A8D; text-align: center">
+    <span style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: #E5484D"></span>Keep it plugged in and do not hold the power key.
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"pct":{"editor":"range","default":62,"min":0,"max":100,"step":1,"unit":"%"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pct = Math.max(0, Math.min(100, Math.round(this.props.pct ?? 62)));
+    const c = 2 * Math.PI * 108;
+    const dash = (c * pct / 100).toFixed(1) + ' ' + c.toFixed(1);
+    const rows = [['The loader', 'done'], ['The system partition', 'done'], ['The kernel and initrd', 'done'], ['Weft', 'now'], ['First start', 'next']];
+    const log = rows.map((r) => ({ what: r[0], fill: r[1] === 'done' ? '#5B7CFA' : (r[1] === 'now' ? '#FFFFFF' : '#08090D'), ring: r[1] === 'next' ? '#4A4F5C' : '#5B7CFA', fg: r[1] === 'next' ? '#6A7080' : '#ECEDF2', weight: r[1] === 'now' ? 700 : 500 }));
+    return { pct, dash, log };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,521 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Main.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Desktop — Night"
+    },
+    "Principles.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1200,
+      "h": 900,
+      "title": "Principles and tokens"
+    },
+    "Components.dc.html": {
+      "x": 0,
+      "y": 1020,
+      "w": 1440,
+      "h": 860,
+      "title": "Components"
+    },
+    "Phone.dc.html": {
+      "x": 1520,
+      "y": 1020,
+      "w": 390,
+      "h": 844,
+      "title": "Mobile — Linen"
+    },
+    "Weft.dc.html": {
+      "x": 0,
+      "y": 2300,
+      "w": 1440,
+      "h": 900,
+      "title": "Weft — Linen"
+    },
+    "Settings.dc.html": {
+      "x": 1520,
+      "y": 2300,
+      "w": 1440,
+      "h": 900,
+      "title": "Settings: Appearance — Night",
+      "is_interactive": true
+    },
+    "PhoneWeft.dc.html": {
+      "x": 3040,
+      "y": 2300,
+      "w": 390,
+      "h": 844,
+      "title": "Weft on the phone"
+    },
+    "Code.dc.html": {
+      "x": 0,
+      "y": 3320,
+      "w": 1440,
+      "h": 900,
+      "title": "Code, the IDE — Night"
+    },
+    "Game.dc.html": {
+      "x": 1520,
+      "y": 3320,
+      "w": 1440,
+      "h": 900,
+      "title": "A game in a window — Night"
+    },
+    "Spool.dc.html": {
+      "x": 0,
+      "y": 4340,
+      "w": 1440,
+      "h": 900,
+      "title": "Loom view: the launcher — Night"
+    },
+    "Media.dc.html": {
+      "x": 1520,
+      "y": 4340,
+      "w": 1440,
+      "h": 900,
+      "title": "Gallery and Mixer — Linen"
+    },
+    "Styles.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "4 · Style",
+      "is_interactive": true,
+      "page": "welcome"
+    },
+    "Shuttle.dc.html": {
+      "x": 0,
+      "y": 5660,
+      "w": 1440,
+      "h": 900,
+      "title": "The shuttle: live activities — Night"
+    },
+    "Find.dc.html": {
+      "x": 1520,
+      "y": 5660,
+      "w": 1440,
+      "h": 900,
+      "title": "Find: search everything — Linen"
+    },
+    "Map.dc.html": {
+      "x": 0,
+      "y": 6680,
+      "w": 1440,
+      "h": 900,
+      "title": "Map — Night"
+    },
+    "Calendar.dc.html": {
+      "x": 1520,
+      "y": 6680,
+      "w": 1440,
+      "h": 900,
+      "title": "Calendar — Linen"
+    },
+    "Welcome1.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "1 · Language",
+      "page": "welcome",
+      "is_interactive": true
+    },
+    "Welcome2.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "2 · Network",
+      "page": "welcome",
+      "is_interactive": true
+    },
+    "Welcome3.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "3 · You",
+      "page": "welcome",
+      "is_interactive": true
+    },
+    "Welcome5.dc.html": {
+      "x": 6080,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "5 · Ready",
+      "page": "welcome",
+      "is_interactive": true
+    },
+    "Install1.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "1 · Try or install",
+      "page": "install",
+      "is_interactive": true
+    },
+    "Install2.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "2 · Where",
+      "page": "install",
+      "is_interactive": true
+    },
+    "Install3.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "3 · Check and confirm",
+      "page": "install",
+      "is_interactive": true
+    },
+    "Install4.dc.html": {
+      "x": 4560,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "4 · Writing",
+      "page": "install",
+      "is_interactive": true
+    },
+    "Install5.dc.html": {
+      "x": 6080,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "5 · Done",
+      "page": "install",
+      "is_interactive": true
+    },
+    "PhoneInstall.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · installing",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "M1.dc.html": {
+      "x": 470,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · 1 Language",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "M2.dc.html": {
+      "x": 940,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · 2 Network",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "M3.dc.html": {
+      "x": 1410,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · 3 You",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "M4.dc.html": {
+      "x": 1880,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · 4 Getting around",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "M5.dc.html": {
+      "x": 2350,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Phone · 5 Ready",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "TabletInstall.dc.html": {
+      "x": 0,
+      "y": 1264,
+      "w": 1180,
+      "h": 820,
+      "title": "Tablet · install, confirm by touch",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "TabletWelcome.dc.html": {
+      "x": 1260,
+      "y": 1264,
+      "w": 1180,
+      "h": 820,
+      "title": "Tablet · how it should work",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "Family.dc.html": {
+      "x": 0,
+      "y": 7700,
+      "w": 1440,
+      "h": 900,
+      "title": "Family: people and devices — Night",
+      "is_interactive": true
+    },
+    "FamilyPhone.dc.html": {
+      "x": 1520,
+      "y": 7700,
+      "w": 390,
+      "h": 844,
+      "title": "Family on the phone",
+      "is_interactive": true
+    },
+    "FamilyInvite.dc.html": {
+      "x": 1990,
+      "y": 7700,
+      "w": 390,
+      "h": 844,
+      "title": "Family: an invitation",
+      "is_interactive": true
+    },
+    "NavStyles.dc.html": {
+      "x": 2820,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Phone navigation: gestures, buttons, the thread",
+      "page": "mobile"
+    },
+    "PhoneNavSettings.dc.html": {
+      "x": 4340,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Settings, Navigation",
+      "page": "mobile",
+      "is_interactive": true
+    },
+    "Strand.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Strand: version control — Night",
+      "page": "apps2"
+    },
+    "Purl.dc.html": {
+      "x": 1520,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Purl: the messenger — Night",
+      "page": "apps2",
+      "is_interactive": true
+    },
+    "PurlPhone.dc.html": {
+      "x": 3040,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Purl on the phone",
+      "page": "apps2"
+    },
+    "SettingsPro.dc.html": {
+      "x": 0,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "title": "Settings, every section — Night",
+      "page": "apps2",
+      "is_interactive": true
+    },
+    "Market.dc.html": {
+      "x": 1520,
+      "y": 1020,
+      "w": 1440,
+      "h": 900,
+      "title": "Market: the app store — Linen",
+      "page": "apps2"
+    },
+    "MarketApp.dc.html": {
+      "x": 0,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "title": "Market: one app — Linen",
+      "page": "apps2"
+    },
+    "Lock.dc.html": {
+      "x": 1520,
+      "y": 2040,
+      "w": 1440,
+      "h": 900,
+      "title": "Lock screen — Night",
+      "page": "apps2"
+    },
+    "PhoneShade.dc.html": {
+      "x": 3040,
+      "y": 2040,
+      "w": 390,
+      "h": 844,
+      "title": "Phone: the shade",
+      "page": "apps2"
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-11-19T06:51:45.933Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {},
+  "notes": {
+    "title": {
+      "x": 0,
+      "y": -300,
+      "text": "Weave — a design language for ThreadOS",
+      "kind": "title1",
+      "maxW": 2720
+    },
+    "apps": {
+      "x": 0,
+      "y": 2000,
+      "text": "System apps in Weave",
+      "kind": "title1",
+      "maxW": 3430
+    },
+    "more": {
+      "x": 0,
+      "y": 5360,
+      "text": "The shuttle, and more apps",
+      "kind": "title1",
+      "maxW": 2960
+    },
+    "welcome": {
+      "x": 0,
+      "y": -300,
+      "text": "Welcome to ThreadOS: the first start, step by step",
+      "kind": "title1",
+      "maxW": 7520,
+      "page": "welcome"
+    },
+    "install": {
+      "x": 0,
+      "y": -300,
+      "text": "Installing ThreadOS from the stick",
+      "kind": "title1",
+      "maxW": 7520,
+      "page": "install"
+    },
+    "mobile": {
+      "x": 0,
+      "y": -300,
+      "text": "Phone and tablet",
+      "kind": "title1",
+      "maxW": 4730,
+      "page": "mobile"
+    },
+    "tablet": {
+      "x": 0,
+      "y": 964,
+      "text": "Tablet",
+      "kind": "title1",
+      "maxW": 2440,
+      "page": "mobile"
+    },
+    "apps2": {
+      "x": 0,
+      "y": -300,
+      "text": "More apps: Strand, Purl, Settings, Market",
+      "kind": "title1",
+      "maxW": 3430,
+      "page": "apps2"
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Principles.dc.html",
+    "Components.dc.html",
+    "Phone.dc.html",
+    "Weft.dc.html",
+    "Settings.dc.html",
+    "PhoneWeft.dc.html",
+    "Code.dc.html",
+    "Game.dc.html",
+    "Spool.dc.html",
+    "Media.dc.html",
+    "Styles.dc.html",
+    "Shuttle.dc.html",
+    "Find.dc.html",
+    "Map.dc.html",
+    "Calendar.dc.html",
+    "Welcome1.dc.html",
+    "Welcome2.dc.html",
+    "Welcome3.dc.html",
+    "Welcome5.dc.html",
+    "Install1.dc.html",
+    "Install2.dc.html",
+    "Install3.dc.html",
+    "Install4.dc.html",
+    "Install5.dc.html",
+    "PhoneInstall.dc.html",
+    "M1.dc.html",
+    "M2.dc.html",
+    "M3.dc.html",
+    "M4.dc.html",
+    "M5.dc.html",
+    "TabletInstall.dc.html",
+    "TabletWelcome.dc.html",
+    "Family.dc.html",
+    "FamilyPhone.dc.html",
+    "FamilyInvite.dc.html",
+    "NavStyles.dc.html",
+    "PhoneNavSettings.dc.html",
+    "Strand.dc.html",
+    "Purl.dc.html",
+    "PurlPhone.dc.html",
+    "SettingsPro.dc.html",
+    "Market.dc.html",
+    "MarketApp.dc.html",
+    "Lock.dc.html",
+    "PhoneShade.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Page 1"
+    },
+    {
+      "id": "install",
+      "name": "Install ThreadOS"
+    },
+    {
+      "id": "welcome",
+      "name": "Welcome to ThreadOS"
+    },
+    {
+      "id": "mobile",
+      "name": "Phone and tablet: install and first start"
+    },
+    {
+      "id": "apps2",
+      "name": "More apps"
+    }
+  ],
+  "title": "Design"
+}

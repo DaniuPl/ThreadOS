@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Family, night</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <section aria-label="Family window" style="position: absolute; left: 16px; top: 14px; width: 1408px; height: 800px; border-radius: 10px; overflow: hidden; background: #0F1218; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #2B2F3A">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #D152A6"></div>
+      <div style="font-size: 13px; font-weight: 700">Family</div>
+      <div style="font-size: 13px; color: #8A90A0">4 people · 5 devices</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <aside style="width: 380px; flex-shrink: 0; box-sizing: border-box; background: #1A1C23; border-right: 1px solid #262A33; display: flex; flex-direction: column">
+        <div style="padding: 14px 14px 10px">
+          <div role="tablist" aria-label="Show" style="display: flex; padding: 3px; border-radius: 10px; background: #14161B; border: 1px solid #2E323D">
+            <sc-for list="{{tabs}}" as="t" hint-placeholder-count="2">
+              <button role="tab" aria-selected="{{t.sel}}" onClick="{{t.pick}}" style="flex: 1; height: 32px; border-radius: 7px; border: 0; background: {{t.bg}}; color: {{t.fg}}; font: 600 13px Inter, sans-serif; box-shadow: {{t.shadow}}">{{t.name}}</button>
+            </sc-for>
+          </div>
+        </div>
+
+        <sc-if value="{{isPeople}}" hint-placeholder-val="{{ true }}">
+          <div style="padding: 0 10px; display: flex; flex-direction: column; gap: 2px">
+            <sc-for list="{{people}}" as="p" hint-placeholder-count="4">
+              <button onClick="{{p.pick}}" style="display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 12px; border: 0; background: {{p.bg}}; color: #ECEDF2; text-align: left; font-family: Inter, sans-serif">
+                <span style="position: relative; width: 44px; height: 44px; flex-shrink: 0; box-sizing: border-box; border-radius: 50%; border: 2px solid {{p.dye}}; padding: 3px; opacity: {{p.op}}"><span style="display: flex; width: 100%; height: 100%; border-radius: 50%; background: {{p.dye}}; align-items: center; justify-content: center; font-weight: 800; font-size: 15px">{{p.initial}}</span></span>
+                <span style="flex-grow: 1; min-width: 0"><span style="display: block; font-size: 14.5px; font-weight: 700">{{p.name}}</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">{{p.where}}</span></span>
+                <span style="font-size: 12px; color: #8A90A0; white-space: nowrap">{{p.dist}}</span>
+              </button>
+            </sc-for>
+          </div>
+
+          <!-- the one chosen -->
+          <div style="margin: 10px 14px 0; padding: 14px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; flex-direction: column; gap: 12px">
+            <div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 16px; font-weight: 800">{{sel.name}}</span><span style="font-size: 12.5px; color: #9AA0AE">{{sel.since}}</span></div>
+            <div style="display: flex; gap: 8px; font-size: 12.5px; color: #C9CDD8">
+              <span style="display: flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; background: #20232B">Phone · {{sel.battery}}</span>
+              <span style="display: flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 999px; background: #20232B">{{sel.mode}}</span>
+            </div>
+            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+              <button style="height: 56px; border-radius: 10px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 12.5px Inter, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8FA5FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-8-6 16-2-7z"></path></svg>Directions</button>
+              <button style="height: 56px; border-radius: 10px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 12.5px Inter, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8FA5FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 5h14v10H9l-4 4z"></path></svg>Message</button>
+              <button style="height: 56px; border-radius: 10px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 12.5px Inter, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8FA5FF" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"></path><circle cx="12" cy="10" r="2.5"></circle></svg>Tell me</button>
+            </div>
+            <div style="font-size: 12px; color: #8A90A0; line-height: 1.5">“Tell me” sends a note when {{sel.name}} gets home. {{sel.name}} sees that you asked for it.</div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{isDevices}}" hint-placeholder-val="{{ false }}">
+          <div style="padding: 0 10px; display: flex; flex-direction: column; gap: 2px">
+            <sc-for list="{{devices}}" as="d" hint-placeholder-count="5">
+              <div style="display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 12px; background: {{d.bg}}">
+                <span style="width: 40px; height: 40px; border-radius: 11px; background: #20232B; border: 2px solid {{d.dye}}; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: #C9CDD8">{{d.kind}}</span>
+                <span style="flex-grow: 1; min-width: 0"><span style="display: block; font-size: 14px; font-weight: 700">{{d.name}}</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">{{d.where}}</span></span>
+                <span style="font-size: 12px; color: {{d.battColor}}">{{d.battery}}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin: 10px 14px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px">
+            <button style="height: 40px; border-radius: 10px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 12.5px Inter, sans-serif">Play a sound</button>
+            <button style="height: 40px; border-radius: 10px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 12.5px Inter, sans-serif">Lock it</button>
+            <button style="height: 40px; border-radius: 10px; border: 1px solid rgba(229,72,77,0.5); background: rgba(229,72,77,0.1); color: #FF8A8D; font: 600 12.5px Inter, sans-serif">Erase it</button>
+          </div>
+        </sc-if>
+
+        <div style="margin-top: auto; padding: 14px; border-top: 1px dashed #2E323D; display: flex; flex-direction: column; gap: 10px">
+          <div style="display: flex; align-items: center; gap: 10px"><span style="width: 10px; height: 10px; border-radius: 50%; background: #D152A6; box-shadow: 0 0 8px #D152A6"></span><span style="font-size: 13.5px; font-weight: 600; flex-grow: 1">You share where you are</span><button style="height: 30px; padding: 0 12px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 12.5px Inter, sans-serif">Stop</button></div>
+          <div style="font-size: 12px; color: #8A90A0; line-height: 1.5">Everyone here chose to share, and sees who can see them. Anyone can stop at any time; while you share, the shuttle says so.</div>
+        </div>
+      </aside>
+
+      <!-- the map, with each person as a knot in their own colour -->
+      <div style="position: relative; flex-grow: 1">
+        <svg role="img" aria-label="Map with Ania at home, Ola at school and Alex at the office" width="1026" height="758" viewBox="0 0 1026 758" style="position: absolute; left: 0; top: 0">
+          <rect x="0" y="0" width="1026" height="758" fill="#0F1218"></rect>
+          <g fill="#151922"><rect x="40" y="40" width="200" height="140" rx="8"></rect><rect x="260" y="40" width="240" height="140" rx="8"></rect><rect x="520" y="40" width="200" height="140" rx="8"></rect><rect x="740" y="40" width="250" height="140" rx="8"></rect><rect x="40" y="200" width="200" height="160" rx="8"></rect><rect x="740" y="200" width="250" height="160" rx="8"></rect><rect x="40" y="520" width="300" height="200" rx="8"></rect><rect x="360" y="560" width="280" height="160" rx="8"></rect><rect x="660" y="520" width="330" height="200" rx="8"></rect></g>
+          <path d="M260 200 H720 V360 H260 Z" fill="#14281C"></path>
+          <path d="M0 420 C 240 380, 420 480, 640 430 S 920 400, 1026 440 L1026 500 C 920 470, 760 520, 640 490 S 260 450, 0 480 Z" fill="#12333B"></path>
+          <g stroke="#262B36" stroke-width="10" fill="none" stroke-linecap="round"><path d="M250 20 V740"></path><path d="M730 20 V740"></path><path d="M20 190 H1010"></path><path d="M20 370 H1010"></path><path d="M20 540 H1010"></path><path d="M350 540 V740"></path><path d="M650 540 V740"></path></g>
+          <g stroke="#3A4150" stroke-width="16" fill="none"><path d="M480 370 V540"></path></g>
+          <g font-family="Inter, sans-serif" font-size="12" fill="#8A90A0"><text x="400" y="290">Linen Park</text><text x="820" y="460" fill="#4FA3AA">River Warp</text><text x="80" y="640">Home</text><text x="800" y="640">School</text><text x="790" y="110">Office</text></g>
+          <!-- Ola's walk to school, the last half hour, only because Ola shares it -->
+          <path d="M150 600 C 260 600, 300 560, 420 560 S 640 600, 820 600" stroke="#F5A524" stroke-width="2" stroke-dasharray="4 6" fill="none" stroke-opacity="0.7"></path>
+        </svg>
+        <sc-for list="{{pins}}" as="p" hint-placeholder-count="3">
+          <div style="position: absolute; left: {{p.x}}; top: {{p.y}}; transform: translate(-50%, -100%); display: flex; flex-direction: column; align-items: center">
+            <span style="width: {{p.size}}; height: {{p.size}}; box-sizing: border-box; border-radius: 50%; border: 3px solid #FFFFFF; background: {{p.dye}}; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 15px; box-shadow: 0 8px 20px rgba(0,0,0,0.5)">{{p.initial}}</span>
+            <span style="width: 2px; height: 12px; background: #FFFFFF"></span>
+            <span style="width: 8px; height: 8px; border-radius: 50%; background: {{p.dye}}; border: 2px solid #FFFFFF"></span>
+          </div>
+        </sc-for>
+        <div style="position: absolute; right: 16px; bottom: 12px; font-size: 11.5px; color: #8A90A0">Map data © OpenStreetMap contributors</div>
+        <button style="position: absolute; right: 16px; top: 16px; height: 38px; padding: 0 14px; border-radius: 10px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 13.5px Inter, sans-serif">Invite someone</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- the shuttle, telling you that you share -->
+  <div role="status" style="position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 14px; border-radius: 999px; background: #1F2229; border: 1px solid #353A46; font-size: 12.5px; box-shadow: 0 10px 30px rgba(0,0,0,0.5)"><span style="width: 8px; height: 8px; border-radius: 50%; background: #D152A6"></span>Sharing where you are with Family</div>
+  <div style="position: absolute; left: 50%; bottom: 72px; width: 2px; height: 12px; background: #D152A6"></div>
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; padding: 0 10px; gap: 14px">
+    <span style="width: 40px; height: 40px; border-radius: 10px; background: #5B7CFA"></span>
+    <div style="flex-grow: 1"></div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 12px; border-left: 1px dashed #2E323D; line-height: 1.15"><div style="font-size: 15px; font-weight: 700">08:24</div><div style="font-size: 11px; color: #9AA0AE">Mon 23 Nov</div></div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const st = this.state || {};
+    const tab = st.tab || 'People';
+    const selName = st.sel || 'Ania';
+    const tabs = ['People', 'Devices'].map((n) => ({ name: n, sel: n === tab ? 'true' : 'false', bg: n === tab ? '#2A2D36' : 'transparent', fg: n === tab ? '#FFFFFF' : '#B4B9C6', shadow: n === tab ? 'inset 0 -2px 0 #5B7CFA' : 'none', pick: () => this.setState({ tab: n }) }));
+    const P = [
+      { name: 'Alex', initial: 'A', dye: '#5B7CFA', where: 'You · Office', dist: '', since: 'now', battery: '71 %', mode: 'Sitting still', x: '80%', y: '18%', share: true },
+      { name: 'Ania', initial: 'N', dye: '#D152A6', where: 'Home · since 7:40', dist: '2.1 km', since: 'updated now', battery: '58 %', mode: 'At home', x: '12%', y: '78%', share: true },
+      { name: 'Ola', initial: 'O', dye: '#F5A524', where: 'School · walked there', dist: '1.6 km', since: '3 min ago', battery: '34 %', mode: 'Walking', x: '79%', y: '78%', share: true },
+      { name: 'Tomek', initial: 'T', dye: '#4B505E', where: 'Not sharing at the moment', dist: '', since: 'chose not to share', battery: 'hidden', mode: 'Not sharing', share: false }
+    ];
+    const people = P.map((p) => Object.assign({}, p, { bg: p.name === selName ? 'rgba(91,124,250,0.14)' : 'transparent', op: p.share ? 1 : 0.45, pick: () => this.setState({ sel: p.name }) }));
+    const sel = P.find((p) => p.name === selName);
+    const pins = P.filter((p) => p.share).map((p) => ({ x: p.x, y: p.y, dye: p.dye, initial: p.initial, size: p.name === selName ? '52px' : '42px' }));
+    const devices = [
+      ['This laptop', 'PC', 'Office · now', '71 %', '#5B7CFA'],
+      ['Alex’s phone', 'PH', 'Office · now', '64 %', '#5B7CFA'],
+      ['Tablet', 'TB', 'Home · 2 hours ago', '22 %', '#5B7CFA'],
+      ['Ania’s phone', 'PH', 'Home · now', '58 %', '#D152A6'],
+      ['Ola’s phone', 'PH', 'School · 3 min ago', '34 %', '#F5A524']
+    ].map((d, i) => ({ name: d[0], kind: d[1], where: d[2], battery: d[3], dye: d[4], battColor: parseInt(d[3]) < 25 ? '#F5A524' : '#9AA0AE', bg: i === 2 ? 'rgba(91,124,250,0.14)' : 'transparent' }));
+    return { tabs, isPeople: tab === 'People', isDevices: tab === 'Devices', people, sel, pins, devices };
+  }
+}
+</script>
+</body>
+</html>

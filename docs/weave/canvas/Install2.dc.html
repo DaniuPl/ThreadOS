@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Install: where</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #08090D; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; align-items: center; padding-top: 30px; box-sizing: border-box">
+  <div style="position: absolute; left: 32px; top: 30px; display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700"><span style="width: 22px; height: 22px; border-radius: 6px; background: #5B7CFA"></span>Install ThreadOS</div>
+
+  <nav aria-label="Install steps" style="position: relative; display: flex; width: 520px">
+    <sc-for list="{{steps}}" as="st" hint-placeholder-count="4">
+      <div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <div style="position: absolute; top: 7px; right: 50%; width: 100%; height: 2px; background: {{st.line}}"></div>
+        <span style="position: relative; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{st.fill}}; border: 2px solid {{st.ring}}"></span>
+        <span style="font-size: 12px; color: {{st.fg}}; font-weight: {{st.weight}}">{{st.label}}</span>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center">
+    <h1 style="margin: 0; font-size: 40px; font-weight: 800; letter-spacing: -0.03em">Where should ThreadOS go?</h1>
+    <p style="margin: 0; font-size: 16px; color: #B4B9C6">NVMe disk · 512 GB · the disk this computer starts from</p>
+  </div>
+
+  <div role="radiogroup" aria-label="How to install" style="margin-top: 30px; display: grid; grid-template-columns: repeat(2, 440px); gap: 24px">
+    <sc-for list="{{modes}}" as="m" hint-placeholder-count="2">
+      <button role="radio" aria-checked="{{m.checked}}" onClick="{{m.pick}}" style="display: flex; gap: 14px; padding: 20px; border-radius: 16px; border: {{m.border}}; background: {{m.bg}}; color: #ECEDF2; text-align: left; font-family: Inter, sans-serif">
+        <span style="flex-shrink: 0; margin-top: 3px; width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{m.ring}}; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{m.ring}}; opacity: {{m.dot}}"></span></span>
+        <span style="display: flex; flex-direction: column; gap: 6px">
+          <span style="font-size: 18px; font-weight: 700; color: {{m.titleColor}}">{{m.title}}</span>
+          <span style="font-size: 13.5px; line-height: 1.5; color: #B4B9C6">{{m.body}}</span>
+        </span>
+      </button>
+    </sc-for>
+  </div>
+
+  <!-- the disk, now and after: one bar each, the same scale -->
+  <section aria-label="The disk, now and after" style="margin-top: 34px; width: 904px; display: flex; flex-direction: column; gap: 18px; padding: 22px 24px; box-sizing: border-box; border-radius: 16px; background: #111318; border: 1px solid #22252E">
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">Now</div>
+      <div style="display: flex; height: 40px; gap: 3px">
+        <div style="width: 3%; border-radius: 8px 3px 3px 8px; background: #3A3F4C"></div>
+        <div style="width: 71%; border-radius: 3px; background: #2A2D36; display: flex; align-items: center; padding: 0 12px; font-size: 12.5px; color: #C9CDD8">Another system · NTFS · 380 GB</div>
+        <div style="flex-grow: 1; border-radius: 3px 8px 8px 3px; border: 2px dashed #3A3F4C; display: flex; align-items: center; padding: 0 12px; font-size: 12.5px; color: #8A90A0">Free · 131.7 GB</div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0">After</div>
+      <sc-if value="{{beside}}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; height: 40px; gap: 3px">
+          <div style="width: 3%; border-radius: 8px 3px 3px 8px; background: #3A3F4C; box-shadow: inset 0 -3px 0 #5B7CFA"></div>
+          <div style="width: 71%; border-radius: 3px; background: #2A2D36; display: flex; align-items: center; padding: 0 12px; font-size: 12.5px; color: #C9CDD8">Another system · untouched</div>
+          <div style="flex-grow: 1; border-radius: 3px 8px 8px 3px; background-color: #5B7CFA; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.14) 0px, rgba(255,255,255,0.14) 2px, transparent 2px, transparent 5px), repeating-linear-gradient(90deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 5px); display: flex; align-items: center; padding: 0 12px; font-size: 12.5px; font-weight: 700">ThreadOS · TFS · 131.7 GB</div>
+        </div>
+        <div style="font-size: 12.5px; color: #9AA0AE">The EFI partition gets threadboot beside what it already holds, so the other system still starts from the same menu.</div>
+      </sc-if>
+      <sc-if value="{{whole}}" hint-placeholder-val="{{ false }}">
+        <div style="display: flex; height: 40px; gap: 3px">
+          <div style="width: 3%; border-radius: 8px 3px 3px 8px; background: #3A3F4C; box-shadow: inset 0 -3px 0 #E5484D"></div>
+          <div style="flex-grow: 1; border-radius: 3px 8px 8px 3px; background-color: #5B7CFA; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.14) 0px, rgba(255,255,255,0.14) 2px, transparent 2px, transparent 5px), repeating-linear-gradient(90deg, rgba(0,0,0,0.12) 0px, rgba(0,0,0,0.12) 2px, transparent 2px, transparent 5px); display: flex; align-items: center; padding: 0 12px; font-size: 12.5px; font-weight: 700">ThreadOS · TFS · 511.7 GB</div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #FF8A8D; font-weight: 600"><span style="width: 8px; height: 8px; border-radius: 50%; background: #E5484D"></span>The other system and everything in it, 380 GB, will be erased.</div>
+      </sc-if>
+    </div>
+  </section>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 48px; display: flex; justify-content: center; gap: 12px">
+    <a href="Install1.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 22px; border-radius: 11px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 15px Inter, sans-serif; text-decoration: none">Back</a>
+    <a href="Install3.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 28px; border-radius: 11px; background: {{nextBg}}; color: #FFFFFF; font: 600 15px Inter, sans-serif; text-decoration: none">See what will be written</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = 0;
+    const steps = ['Where', 'Check', 'Write', 'Done'].map((label, i) => ({
+      label,
+      line: i === 0 ? 'transparent' : (i <= cur ? '#5B7CFA' : '#2E323D'),
+      fill: i <= cur ? '#5B7CFA' : '#08090D',
+      ring: i <= cur ? '#5B7CFA' : '#4A4F5C',
+      fg: i === cur ? '#FFFFFF' : (i < cur ? '#B4B9C6' : '#6A7080'),
+      weight: i === cur ? 700 : 500
+    }));
+    const mode = (this.state && this.state.mode) || 'beside';
+    const modes = [
+      { id: 'beside', title: 'Beside the other system', body: 'Into the 131.7 GB that is free. Nothing already on the disk changes; you choose the system each time the computer starts.', danger: false },
+      { id: 'whole', title: 'The whole disk', body: 'Everything on this disk is erased, the other system with it, and ThreadOS gets all 512 GB.', danger: true }
+    ].map((m) => {
+      const on = m.id === mode;
+      const c = m.danger ? '#E5484D' : '#5B7CFA';
+      return Object.assign({}, m, {
+        checked: on ? 'true' : 'false',
+        border: on ? '2px solid ' + c : '2px solid #262A33',
+        bg: on ? (m.danger ? 'rgba(229,72,77,0.08)' : '#1A1C23') : '#14161B',
+        ring: on ? c : '#4A4F5C', dot: on ? 1 : 0,
+        titleColor: m.danger && on ? '#FF8A8D' : '#ECEDF2',
+        pick: () => this.setState({ mode: m.id })
+      });
+    });
+    return { steps, modes, beside: mode === 'beside', whole: mode === 'whole', nextBg: mode === 'whole' ? '#E5484D' : '#5B7CFA' };
+  }
+}
+</script>
+</body>
+</html>

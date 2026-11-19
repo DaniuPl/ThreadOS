@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone navigation, three ways</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; padding: 40px 56px; background: #0B0C10; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; gap: 26px">
+  <header style="display: flex; justify-content: space-between; align-items: flex-end">
+    <div>
+      <h1 style="margin: 0; font-size: 38px; font-weight: 800; letter-spacing: -0.03em">Getting around a phone, three ways</h1>
+      <p style="margin: 8px 0 0; font-size: 15px; color: #B4B9C6; max-width: 760px; line-height: 1.5">Settings, Navigation. The two familiar ones stay; the thread is ThreadOS's own. It is the loom's thread from the desktop, laid along the bottom of the phone: every running program is a knot on it.</p>
+    </div>
+  </header>
+
+  <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 40px; flex-grow: 1">
+    <sc-for list="{{styles}}" as="s" hint-placeholder-count="3">
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 18px">
+        <div style="position: relative; width: 280px; height: 560px; box-sizing: border-box; border-radius: 40px; border: {{s.frame}}; background: #0D0F15; overflow: hidden; box-shadow: {{s.glow}}">
+          <div style="height: 34px; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600">12:36</div>
+          <div style="padding: 10px 18px; display: flex; flex-direction: column; gap: 10px">
+            <div style="height: 120px; border-radius: 14px; background: linear-gradient(135deg, #1A2550, #3A1A4A)"></div>
+            <div style="height: 10px; width: 80%; border-radius: 5px; background: #262A33"></div>
+            <div style="height: 10px; width: 95%; border-radius: 5px; background: #262A33"></div>
+            <div style="height: 10px; width: 70%; border-radius: 5px; background: #262A33"></div>
+            <div style="height: 10px; width: 88%; border-radius: 5px; background: #262A33"></div>
+            <div style="height: 10px; width: 60%; border-radius: 5px; background: #262A33"></div>
+          </div>
+
+          <sc-if value="{{s.isGest}}" hint-placeholder-val="{{ false }}">
+            <div style="position: absolute; left: 50%; bottom: 9px; width: 110px; height: 5px; margin-left: -55px; border-radius: 3px; background: #ECEDF2"></div>
+          </sc-if>
+          <sc-if value="{{s.isButtons}}" hint-placeholder-val="{{ false }}">
+            <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 46px; background: #08090D; display: flex; align-items: center; justify-content: space-around; padding: 0 30px">
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ECEDF2" stroke-width="2.4" stroke-linejoin="round"><path d="M17 4L6 12l11 8z"></path></svg>
+              <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ECEDF2" stroke-width="2.4"><circle cx="12" cy="12" r="8"></circle></svg>
+              <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ECEDF2" stroke-width="2.4" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+            </div>
+          </sc-if>
+          <sc-if value="{{s.isThread}}" hint-placeholder-val="{{ true }}">
+            <div aria-label="The thread: five programs running, Weft in front" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+              <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #3A3F4C"></div>
+              <div style="position: absolute; left: 50%; top: 9px; width: 56px; margin-left: -28px; height: 4px; border-radius: 2px; background: #2EC4C4"></div>
+              <div style="position: absolute; left: 0; right: 0; top: 0; display: flex; justify-content: center; align-items: center; gap: 16px; height: 22px">
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #4A6BE0"></span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #D152A6"></span>
+                <span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #2EC4C4; border: 2px solid #FFFFFF"></span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #F5A524"></span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #46C27A"></span>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px"><span style="font-size: 20px; font-weight: 800">{{s.name}}</span><span style="font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; background: {{s.tagBg}}; color: {{s.tagFg}}">{{s.tag}}</span></div>
+        <div style="align-self: stretch; display: flex; flex-direction: column; gap: 8px">
+          <sc-for list="{{s.moves}}" as="m" hint-placeholder-count="4">
+            <div style="display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; font-size: 13px; line-height: 1.4"><span style="color: #ECEDF2; font-weight: 600">{{m.a}}</span><span style="color: #B4B9C6">{{m.b}}</span></div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-for>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const mv = (list) => list.map((x) => ({ a: x[0], b: x[1] }));
+    const styles = [
+      { name: 'Gestures', tag: 'Familiar', kind: 'gest', moves: mv([['Swipe up', 'Home'], ['Swipe up and hold', 'Open programs'], ['Swipe along the bar', 'The program before'], ['From the left edge', 'Back']]) },
+      { name: 'Three buttons', tag: 'Familiar', kind: 'buttons', moves: mv([['Triangle', 'Back'], ['Circle', 'Home'], ['Square', 'Open programs'], ['', 'Always there, takes 46 px']]) },
+      { name: 'The thread', tag: 'ThreadOS', kind: 'thread', moves: mv([['Tap a knot', 'Straight to that program'], ['Slide along the thread', 'Through the programs, one knot at a time'], ['Swipe up', 'Home; up and hold, loom view'], ['From the left edge', 'Back, as everywhere']]) }
+    ].map((s) => {
+      const own = s.kind === 'thread';
+      return Object.assign({}, s, {
+        isGest: s.kind === 'gest', isButtons: s.kind === 'buttons', isThread: own,
+        frame: own ? '3px solid #5B7CFA' : '3px solid #262A33',
+        glow: own ? '0 24px 60px rgba(91,124,250,0.25)' : '0 20px 40px rgba(0,0,0,0.4)',
+        tagBg: own ? '#5B7CFA' : '#20232B', tagFg: own ? '#FFFFFF' : '#9AA0AE'
+      });
+    });
+    return { styles };
+  }
+}
+</script>
+</body>
+</html>

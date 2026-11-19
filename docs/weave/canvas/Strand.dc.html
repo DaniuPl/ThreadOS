@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Strand, version control</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <section aria-label="Strand window" style="position: absolute; left: 16px; top: 14px; width: 1408px; height: 800px; border-radius: 10px; overflow: hidden; background: #16181E; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #2B2F3A">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #6A4FD6"></div>
+      <div style="font-size: 13px; font-weight: 700">Strand</div>
+      <div style="font-size: 13px; color: #8A90A0">threados</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="height: 46px; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-bottom: 1px solid #262A33; background: #1A1C23">
+      <button style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 600 13px Inter, sans-serif"><span style="width: 10px; height: 10px; border-radius: 50%; background: #D152A6"></span>weave-theme<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2.4" stroke-linecap="round"><path d="M7 10l5 5 5-5"></path></svg></button>
+      <span style="font-size: 12.5px; color: #9AA0AE">from main · 2 ahead of origin</span>
+      <div style="flex-grow: 1"></div>
+      <button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Fetch</button>
+      <button style="height: 32px; padding: 0 12px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Pull</button>
+      <button style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 13px Inter, sans-serif">Push<span style="padding: 1px 7px; border-radius: 999px; background: rgba(255,255,255,0.25); font-size: 11.5px">2</span></button>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <!-- left: what you are changing, and the threads you have -->
+      <aside style="width: 270px; flex-shrink: 0; box-sizing: border-box; border-right: 1px solid #262A33; background: #17191F; display: flex; flex-direction: column">
+        <div style="padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 6px; border-bottom: 1px dashed #2E323D">
+          <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0"><span>Changes</span><span>3</span></div>
+          <sc-for list="{{changes}}" as="c" hint-placeholder-count="3">
+            <div style="display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 6px; border-radius: 6px; font-size: 13px">
+              <span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 4px; background: {{c.box}}; border: 2px solid {{c.boxLine}}"></span>
+              <span style="font: 600 11px 'JetBrains Mono', monospace; color: {{c.kindColor}}; width: 12px">{{c.kind}}</span>
+              <span style="flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{c.path}}</span>
+            </div>
+          </sc-for>
+          <textarea aria-label="What this commit does" style="margin-top: 6px; height: 64px; box-sizing: border-box; padding: 8px 10px; border-radius: 8px 8px 4px 4px; border: 0; border-bottom: 2px solid #D152A6; background: #20232B; color: #ECEDF2; font: 400 13px Inter, sans-serif; resize: none; outline: none">Thread navigation: the knot of the program in front</textarea>
+          <button style="height: 34px; border-radius: 8px; border: 0; background: #D152A6; color: #FFFFFF; font: 600 13px Inter, sans-serif">Commit 2 files to weave-theme</button>
+        </div>
+        <div style="padding: 12px; display: flex; flex-direction: column; gap: 4px">
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0; padding-bottom: 4px">Threads</div>
+          <sc-for list="{{branches}}" as="b" hint-placeholder-count="4">
+            <div style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; border-radius: 7px; background: {{b.bg}}; font-size: 13px; font-weight: {{b.weight}}">
+              <span style="width: 22px; height: 3px; border-radius: 2px; background: {{b.dye}}"></span>
+              <span style="flex-grow: 1">{{b.name}}</span>
+              <span style="font-size: 11.5px; color: #8A90A0">{{b.meta}}</span>
+            </div>
+          </sc-for>
+          <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0; padding: 12px 0 4px">Remote</div>
+          <div style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; font-size: 13px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #46C27A"></span>origin<span style="flex-grow: 1"></span><span style="font-size: 11.5px; color: #8A90A0">fetched 4 min ago</span></div>
+        </div>
+      </aside>
+
+      <!-- middle: the history, woven: each branch a thread, each commit a knot -->
+      <div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column">
+        <div style="height: 32px; display: flex; align-items: center; padding: 0 14px; gap: 12px; border-bottom: 1px dashed #262A33; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #8A90A0"><span style="width: 96px">Threads</span><span style="flex-grow: 1">What changed</span><span style="width: 90px">Who</span><span style="width: 70px; text-align: right">When</span></div>
+        <div style="position: relative">
+          <svg aria-hidden="true" width="110" height="340" viewBox="0 0 110 340" style="position: absolute; left: 14px; top: 0" fill="none" stroke-width="3" stroke-linecap="round">
+            <path d="M24 119 V340" stroke="#5B7CFA"></path>
+            <path d="M48 17 V153 C 48 200, 24 205, 24 255" stroke="#D152A6"></path>
+            <path d="M72 85 V187 C 72 210, 24 205, 24 221" stroke="#2EC4C4"></path>
+          </svg>
+          <sc-for list="{{commits}}" as="k" hint-placeholder-count="9">
+            <div style="position: relative; height: 34px; display: flex; align-items: center; gap: 12px; padding: 0 14px; background: {{k.bg}}">
+              <span style="width: 96px; position: relative; height: 34px"><span style="position: absolute; left: {{k.x}}; top: 17px; width: {{k.d}}; height: {{k.d}}; transform: translate(-50%, -50%); box-sizing: border-box; border-radius: 50%; background: {{k.dye}}; border: {{k.ring}}"></span></span>
+              <span style="flex-grow: 1; min-width: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: {{k.weight}}"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{k.msg}}</span><span style="flex-shrink: 0; font: 600 10.5px 'JetBrains Mono', monospace; padding: 2px 6px; border-radius: 999px; background: {{k.tagBg}}; color: #F5A524">{{k.tag}}</span></span>
+              <span style="width: 90px; font-size: 12.5px; color: #B4B9C6">{{k.who}}</span>
+              <span style="width: 70px; text-align: right; font-size: 12px; color: #8A90A0">{{k.when}}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- right: the chosen knot, opened -->
+      <aside style="width: 440px; flex-shrink: 0; box-sizing: border-box; border-left: 1px solid #262A33; background: #14161B; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+        <div style="display: flex; align-items: center; gap: 8px"><span style="width: 12px; height: 12px; border-radius: 50%; background: #D152A6; border: 2px solid #FFFFFF"></span><span style="font: 600 12px 'JetBrains Mono', monospace; color: #8A90A0">a41f9c2</span><span style="font-size: 12px; color: #8A90A0">· Alex · 12 min ago</span></div>
+        <div style="font-size: 16px; font-weight: 700; line-height: 1.35">Draw the selvedge on the window in front</div>
+        <div style="font-size: 13px; line-height: 1.5; color: #B4B9C6">Focus was a lighter title bar, which is easy to miss on a busy screen. Three pixels of the focus dye along the top say it in one colour that nothing else uses.</div>
+        <div style="display: flex; flex-direction: column; gap: 2px; border-top: 1px dashed #2E323D; padding-top: 10px">
+          <sc-for list="{{files}}" as="f" hint-placeholder-count="3">
+            <div style="display: flex; align-items: center; gap: 10px; height: 26px; font-size: 12.5px"><span style="flex-grow: 1; font-family: 'JetBrains Mono', monospace">{{f.path}}</span><span style="color: #7AD69B; font-family: 'JetBrains Mono', monospace">+{{f.add}}</span><span style="color: #FF8A8D; font-family: 'JetBrains Mono', monospace">−{{f.del}}</span></div>
+          </sc-for>
+        </div>
+        <div style="flex-grow: 1; border-radius: 10px; background: #0F1116; border: 1px solid #22252E; overflow: hidden; font: 400 12px/20px 'JetBrains Mono', monospace">
+          <div style="padding: 6px 10px; color: #8A90A0; border-bottom: 1px dashed #22252E">kernel/desktop.c</div>
+          <sc-for list="{{diff}}" as="l" hint-placeholder-count="10">
+            <div style="display: flex; background: {{l.bg}}; color: {{l.fg}}; white-space: pre"><span style="width: 22px; text-align: center; color: {{l.signColor}}">{{l.sign}}</span>{{l.text}}</div>
+          </sc-for>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <nav aria-label="Loom" style="position: absolute; left: 16px; right: 16px; bottom: 14px; height: 58px; box-sizing: border-box; border-radius: 14px; background-color: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; padding: 0 10px; gap: 14px">
+    <span style="width: 40px; height: 40px; border-radius: 10px; background: #5B7CFA"></span>
+    <div style="flex-grow: 1; display: flex; justify-content: center; gap: 10px"><span style="width: 38px; height: 38px; border-radius: 10px; background: #B23D8C"></span><span style="width: 38px; height: 38px; border-radius: 10px; background: #2A2D36"></span><span style="position: relative; width: 38px; height: 38px; border-radius: 10px; background: #6A4FD6"><span style="position: absolute; left: 4px; right: 4px; bottom: -10px; height: 3px; border-radius: 2px; background: #5B7CFA"></span></span></div>
+    <div style="display: flex; flex-direction: column; align-items: flex-end; padding: 0 6px 0 12px; border-left: 1px dashed #2E323D; line-height: 1.15"><div style="font-size: 15px; font-weight: 700">16:05</div><div style="font-size: 11px; color: #9AA0AE">Thu 19 Nov</div></div>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const L = { main: ['#5B7CFA', '24px'], weave: ['#D152A6', '48px'], phone: ['#2EC4C4', '72px'] };
+    const raw = [
+      ['weave', 'Draw the selvedge on the window in front', 'Alex', '12 min', '', true],
+      ['weave', 'Add the grain tile to the loom', 'Alex', '1 h', ''],
+      ['phone', 'Thread navigation: a knot for each running program', 'Ola', '3 h', ''],
+      ['main', 'hda: wake the codec after resume', 'Tomek', '5 h', ''],
+      ['weave', 'look.h: the dyes for Night and Linen', 'Alex', 'yesterday', ''],
+      ['phone', 'Settings: a third choice under Navigation', 'Ola', 'yesterday', ''],
+      ['main', 'Journal: the installer’s new screens', 'Alex', 'Mon', ''],
+      ['main', 'Release 0.1.0-alpha', 'Alex', 'Mon', 'v0.1.0-alpha'],
+      ['main', 'Weft: play a page’s sound through the island', 'Tomek', 'Sun', '']
+    ];
+    const commits = raw.map((r) => ({
+      msg: r[1], who: r[2], when: r[3], tag: r[4], tagBg: r[4] ? 'rgba(245,165,36,0.14)' : 'transparent',
+      x: L[r[0]][1], dye: r[5] ? '#FFFFFF' : L[r[0]][0], d: r[5] ? '14px' : '10px',
+      ring: r[5] ? '3px solid #D152A6' : '2px solid #16181E',
+      bg: r[5] ? 'rgba(209,82,166,0.12)' : 'transparent', weight: r[5] ? 700 : 500
+    }));
+    const changes = [
+      { kind: 'M', kindColor: '#F5A524', path: 'kernelarm64/mobile.c', box: '#D152A6', boxLine: '#D152A6' },
+      { kind: 'M', kindColor: '#F5A524', path: 'scripts/tests/t_arm64mobile.py', box: '#D152A6', boxLine: '#D152A6' },
+      { kind: '?', kindColor: '#8A90A0', path: 'notes.txt', box: 'transparent', boxLine: '#4A4F5C' }
+    ];
+    const branches = [
+      { name: 'weave-theme', dye: '#D152A6', meta: 'here · 2 ahead', bg: 'rgba(209,82,166,0.12)', weight: 700 },
+      { name: 'main', dye: '#5B7CFA', meta: '', bg: 'transparent', weight: 500 },
+      { name: 'phone-nav', dye: '#2EC4C4', meta: 'Ola', bg: 'transparent', weight: 500 },
+      { name: 'fix-hda', dye: '#F5A524', meta: 'merged', bg: 'transparent', weight: 500 }
+    ];
+    const files = [{ path: 'kernel/desktop.c', add: 14, del: 3 }, { path: 'kernel/include/look.h', add: 4, del: 0 }, { path: 'scripts/tests/t_desktop.py', add: 22, del: 1 }];
+    const D = [
+      [' ', '    gfx_rrect(x, y, w, h, WIN_R, L.win_bg, 255);'],
+      ['-', '    gfx_fill(x, y, w, TITLE_H, L.title_bg, 255);'],
+      ['+', '    /* the thread of focus: three pixels of the dye */'],
+      ['+', '    if (focused)'],
+      ['+', '        gfx_fill(x, y, w, SELVEDGE_H, L.accent, 255);'],
+      ['+', '    gfx_fill(x, y + SELVEDGE_H, w, TITLE_H,'],
+      ['+', '             L.title_bg, 255);'],
+      [' ', '    draw_title(win, x, y);'],
+      [' ', '    draw_spool(win, x + w, y);']
+    ];
+    const diff = D.map((d) => ({ sign: d[0] === ' ' ? '' : d[0], text: d[1], bg: d[0] === '+' ? 'rgba(70,194,122,0.12)' : (d[0] === '-' ? 'rgba(229,72,77,0.12)' : 'transparent'), fg: d[0] === ' ' ? '#9AA0AE' : '#ECEDF2', signColor: d[0] === '+' ? '#7AD69B' : '#FF8A8D' }));
+    return { commits, changes, branches, files, diff };
+  }
+}
+</script>
+</body>
+</html>

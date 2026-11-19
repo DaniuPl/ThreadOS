@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings, every section</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <section aria-label="Settings window" style="position: absolute; left: 80px; top: 30px; width: 1280px; height: 780px; border-radius: 10px; overflow: hidden; background: #1A1C23; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: #5B7CFA"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #2B2F3A">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #4B505E"></div>
+      <div style="font-size: 13px; font-weight: 700">Settings</div>
+      <div style="font-size: 13px; color: #8A90A0">{{cur.name}}</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; min-height: 0; display: flex">
+      <nav aria-label="Settings sections" style="width: 260px; flex-shrink: 0; box-sizing: border-box; padding: 14px 10px; border-right: 1px solid #262A33; background: #17191F; display: flex; flex-direction: column; gap: 2px">
+        <sc-for list="{{sections}}" as="s" hint-placeholder-count="10">
+          <button onClick="{{s.pick}}" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 10px; border-radius: 8px; border: 0; background: {{s.bg}}; color: {{s.fg}}; font: {{s.weight}} 13.5px Inter, sans-serif; text-align: left; margin-top: {{s.gap}}">
+            <span style="width: 22px; height: 22px; border-radius: 6px; background: {{s.dye}}; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font-size: 11px; font-weight: 700">{{s.glyph}}</span>
+            <span style="flex-grow: 1">{{s.name}}</span>
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: {{s.knot}}"></span>
+          </button>
+        </sc-for>
+      </nav>
+
+      <main style="flex-grow: 1; min-width: 0; overflow: hidden; padding: 26px 34px; display: flex; flex-direction: column; gap: 20px">
+        <div>
+          <h1 style="margin: 0; font-size: 24px; font-weight: 700">{{cur.name}}</h1>
+          <p style="margin: 6px 0 0; font-size: 13px; color: #9AA0AE">{{cur.sub}}</p>
+        </div>
+
+        <sc-for list="{{cur.groups}}" as="g" hint-placeholder-count="3">
+          <section style="display: flex; flex-direction: column; gap: 8px">
+            <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">{{g.title}}</h2>
+            <div style="background: #1F2229; border: 1px solid #2E323D; border-radius: 12px; padding: 0 16px">
+              <sc-for list="{{g.rows}}" as="r" hint-placeholder-count="3">
+                <div style="display: flex; align-items: center; gap: 16px; min-height: 52px; border-bottom: {{r.line}}">
+                  <sc-if value="{{r.hasDye}}" hint-placeholder-val="{{ false }}"><span style="width: 26px; height: 26px; flex-shrink: 0; border-radius: 7px; background: {{r.dye}}; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700">{{r.glyph}}</span></sc-if>
+                  <div style="flex-grow: 1; min-width: 0; padding: 8px 0"><div style="font-size: 13.5px; font-weight: 600">{{r.label}}</div><div style="font-size: 12px; color: #9AA0AE; margin-top: 2px">{{r.sub}}</div></div>
+                  <sc-if value="{{r.isToggle}}" hint-placeholder-val="{{ true }}">
+                    <span style="width: 40px; height: 22px; flex-shrink: 0; border-radius: 999px; box-sizing: border-box; background: {{r.tBg}}; border: {{r.tLine}}; display: flex; align-items: center; justify-content: {{r.tJust}}; padding: 0 3px"><span style="width: 16px; height: 16px; border-radius: 50%; background: {{r.tKnob}}"></span></span>
+                  </sc-if>
+                  <sc-if value="{{r.isValue}}" hint-placeholder-val="{{ false }}">
+                    <span style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: {{r.vColor}}; white-space: nowrap"><span style="width: 7px; height: 7px; border-radius: 50%; background: {{r.vKnot}}"></span>{{r.value}}<svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#6A7080" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"></path></svg></span>
+                  </sc-if>
+                  <sc-if value="{{r.isSeg}}" hint-placeholder-val="{{ false }}">
+                    <span role="group" style="display: inline-flex; flex-shrink: 0; padding: 3px; border-radius: 9px; background: #17191F; border: 1px solid #2E323D">
+                      <sc-for list="{{r.opts}}" as="o" hint-placeholder-count="3"><span style="height: 26px; display: flex; align-items: center; padding: 0 11px; border-radius: 6px; background: {{o.bg}}; color: {{o.fg}}; font-size: 12.5px; font-weight: {{o.w}}; box-shadow: {{o.sh}}">{{o.t}}</span></sc-for>
+                    </span>
+                  </sc-if>
+                  <sc-if value="{{r.isButton}}" hint-placeholder-val="{{ false }}">
+                    <button style="flex-shrink: 0; height: 32px; padding: 0 14px; border-radius: 8px; border: {{r.bLine}}; background: {{r.bBg}}; color: {{r.bFg}}; font: 600 13px Inter, sans-serif">{{r.value}}</button>
+                  </sc-if>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+        </sc-for>
+      </main>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const A = '#5B7CFA';
+    const T = (label, sub, on, extra) => Object.assign({ kind: 'toggle', label, sub, on }, extra || {});
+    const V = (label, sub, value, extra) => Object.assign({ kind: 'value', label, sub, value }, extra || {});
+    const S = (label, sub, opts, sel, extra) => Object.assign({ kind: 'seg', label, sub, opts, sel }, extra || {});
+    const B = (label, sub, value, extra) => Object.assign({ kind: 'button', label, sub, value }, extra || {});
+    const data = [
+      { id: 'desktop', name: 'Desktop', glyph: 'D', dye: '#4B505E', sub: 'How the screen around your programs works.', groups: [
+        { title: 'Style', rows: [
+          S('Desktop style', 'The same programs and files in each; only the frame changes', ['Bar and dock', 'Taskbar', 'Weave'], 2),
+          S('Window buttons', 'Where minimise, maximise and close sit', ['Left', 'Right'], 1),
+          T('The selvedge', 'Three pixels of the thread colour on the window in front', true) ] },
+        { title: 'The loom', rows: [
+          S('Size', '', ['Small', 'Medium', 'Large'], 1),
+          T('Hide it while a program fills the screen', 'Touch the bottom edge to bring it back', true),
+          V('Desktops', 'Four knots on the loom; Super and a number switches', '4') ] },
+        { title: 'The shuttle', rows: [
+          T('Show what is playing', '', true), T('Show timers and downloads', '', true),
+          T('Game mode holds notifications', 'They wait until you stop playing', true) ] } ] },
+      { id: 'appearance', name: 'Appearance', glyph: 'A', dye: '#C77F0A', sub: 'Light, colour and grain.', groups: [
+        { title: 'Light', rows: [ S('Theme', '', ['Linen', 'Night', 'Follow the sun'], 1), V('Thread colour', 'Focus, the selvedge and the loom', 'Indigo', { vKnot: A }) ] },
+        { title: 'Text', rows: [ S('Size', '13 px everywhere by default', ['13', '15', '17'], 0), T('Less motion', 'Windows appear without unrolling', true) ] } ] },
+      { id: 'privacy', name: 'Privacy and location', glyph: 'P', dye: '#D152A6', sub: 'Who may use the camera, the microphone and where you are. Nothing is shared without a yes.', groups: [
+        { title: 'Lately', rows: [
+          V('Recorder used the microphone', 'Today, 12:10 to 12:12', 'Microphone', { vKnot: '#F5A524', hasDye: true, dye: '#C77F0A', glyph: 'R' }),
+          V('Family used where you are', 'Shared with 3 people, until you stop', 'Location', { vKnot: '#D152A6', hasDye: true, dye: '#D152A6', glyph: 'F' }) ] },
+        { title: 'Allowed', rows: [
+          V('Camera', 'Camera and Purl', '2 programs'), V('Microphone', 'Recorder, Purl and Weft (asks each time)', '3 programs'),
+          V('Location', 'Family, Map', '2 programs'), T('Show it on the shuttle while in use', 'The desktop draws this itself; no program can hide it', true, { locked: true }) ] },
+        { title: 'Family', rows: [ B('Share where I am', 'With Ania, Ola and Tomek', 'Stop sharing', { danger: true }) ] } ] },
+      { id: 'updates', name: 'Updates', glyph: 'U', dye: '#1FA3A3', knot: '#F5A524', sub: 'Every update is signed; ThreadOS checks the signature before it installs anything.', groups: [
+        { title: 'This computer', rows: [
+          V('ThreadOS 0.1.0-alpha', 'Installed on Monday', 'Up to date', { vKnot: '#46C27A' }),
+          B('0.1.0-alpha.2 is ready', 'Signed · 38 MB · restarts once', 'Install tonight', {}),
+          S('Channel', 'Alpha arrives first and breaks sometimes', ['Alpha', 'Stable'], 0) ] },
+        { title: 'Lately', rows: [
+          V('0.1.0-alpha', 'Weave, the installer’s new screens', 'Mon'), V('0.1.0-dev', 'The first build with a version', 'Nov 2') ] } ] },
+      { id: 'network', name: 'Network', glyph: 'N', dye: '#1FA3A3', sub: 'Wi-Fi, the cable and the names this computer answers to.', groups: [
+        { title: 'Connections', rows: [
+          V('Wi-Fi', 'Home-5G · Intel AX201', 'Connected', { vKnot: '#46C27A' }),
+          V('Cable', 'virtio-net', 'Not plugged in', { vKnot: '#4A4F5C' }),
+          T('Bluetooth', 'Two devices paired', true) ] },
+        { title: 'This computer', rows: [ V('Name on the network', '', 'threados-pc'), V('Address', 'From DHCP', '192.168.1.24') ] } ] },
+      { id: 'sound', name: 'Sound', glyph: 'S', dye: '#B23D8C', sub: 'Where sound goes and where it comes from.', groups: [
+        { title: 'Out', rows: [ V('Speakers', 'HD Audio · 64 %', 'In use', { vKnot: '#46C27A' }), V('Headphones', 'Pairs over Bluetooth', 'Not here', { vKnot: '#4A4F5C' }) ] },
+        { title: 'In', rows: [ V('Microphone', 'Built in', 'Ready') ] },
+        { title: 'The desktop', rows: [ T('A chime for notifications', '', true), S('Mixer', 'Each program its own level', ['Open Mixer'], 0) ] } ] },
+      { id: 'navigation', name: 'Touch and navigation', glyph: 'T', dye: '#2F9A5C', sub: 'For touch screens and tablets.', groups: [
+        { title: 'Getting around', rows: [ S('On a touch screen', '', ['The thread', 'Gestures', 'Three buttons'], 0), T('Windows when a keyboard is attached', '', true) ] } ] },
+      { id: 'accounts', name: 'Accounts', glyph: 'U', dye: '#6A4FD6', sub: 'The people who use this computer.', groups: [
+        { title: 'People', rows: [ V('Alex', 'Admin · Indigo', 'You', { hasDye: true, dye: A, glyph: 'A' }), V('Ola', 'Indigo · Woad', '', { hasDye: true, dye: '#2EC4C4', glyph: 'O' }) ] },
+        { title: '', rows: [ B('Add a person', 'Each gets files, settings and a colour of their own', 'Add', {}) ] } ] },
+      { id: 'disks', name: 'Disks and backup', glyph: 'D', dye: '#4B505E', sub: 'What is stored where, and a copy of it.', groups: [
+        { title: 'Disks', rows: [ V('NVMe disk', 'ThreadOS · TFS · 131.7 GB, 22 % used', '29 GB used'), V('USB stick', 'FAT · 8 GB', 'Eject') ] },
+        { title: 'Backup', rows: [ T('Copy my files every night', 'To the USB stick, when it is in', false) ] } ] },
+      { id: 'about', name: 'About ThreadOS', glyph: 'i', dye: '#4B505E', sub: 'Version, licences and this machine.', groups: [
+        { title: 'This system', rows: [ V('Version', '', '0.1.0-alpha'), V('Kernel', 'x86-64, long mode', '64-bit'), V('Licences', 'Every library it is built from', 'LICENSES.txt') ] } ] }
+    ];
+    const pick = (this.state && this.state.s) || 'desktop';
+    const sections = data.map((d, i) => ({
+      name: d.name, glyph: d.glyph, dye: d.dye, gap: (i === 2 || i === 6 || i === 9) ? '10px' : '0px',
+      bg: d.id === pick ? 'rgba(91,124,250,0.18)' : 'transparent', fg: d.id === pick ? '#FFFFFF' : '#C9CDD8', weight: d.id === pick ? 600 : 400,
+      knot: d.id === pick ? A : (d.knot || 'transparent'), pick: () => this.setState({ s: d.id })
+    }));
+    const c = data.find((d) => d.id === pick);
+    const groups = c.groups.map((g) => ({ title: g.title, rows: g.rows.map((r, i) => ({
+      label: r.label, sub: r.sub || '', value: r.value || '', line: i < g.rows.length - 1 ? '1px dashed #2E323D' : '0',
+      hasDye: !!r.hasDye, dye: r.dye || 'transparent', glyph: r.glyph || '',
+      isToggle: r.kind === 'toggle', isValue: r.kind === 'value', isSeg: r.kind === 'seg', isButton: r.kind === 'button',
+      tBg: r.on ? A : '#2A2D36', tLine: r.on ? '0' : '1px dashed #4A4F5C', tJust: r.on ? 'flex-end' : 'flex-start', tKnob: r.on ? '#FFFFFF' : '#8A90A0',
+      vColor: '#C9CDD8', vKnot: r.vKnot || 'transparent',
+      bBg: r.danger ? 'rgba(229,72,77,0.1)' : (r.value === 'Install tonight' || r.value === 'Add' ? A : '#20232B'),
+      bFg: r.danger ? '#FF8A8D' : (r.value === 'Install tonight' || r.value === 'Add' ? '#FFFFFF' : '#ECEDF2'),
+      bLine: r.danger ? '1px solid rgba(229,72,77,0.5)' : '0',
+      opts: (r.opts || []).map((t, k) => ({ t, bg: k === r.sel ? '#2A2D36' : 'transparent', fg: k === r.sel ? '#FFFFFF' : '#B4B9C6', w: k === r.sel ? 600 : 500, sh: k === r.sel ? 'inset 0 -2px 0 ' + A : 'none' }))
+    })) }));
+    return { sections, cur: { name: c.name, sub: c.sub, groups } };
+  }
+}
+</script>
+</body>
+</html>

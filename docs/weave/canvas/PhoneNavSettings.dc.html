@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone settings: navigation</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#3F5EE8}a:hover{color:#2A45C0}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #F6F3EC; font-family: Inter, system-ui, sans-serif; color: #1D1C1A">
+  <div style="height: 44px; display: flex; align-items: center; justify-content: space-between; padding: 0 22px; font-size: 14px; font-weight: 600"><span>12:36</span><span style="font-size: 12px">71%</span></div>
+  <div style="display: flex; align-items: center; gap: 6px; padding: 4px 12px 0">
+    <a href="#" aria-label="Back to Settings" style="width: 40px; height: 40px; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#3F5EE8" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></a>
+    <span style="font-size: 15px; color: #3F5EE8; font-weight: 600">Settings</span>
+  </div>
+  <h1 style="margin: 4px 24px 14px; font-size: 30px; font-weight: 800; letter-spacing: -0.03em">Navigation</h1>
+
+  <div role="radiogroup" aria-label="Navigation" style="margin: 0 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+    <sc-for list="{{opts}}" as="o" hint-placeholder-count="3">
+      <button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 10px 6px 12px; border-radius: 16px; border: {{o.border}}; background: #FCFBF8; color: #1D1C1A; font: 600 12.5px Inter, sans-serif">
+        <span style="position: relative; width: 70px; height: 128px; box-sizing: border-box; border-radius: 14px; border: 2px solid #CFC8BA; background: #EFEBE3; overflow: hidden">
+          <span style="position: absolute; left: 8px; right: 8px; top: 14px; height: 30px; border-radius: 6px; background: #DDD6C9"></span>
+          <span style="position: absolute; left: 8px; right: 14px; top: 52px; height: 5px; border-radius: 3px; background: #DDD6C9"></span>
+          <span style="position: absolute; left: 8px; right: 20px; top: 62px; height: 5px; border-radius: 3px; background: #DDD6C9"></span>
+          <sc-if value="{{o.isGest}}" hint-placeholder-val="{{ false }}"><span style="position: absolute; left: 20px; right: 20px; bottom: 5px; height: 3px; border-radius: 2px; background: #1D1C1A"></span></sc-if>
+          <sc-if value="{{o.isButtons}}" hint-placeholder-val="{{ false }}"><span style="position: absolute; left: 0; right: 0; bottom: 0; height: 16px; background: #DDD6C9; display: flex; align-items: center; justify-content: space-around; padding: 0 8px"><span style="width: 5px; height: 5px; background: #1D1C1A; clip-path: polygon(100% 0, 0 50%, 100% 100%)"></span><span style="width: 6px; height: 6px; box-sizing: border-box; border-radius: 50%; border: 1.5px solid #1D1C1A"></span><span style="width: 5px; height: 5px; box-sizing: border-box; border: 1.5px solid #1D1C1A"></span></span></sc-if>
+          <sc-if value="{{o.isThread}}" hint-placeholder-val="{{ true }}"><span style="position: absolute; left: 6px; right: 6px; bottom: 7px; height: 1.5px; background: #B3AC9F"></span><span style="position: absolute; left: 0; right: 0; bottom: 4px; display: flex; justify-content: center; align-items: center; gap: 5px"><span style="width: 4px; height: 4px; border-radius: 50%; background: #3F5EE8"></span><span style="width: 7px; height: 7px; border-radius: 50%; background: #1E7F86"></span><span style="width: 4px; height: 4px; border-radius: 50%; background: #B86E00"></span></span></sc-if>
+        </span>
+        {{o.name}}
+      </button>
+    </sc-for>
+  </div>
+
+  <div style="margin: 16px 16px 0; border-radius: 16px; background: #FCFBF8; border: 1px solid #E3DDD1; padding: 4px 16px">
+    <sc-for list="{{help}}" as="h" hint-placeholder-count="4">
+      <div style="display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: {{h.line}}; font-size: 14px"><span style="font-weight: 600">{{h.a}}</span><span style="color: #6B675F; text-align: right">{{h.b}}</span></div>
+    </sc-for>
+  </div>
+
+  <sc-if value="{{isThread}}" hint-placeholder-val="{{ true }}">
+    <div style="margin: 16px 16px 0; border-radius: 16px; background: #FCFBF8; border: 1px solid #E3DDD1; padding: 4px 16px">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px dashed #DDD6C9; font-size: 14px"><span>Knots in their programs' colours</span><span style="width: 44px; height: 26px; border-radius: 999px; background: #3F5EE8; display: flex; justify-content: flex-end; align-items: center; padding: 0 3px; box-sizing: border-box"><span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF"></span></span></div>
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 0; font-size: 14px"><span>Hide it while a video fills the screen</span><span style="width: 44px; height: 26px; border-radius: 999px; background: #3F5EE8; display: flex; justify-content: flex-end; align-items: center; padding: 0 3px; box-sizing: border-box"><span style="width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF"></span></span></div>
+    </div>
+  </sc-if>
+
+  <!-- this screen's own navigation, live: it follows the choice -->
+  <sc-if value="{{isThread}}" hint-placeholder-val="{{ true }}">
+    <div style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+      <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #CFC8BA"></div>
+      <div style="position: absolute; left: 50%; top: 9px; width: 56px; margin-left: -28px; height: 4px; border-radius: 2px; background: #6B675F"></div>
+      <div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 8px; height: 8px; border-radius: 50%; background: #3F5EE8"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #1E7F86"></span><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #6B675F; border: 2px solid #FFFFFF"></span><span style="width: 8px; height: 8px; border-radius: 50%; background: #C2366F"></span></div>
+    </div>
+  </sc-if>
+  <sc-if value="{{isGest}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 50%; bottom: 9px; width: 134px; height: 5px; margin-left: -67px; border-radius: 3px; background: #1D1C1A"></div>
+  </sc-if>
+  <sc-if value="{{isButtons}}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 48px; background: #EFEBE3; display: flex; align-items: center; justify-content: space-around; padding: 0 40px">
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D1C1A" stroke-width="2.4" stroke-linejoin="round"><path d="M17 4L6 12l11 8z"></path></svg>
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1D1C1A" stroke-width="2.4"><circle cx="12" cy="12" r="8"></circle></svg>
+      <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1D1C1A" stroke-width="2.4" stroke-linejoin="round"><rect x="5" y="5" width="14" height="14" rx="2"></rect></svg>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pick = (this.state && this.state.k) || 'thread';
+    const defs = [['gest', 'Gestures'], ['buttons', 'Three buttons'], ['thread', 'The thread']];
+    const opts = defs.map((d) => ({ name: d[1], checked: d[0] === pick ? 'true' : 'false', border: d[0] === pick ? '2px solid #3F5EE8' : '2px solid #E3DDD1', isGest: d[0] === 'gest', isButtons: d[0] === 'buttons', isThread: d[0] === 'thread', pick: () => this.setState({ k: d[0] }) }));
+    const H = {
+      gest: [['Swipe up', 'Home'], ['Up and hold', 'Open programs'], ['Along the bar', 'The one before'], ['Left edge', 'Back']],
+      buttons: [['Triangle', 'Back'], ['Circle', 'Home'], ['Square', 'Open programs'], ['Space', '48 px kept at the bottom']],
+      thread: [['Tap a knot', 'That program'], ['Slide along it', 'One knot at a time'], ['Swipe up', 'Home; hold for loom view'], ['Left edge', 'Back']]
+    };
+    const help = H[pick].map((h, i) => ({ a: h[0], b: h[1], line: i < 3 ? '1px dashed #DDD6C9' : '0' }));
+    return { opts, help, isThread: pick === 'thread', isGest: pick === 'gest', isButtons: pick === 'buttons' };
+  }
+}
+</script>
+</body>
+</html>

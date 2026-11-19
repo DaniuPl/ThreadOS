@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Weave components</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="width: 1440px; height: 860px; box-sizing: border-box; padding: 48px; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-rows: 1fr 1fr; gap: 24px">
+
+  <!-- Window anatomy -->
+  <section aria-label="Window" style="background: #14161B; border: 1px solid #262A33; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+    <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Window</h2>
+    <div style="display: flex; flex-direction: column; gap: 14px">
+      <div style="border-radius: 10px; overflow: hidden; border: 1px solid #2E323D; background: #1A1C23; box-shadow: 0 12px 28px rgba(0,0,0,0.45)">
+        <div style="height: 3px; background: #5B7CFA"></div>
+        <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px)">
+          <div style="width: 18px; height: 18px; border-radius: 5px; background: #5B7CFA"></div>
+          <div style="font-size: 13px; font-weight: 700">Editor</div>
+          <div style="font-size: 13px; color: #8A90A0">notes.txt</div>
+          <div style="flex-grow: 1"></div>
+          <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+            <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+            <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+            <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+          </div>
+        </div>
+        <div style="height: 56px"></div>
+      </div>
+      <div style="border-radius: 10px; overflow: hidden; border: 1px solid #262A33; background: #16181E">
+        <div style="height: 3px; background: #16181E"></div>
+        <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background: #1B1D24">
+          <div style="width: 18px; height: 18px; border-radius: 5px; background: #2A2D36"></div>
+          <div style="font-size: 13px; font-weight: 600; color: #7D8391">Term</div>
+          <div style="flex-grow: 1"></div>
+          <div style="font-size: 12px; color: #6A7080">without focus: no selvedge, grey controls</div>
+        </div>
+      </div>
+    </div>
+    <ul style="margin: 0; padding: 0 0 0 18px; font-size: 13px; line-height: 1.6; color: #B4B9C6">
+      <li><strong style="color: #ECEDF2">Selvedge</strong>: 3 px of the focus dye along the top</li>
+      <li><strong style="color: #ECEDF2">Spool</strong>: minimise, maximise, close in one capsule on the right; close is the only madder</li>
+      <li><strong style="color: #ECEDF2">Grain</strong> on the title bar and the loom only, never under text you read</li>
+    </ul>
+  </section>
+
+  <!-- Buttons -->
+  <section aria-label="Buttons" style="background: #14161B; border: 1px solid #262A33; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+    <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Buttons</h2>
+    <div style="display: flex; flex-wrap: wrap; gap: 10px; align-items: center">
+      <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: #5B7CFA; color: #FFFFFF; font: 600 13px Inter, sans-serif">Install</button>
+      <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Cancel</button>
+      <button style="height: 34px; padding: 0 12px; border-radius: 8px; border: 0; background: transparent; color: #8FA5FF; font: 500 13px Inter, sans-serif">Details</button>
+      <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 1px solid rgba(229,72,77,0.5); background: rgba(229,72,77,0.1); color: #FF8A8D; font: 600 13px Inter, sans-serif">Delete</button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 12px; color: #9AA0AE">Keyboard focus: the thread wraps the button, 2 px out</div>
+      <div style="display: flex; gap: 10px; align-items: center">
+        <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif; outline: 2px solid #5B7CFA; outline-offset: 2px">Open</button>
+        <button style="height: 34px; padding: 0 16px; border-radius: 8px; border: 0; background: #4A68E0; color: #FFFFFF; font: 600 13px Inter, sans-serif">Pressed</button>
+        <button disabled style="height: 34px; padding: 0 16px; border-radius: 8px; border: 1px dashed #3A3F4C; background: transparent; color: #6A7080; font: 500 13px Inter, sans-serif">Unavailable</button>
+      </div>
+    </div>
+    <div style="border-top: 1px dashed #2E323D"></div>
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <div style="font-size: 12px; color: #9AA0AE">Segments: the chosen one carries the thread under it</div>
+      <div role="group" aria-label="View" style="display: inline-flex; align-self: flex-start; padding: 3px; border-radius: 9px; background: #1B1D24; border: 1px solid #2E323D">
+        <button style="position: relative; height: 28px; padding: 0 14px; border-radius: 6px; border: 0; background: #2A2D36; color: #FFFFFF; font: 600 12.5px Inter, sans-serif; box-shadow: inset 0 -2px 0 #5B7CFA">List</button>
+        <button style="height: 28px; padding: 0 14px; border-radius: 6px; border: 0; background: transparent; color: #B4B9C6; font: 500 12.5px Inter, sans-serif">Icons</button>
+        <button style="height: 28px; padding: 0 14px; border-radius: 6px; border: 0; background: transparent; color: #B4B9C6; font: 500 12.5px Inter, sans-serif">Tree</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Fields -->
+  <section aria-label="Fields" style="background: #14161B; border: 1px solid #262A33; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+    <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Fields</h2>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <label for="f1" style="font-size: 12px; color: #B4B9C6">Computer name</label>
+      <input id="f1" value="threados-pc" style="height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px 8px 4px 4px; border: 0; border-bottom: 2px dashed #3A3F4C; background: #1B1D24; color: #ECEDF2; font: 400 13px Inter, sans-serif; outline: none">
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <label for="f2" style="font-size: 12px; color: #B4B9C6">Wi-Fi password (focused)</label>
+      <input id="f2" type="password" value="woven-thread" style="height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px 8px 4px 4px; border: 0; border-bottom: 2px solid #5B7CFA; background: #20232B; color: #ECEDF2; font: 400 13px Inter, sans-serif; outline: none">
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 6px">
+      <label for="f3" style="font-size: 12px; color: #B4B9C6">Port</label>
+      <input id="f3" value="80800" aria-describedby="f3e" style="height: 36px; box-sizing: border-box; padding: 0 12px; border-radius: 8px 8px 4px 4px; border: 0; border-bottom: 2px solid #E5484D; background: #1B1D24; color: #ECEDF2; font: 400 13px 'JetBrains Mono', monospace; outline: none">
+      <div id="f3e" style="font-size: 12px; color: #FF8A8D">A port is a number from 1 to 65535</div>
+    </div>
+    <div style="font-size: 12px; color: #9AA0AE; line-height: 1.5">At rest a field has a stitch under it. Focus pulls the stitch tight into the thread; an error dyes it madder and says why underneath.</div>
+  </section>
+
+  <!-- Choices -->
+  <section aria-label="Choices" style="background: #14161B; border: 1px solid #262A33; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 16px">
+    <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Switches and knots</h2>
+    <div style="display: flex; flex-direction: column; gap: 12px">
+      <label style="display: flex; align-items: center; justify-content: space-between; font-size: 13px">Bluetooth
+        <span style="width: 40px; height: 22px; border-radius: 999px; background: #5B7CFA; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box"><span style="width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF"></span></span>
+      </label>
+      <label style="display: flex; align-items: center; justify-content: space-between; font-size: 13px">Dark theme at night
+        <span style="width: 40px; height: 22px; border-radius: 999px; background: #2A2D36; border: 1px dashed #4A4F5C; display: flex; align-items: center; padding: 0 3px; box-sizing: border-box"><span style="width: 14px; height: 14px; border-radius: 50%; background: #8A90A0"></span></span>
+      </label>
+    </div>
+    <div style="border-top: 1px dashed #2E323D"></div>
+    <div role="radiogroup" aria-label="Dock size" style="display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+      <div style="display: flex; align-items: center; gap: 10px"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid #4A4F5C"></span>Small loom</div>
+      <div style="display: flex; align-items: center; gap: 10px"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid #5B7CFA; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 50%; background: #5B7CFA"></span></span><strong>Medium loom</strong></div>
+      <div style="display: flex; align-items: center; gap: 10px"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; border: 2px solid #4A4F5C"></span>Large loom</div>
+    </div>
+    <div style="border-top: 1px dashed #2E323D"></div>
+    <div style="display: flex; flex-direction: column; gap: 8px; font-size: 13px">
+      <div style="display: flex; align-items: center; gap: 10px"><span style="width: 16px; height: 16px; border-radius: 4px; background: #5B7CFA; display: flex; align-items: center; justify-content: center"><svg aria-hidden="true" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#FFFFFF" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></span>Start Recorder at login</div>
+      <div style="display: flex; align-items: center; gap: 10px"><span style="width: 16px; height: 16px; box-sizing: border-box; border-radius: 4px; border: 2px solid #4A4F5C"></span>Send crash reports</div>
+    </div>
+  </section>
+
+  <!-- Progress -->
+  <section aria-label="Progress" style="background: #14161B; border: 1px solid #262A33; border-radius: 14px; padding: 24px; display: flex; flex-direction: column; gap: 18px">
+    <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Progress: spinning the thread</h2>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="display: flex; justify-content: space-between; font-size: 13px"><span>Installing to Disk 1</span><span style="color: #9AA0AE; font-variant-numeric: tabular-nums">{{pct}} %</span></div>
+      <div role="progressbar" aria-label="Installing" aria-valuenow="{{pct}}" aria-valuemin="0" aria-valuemax="100" style="position: relative; height: 10px; display: flex; align-items: center">
+        <div style="position: absolute; left: 0; right: 0; top: 4px; border-top: 2px dashed #3A3F4C"></div>
+        <div style="position: absolute; left: 0; top: 3px; height: 4px; width: {{pctW}}; border-radius: 2px; background: #5B7CFA"></div>
+        <div style="position: absolute; top: 0; left: {{pctW}}; width: 10px; height: 10px; margin-left: -5px; border-radius: 50%; background: #FFFFFF; border: 2px solid #5B7CFA; box-sizing: border-box"></div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 8px">
+      <div style="font-size: 13px">Downloading, size unknown</div>
+      <div aria-hidden="true" style="position: relative; height: 10px">
+        <div style="position: absolute; left: 0; right: 0; top: 4px; border-top: 2px dashed #3A3F4C"></div>
+        <div style="position: absolute; left: 34%; top: 3px; height: 4px; width: 22%; border-radius: 2px; background: linear-gradient(90deg, rgba(46,196,196,0), #2EC4C4)"></div>
+      </div>
+      <div style="font-size: 12px; color: #9AA0AE">The short length runs along the stitch, left to right, like a shuttle.</div>
+    </div>
+    <div style="border-top: 1px dashed #2E323D"></div>
+    <div style="display: flex; align-items: center; gap: 14px">
+      <svg role="img" aria-label="Working" width="36" height="36" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="14" stroke="#2E323D" stroke-width="3" stroke-dasharray="3 4"></circle><path d="M18 4a14 14 0 0 1 14 14" stroke="#5B7CFA" stroke-width="3" stroke-linecap="round"></path></svg>
+      <div style="font-size: 13px; color: #B4B9C6; line-height: 1.5">Spinner: the thread winding onto a dashed spool. One arc, one colour.</div>
+    </div>
+  </section>
+
+  <!-- Menu and dialog -->
+  <section aria-label="Menus and questions" style="background: #14161B; border: 1px solid #262A33; border-radius: 14px; padding: 24px; display: flex; gap: 18px">
+    <div style="display: flex; flex-direction: column; gap: 12px; flex: 1 1 0; min-width: 0">
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Menu</h2>
+      <div role="menu" aria-label="File menu" style="display: flex; flex-direction: column; padding: 5px; border-radius: 10px; background: #1F2229; border: 1px solid #2E323D; box-shadow: 0 14px 32px rgba(0,0,0,0.5); font-size: 13px">
+        <div role="menuitem" style="display: flex; justify-content: space-between; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; background: rgba(91,124,250,0.18)"><span style="display: flex; align-items: center; gap: 8px"><span style="width: 5px; height: 5px; border-radius: 50%; background: #5B7CFA"></span>Open</span><span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #9AA0AE">Enter</span></div>
+        <div role="menuitem" style="display: flex; justify-content: space-between; align-items: center; height: 28px; padding: 0 10px 0 23px">Rename<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #9AA0AE">F2</span></div>
+        <div role="menuitem" style="display: flex; justify-content: space-between; align-items: center; height: 28px; padding: 0 10px 0 23px">Copy<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #9AA0AE">Ctrl C</span></div>
+        <div role="separator" style="border-top: 1px dashed #3A3F4C; margin: 4px 8px"></div>
+        <div role="menuitem" style="display: flex; justify-content: space-between; align-items: center; height: 28px; padding: 0 10px 0 23px; color: #FF8A8D">Move to Trash<span style="font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #C46A6D">Del</span></div>
+      </div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 12px; flex: 1.2 1 0; min-width: 0">
+      <h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Question</h2>
+      <div role="dialog" aria-label="Shut down" style="border-radius: 12px; overflow: hidden; background: #1F2229; border: 1px solid #2E323D; box-shadow: 0 18px 40px rgba(0,0,0,0.55)">
+        <div style="height: 3px; background: #E5484D"></div>
+        <div style="padding: 18px; display: flex; flex-direction: column; gap: 8px">
+          <div style="font-size: 15px; font-weight: 700">Shut down now?</div>
+          <div style="font-size: 13px; line-height: 1.5; color: #B4B9C6">Editor has a file that is not saved. It will be closed without saving.</div>
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px">
+            <button style="height: 32px; padding: 0 14px; border-radius: 8px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 13px Inter, sans-serif">Cancel</button>
+            <button style="height: 32px; padding: 0 14px; border-radius: 8px; border: 0; background: #E5484D; color: #FFFFFF; font: 600 13px Inter, sans-serif">Shut down</button>
+          </div>
+        </div>
+      </div>
+      <div style="font-size: 12px; color: #9AA0AE; line-height: 1.5">A question that destroys something takes a madder selvedge instead of indigo.</div>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"pct":{"editor":"range","default":62,"min":0,"max":100,"step":1,"unit":"%"},"$preview":{"width":1440,"height":860}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const pct = Math.max(0, Math.min(100, Math.round(this.props.pct ?? 62)));
+    return { pct, pctW: pct + '%' };
+  }
+}
+</script>
+</body>
+</html>

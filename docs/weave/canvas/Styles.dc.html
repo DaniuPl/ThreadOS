@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Choose a desktop style</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; align-items: center; padding-top: 44px; box-sizing: border-box">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 820 C 300 720, 520 900, 820 760 S 1240 600, 1500 650" stroke="#5B7CFA" stroke-opacity="0.45" stroke-width="3"></path>
+    <path d="M -40 860 C 260 800, 560 920, 860 800 S 1260 680, 1500 720" stroke="#2EC4C4" stroke-opacity="0.3" stroke-width="2"></path>
+  </svg>
+
+  <nav aria-label="Setup steps" style="position: relative; display: flex; width: 640px">
+    <sc-for list="{{steps}}" as="st" hint-placeholder-count="5">
+      <div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <div style="position: absolute; top: 7px; right: 50%; width: 100%; height: 2px; background: {{st.line}}"></div>
+        <span style="position: relative; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{st.fill}}; border: 2px solid {{st.ring}}"></span>
+        <span style="font-size: 12px; color: {{st.fg}}; font-weight: {{st.weight}}">{{st.label}}</span>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="position: relative; margin-top: 40px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center">
+    <h1 style="margin: 0; font-size: 44px; font-weight: 800; letter-spacing: -0.03em">How should your desktop work?</h1>
+    <p style="margin: 0; font-size: 16px; color: #B4B9C6; max-width: 640px; line-height: 1.5">Three styles, the same programs and files. Only the frame around them changes, and you can switch any time in Settings, Desktop.</p>
+  </div>
+
+  <div role="radiogroup" aria-label="Desktop style" style="position: relative; margin-top: 34px; display: grid; grid-template-columns: repeat(3, 400px); gap: 28px">
+    <sc-for list="{{styles}}" as="s" hint-placeholder-count="3">
+      <button role="radio" aria-checked="{{s.checked}}" onClick="{{s.pick}}" style="display: flex; flex-direction: column; gap: 16px; padding: 14px 14px 20px; border-radius: 16px; border: {{s.border}}; background: {{s.cardBg}}; color: #ECEDF2; text-align: left; font-family: Inter, sans-serif; box-shadow: {{s.shadow}}">
+        <div style="position: relative; height: 220px; border-radius: 10px; overflow: hidden; background: {{s.wall}}">
+          <sc-if value="{{s.isBar}}" hint-placeholder-val="{{ false }}">
+            <div style="position: absolute; left: 0; right: 0; top: 0; height: 14px; background: rgba(26,26,32,0.7); display: flex; align-items: center; gap: 6px; padding: 0 8px"><span style="width: 8px; height: 8px; border-radius: 2px; background: #F5F5F7"></span><span style="width: 30px; height: 4px; border-radius: 2px; background: #F5F5F7"></span><span style="flex-grow: 1"></span><span style="width: 40px; height: 4px; border-radius: 2px; background: #A5A5AD"></span></div>
+            <div style="position: absolute; left: 60px; top: 34px; width: 250px; height: 136px; border-radius: 7px; background: #29292E; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.4)"><div style="height: 16px; background: #34343B; display: flex; align-items: center; gap: 4px; padding-left: 7px"><span style="width: 6px; height: 6px; border-radius: 50%; background: #FF5F57"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #FEBC2E"></span><span style="width: 6px; height: 6px; border-radius: 50%; background: #28C840"></span></div></div>
+            <div style="position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 5px; padding: 5px; border-radius: 9px; background: rgba(255,255,255,0.18)"><span style="width: 18px; height: 18px; border-radius: 5px; background: #0A84FF"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #30D158"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #FF9F0A"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #8E8E93"></span><span style="width: 18px; height: 18px; border-radius: 5px; background: #FF2D55"></span></div>
+          </sc-if>
+          <sc-if value="{{s.isTask}}" hint-placeholder-val="{{ false }}">
+            <div style="position: absolute; left: 60px; top: 24px; width: 260px; height: 140px; border-radius: 6px; background: #2B2B2F; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.4)"><div style="height: 16px; background: #34343B; display: flex; align-items: center; justify-content: flex-end"><span style="width: 18px; height: 16px; display: flex; align-items: center; justify-content: center"><span style="width: 7px; height: 1.5px; background: #DDD"></span></span><span style="width: 18px; height: 16px; display: flex; align-items: center; justify-content: center"><span style="width: 6px; height: 6px; border: 1.5px solid #DDD; box-sizing: border-box"></span></span><span style="width: 18px; height: 16px; display: flex; align-items: center; justify-content: center; background: #C42B1C; color: #FFF; font-size: 9px">x</span></div></div>
+            <div style="position: absolute; left: 0; right: 0; bottom: 0; height: 24px; background: rgba(32,32,36,0.92); display: flex; align-items: center; justify-content: center; gap: 6px"><span style="width: 14px; height: 14px; border-radius: 3px; background: #4CC2FF"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #8E8E93"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #FFB900"></span><span style="width: 14px; height: 14px; border-radius: 3px; background: #0A84FF"></span><span style="position: absolute; right: 8px; width: 30px; height: 4px; border-radius: 2px; background: #CCC"></span></div>
+          </sc-if>
+          <sc-if value="{{s.isWeave}}" hint-placeholder-val="{{ true }}">
+            <svg aria-hidden="true" width="372" height="220" viewBox="0 0 372 220" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round"><path d="M-10 150 C 80 120, 140 190, 220 140 S 330 90, 390 110" stroke="#5B7CFA" stroke-width="2" stroke-opacity="0.8"></path><path d="M-10 165 C 70 140, 150 200, 230 155 S 330 110, 390 130" stroke="#D152A6" stroke-width="1.5" stroke-opacity="0.6"></path></svg>
+            <div style="position: absolute; left: 60px; top: 22px; width: 250px; height: 136px; border-radius: 7px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.45)"><div style="height: 2px; background: #5B7CFA"></div><div style="height: 15px; background: #21242C; display: flex; align-items: center; justify-content: flex-end; padding-right: 5px"><span style="display: flex; gap: 3px; padding: 2px 4px; border-radius: 999px; background: rgba(255,255,255,0.07)"><span style="width: 5px; height: 5px; border-radius: 50%; border: 1px solid #B4B9C6"></span><span style="width: 5px; height: 5px; border-radius: 50%; border: 1px solid #B4B9C6"></span><span style="width: 5px; height: 5px; border-radius: 50%; border: 1px solid #FF6B6F"></span></span></div></div>
+            <div style="position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); width: 92px; height: 16px; border-radius: 999px; background: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; gap: 4px; padding: 0 6px; box-sizing: border-box"><span style="width: 6px; height: 6px; border-radius: 50%; background: #D152A6"></span><span style="flex-grow: 1; height: 2px; background: #D152A6; border-radius: 1px"></span></div>
+            <div style="position: absolute; left: 8px; right: 8px; bottom: 7px; height: 22px; border-radius: 6px; background: #181A20; border: 1px solid #2E323D; display: flex; align-items: center; gap: 5px; padding: 0 5px; box-sizing: border-box"><span style="width: 14px; height: 14px; border-radius: 4px; background: #5B7CFA"></span><span style="flex-grow: 1"></span><span style="position: relative; display: flex; gap: 4px"><span style="width: 12px; height: 12px; border-radius: 3px; background: #4A6BE0"></span><span style="width: 12px; height: 12px; border-radius: 3px; background: #1FA3A3"></span><span style="width: 12px; height: 12px; border-radius: 3px; background: #B23D8C"></span><span style="width: 12px; height: 12px; border-radius: 3px; background: #C77F0A"></span><span style="position: absolute; left: 0; bottom: -4px; width: 12px; height: 2px; background: #5B7CFA"></span></span><span style="flex-grow: 1"></span><span style="width: 22px; height: 4px; border-radius: 2px; background: #9AA0AE"></span></div>
+          </sc-if>
+        </div>
+        <div style="display: flex; align-items: center; gap: 10px">
+          <span style="width: 18px; height: 18px; box-sizing: border-box; border-radius: 50%; border: 2px solid {{s.radioRing}}; display: flex; align-items: center; justify-content: center"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{s.radioDot}}"></span></span>
+          <span style="font-size: 19px; font-weight: 700">{{s.name}}</span>
+          <span style="margin-left: auto; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: {{s.tagColor}}; background: {{s.tagBg}}; padding: 4px 8px; border-radius: 999px">{{s.tag}}</span>
+        </div>
+        <ul style="margin: 0; padding: 0 0 0 18px; font-size: 13.5px; line-height: 1.7; color: #B4B9C6">
+          <sc-for list="{{s.points}}" as="p" hint-placeholder-count="3"><li>{{p}}</li></sc-for>
+        </ul>
+      </button>
+    </sc-for>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 56px; display: flex; justify-content: center; gap: 12px">
+    <a href="Welcome3.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 22px; border-radius: 11px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 15px Inter, sans-serif; text-decoration: none">Back</a>
+    <a href="Welcome5.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 28px; border-radius: 11px; background: #5B7CFA; color: #FFFFFF; font: 600 15px Inter, sans-serif; text-decoration: none">Continue with {{chosen}}</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const picked = (this.state && this.state.picked) || 'Weave';
+    const defs = [
+      { name: 'Bar and dock', tag: 'Familiar', wall: 'linear-gradient(160deg, #3B2A9A, #2A6C8A 60%, #A33C78)', points: ['A menu bar along the top, a dock below', 'Window buttons as coloured lights on the left', 'Glass that lets the wallpaper through'] },
+      { name: 'Taskbar', tag: 'Familiar', wall: 'linear-gradient(160deg, #10325A, #1C5A8A 55%, #3A7CC0)', points: ['Start, programs and windows along the bottom', 'Minimise, maximise and close on the right', 'Tray and clock in the bottom corner'] },
+      { name: 'Weave', tag: 'ThreadOS', wall: '#0D0F15', points: ['Opaque cloth, a coloured thread marks focus', 'The loom along the bottom, the shuttle above it', 'Fast on any machine: nothing is blurred'] }
+    ];
+    const styles = defs.map((d) => {
+      const on = d.name === picked;
+      const own = d.name === 'Weave';
+      return Object.assign({}, d, {
+        isBar: d.name === 'Bar and dock', isTask: d.name === 'Taskbar', isWeave: own,
+        checked: on ? 'true' : 'false',
+        border: on ? '2px solid #5B7CFA' : '2px solid #262A33',
+        cardBg: on ? '#1A1C23' : '#14161B',
+        shadow: on ? '0 20px 50px rgba(91,124,250,0.18)' : 'none',
+        radioRing: on ? '#5B7CFA' : '#4A4F5C', radioDot: on ? '#5B7CFA' : 'transparent',
+        tagColor: own ? '#FFFFFF' : '#9AA0AE', tagBg: own ? '#5B7CFA' : '#20232B',
+        pick: () => this.setState({ picked: d.name })
+      });
+    });
+    const cur = 3;
+    const steps = ['Language', 'Network', 'You', 'Style', 'Ready'].map((label, i) => ({
+      label,
+      line: i === 0 ? 'transparent' : (i <= cur ? '#5B7CFA' : '#2E323D'),
+      fill: i <= cur ? '#5B7CFA' : '#0D0F15',
+      ring: i <= cur ? '#5B7CFA' : '#4A4F5C',
+      fg: i === cur ? '#FFFFFF' : (i < cur ? '#B4B9C6' : '#6A7080'),
+      weight: i === cur ? 700 : 500
+    }));
+    return { styles, chosen: picked, steps };
+  }
+}
+</script>
+</body>
+</html>

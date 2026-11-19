@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings, appearance</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 640 C 300 540, 520 780, 820 580 S 1240 320, 1500 370" stroke="{{accent}}" stroke-opacity="0.6" stroke-width="3"></path>
+    <path d="M -40 700 C 260 620, 560 840, 860 630 S 1260 390, 1500 440" stroke="#2EC4C4" stroke-opacity="0.4" stroke-width="2"></path>
+  </svg>
+
+  <section aria-label="Settings window" style="position: absolute; left: 120px; top: 40px; width: 1200px; height: 760px; border-radius: 10px; overflow: hidden; background: #1A1C23; border: 1px solid #2E323D; box-shadow: 0 22px 56px rgba(0,0,0,0.5); display: flex; flex-direction: column">
+    <div style="height: 3px; background: {{accent}}"></div>
+    <div style="height: 38px; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 12px; background-color: #21242C; background-image: repeating-linear-gradient(0deg, rgba(255,255,255,0.022) 0px, rgba(255,255,255,0.022) 1px, transparent 1px, transparent 3px), repeating-linear-gradient(90deg, rgba(255,255,255,0.016) 0px, rgba(255,255,255,0.016) 1px, transparent 1px, transparent 3px); border-bottom: 1px solid #2B2F3A">
+      <div style="width: 18px; height: 18px; border-radius: 5px; background: #4B505E"></div>
+      <div style="font-size: 13px; font-weight: 700">Settings</div>
+      <div style="font-size: 13px; color: #8A90A0">Appearance</div>
+      <div style="flex-grow: 1"></div>
+      <div style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255,255,255,0.05)">
+        <button aria-label="Minimise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linecap="round"><path d="M6 12h12"></path></svg></button>
+        <button aria-label="Maximise" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: transparent; display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#B4B9C6" stroke-width="2.4" stroke-linejoin="round"><rect x="6" y="6" width="12" height="12" rx="2"></rect></svg></button>
+        <button aria-label="Close" style="width: 26px; height: 26px; border-radius: 50%; border: 0; background: rgba(229,72,77,0.16); display: flex; align-items: center; justify-content: center; padding: 0"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#FF6B6F" stroke-width="2.6" stroke-linecap="round"><path d="M7 7l10 10M17 7L7 17"></path></svg></button>
+      </div>
+    </div>
+
+    <div style="flex-grow: 1; display: flex; min-height: 0">
+      <nav aria-label="Settings sections" style="width: 260px; box-sizing: border-box; padding: 14px 10px; border-right: 1px solid #262A33; display: flex; flex-direction: column; gap: 2px; background: #17191F">
+        <label style="display: flex; align-items: center; gap: 8px; height: 34px; box-sizing: border-box; padding: 0 10px; margin-bottom: 10px; border-radius: 8px 8px 4px 4px; background: #121419; border-bottom: 2px dashed #3A3F4C">
+          <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8A90A0" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6"></circle><path d="M20 20l-4.5-4.5"></path></svg>
+          <input aria-label="Find a setting" placeholder="Find a setting" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; color: #ECEDF2; font: 400 13px Inter, sans-serif; outline: none">
+        </label>
+        <sc-for list="{{sections}}" as="s" hint-placeholder-count="12">
+          <a href="#" style="display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 8px; text-decoration: none; background: {{s.bg}}; color: {{s.fg}}; font-size: 13.5px; font-weight: {{s.weight}}; margin-top: {{s.gap}}">
+            <span style="width: 22px; height: 22px; border-radius: 6px; background: {{s.dye}}; display: flex; align-items: center; justify-content: center; color: #FFFFFF; font-size: 11px; font-weight: 700">{{s.glyph}}</span>
+            <span style="flex-grow: 1">{{s.name}}</span>
+            <span style="width: 6px; height: 6px; border-radius: 50%; background: {{s.knot}}"></span>
+          </a>
+        </sc-for>
+      </nav>
+
+      <main style="flex-grow: 1; overflow: hidden; padding: 28px 36px; display: flex; flex-direction: column; gap: 26px">
+        <div>
+          <h1 style="margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.01em">Appearance</h1>
+          <p style="margin: 6px 0 0; font-size: 13px; color: #9AA0AE">How the desktop and every program look. Changes show at once.</p>
+        </div>
+
+        <section aria-label="Theme" style="display: flex; flex-direction: column; gap: 12px">
+          <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Theme</h2>
+          <div role="radiogroup" aria-label="Theme" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+            <button role="radio" aria-checked="false" style="display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; border: 1px solid #2E323D; background: #1F2229; color: #ECEDF2; font: 500 13px Inter, sans-serif; text-align: left">
+              <div style="height: 110px; border-radius: 8px; background: #E6E1D6; position: relative; overflow: hidden">
+                <div style="position: absolute; left: 16px; top: 14px; right: 40px; bottom: 26px; border-radius: 6px; background: #FAF8F4; border: 1px solid #D3CCBE; overflow: hidden"><div style="height: 3px; background: #3F5EE8"></div></div>
+                <div style="position: absolute; left: 30px; right: 30px; bottom: 6px; height: 12px; border-radius: 4px; background: #FAF8F4; border: 1px solid #D3CCBE"></div>
+              </div>
+              <span>Linen</span>
+            </button>
+            <button role="radio" aria-checked="true" style="display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; border: 2px solid {{accent}}; background: #1F2229; color: #ECEDF2; font: 600 13px Inter, sans-serif; text-align: left">
+              <div style="height: 110px; border-radius: 8px; background: #0D0F15; position: relative; overflow: hidden">
+                <div style="position: absolute; left: 16px; top: 14px; right: 40px; bottom: 26px; border-radius: 6px; background: #1A1C23; border: 1px solid #2E323D; overflow: hidden"><div style="height: 3px; background: {{accent}}"></div></div>
+                <div style="position: absolute; left: 30px; right: 30px; bottom: 6px; height: 12px; border-radius: 4px; background: #181A20; border: 1px solid #2E323D"></div>
+              </div>
+              <span style="display: flex; align-items: center; gap: 8px"><span style="width: 8px; height: 8px; border-radius: 50%; background: {{accent}}"></span>Night</span>
+            </button>
+            <button role="radio" aria-checked="false" style="display: flex; flex-direction: column; gap: 10px; padding: 10px; border-radius: 12px; border: 1px solid #2E323D; background: #1F2229; color: #ECEDF2; font: 500 13px Inter, sans-serif; text-align: left">
+              <div style="height: 110px; border-radius: 8px; overflow: hidden; display: flex">
+                <div style="flex: 1; background: #E6E1D6"></div><div style="flex: 1; background: #0D0F15"></div>
+              </div>
+              <span>Follow the sun <span style="color: #9AA0AE">· Linen by day, Night after dark</span></span>
+            </button>
+          </div>
+        </section>
+
+        <section aria-label="Thread colour" style="display: flex; flex-direction: column; gap: 12px">
+          <h2 style="margin: 0; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #9AA0AE">Thread colour</h2>
+          <div style="display: flex; align-items: center; gap: 16px">
+            <sc-for list="{{dyes}}" as="d" hint-placeholder-count="6">
+              <button aria-label="{{d.name}}" onClick="{{d.pick}}" style="display: flex; flex-direction: column; align-items: center; gap: 6px; border: 0; background: transparent; padding: 0; color: {{d.labelColor}}; font: 500 12px Inter, sans-serif">
+                <span style="width: 34px; height: 34px; box-sizing: border-box; border-radius: 50%; border: 3px solid {{d.ring}}; padding: 3px"><span style="display: block; width: 100%; height: 100%; border-radius: 50%; background: {{d.hex}}"></span></span>
+                {{d.name}}
+              </button>
+            </sc-for>
+            <div style="margin-left: 12px; font-size: 13px; color: #9AA0AE; max-width: 300px; line-height: 1.5">The one colour for focus: the selvedge, the loom, the knot by what you chose.</div>
+          </div>
+        </section>
+
+        <section aria-label="Desktop" style="display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px">
+          <div style="background: #1F2229; border: 1px solid #2E323D; border-radius: 12px; padding: 4px 16px">
+            <div style="display: flex; align-items: center; justify-content: space-between; height: 52px; border-bottom: 1px dashed #2E323D">
+              <div><div style="font-size: 13.5px; font-weight: 600">Grain</div><div style="font-size: 12px; color: #9AA0AE">The weave on title bars and the loom</div></div>
+              <div style="display: flex; align-items: center; gap: 10px; width: 180px">
+                <div style="position: relative; flex-grow: 1; height: 10px"><div style="position: absolute; left: 0; right: 0; top: 4px; border-top: 2px dashed #3A3F4C"></div><div style="position: absolute; left: 0; top: 3px; width: 45%; height: 4px; border-radius: 2px; background: {{accent}}"></div><div style="position: absolute; left: 45%; top: -3px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: #FFFFFF"></div></div>
+                <span style="font-size: 12px; color: #9AA0AE; width: 34px; text-align: right">2 %</span>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; height: 52px; border-bottom: 1px dashed #2E323D">
+              <div><div style="font-size: 13.5px; font-weight: 600">Loom size</div><div style="font-size: 12px; color: #9AA0AE">The bar along the bottom</div></div>
+              <div role="group" aria-label="Loom size" style="display: inline-flex; padding: 3px; border-radius: 9px; background: #17191F; border: 1px solid #2E323D">
+                <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: transparent; color: #B4B9C6; font: 500 12.5px Inter, sans-serif">Small</button>
+                <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: #2A2D36; color: #FFFFFF; font: 600 12.5px Inter, sans-serif; box-shadow: inset 0 -2px 0 {{accent}}">Medium</button>
+                <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: transparent; color: #B4B9C6; font: 500 12.5px Inter, sans-serif">Large</button>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; height: 52px">
+              <div><div style="font-size: 13.5px; font-weight: 600">Window buttons</div><div style="font-size: 12px; color: #9AA0AE">Where the spool sits on a title bar</div></div>
+              <div role="group" aria-label="Window buttons" style="display: inline-flex; padding: 3px; border-radius: 9px; background: #17191F; border: 1px solid #2E323D">
+                <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: transparent; color: #B4B9C6; font: 500 12.5px Inter, sans-serif">Left</button>
+                <button style="height: 26px; padding: 0 12px; border-radius: 6px; border: 0; background: #2A2D36; color: #FFFFFF; font: 600 12.5px Inter, sans-serif; box-shadow: inset 0 -2px 0 {{accent}}">Right</button>
+              </div>
+            </div>
+          </div>
+          <div style="background: #1F2229; border: 1px solid #2E323D; border-radius: 12px; padding: 4px 16px">
+            <div style="display: flex; align-items: center; justify-content: space-between; height: 52px; border-bottom: 1px dashed #2E323D">
+              <div><div style="font-size: 13.5px; font-weight: 600">Wallpaper</div><div style="font-size: 12px; color: #9AA0AE">Warp, drawn from the thread colour</div></div>
+              <div style="display: flex; gap: 6px">
+                <div style="width: 54px; height: 34px; border-radius: 6px; background: #0D0F15; border: 2px solid {{accent}}; box-sizing: border-box; overflow: hidden"><svg aria-hidden="true" width="50" height="30" viewBox="0 0 50 30" fill="none"><path d="M0 22 C 12 12, 20 28, 32 16 S 46 8, 50 10" stroke="{{accent}}" stroke-width="2"></path><path d="M0 26 C 12 18, 22 30, 34 20 S 46 14, 50 16" stroke="#2EC4C4" stroke-width="1.2"></path></svg></div>
+                <div style="width: 54px; height: 34px; border-radius: 6px; background: linear-gradient(135deg, #3A2A8F, #155A7A 60%, #8A2F6A); border: 1px solid #2E323D; box-sizing: border-box"></div>
+                <div style="width: 54px; height: 34px; border-radius: 6px; border: 1px dashed #4A4F5C; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-size: 11px; color: #9AA0AE">Picture</div>
+              </div>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; height: 52px; border-bottom: 1px dashed #2E323D">
+              <div><div style="font-size: 13.5px; font-weight: 600">Larger text</div><div style="font-size: 12px; color: #9AA0AE">15 px instead of 13 everywhere</div></div>
+              <span style="width: 40px; height: 22px; border-radius: 999px; background: #2A2D36; border: 1px dashed #4A4F5C; display: flex; align-items: center; padding: 0 3px; box-sizing: border-box"><span style="width: 14px; height: 14px; border-radius: 50%; background: #8A90A0"></span></span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; height: 52px">
+              <div><div style="font-size: 13.5px; font-weight: 600">Less motion</div><div style="font-size: 12px; color: #9AA0AE">Windows appear without unrolling</div></div>
+              <span style="width: 40px; height: 22px; border-radius: 999px; background: {{accent}}; display: flex; align-items: center; justify-content: flex-end; padding: 0 3px; box-sizing: border-box"><span style="width: 16px; height: 16px; border-radius: 50%; background: #FFFFFF"></span></span>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dyeList = [
+      ['Indigo', '#5B7CFA'], ['Woad', '#2EC4C4'], ['Weld', '#46C27A'],
+      ['Saffron', '#F5A524'], ['Madder', '#E5484D'], ['Cochineal', '#D152A6']
+    ];
+    const picked = (this.state && this.state.picked) || 'Indigo';
+    const accent = dyeList.find((d) => d[0] === picked)[1];
+    const dyes = dyeList.map((d) => ({
+      name: d[0], hex: d[1],
+      ring: d[0] === picked ? '#FFFFFF' : 'transparent',
+      labelColor: d[0] === picked ? '#FFFFFF' : '#9AA0AE',
+      pick: () => this.setState({ picked: d[0] })
+    }));
+    const list = [
+      ['Network', 'N', '#1FA3A3', 0], ['Bluetooth', 'B', '#3B5BDB', 0], ['Sound', 'S', '#B23D8C', 0],
+      ['Display', 'D', '#2F9A5C', 0], ['Appearance', 'A', '#C77F0A', 0], ['Loom and desktops', 'L', '#4B505E', 0],
+      ['Notifications', 'T', '#C9302C', 0], ['Keyboard', 'K', '#4B505E', 12], ['Language and region', 'R', '#2F9A5C', 0],
+      ['Accounts', 'U', '#6A4FD6', 12], ['Disks', 'D', '#4B505E', 0], ['Updates', 'U', '#1FA3A3', 0], ['About ThreadOS', 'i', '#4B505E', 0]
+    ];
+    const sections = list.map((s) => {
+      const on = s[0] === 'Appearance';
+      const upd = s[0] === 'Updates';
+      return {
+        name: s[0], glyph: s[1], dye: s[2], gap: s[3] + 'px',
+        bg: on ? 'rgba(91,124,250,0.18)' : 'transparent',
+        fg: on ? '#FFFFFF' : '#C9CDD8',
+        weight: on ? 600 : 400,
+        knot: on ? accent : (upd ? '#F5A524' : 'transparent')
+      };
+    });
+    return { accent, dyes, sections };
+  }
+}
+</script>
+</body>
+</html>

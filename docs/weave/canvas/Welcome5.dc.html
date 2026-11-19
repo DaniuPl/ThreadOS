@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Welcome: ready</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2; display: flex; flex-direction: column; align-items: center; padding-top: 44px; box-sizing: border-box">
+  <!-- the threads gather towards the middle: the desktop is about to be woven -->
+  <svg aria-hidden="true" width="1440" height="900" viewBox="0 0 1440 900" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -40 760 C 300 700, 560 860, 720 800 S 1180 640, 1500 660" stroke="#5B7CFA" stroke-opacity="0.7" stroke-width="3"></path>
+    <path d="M -40 820 C 280 760, 560 840, 720 800 S 1200 720, 1500 740" stroke="#2EC4C4" stroke-opacity="0.45" stroke-width="2"></path>
+    <path d="M -40 700 C 320 660, 560 780, 720 800 S 1160 580, 1500 590" stroke="#D152A6" stroke-opacity="0.4" stroke-width="2"></path>
+    <path d="M -40 870 C 300 840, 580 820, 720 800 S 1220 800, 1500 820" stroke="#F5A524" stroke-opacity="0.35" stroke-width="1.5"></path>
+    <path d="M -40 640 C 340 620, 560 740, 720 800 S 1140 520, 1500 520" stroke="#46C27A" stroke-opacity="0.3" stroke-width="1.5"></path>
+    <circle cx="720" cy="800" r="7" fill="#FFFFFF"></circle>
+  </svg>
+
+  <nav aria-label="Setup steps" style="position: relative; display: flex; width: 640px">
+    <sc-for list="{{steps}}" as="st" hint-placeholder-count="5">
+      <div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px">
+        <div style="position: absolute; top: 7px; right: 50%; width: 100%; height: 2px; background: {{st.line}}"></div>
+        <span style="position: relative; width: 16px; height: 16px; box-sizing: border-box; border-radius: 50%; background: {{st.fill}}; border: 2px solid {{st.ring}}"></span>
+        <span style="font-size: 12px; color: {{st.fg}}; font-weight: {{st.weight}}">{{st.label}}</span>
+      </div>
+    </sc-for>
+  </nav>
+
+  <div style="position: relative; margin-top: 48px; display: flex; flex-direction: column; align-items: center; gap: 12px; text-align: center">
+    <span style="width: 76px; height: 76px; box-sizing: border-box; border-radius: 50%; border: 3px solid #5B7CFA; padding: 4px"><span style="display: flex; width: 100%; height: 100%; border-radius: 50%; background: #5B7CFA; align-items: center; justify-content: center; font-size: 26px; font-weight: 800">A</span></span>
+    <h1 style="margin: 0; font-size: 44px; font-weight: 800; letter-spacing: -0.03em">All set, Alex</h1>
+    <p style="margin: 0; font-size: 16px; color: #B4B9C6">Here is what you chose. Everything can be changed later in Settings.</p>
+  </div>
+
+  <div style="position: relative; margin-top: 30px; display: grid; grid-template-columns: 460px 380px; gap: 32px">
+    <section aria-label="Your choices" style="position: relative; padding: 18px 22px 18px 44px; border-radius: 16px; background: #14161B; border: 1px solid #262A33">
+      <div style="position: absolute; left: 24px; top: 30px; bottom: 30px; width: 2px; background: #5B7CFA"></div>
+      <div style="display: flex; flex-direction: column; gap: 4px">
+        <sc-for list="{{summary}}" as="s" hint-placeholder-count="5">
+          <div style="position: relative; display: flex; align-items: center; gap: 12px; height: 48px">
+            <span style="position: absolute; left: -26px; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; background: #5B7CFA; border: 2px solid #14161B"></span>
+            <span style="flex-grow: 1; min-width: 0"><span style="display: block; font-size: 12px; color: #8A90A0">{{s.what}}</span><span style="display: block; font-size: 14.5px; font-weight: 600">{{s.value}}</span></span>
+            <a href="{{s.href}}" style="font-size: 13px; text-decoration: none">Change</a>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <section aria-label="Good to know" style="display: flex; flex-direction: column; gap: 12px">
+      <div style="padding: 16px 18px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; gap: 12px">
+        <span style="flex-shrink: 0; display: flex; gap: 4px; margin-top: 4px"><span style="width: 9px; height: 9px; border-radius: 50%; background: #46C27A"></span><span style="width: 9px; height: 9px; border-radius: 50%; background: #F5A524"></span></span>
+        <span style="font-size: 13.5px; line-height: 1.5; color: #C9CDD8"><strong style="color: #ECEDF2">Camera and microphone always show.</strong> While either is on, the shuttle above the loom says so. No program can hide it.</span>
+      </div>
+      <div style="padding: 16px 18px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; gap: 12px">
+        <svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#46C27A" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px"><path d="M12 3l7 3v6c0 4-3 7-7 9-4-2-7-5-7-9V6z"></path><path d="M9 12l2 2 4-4"></path></svg>
+        <span style="font-size: 13.5px; line-height: 1.5; color: #C9CDD8"><strong style="color: #ECEDF2">Updates are signed.</strong> ThreadOS checks the signature before it installs anything.</span>
+      </div>
+      <div style="padding: 16px 18px; border-radius: 14px; background: #14161B; border: 1px solid #262A33; display: flex; gap: 12px">
+        <span style="flex-shrink: 0; width: 18px; height: 18px; border-radius: 5px; background: #5B7CFA; margin-top: 1px"></span>
+        <span style="font-size: 13.5px; line-height: 1.5; color: #C9CDD8"><strong style="color: #ECEDF2">Everything starts from the spool.</strong> The button at the left of the loom, or the Super key.</span>
+      </div>
+    </section>
+  </div>
+
+  <div style="position: absolute; left: 0; right: 0; bottom: 56px; display: flex; justify-content: center; gap: 12px">
+    <a href="Styles.dc.html" style="display: flex; align-items: center; height: 44px; padding: 0 22px; border-radius: 11px; border: 1px solid #2E323D; background: #20232B; color: #ECEDF2; font: 500 15px Inter, sans-serif; text-decoration: none">Back</a>
+    <a href="Main.dc.html" style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 30px; border-radius: 11px; background: #5B7CFA; color: #FFFFFF; font: 700 15px Inter, sans-serif; text-decoration: none; box-shadow: 0 12px 30px rgba(91,124,250,0.35)">Start ThreadOS</a>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = 4;
+    const steps = ['Language', 'Network', 'You', 'Style', 'Ready'].map((label, i) => ({
+      label,
+      line: i === 0 ? 'transparent' : (i <= cur ? '#5B7CFA' : '#2E323D'),
+      fill: i <= cur ? '#5B7CFA' : '#0D0F15',
+      ring: i <= cur ? '#5B7CFA' : '#4A4F5C',
+      fg: i === cur ? '#FFFFFF' : (i < cur ? '#B4B9C6' : '#6A7080'),
+      weight: i === cur ? 700 : 500
+    }));
+    const summary = [
+      { what: 'Language and keyboard', value: "English · Polish (programmer's)", href: 'Welcome1.dc.html' },
+      { what: 'Network', value: 'Home-5G', href: 'Welcome2.dc.html' },
+      { what: 'Profile', value: 'Alex (alex), with a password', href: 'Welcome3.dc.html' },
+      { what: 'Thread and light', value: 'Indigo · Night', href: 'Welcome3.dc.html' },
+      { what: 'Desktop style', value: 'Weave', href: 'Styles.dc.html' }
+    ];
+    return { steps, summary };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone welcome: language</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#8FA5FF}a:hover{color:#B7C5FF}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: 844px; overflow: hidden; background: #0D0F15; font-family: Inter, system-ui, sans-serif; color: #ECEDF2">
+  <svg aria-hidden="true" width="390" height="844" viewBox="0 0 390 844" style="position: absolute; left: 0; top: 0" fill="none" stroke-linecap="round">
+    <path d="M -20 560 C 80 500, 160 620, 240 560 S 360 480, 420 520" stroke="#5B7CFA" stroke-opacity="0.5" stroke-width="3"></path>
+    <path d="M -20 590 C 90 540, 170 650, 250 590 S 360 520, 420 550" stroke="#D152A6" stroke-opacity="0.3" stroke-width="2"></path>
+  </svg>
+  <div style="position: relative; height: 44px; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 600">12:36</div>
+  <nav aria-label="Step 1 of 5" style="position: relative; display: flex; justify-content: center; align-items: center; gap: 0; margin-top: 4px">
+    <sc-for list="{{knots}}" as="k" hint-placeholder-count="5">
+      <span style="display: flex; align-items: center"><span style="width: {{k.gapW}}; height: 2px; background: {{k.line}}"></span><span style="width: 10px; height: 10px; box-sizing: border-box; border-radius: 50%; background: {{k.fill}}; border: 2px solid {{k.ring}}"></span></span>
+    </sc-for>
+  </nav>
+
+  <div style="position: relative; padding: 70px 28px 0; display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center">
+    <div style="width: 76px; height: 76px; border-radius: 22px; background: #5B7CFA; display: flex; align-items: center; justify-content: center; font-size: 34px; font-weight: 800; box-shadow: 0 18px 44px rgba(91,124,250,0.35)">T</div>
+    <h1 style="margin: 0; font-size: 32px; line-height: 1.1; font-weight: 800; letter-spacing: -0.03em">Welcome to ThreadOS</h1>
+    <p style="margin: 0; font-size: 15px; color: #B4B9C6; line-height: 1.5">Choose a language. You can change it later.</p>
+  </div>
+
+  <div role="radiogroup" aria-label="Language" style="position: relative; margin: 34px 20px 0; display: flex; flex-direction: column; gap: 10px">
+    <button role="radio" aria-checked="true" style="display: flex; align-items: center; gap: 14px; height: 64px; padding: 0 18px; border-radius: 16px; border: 2px solid #5B7CFA; background: #1A1C23; color: #ECEDF2; text-align: left; font-family: Inter, sans-serif">
+      <span style="width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 2px solid #5B7CFA; display: flex; align-items: center; justify-content: center"><span style="width: 9px; height: 9px; border-radius: 50%; background: #5B7CFA"></span></span>
+      <span><span style="display: block; font-size: 17px; font-weight: 700">English</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">Settings, Files, Shut down</span></span>
+    </button>
+    <button role="radio" aria-checked="false" style="display: flex; align-items: center; gap: 14px; height: 64px; padding: 0 18px; border-radius: 16px; border: 2px solid #262A33; background: #14161B; color: #ECEDF2; text-align: left; font-family: Inter, sans-serif">
+      <span style="width: 20px; height: 20px; box-sizing: border-box; border-radius: 50%; border: 2px solid #4A4F5C"></span>
+      <span><span style="display: block; font-size: 17px; font-weight: 700">Polski</span><span style="display: block; font-size: 12.5px; color: #9AA0AE">Ustawienia, Pliki, Wyłącz</span></span>
+    </button>
+  </div>
+
+  <div style="position: absolute; left: 20px; right: 20px; bottom: 34px">
+    <a href="M2.dc.html" style="display: flex; align-items: center; justify-content: center; height: 54px; border-radius: 16px; background: #5B7CFA; color: #FFFFFF; font: 700 16px Inter, sans-serif; text-decoration: none">Continue</a>
+  </div>
+  <!-- the thread: the phone's navigation, every running program a knot -->
+  <div aria-label="The thread" style="position: absolute; left: 16px; right: 16px; bottom: 6px; height: 22px">
+    <div style="position: absolute; left: 0; right: 0; top: 10px; height: 2px; background: #3A3F4C"></div>
+    <div style="position: absolute; left: 50%; top: 9px; width: 56px; margin-left: -28px; height: 4px; border-radius: 2px; background: #5B7CFA"></div>
+    <div style="position: absolute; left: 0; right: 0; top: 0; height: 22px; display: flex; justify-content: center; align-items: center; gap: 16px"><span style="width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; background: #5B7CFA; border: 2px solid #FFFFFF"></span></div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const cur = 0;
+    const knots = [0, 1, 2, 3, 4].map((i) => ({
+      gapW: i === 0 ? '0px' : '28px',
+      line: i <= cur ? '#5B7CFA' : '#2E323D',
+      fill: i <= cur ? '#5B7CFA' : '#0D0F15',
+      ring: i <= cur ? '#5B7CFA' : '#4A4F5C'
+    }));
+    return { knots };
+  }
+}
+</script>
+</body>
+</html>
