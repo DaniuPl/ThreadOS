@@ -12,6 +12,14 @@ const struct ttf_font *font_sans(void);
 const struct ttf_font *font_bold(void);
 const struct ttf_font *font_mono(void);
 
+/* Inter, regular and bold: Weave's letters. While fonts_use_inter(1)
+   is in force the desktop's sans and bold are these - kernel/uitext.c
+   asks fonts_inter() once for each text it draws or measures. */
+const struct ttf_font *font_inter(void);
+const struct ttf_font *font_inter_bold(void);
+void fonts_use_inter(int on);
+int fonts_inter(void);
+
 /* The 'font' shell command: what the fonts are, and glyphs drawn as
    numbers - which is how the test compares them with FreeType. */
 void fonts_command(const char *arg);

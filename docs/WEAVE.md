@@ -8,8 +8,9 @@ own, and it takes its ideas from the name: a thread, cloth, a loom.
 This document is the design. What is built, and how far, is in
 [protonui-plan.md](protonui-plan.md): the look programs read with the
 dyes, the grain, stitches, knots and threads as drawing operations, and
-the Weave style itself (`layout weave`: the loom, the selvedge, cloth
-for glass, the warp).
+the Weave style itself (`layout weave`: the loom, loom view, the
+selvedge and the window's bar, cloth for glass, the warp, the icons and
+Inter).
 The mock-ups are in `docs/weave/canvas/` (one `.dc.html` file per
 screen, laid out by `canvas.json`), and on the design canvas they were
 drawn on: https://claude.ai/artifact/AG3KVaL3nxBS3a3zosmn3B

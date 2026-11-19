@@ -346,17 +346,86 @@
     { 4, 192, 23, 32, 128, { -28, 778, 181, 689, 389, 933, 597, 700, 875, 433, 1042, 489 } }, \
     { 2,   0,  0, 24,  82, { -28, 844, 208, 800, 417, 978, 625, 756, 889, 522, 1042, 567 } } }
 
+/* Weave's icons (kernel/weave.c, from docs/weave/canvas/Icon.dc.html):
+   corners a quarter of the tile and a bit (percent), the grain - a dark
+   warp every third column at WEAVE_WARP_INK, a light weft every third
+   row from the bottom at WEAVE_WEFT_INK over it - a dark last row at
+   WEAVE_EDGE_INK, and the thread along the foot: white at
+   WEAVE_TINT_A, or WEAVE_GREY_TINT at WEAVE_GREY_TINT_A on the two
+   grey dyes. Inks of 255. */
+#define WEAVE_ICON_R       26
+#define WEAVE_WARP_INK     15
+#define WEAVE_WEFT_INK     18
+#define WEAVE_EDGE_INK     46
+#define WEAVE_TINT_A       195
+#define WEAVE_GREY_TINT    0x9AA0AE
+#define WEAVE_GREY_TINT_A  217
+#define WEAVE_LETTER_DYE   0x4B505E
+
 /* Weave's sizes */
 #define SELVEDGE_H         3       /* the thread along the window in front */
-#define LOOM_H             52      /* the loom along the bottom ... */
-#define LOOM_GAP           10      /* ... this far from the edges */
-#define LOOM_R             12
-#define LOOM_SLOT          44      /* one program on it */
-#define LOOM_ICON          32
+/* The loom along the bottom (docs/weave/canvas/Main.dc.html), LOOM_SIDE
+   from the screen's sides and LOOM_GAP from its foot, a pixel's line
+   round it. Inside, LOOM_PAD from its ends and LOOM_SPACE apart: the
+   spool, the field that finds anything (on a screen too narrow for it,
+   a button of LOOM_FIND_H square), the programs - icons LOOM_ICON
+   across, LOOM_ICON_GAP apart, LOOM_ICON_Y from the loom's top, smaller
+   where they would not fit, on a thread LOOM_LINE_Y down - the
+   desktops' knots, the tray (network, sound, the battery: pictures
+   LOOM_GLYPH across, LOOM_TRAY_GAP apart) and, behind a stitch, the
+   clock */
+#define LOOM_H             58
+#define LOOM_SIDE          16
+#define LOOM_GAP           14
+#define LOOM_R             14
+#define LOOM_PAD           10
+#define LOOM_SPACE         14
+#define LOOM_SPOOL         40
+#define LOOM_FIND_W        220
+#define LOOM_FIND_H        36
+#define LOOM_ICON          38
+#define LOOM_ICON_GAP      10
+#define LOOM_ICON_MIN      24
+#define LOOM_ICON_Y        5
+#define LOOM_LINE_Y        49
 #define LOOM_THREAD_RUN    14      /* the thread under a program that runs */
 #define LOOM_THREAD_FOCUS  30      /* ... and under the one in front */
 #define LOOM_KNOT_D        10      /* a desktop's knot */
-#define CAPSULE_BTN        16      /* a window button in the capsule */
+#define LOOM_KNOT_GAP      7
+#define LOOM_GLYPH         18
+#define LOOM_TRAY_GAP      12
+#define LOOM_BATT_W        54      /* the battery and its percentage */
+#define LOOM_CLOCK_W       84      /* the stitch, the time over the date */
+#define LOOM_CLOCK_PX      15
+#define LOOM_DATE_PX       11
+#define LOOM_FIND_BG       0x121419   /* Night's field */
+#define LOOM_FIND_LINE     0x3A3F4C   /* the stitch under it */
+#define LOOM_TRAY_INK      0xC9CDD8
+#define LOOM_KNOT_EMPTY    0x3A3F4C   /* a desktop with nothing on it */
+#define LOOM_KNOT_USED     0x8A90A0   /* ... with windows */
+/* A window in Weave (docs/weave/canvas/Main.dc.html): the selvedge,
+   then a bar of its own height, the window's corners rounder than the
+   other styles'. In the bar from the left, WEAVE_BAR_LEFT in: the
+   program's icon, WEAVE_TITLE_GAP, its name in the bold and what the
+   title says after it; at the right, WEAVE_CAP_RIGHT from the edge, the
+   capsule - WEAVE_CAP_PAD round three round buttons WEAVE_BTN across,
+   WEAVE_BTN_GAP apart: minimise, maximise, close */
+#define WEAVE_BAR_H        38
+#define WEAVE_TITLE_H      41      /* SELVEDGE_H + WEAVE_BAR_H */
+#define WEAVE_WIN_R        10
+#define WEAVE_BAR_LEFT     12
+#define WEAVE_TITLE_ICON   18
+#define WEAVE_TITLE_GAP    10
+#define WEAVE_TITLE_PX     13
+#define WEAVE_CAP_RIGHT    8
+#define WEAVE_CAP_PAD      3
+#define WEAVE_BTN          26
+#define WEAVE_BTN_GAP      2
+#define WEAVE_BTN_INK      0xB4B9C6   /* the buttons' signs, Night */
+#define WEAVE_BTN_DIM      0x5F6573   /* ... on a window without focus */
+#define WEAVE_CLOSE_INK    0xFF6B6F   /* close's, on its madder ground */
+#define WEAVE_SHADOW_S     26      /* the shadow of the window in front ... */
+#define WEAVE_SHADOW_DY    12      /* ... and how far it falls */
 
 /* --- the programs' own colours ----------------------------------------------
  * What a program draws its window in (desktop_ui_look): its background

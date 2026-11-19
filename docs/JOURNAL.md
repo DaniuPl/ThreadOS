@@ -11185,3 +11185,50 @@ works and is checked by `make test`.
       thread under the program in front, a knot taking the screen to an
       empty desktop, the style and colours pulook hears, and the Mac
       style back with the warp gone.
+- [x] **Weave as its design draws it: icons, Inter, the window, the loom,
+      loom view** (kernel/weave.c, kernel/include/weave.h,
+      scripts/mkweaveicons.py, kernel/desktop.c, kernel/include/look.h,
+      kernel/fonts.c, kernel/uitext.c, kernel/include/fonts.h,
+      scripts/mkfonts.py, fonts/inter.ttf, fonts/interb.ttf,
+      fonts/LICENSE-Inter.txt, scripts/mknotices.py, third_party/README.md,
+      Makefile, scripts/tests/t_weave.py, scripts/tests/t_ttf.py)
+      Stage 3 had Weave's colours and cloth but not its shapes: next to
+      the design's own boards (docs/weave/canvas/Main.dc.html,
+      Spool.dc.html) the desktop still had the old icons, DejaVu, a
+      title bar of 22 and the loom of a taskbar. This pass draws it as
+      the boards do. The icons are the design's: Icon.dc.html keeps them
+      as SVG path data on a grid of 48, scripts/mkweaveicons.py reads
+      that table at build time - arcs and curves flattened, a filled
+      shape only if it is a dot - and kernel/weave.c lays each on a tile
+      of its dye with the icon's grain, its edge and its thread, and
+      strokes the mark by distance, round at the ends and joins, each
+      pixel coloured once. Weave's letters are Inter 4.1 (SIL Open Font
+      Licence), regular and bold, cut by scripts/mkfonts.py like DejaVu
+      and switched in for the sans and the bold while the desktop is in
+      Weave - which family a text is drawn in is decided once per text,
+      and the glyph cache keeps the two apart. A window has the selvedge
+      above a bar of 38 (the window keeps its content's size and grows by
+      the difference when the style changes), the program's icon, its
+      name in the bold and what the title says after it a shade quieter,
+      and the capsule of three round buttons, close on its madder ground.
+      The loom is the design's: 16 from the sides and 14 from the foot,
+      the spool, the field that finds anything (on a narrow screen a
+      button, and the icons smaller), one icon a program - a window
+      that program started is its thread under it, the long one in the
+      thread colour under the program in front, and a click on it brings
+      the window up - the knots, the network and the sound (and a
+      battery when there is one), and behind a stitch the clock with the
+      short date and the count of notes waiting. And the spool opens loom
+      view, Spool.dc.html: the windows of this desktop as cards, their
+      contents shrunk into them; the field; the programs on four threads
+      of the dyes by what they are for; the person and lock, restart and
+      shut down; the keys walk the threads and Enter starts. Inter's
+      glyphs are held to FreeType in t_ttf like DejaVu's. t_weave (grown):
+      the Files icon's dye and grain to the pixel and its stroke, both
+      against the design's table; the bar's height and cloth; the title
+      read in Inter's bold, which DejaVu does not read; close's madder
+      against minimise; where the selvedge was on a window without
+      focus, its own colour; loom view's ground and its four threads in
+      order; the arrows and Enter starting Term, which then has the long
+      thread on the loom; Esc closing it. The other styles are drawn as
+      before - every Mac and Windows group passes unchanged.

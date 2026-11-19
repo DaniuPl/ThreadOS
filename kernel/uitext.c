@@ -105,17 +105,39 @@ static const struct cached *glyph_of(const struct ttf_font *f, int font,
     return glyph_of(f, font, px, g);
 }
 
+/* Inter's glyphs are kept apart from DejaVu's under the same name: the
+   cache's number for a font carries this bit when it is Inter's */
+#define KEY_INTER 8
+
 /* The font behind a name. Bold falls back to the plain sans, and that
    to nothing - the 8x8 letters - so a missing file costs looks, never
-   text. */
-static const struct ttf_font *font_of(int font)
+   text. Under Weave the sans and the bold are Inter's, where the initrd
+   has them; 'key', when asked for, is the number the cache keeps the
+   glyphs under. Which family is decided once here, for the whole text,
+   so that a switch of style in the middle of a line cannot mix them. */
+static const struct ttf_font *font_of_k(int font, int *key)
 {
     const struct ttf_font *f = (const struct ttf_font *)0;
-    if (font == UI_BOLD)
+    int k = font;
+    if (font != UI_MONO && fonts_inter()) {
+        f = font == UI_BOLD ? font_inter_bold() : font_inter();
+        if (!f)
+            f = font_inter();
+        if (f)
+            k |= KEY_INTER;
+    }
+    if (!f && font == UI_BOLD)
         f = font_bold();
-    else if (font == UI_MONO)
+    else if (!f && font == UI_MONO)
         f = font_mono();
+    if (key)
+        *key = k;
     return f ? f : font_sans();
+}
+
+static const struct ttf_font *font_of(int font)
+{
+    return font_of_k(font, (int *)0);
 }
 
 /* --- UTF-8 ----------------------------------------------------------- */
@@ -161,7 +183,7 @@ static uint32_t next_char(const char **p)
 
 int ui_ascent(void)
 {
-    const struct ttf_font *f = font_sans();
+    const struct ttf_font *f = font_of(UI_SANS);
     if (!f)
         return 8;
     int32_t a;
@@ -171,7 +193,7 @@ int ui_ascent(void)
 
 int ui_descent(void)
 {
-    const struct ttf_font *f = font_sans();
+    const struct ttf_font *f = font_of(UI_SANS);
     if (!f)
         return 0;
     int32_t d;
@@ -179,8 +201,8 @@ int ui_descent(void)
     return (-d + 63) >> 6;
 }
 
-/* Capital letters are about 0.73 of the em in these fonts, the bold as
-   much as the plain: the baseline goes where they come out centred.
+/* Capital letters are about 0.73 of the em in these fonts - DejaVu's
+   and Inter's alike - the bold as much as the plain: the baseline goes where they come out centred.
    Worked out from the em rather than measured from a glyph, so it
    cannot change with the text. */
 int ui_font_baseline_in(int px, int top, int height)
@@ -225,7 +247,8 @@ int ui_text_width(const char *s)
 static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
                      int x, int baseline, const char *s, uint32_t rgb)
 {
-    const struct ttf_font *f = font_of(font);
+    int key;
+    const struct ttf_font *f = font_of_k(font, &key);
     if (!f) {
         int n = 0;
         while (s[n])
@@ -258,7 +281,7 @@ static int draw_text(int cur, const struct gfx_surface *t, int font, int px,
     irqflags_t fl = spin_lock_irq(&lock);
     while (*s) {
         uint32_t c = next_char(&s);
-        const struct cached *g = glyph_of(f, font, ppx, ttf_glyph(f, c));
+        const struct cached *g = glyph_of(f, key, ppx, ttf_glyph(f, c));
         if (!g)
             continue;
         /* The pen's whole pixel, rounded - glyphs are not placed at

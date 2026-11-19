@@ -37,10 +37,15 @@ it touches (`t_gcode`, `t_desktop`, `t_arm64win` and the rest).
 ## Before anything: the fonts
 
 WEAVE.md draws Inter and JetBrains Mono. Both are under the SIL Open
-Font Licence, which AGENTS.md rule 6 allows, but a new library needs the
-owner's yes and an entry in `third_party/README.md` and
-`scripts/mknotices.py`. Until then everything is drawn in DejaVu, as
-today; nothing below depends on the font.
+Font Licence, which AGENTS.md rule 6 allows, with an entry in
+`third_party/README.md` and `scripts/mknotices.py`.
+
+- **Done** for Inter (journal: "Weave as its design draws it"): Inter
+  4.1's regular and bold, cut by `scripts/mkfonts.py` like DejaVu, are
+  the desktop's letters while it is in Weave (`fonts_use_inter`);
+  `t_ttf` holds them to FreeType. JetBrains Mono is still to come: the
+  terminal measures its cells by its font, and changing that is a step
+  of its own.
 
 ## Stage 1 - the look grows - half a day
 
@@ -100,14 +105,20 @@ today; nothing below depends on the font.
   running programs; a click on the spool opens loom view; the warp
   compared with a Python drawing of it. The groups for the other two
   styles must pass unchanged.
-- **Done** (journal: "Weave, stage 3"), but for loom view: the spool
-  opens the programs' menu for now. Weave keeps the window sizes of the
-  other styles (the title bar 22, corners 8) so that no program's
-  layout moves; the selvedge is drawn inside the title bar. `t_weave`
-  reads the loom's cloth and grain and the warp's weave to the pixel,
-  the person's thread through its curve, the selvedge moving with the
-  focus, the long piece of thread under the program in front, a
-  desktop's knot, and the style a program hears.
+- **Done** (journal: "Weave, stage 3", then "Weave as its design draws
+  it"). The second pass laid it out as `docs/weave/canvas/Main.dc.html`
+  and `Spool.dc.html` draw it: the design's own icons (its table in
+  `Icon.dc.html`, flattened by `scripts/mkweaveicons.py`, stroked by
+  `kernel/weave.c`), the window's selvedge over a bar of 38 with the
+  program's icon, its name and the capsule of round buttons (the window
+  keeps its content's size and grows by the difference), the loom with
+  the field that finds anything, one icon a program with its thread,
+  the tray and the clock, and loom view in place of the menu. `t_weave`
+  reads all of it: the loom's cloth and the warp to the pixel, the Files
+  icon's dye, grain and stroke against the design's table, the bar's
+  height and cloth, the title in Inter, close's madder, the selvedge
+  moving with the focus, a desktop's knot, loom view's four threads and
+  its keys, and the style a program hears.
 
 ## Stage 4 - the new controls - 3 days
 

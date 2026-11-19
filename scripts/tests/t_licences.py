@@ -15,7 +15,8 @@ to the libraries themselves, not to the script's own idea of them:
   ship without its text;
 
   the first line counts the components, and the count is the README
-  table's rows and the fonts - Settings -> About shows that number
+  table's rows and the fonts (a licence file each in fonts/) - Settings
+  -> About shows that number
   (t_settings), so it has to be right;
 
   the booted kernel has the file in its initrd, at the size the build
@@ -131,10 +132,14 @@ def main():
     text = data.decode("utf-8", errors="replace")
 
     rows = readme_rows()
+    # the fonts: in fonts/, with a licence file each (DejaVu, Inter)
+    fonts = sorted(f for f in os.listdir(os.path.join(ROOT, "fonts"))
+                   if f.startswith("LICENSE-"))
     m = re.match(r"ThreadOS contains (\d+) third-party components", text)
     check("its first line counts the README table's %d components and the "
-          "fonts (%s)" % (len(rows), m.group(1) if m else "no count"),
-          m is not None and int(m.group(1)) == len(rows) + 1)
+          "%d fonts (%s)" % (len(rows), len(fonts),
+                             m.group(1) if m else "no count"),
+          m is not None and int(m.group(1)) == len(rows) + len(fonts))
 
     # Every licence file the README names, out of the archive by GNU tar
     found, missing = 0, []
@@ -161,6 +166,9 @@ def main():
              "                       Version 2.1, February 1999"),
             ("the DejaVu fonts' licence",
              open(os.path.join(ROOT, "fonts", "LICENSE-DejaVu.txt"),
+                  encoding="utf-8", errors="replace").read().rstrip()),
+            ("Inter's licence, the SIL Open Font Licence",
+             open(os.path.join(ROOT, "fonts", "LICENSE-Inter.txt"),
                   encoding="utf-8", errors="replace").read().rstrip()),
             ("where the source of the release is",
              "https://github.com/DaniuPl/ThreadOS/releases")):

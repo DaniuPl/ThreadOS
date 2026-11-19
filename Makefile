@@ -19,9 +19,11 @@ AS      := gcc
 LD      := gcc
 
 BUILD   := build
-# The fonts in the initrd - cut out of DejaVu by scripts/mkfonts.py and
-# committed, so building needs neither fonttools nor the DejaVu package
-FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf
+# The fonts in the initrd - cut out of DejaVu and Inter (Weave's) by
+# scripts/mkfonts.py and committed, so building needs neither fonttools
+# nor the fonts themselves
+FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf fonts/inter.ttf \
+           fonts/interb.ttf
 
 .PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone webkit \
@@ -152,7 +154,7 @@ LDFLAGS64 := -m64 -ffreestanding -nostdlib -static -no-pie -T kernel64/linker64.
 
 SHARED64 := string serial printk locale bootsplash mark mb2 fbcon vga pic pit pmm heap initrd \
             kbdmap pci ata ahci nvme blk fs tfs3 tfs4 tfs3to4 rtl8139 net dhcp tcp video \
-            mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
+            mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora weave usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 rtl8168 virtio_net netdev smp random hid iwlwifi acpios power \
             devices uvc ipc wpa wlan
@@ -1982,7 +1984,8 @@ $(filter $(BUILD)/user64/%,$(USER64_ELFS) $(DISK64_ELFS)): $(LIBC64)
 # at the root of the disc, readable on any computer.
 LICENSES_TXT := $(BUILD)/LICENSES.txt
 $(LICENSES_TXT): scripts/mknotices.py third_party/README.md LICENSE \
-                 fonts/LICENSE-DejaVu.txt $(wildcard third_party/* third_party/*/*)
+                 fonts/LICENSE-DejaVu.txt fonts/LICENSE-Inter.txt \
+                 $(wildcard third_party/* third_party/*/*)
 	@mkdir -p $(BUILD)
 	python3 scripts/mknotices.py $@
 
@@ -1993,6 +1996,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	python3 scripts/mkinitrd.py $@ \
 	    libthread.so=$(LIBTHREAD64) LICENSES.txt=$(LICENSES_TXT) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
+	    inter.ttf=fonts/inter.ttf interb.ttf=fonts/interb.ttf \
 	    hello64=$(BUILD)/user64/hello64.elf \
 	    nx64=$(BUILD)/user64/nx64.elf \
 	    wild64=$(BUILD)/user64/wild64.elf \
@@ -2111,6 +2115,15 @@ $(LOGO_HDR): art/threados-mark.svg scripts/mklogo.py
 	python3 scripts/mklogo.py $< $@ 256
 $(BUILD)/64/mark.o: $(LOGO_HDR)
 $(BUILD)/64/mark.o: CFLAGS64 += -I$(BUILD)/gen
+
+# Weave's icons (kernel/weave.c): the design's table of them,
+# docs/weave/canvas/Icon.dc.html, flattened into broken lines
+WEAVEICONS_HDR := $(BUILD)/gen/weaveicons.h
+$(WEAVEICONS_HDR): docs/weave/canvas/Icon.dc.html scripts/mkweaveicons.py
+	@mkdir -p $(BUILD)/gen
+	python3 scripts/mkweaveicons.py $< $@
+$(BUILD)/64/weave.o: $(WEAVEICONS_HDR)
+$(BUILD)/64/weave.o: CFLAGS64 += -I$(BUILD)/gen
 
 # --- ACPICA -------------------------------------------------------------
 # The interpreter of the firmware's AML (Linux's and the BSDs'): the

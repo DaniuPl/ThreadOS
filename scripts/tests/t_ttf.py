@@ -22,7 +22,8 @@ the same file with FreeType and compares:
   Both compute the exact area under the outline; what differs is only
   where the arcs get cut into lines, and rounding
 
-both fonts, sizes from small to large.
+DejaVu's sans and mono and Weave's Inter, regular and bold, sizes from
+small to large.
 
 FreeType is drawn with hinting off, because the system does not run
 hinting programs - the outlines are drawn as designed.
@@ -152,15 +153,16 @@ def compare(label, ours, ref, px, chars):
           n > 0 and worst <= MAX_DIFF and mean <= MEAN_DIFF)
 
 
-def sheets(q, sans, mono):
+def sheets(q, sans, mono, inter, interb):
     all_sans = sorted(sans.cmap)
     all_mono = sorted(mono.cmap)
+    all_inter = sorted(inter.cmap)
     # Glyphs that are hard in different ways: composites (accents,
     # Polish letters), deep curves, thin strokes, a glyph much wider
     # than tall, and one with holes
     hard = [ord(c) for c in "Ag@&%WQé£ąęłśżŻ€"]
 
-    out = q.command("font", "mono.ttf", timeout=20)
+    out = q.command("font", "interb.ttf", timeout=20)
     m = re.search(r"sans\.ttf - (\d+) glyphs, (\d+) units per em", out)
     check("the kernel reads the font's own numbers (%s glyphs, %s units "
           "per em; fontTools: %d, %d)"
@@ -169,9 +171,19 @@ def sheets(q, sans, mono):
           m is not None and int(m.group(1)) == sans.glyphs and
           int(m.group(2)) == sans.upem)
 
+    m = re.search(r"inter\.ttf - (\d+) glyphs, (\d+) units per em", out)
+    check("and Inter's (%s glyphs, %s units per em; fontTools: %d, %d)"
+          % (m.group(1) if m else "?", m.group(2) if m else "?",
+             inter.glyphs, inter.upem),
+          m is not None and int(m.group(1)) == inter.glyphs and
+          int(m.group(2)) == inter.upem)
+
     plan = [("sans", sans, 12, all_sans), ("sans", sans, 16, all_sans),
             ("mono", mono, 13, all_mono), ("sans", sans, 48, hard),
-            ("sans", sans, 100, hard[:6])]
+            ("sans", sans, 100, hard[:6]),
+            ("inter", inter, 13, all_inter),
+            ("interbold", interb, 15, sorted(interb.cmap)),
+            ("inter", inter, 48, hard), ("interbold", interb, 100, hard[:6])]
     for name, ref, px, chars in plan:
         text = ""
         # One command per run of characters: a sheet of every character
@@ -204,6 +216,8 @@ def main():
 
     sans = Reference(os.path.join(FONTS, "sans.ttf"))
     mono = Reference(os.path.join(FONTS, "mono.ttf"))
+    inter = Reference(os.path.join(FONTS, "inter.ttf"))
+    interb = Reference(os.path.join(FONTS, "interb.ttf"))
 
     reason = no64()
     if reason:
@@ -220,7 +234,7 @@ def main():
              qemu="qemu-system-x86_64")
     try:
         q.wait_serial("thread64>", timeout=120)
-        sheets(q, sans, mono)
+        sheets(q, sans, mono, inter, interb)
     finally:
         q.close()
         for f in (iso, slog):

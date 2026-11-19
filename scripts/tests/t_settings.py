@@ -63,13 +63,16 @@ def initrd_version():
 
 def licensed_components():
     """How many components LICENSES.txt has to cover: the rows of
-    third_party/README.md's table, and the DejaVu fonts, which live in
-    fonts/ - counted here, not taken from the file the window reads"""
+    third_party/README.md's table, and the fonts, which live in fonts/
+    with a licence file each (DejaVu, Inter) - counted here, not taken
+    from the file the window reads"""
     root = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.abspath(__file__))))
+    fonts = sum(1 for f in os.listdir(os.path.join(root, "fonts"))
+                if f.startswith("LICENSE-"))
     with open(os.path.join(root, "third_party", "README.md"),
               encoding="utf-8") as fh:
-        return sum(1 for line in fh if line.startswith("| `")) + 1
+        return sum(1 for line in fh if line.startswith("| `")) + fonts
 
 
 def section(q, name):

@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""Cuts the fonts ThreadOS carries out of the DejaVu fonts.
+"""Cuts the fonts ThreadOS carries out of the DejaVu fonts and Inter.
 
     python3 scripts/mkfonts.py [directory with DejaVuSans.ttf]
+                               [directory with Inter-Regular.ttf]
+
+The second directory is extras/ttf/ of Inter's release archive
+(Inter-4.1.zip, https://github.com/rsms/inter/releases): the TrueType
+outlines kernel/ttf.c reads, where the fonts most systems install are
+CFF. Without it the Inter files in fonts/ are left as they are.
 
 needs fonttools (pip install fonttools). The results are committed to
 fonts/, so building the system does not need this script or fonttools -
@@ -9,7 +15,10 @@ only changing which characters the system knows does.
 
 Three of them: the sans for the desktop's text, its bold for titles
 and names that have to stand out, and the monospaced one for anything
-that wants columns.
+that wants columns. And two of Inter, regular and bold, which Weave
+(docs/WEAVE.md) draws its text in - the same characters, cut the same
+way. Inter's licence (the SIL Open Font Licence) reserves no name; the
+cut is renamed all the same, as the DejaVu ones are.
 
 What is kept, and why:
 
@@ -44,6 +53,7 @@ from fontTools.ttLib import TTFont
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu"
+INTER = sys.argv[2] if len(sys.argv) > 2 else None
 
 CHARS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) +
          list(range(0x100, 0x180)) +
@@ -53,6 +63,8 @@ CHARS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) +
 FONTS = [("DejaVuSans.ttf", "sans.ttf", "DejaVu Sans ThreadOS"),
          ("DejaVuSans-Bold.ttf", "bold.ttf", "DejaVu Sans Bold ThreadOS"),
          ("DejaVuSansMono.ttf", "mono.ttf", "DejaVu Sans Mono ThreadOS")]
+INTER_FONTS = [("Inter-Regular.ttf", "inter.ttf", "Inter ThreadOS"),
+               ("Inter-Bold.ttf", "interb.ttf", "Inter Bold ThreadOS")]
 
 
 def make(src, dst, name):
@@ -80,9 +92,12 @@ def make(src, dst, name):
 
 def main():
     os.makedirs(os.path.join(HERE, "fonts"), exist_ok=True)
-    for src, dst, name in FONTS:
+    todo = [(SOURCE, f) for f in FONTS]
+    if INTER:
+        todo += [(INTER, f) for f in INTER_FONTS]
+    for where, (src, dst, name) in todo:
         out = os.path.join(HERE, "fonts", dst)
-        size = make(os.path.join(SOURCE, src), out, name)
+        size = make(os.path.join(where, src), out, name)
         print("%s -> fonts/%s: %d B" % (src, dst, size))
 
 

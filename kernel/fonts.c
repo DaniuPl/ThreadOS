@@ -2,8 +2,10 @@
  *
  * Three files, cut out of DejaVu by scripts/mkfonts.py: sans.ttf for
  * the desktop, bold.ttf for what on it has to stand out, and mono.ttf
- * for anything that wants columns. They are read
- * where they lie in the initrd - kernel/ttf.c copies nothing.
+ * for anything that wants columns; and two cut out of Inter, inter.ttf
+ * and interb.ttf, which take the place of the first two while the
+ * desktop is in Weave (docs/WEAVE.md draws its text in Inter). They are
+ * read where they lie in the initrd - kernel/ttf.c copies nothing.
  *
  * 'font' on its own says what was found. 'font sheet NAME PX FIRST
  * LAST' draws every character in the range and prints each glyph as
@@ -17,10 +19,12 @@
 #include "include/initrd.h"
 #include "include/printk.h"
 
-static struct ttf_font sans, bold, mono;
-static int have_sans, have_bold, have_mono;
+static struct ttf_font sans, bold, mono, inter, interb;
+static int have_sans, have_bold, have_mono, have_inter, have_interb;
 static const char *why_sans = "not looked for", *why_bold = "not looked for",
-                  *why_mono = "not looked for";
+                  *why_mono = "not looked for", *why_inter = "not looked for",
+                  *why_interb = "not looked for";
+static volatile int use_inter;
 
 static int open_one(struct ttf_font *f, const char *name, const char **why)
 {
@@ -38,6 +42,28 @@ void fonts_init(void)
     have_sans = open_one(&sans, "sans.ttf", &why_sans);
     have_bold = open_one(&bold, "bold.ttf", &why_bold);
     have_mono = open_one(&mono, "mono.ttf", &why_mono);
+    have_inter = open_one(&inter, "inter.ttf", &why_inter);
+    have_interb = open_one(&interb, "interb.ttf", &why_interb);
+}
+
+void fonts_use_inter(int on)
+{
+    use_inter = on;
+}
+
+int fonts_inter(void)
+{
+    return use_inter;
+}
+
+const struct ttf_font *font_inter(void)
+{
+    return have_inter ? &inter : (const struct ttf_font *)0;
+}
+
+const struct ttf_font *font_inter_bold(void)
+{
+    return have_interb ? &interb : (const struct ttf_font *)0;
 }
 
 const struct ttf_font *font_sans(void)
@@ -151,6 +177,8 @@ void fonts_command(const char *arg)
         describe("sans.ttf", &sans, have_sans, why_sans);
         describe("bold.ttf", &bold, have_bold, why_bold);
         describe("mono.ttf", &mono, have_mono, why_mono);
+        describe("inter.ttf", &inter, have_inter, why_inter);
+        describe("interb.ttf", &interb, have_interb, why_interb);
         return;
     }
     if (take(&p, "sheet")) {
@@ -161,13 +189,19 @@ void fonts_command(const char *arg)
             f = font_bold();
         else if (take(&p, "mono"))
             f = font_mono();
+        else if (take(&p, "inter"))
+            f = font_inter();
+        else if (take(&p, "interbold"))
+            f = font_inter_bold();
         uint32_t px = number(&p), first = number(&p), last = number(&p);
         if (!f || px < 1 || px > 255 || last < first) {
-            printk("usage: font sheet sans|bold|mono <px> <first> <last>\n");
+            printk("usage: font sheet sans|bold|mono|inter|interbold <px> "
+                   "<first> <last>\n");
             return;
         }
         sheet(f, (int)px, first, last);
         return;
     }
-    printk("usage: font  |  font sheet sans|bold|mono <px> <first> <last>\n");
+    printk("usage: font  |  font sheet sans|bold|mono|inter|interbold <px> "
+           "<first> <last>\n");
 }

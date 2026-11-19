@@ -231,3 +231,27 @@ Trimmed, not modified:
   `harfbuzz-icu` with ICU, with the `hb-features.h` and pkg-config
   files meson would write; ICU gets `icu-uc.pc` and `icu-i18n.pc` the
   same way.
+
+## Fonts, outside this directory
+
+The fonts the kernel draws with are cut out of their releases by
+`scripts/mkfonts.py` and committed to `fonts/`, so building needs
+neither fontTools nor the fonts themselves (`scripts/mknotices.py`
+lists them in EXTRA, since they are not here):
+
+- **DejaVu** 2.37 - `fonts/sans.ttf`, `bold.ttf`, `mono.ttf` (Sans,
+  Sans Bold, Sans Mono): Bitstream Vera licence and public domain
+  changes (`fonts/LICENSE-DejaVu.txt`); https://dejavu-fonts.github.io/
+- **Inter** 4.1 - `fonts/inter.ttf`, `interb.ttf` (Regular, Bold), which
+  Weave (docs/WEAVE.md) draws its text in: SIL Open Font Licence 1.1
+  (`fonts/LICENSE-Inter.txt`), no reserved name;
+  https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip
+  (SHA-256 `9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e`,
+  computed on download), the files in its `extras/ttf/` - TrueType
+  outlines, which kernel/ttf.c reads, where the other files are CFF.
+- **What was trimmed**, from each: every character but ASCII, Latin-1,
+  Latin Extended-A and a handful of typographic marks; the hinting
+  instructions (`prep`, `fpgm`, `cvt `), which kernel/ttf.c does not
+  run; and the layout tables (`GSUB`, `GPOS`, `GDEF`, `kern`), which it
+  does not read. The outlines and the metrics are untouched, and the
+  cut fonts are renamed ("... ThreadOS").

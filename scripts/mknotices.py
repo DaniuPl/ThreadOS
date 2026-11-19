@@ -113,6 +113,10 @@ EXTRA = [
      "Bitstream Vera licence and public domain changes",
      "https://dejavu-fonts.github.io/",
      [os.path.join(ROOT, "fonts", "LICENSE-DejaVu.txt")]),
+    ("Inter (fonts/inter.ttf, interb.ttf)", "4.1",
+     "SIL Open Font Licence 1.1",
+     "https://github.com/rsms/inter",
+     [os.path.join(ROOT, "fonts", "LICENSE-Inter.txt")]),
 ]
 
 SOURCE_NOTE = """\
