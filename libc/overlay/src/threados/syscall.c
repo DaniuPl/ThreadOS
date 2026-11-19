@@ -125,6 +125,25 @@ long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
 #define T_FDINFO2  118               /* (fd, &struct fdinfo) */
 #define T_PATH    1024               /* FS_PATH_MAX: a path with its NUL */
 #define T_DT_DIR     2
+#define T_DT_LINK    3
+/* POSIX's metadata (kernel64/syscall64.h): these answer -errno */
+#define T_OPEN2    119               /* (path, len, how, mode) */
+#define T_MKDIR2   120               /* (path, len, mode) */
+#define T_FDSTAT   121               /* (fd, &struct t_stat) */
+#define T_CHMOD    122               /* (path, len | 0: fd, mode) */
+#define T_CHOWN    123               /* (path, len | 0: fd, uid, gid) */
+#define T_UTIMES   124               /* (path, len | 0: fd, &long[2]) */
+#define T_LINK     125
+#define T_SYMLINK  126
+#define T_READLINK 127               /* (path, len, buf, size) */
+#define T_ACCESS   128
+#define T_UMASK    129
+#define T_FSERRNO  130               /* why the last file call failed */
+#define T_STAT_NOFOLLOW 1
+#define T_OPEN_EXCL  4
+#define T_OPEN_WRITE 8
+#define T_UTIME_NOW  (-1L)
+#define T_UTIME_OMIT (-2L)
 
 /* SYS64_IPC's operations (kernel/include/ipc.h) used here */
 #define IPC_MEMFD 6
@@ -483,10 +502,23 @@ static const char *tidy(const char *p, char *out)
 /* What the kernel says is at a path. (This used to go to a directory
    and come back to tell it was one - changing the whole process's
    working directory for a moment, under every other thread's feet.) */
-static int kstat_path(const char *p, struct t_stat *ks)
+static int kstat_path_how(const char *p, struct t_stat *ks, long how)
 {
 	touch(ks, sizeof(*ks));
-	return tos(T_STAT, (long)p, slen(p), (long)ks, 0) < 0 ? -1 : 0;
+	return tos(T_STAT, (long)p, slen(p), (long)ks, how) < 0 ? -1 : 0;
+}
+
+static int kstat_path(const char *p, struct t_stat *ks)
+{
+	return kstat_path_how(p, ks, 0);
+}
+
+/* Why the kernel's last file call for this program failed - an errno,
+   or 'otherwise' when it does not say (a kernel before TFS4's) */
+static long fs_errno_or(long otherwise)
+{
+	long e = tos(T_FSERRNO, 0, 0, 0, 0);
+	return e > 0 && e < 4096 ? -e : otherwise;
 }
 
 static int is_dir(const char *p)
@@ -497,7 +529,7 @@ static int is_dir(const char *p)
 	return kstat_path(p, &ks) == 0 && ks.type == T_DT_DIR;
 }
 
-static long do_open(const char *path, int flags)
+static long do_open(const char *path, int flags, unsigned mode)
 {
 	char buf[T_PATH];
 	int e = path_ok(path);
@@ -539,7 +571,34 @@ static long do_open(const char *path, int flags)
 	if ((flags & O_CREAT) && !strncmp(path, "/tmp/", 5) && !is_dir("/tmp")) {
 		char tmp[] = "/tmp";
 		tos(T_MKDIR, (long)tmp, 4, 0, 0);
+		tos(T_CHMOD, (long)tmp, 4, 01777, 0);   /* everybody's, as /tmp */
 	}
+	/* the kernel opens with the mode, the umask and the access asked
+	   for, and says why it would not */
+	long how2 = (flags & O_CREAT ? T_OPEN_CREATE : 0) |
+	            ((flags & O_TRUNC) && acc != O_RDONLY ? T_OPEN_TRUNC : 0) |
+	            ((flags & O_CREAT) && (flags & O_EXCL) ? T_OPEN_EXCL : 0) |
+	            (acc != O_RDONLY ? T_OPEN_WRITE : 0);
+	long fd2 = tos(T_OPEN2, (long)path, slen(path), how2, mode & 07777);
+	if (fd2 != -ENOSYS) {
+		if (fd2 == -EISDIR && acc == O_RDONLY)
+			return __tos_open_dir(path);
+		/* a file the system makes up when the disk has none
+		   (/etc/resolv.conf, /dev/urandom: socket.c) */
+		if (fd2 < 0 && acc == O_RDONLY && !(flags & O_CREAT)) {
+			long v = __tos_open_virtual(path);
+			if (v >= 0)
+				return v;
+		}
+		if (fd2 < 0)
+			return fd2;
+		set_flags(fd2, flags & ~(O_CREAT | O_EXCL | O_TRUNC | O_NOCTTY |
+		                         O_CLOEXEC));
+		if (flags & O_CLOEXEC)
+			set_cloexec(fd2, 1);
+		return fd2;
+	}
+	/* a kernel without T_OPEN2 (the phone's): the old way */
 	long how = 0;
 	if (flags & O_CREAT)
 		how |= T_OPEN_CREATE;
@@ -564,6 +623,33 @@ static long do_open(const char *path, int flags)
 	if (flags & O_CLOEXEC)
 		set_cloexec(fd, 1);
 	return fd;
+}
+
+static void fill_stat(struct kstat *st, unsigned mode, unsigned long size,
+                      long ino);
+
+/* What the kernel said of a file, where it keeps POSIX's metadata
+   (TFS4); with mode 0 it keeps none (TFS3) and the defaults stand */
+static void from_kernel(struct kstat *st, const struct t_stat *ks)
+{
+	unsigned type = ks->type == T_DT_DIR ? S_IFDIR
+	                : ks->type == T_DT_LINK ? S_IFLNK : S_IFREG;
+	if (!ks->mode) {
+		fill_stat(st, type | (type == S_IFDIR ? 0755 : 0644), ks->size,
+		          (long)ks->ino);
+		if (type == S_IFDIR)
+			st->st_nlink = 2;
+		return;
+	}
+	fill_stat(st, type | ks->mode, ks->size, (long)ks->ino);
+	st->st_uid = ks->uid;
+	st->st_gid = ks->gid;
+	st->st_nlink = ks->nlink;
+	st->st_blksize = ks->blksize ? ks->blksize : 4096;
+	st->st_blocks = ks->blocks;
+	st->st_atime_sec = ks->atime;
+	st->st_mtime_sec = ks->mtime;
+	st->st_ctime_sec = ks->ctime;
 }
 
 static void fill_stat(struct kstat *st, unsigned mode, unsigned long size,
@@ -596,9 +682,15 @@ static long do_fstat(int fd, struct kstat *st)
 	if (fd < 0 || fd >= T_FDS || fdinfo(fd, &fi) < 0)
 		return -EBADF;
 	switch (fi.kind) {
-	case K_FILE:
-		fill_stat(st, S_IFREG | 0644, fi.size, file_ino(fd));
+	case K_FILE: {
+		struct t_stat ks;
+		touch(&ks, sizeof(ks));
+		if (tos(T_FDSTAT, fd, (long)&ks, 0, 0) == 0)
+			from_kernel(st, &ks);
+		else
+			fill_stat(st, S_IFREG | 0644, fi.size, file_ino(fd));
 		return 0;
+	}
 	case K_PIPE_R:
 	case K_PIPE_W:
 		fill_stat(st, S_IFIFO | 0600, 0, 10 + fd);
@@ -621,7 +713,7 @@ static long do_fstat(int fd, struct kstat *st)
 	return -EBADF;
 }
 
-static long do_stat(const char *path, struct kstat *st)
+static long do_stat_how(const char *path, struct kstat *st, int nofollow)
 {
 	char buf[T_PATH];
 	struct t_stat ks;
@@ -636,13 +728,14 @@ static long do_stat(const char *path, struct kstat *st)
 		st->st_rdev = 0x0103;
 		return 0;
 	}
-	if (kstat_path(path, &ks) == 0) {
-		int d = ks.type == T_DT_DIR;
-		fill_stat(st, d ? S_IFDIR | 0755 : S_IFREG | 0644, ks.size, ks.ino);
-		if (d)
-			st->st_nlink = 2;
+	if (kstat_path_how(path, &ks, nofollow ? T_STAT_NOFOLLOW : 0) == 0) {
+		from_kernel(st, &ks);
 		return 0;
 	}
+	long why = fs_errno_or(0);
+	if (why == -EACCES || why == -ENOTDIR || why == -ELOOP ||
+	    why == -ENAMETOOLONG)
+		return why;
 	/* a kernel without T_STAT (the phone's): open it and ask */
 	long fd = tos(T_OPEN, (long)path, slen(path), 0, 0);
 	if (fd >= 0) {
@@ -660,6 +753,11 @@ static long do_stat(const char *path, struct kstat *st)
 	}
 	/* what the system makes up: its fonts (socket.c) */
 	return __tos_stat_virtual(path, st);
+}
+
+static long do_stat(const char *path, struct kstat *st)
+{
+	return do_stat_how(path, st, 0);
 }
 
 static long do_lseek(int fd, long off, int whence)
@@ -795,10 +893,80 @@ static long name_call(int nr, const char *path)
 		return -EACCES;
 	if (r >= 0)
 		return 0;
-	if (nr == T_MKDIR)
+	if (nr == T_MKDIR && fs_errno_or(0) == 0)
 		return is_dir(path) || do_stat(path, &(struct kstat){0}) == 0
 			? -EEXIST : -ENOENT;
-	return -ENOENT;
+	return fs_errno_or(-ENOENT);
+}
+
+/* A call on a path that answers -errno itself (T_CHMOD and the rest);
+   'otherwise' is what a kernel without it (the phone's) amounts to */
+static long path_call(int nr, const char *path, long x, long y,
+                      long otherwise)
+{
+	char buf[T_PATH];
+	int e = path_ok(path);
+	if (e)
+		return e;
+	touch(path, slen(path) + 1);
+	path = tidy(path, buf);
+	long r = tos(nr, (long)path, slen(path), x, y);
+	return r == -ENOSYS ? otherwise : r;
+}
+
+static long do_mkdir(const char *path, unsigned mode)
+{
+	long r = path_call(T_MKDIR2, path, mode & 07777, 0, 1);
+	return r == 1 ? name_call(T_MKDIR, path) : r;
+}
+
+/* unlink() takes no directory and rmdir() nothing else; the kernel's
+   call takes either */
+static long do_remove(const char *path, int dir)
+{
+	struct kstat st;
+	long e = do_stat_how(path, &st, 1);
+	if (e == 0 && dir != S_ISDIR(st.st_mode))
+		return dir ? -ENOTDIR : -EISDIR;
+	return name_call(T_UNLINK, path);
+}
+
+/* struct timespec[2] as utimensat(2) takes it into the kernel's pair of
+   seconds, "now" or "leave it" */
+static long do_utimens(int fd, const char *path, const struct timespec *t)
+{
+	long out[2];
+	for (int i = 0; i < 2; i++) {
+		if (!t || t[i].tv_nsec == UTIME_NOW)
+			out[i] = T_UTIME_NOW;
+		else if (t[i].tv_nsec == UTIME_OMIT)
+			out[i] = T_UTIME_OMIT;
+		else if (t[i].tv_nsec < 0 || t[i].tv_nsec > 999999999 ||
+		         t[i].tv_sec < 0)
+			return -EINVAL;
+		else
+			out[i] = t[i].tv_sec;
+	}
+	touch(out, sizeof(out));
+	if (!path) {
+		long r = tos(T_UTIMES, fd, 0, (long)out, 0);
+		return r == -ENOSYS ? 0 : r;
+	}
+	return path_call(T_UTIMES, path, (long)out, 0, 0);
+}
+
+static long do_readlink(const char *path, char *buf, long size)
+{
+	if (size <= 0)
+		return -EINVAL;
+	touch(buf, size);
+	return path_call(T_READLINK, path, (long)buf, size, -EINVAL);
+}
+
+static long do_access(const char *path, int mode)
+{
+	long r = path_call(T_ACCESS, path, mode & 7, 0, 1);
+	return r == 1 ? do_stat(path, &(struct kstat){0}) : r;
 }
 
 static long do_rename(const char *from, const char *to)
@@ -814,7 +982,26 @@ static long do_rename(const char *from, const char *to)
 	from = tidy(from, a);
 	to = tidy(to, b);
 	long r = tos(T_RENAME, (long)from, slen(from), (long)to, slen(to));
-	return r == -2 ? -EACCES : r < 0 ? -ENOENT : 0;
+	return r == -2 ? -EACCES : r < 0 ? fs_errno_or(-ENOENT) : 0;
+}
+
+/* link() and symlink(): two paths into the kernel (for symlink the
+   first is the target, kept as it is, not tidied) */
+static long do_link(const char *a, const char *b, int nr)
+{
+	char ba[T_PATH], bb[T_PATH];
+	int e = path_ok(a);
+	if (!e)
+		e = path_ok(b);
+	if (e)
+		return e;
+	touch(a, slen(a) + 1);
+	touch(b, slen(b) + 1);
+	if (nr == T_LINK)
+		a = tidy(a, ba);
+	b = tidy(b, bb);
+	long r = tos(nr, (long)a, slen(a), (long)b, slen(b));
+	return r == -ENOSYS ? -EPERM : r;
 }
 
 static long do_getcwd(char *buf, size_t size)
@@ -1525,7 +1712,7 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	case SYS_openat:
 		if (a != AT_FDCWD && ((const char *)b)[0] != '/')
 			return -ENOSYS;
-		return do_open((const char *)b, c);
+		return do_open((const char *)b, c, d);
 	case SYS_close:      return do_close(a);
 	case SYS_lseek:      return do_lseek(a, b, c);
 	case SYS_fstat:      return do_fstat(a, (struct kstat *)b);
@@ -1534,11 +1721,14 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 			return do_fstat(a, (struct kstat *)c);
 		if (a != AT_FDCWD && ((const char *)b)[0] != '/')
 			return -ENOSYS;
-		return do_stat((const char *)b, (struct kstat *)c);
+		return do_stat_how((const char *)b, (struct kstat *)c,
+		                   (d & AT_SYMLINK_NOFOLLOW) != 0);
 	case SYS_statx:      return -ENOSYS;   /* musl falls back to fstatat */
 	case SYS_faccessat:
 	case SYS_faccessat2:
-		return do_stat((const char *)b, &(struct kstat){0});
+		if (a != AT_FDCWD && ((const char *)b)[0] != '/')
+			return -ENOSYS;
+		return do_access((const char *)b, c);
 	case SYS_ioctl:      return do_ioctl(a, b, (void *)c);
 	case SYS_fcntl:      return do_fcntl(a, b, c);
 	case SYS_dup:        return do_dupfd(a, 3);
@@ -1583,15 +1773,51 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 	}
 	case SYS_getcwd:     return do_getcwd((char *)a, b);
 	case SYS_chdir:      return name_call(T_CHDIR, (const char *)a);
-	case SYS_mkdirat:    return name_call(T_MKDIR, (const char *)b);
-	case SYS_unlinkat:   return name_call(T_UNLINK, (const char *)b);
+	case SYS_mkdirat:    return do_mkdir((const char *)b, c);
+	case SYS_unlinkat:
+		return do_remove((const char *)b, (c & AT_REMOVEDIR) != 0);
 	case SYS_renameat:
 	case SYS_renameat2:  return do_rename((const char *)b, (const char *)d);
-	case SYS_readlinkat: return -EINVAL;     /* there are no links */
-	case SYS_umask:      return 022;
-	case SYS_fchmod:
+	case SYS_readlinkat:
+		return do_readlink((const char *)b, (char *)c, d);
+	case SYS_umask: {
+		long old = tos(T_UMASK, a & 0777, 0, 0, 0);
+		return old < 0 ? 022 : old;
+	}
+	case SYS_fchmod: {
+		struct fdinfo fi;
+		if (a < 0 || a >= T_FDS || fdinfo(a, &fi) < 0)
+			return -EBADF;
+		if (fi.kind != K_FILE)
+			return 0;
+		long r = tos(T_CHMOD, a, 0, b & 07777, 0);
+		return r == -ENOSYS ? 0 : r;
+	}
 	case SYS_fchmodat:
-	case SYS_utimensat:  return 0;
+		if (a != AT_FDCWD && ((const char *)b)[0] != '/')
+			return -ENOSYS;
+		return path_call(T_CHMOD, (const char *)b, c & 07777, 0, 0);
+	case SYS_fchownat:
+		if (a != AT_FDCWD && ((const char *)b)[0] != '/')
+			return -ENOSYS;
+		return path_call(T_CHOWN, (const char *)b, (int)c, (int)d, 0);
+	case SYS_fchown: {
+		long r = tos(T_CHOWN, a, 0, (int)b, (int)c);
+		return r == -ENOSYS ? 0 : r;
+	}
+	case SYS_utimensat:
+		if (b && a != AT_FDCWD && ((const char *)b)[0] != '/')
+			return -ENOSYS;
+		return do_utimens(a, (const char *)b, (const struct timespec *)c);
+	case SYS_linkat:
+		if ((a != AT_FDCWD && ((const char *)b)[0] != '/') ||
+		    (c != AT_FDCWD && ((const char *)d)[0] != '/'))
+			return -ENOSYS;
+		return do_link((const char *)b, (const char *)d, T_LINK);
+	case SYS_symlinkat:
+		if (b != AT_FDCWD && ((const char *)c)[0] != '/')
+			return -ENOSYS;
+		return do_link((const char *)a, (const char *)c, T_SYMLINK);
 
 	case SYS_brk:        return do_brk(a);
 	case SYS_mmap:       return do_mmap(a, b, c, d, e, f);
@@ -1760,19 +1986,28 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 #ifdef SYS_open
 	/* Linux's older calls, which the PC has and AArch64 does not:
 	   there musl uses the *at ones above for all of them */
-	case SYS_open:       return do_open((const char *)a, b);
-	case SYS_stat:
-	case SYS_lstat:      return do_stat((const char *)a, (struct kstat *)b);
-	case SYS_access:
-		return do_stat((const char *)a, &(struct kstat){0});
+	case SYS_open:       return do_open((const char *)a, b, c);
+	case SYS_stat:       return do_stat((const char *)a, (struct kstat *)b);
+	case SYS_lstat:
+		return do_stat_how((const char *)a, (struct kstat *)b, 1);
+	case SYS_access:     return do_access((const char *)a, b);
 	case SYS_dup2:       return do_dup2(a, b);
 	case SYS_pipe:       return do_pipe2((int *)a, 0);
-	case SYS_mkdir:      return name_call(T_MKDIR, (const char *)a);
-	case SYS_rmdir:
-	case SYS_unlink:     return name_call(T_UNLINK, (const char *)a);
+	case SYS_mkdir:      return do_mkdir((const char *)a, b);
+	case SYS_rmdir:      return do_remove((const char *)a, 1);
+	case SYS_unlink:     return do_remove((const char *)a, 0);
 	case SYS_rename:     return do_rename((const char *)a, (const char *)b);
-	case SYS_readlink:   return -EINVAL;
-	case SYS_chmod:      return 0;
+	case SYS_readlink:
+		return do_readlink((const char *)a, (char *)b, c);
+	case SYS_chmod:
+		return path_call(T_CHMOD, (const char *)a, b & 07777, 0, 0);
+	case SYS_chown:
+	case SYS_lchown:
+		return path_call(T_CHOWN, (const char *)a, (int)b, (int)c, 0);
+	case SYS_link:
+		return do_link((const char *)a, (const char *)b, T_LINK);
+	case SYS_symlink:
+		return do_link((const char *)a, (const char *)b, T_SYMLINK);
 	case SYS_time: {
 		struct timespec ts;
 		wall_clock(&ts);

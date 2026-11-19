@@ -10954,3 +10954,50 @@ works and is checked by `make test`.
       (one to nine groups) and over mke2fs's images after the harness's
       writing: all clean. (The first such run found the orphan list
       unhandled after a crash: an orphan is now released at mount.)
+- [x] **TFS4 stage 4: POSIX's rights and metadata** (kernel/tfs4.c,
+      kernel/tfs3.c, kernel/fs.c, kernel/include/fs.h, fsbackend.h,
+      kernel64/syscall64.c, syscall64.h, task64.c, task64.h,
+      kernel/user.c, kernelarm64/proc.c,
+      libc/overlay/src/threados/syscall.c, socket.c,
+      libc/tests/permtest.c, libc/tests/fswalk.c,
+      scripts/tests/t_tfs4perm.py, tests/fuzz/tfs4_harness.c,
+      scripts/fuzz_parsers.py)
+      TFS4 keeps what TFS3 never did, and the system now uses it. Rights
+      are POSIX's: owner, group and others, read, write and enter; an
+      administrator's session passes every check as root does; a task's
+      group is "users" (100), an administrator's 0. The root of a disk
+      the kernel formats is 1777 like /tmp - everybody makes files there,
+      only their owners take them away (TFS3's root let everybody write)
+      - and the system's files in it stay the administrator's. Homes are
+      0700. A file made with no mode asked (the kernel's own, programs
+      without the C library) is its owner's alone, as under TFS3; the C
+      library's open and mkdir pass their mode, less the task's umask,
+      which children inherit. Hard links, symbolic links (short ones kept
+      in the inode, as ext2's "fast" links), access, modification and
+      change times, link counts. New calls - SYS64_OPEN2 and MKDIR2 with
+      a mode, FDSTAT, CHMOD, CHOWN (an administrator's), UTIMES (set
+      outright by the owner, "now" by whoever may write), LINK, SYMLINK,
+      READLINK, ACCESS, UMASK - answer -errno, and every file call leaves
+      its reason for SYS64_FSERRNO, so the C library's errno is the real
+      one (ENOENT, EACCES, EPERM for the sticky bit, EEXIST, ENOTEMPTY,
+      ELOOP...) where it was guessed. musl's stat, lstat and fstat give
+      the mode, owner, group, links and times; chmod, fchmod, chown,
+      utimensat, link, symlink, readlink, access and umask reach the disk
+      instead of pretending; unlink refuses a directory and rmdir a file.
+      TFS3 answers the new calls as before (changes taken and dropped)
+      and now says why its calls fail too - the first run found a
+      missing file reported as EIO, so the C library never fell back to
+      the /dev/urandom it makes up, and curl would not start. The phone's
+      kernel answers ENOSYS to the new calls, which the C library takes
+      as "the old way". t_tfs4perm (new): two accounts on a disk made by
+      the kernel; alice makes a 0600 secret, an open file, a hard link,
+      a short and a long symbolic link, a file under umask 077, sets
+      times; bob is refused the secret (EACCES, also through the link),
+      writing, removing (EACCES) and chmod-ing (EPERM) her file, chown,
+      her 0700 home, her file in the sticky root (EPERM); she opens the
+      secret and he reads it. On the host e2fsck finds nothing, and
+      debugfs reads for every file the type, mode, owner, group, links,
+      size and time ThreadOS's stat said, the short link in the inode
+      and the long one in a block. The fuzz harness now also chmods,
+      chowns, links and makes links on damaged disks, and e2fsck checks
+      what it leaves on clean ones.

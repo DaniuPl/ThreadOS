@@ -1255,16 +1255,225 @@ static int t3_write_at(int slot, uint64_t off64, const void *buf, uint32_t len)
     return done ? (int)done : -1;
 }
 
+/* Why a call on a path failed. TFS3's own code says only -1; the
+   reason is worked out after the fact, from what is at the path, so a
+   C library has an errno to hand on (a missing file is ENOENT, which
+   is how it knows to look further - /dev/urandom is made up by it) */
+static int why_make(int cwd, const char *path)
+{
+    char base[TFS3_NAME_MAX + 1];
+    const char *last = path;
+    for (const char *q = path; *q; q++)
+        if (*q == '/' && q[1])
+            last = q + 1;
+    if (strlen(last) > TFS3_NAME_MAX)
+        return FS_ENAMETOOLONG;
+    int dir = resolve_parent(cwd, path, base);
+    if (dir == FS_NOTFOUND)
+        return FS_ENOENT;
+    if (!is_dir(dir))
+        return FS_ENOTDIR;
+    if (!can_access(dir) ||
+        (dir == FS_ROOT && system_file(base) && current_level() != USER_ADMIN))
+        return FS_EACCES;
+    return FS_ENOSPC;                      /* the 64 inodes are taken */
+}
+
+static int with_why(int r, int cwd, const char *path, int op)
+{
+    if (r >= 0 || fs_errno())
+        return r;
+    uint32_t flags = irq_save();
+    int slot = resolve(cwd, path), e;
+    switch (op) {
+    case 0:                                /* open, no create */
+        e = slot == FS_NOTFOUND ? FS_ENOENT
+            : is_dir(slot) ? FS_EISDIR : FS_EACCES;
+        break;
+    case 1:                                /* open, create */
+        e = slot == FS_NOTFOUND ? why_make(cwd, path)
+            : is_dir(slot) ? FS_EISDIR : FS_EACCES;
+        break;
+    case 2:                                /* mkdir */
+        e = slot != FS_NOTFOUND ? FS_EEXIST : why_make(cwd, path);
+        break;
+    case 3:                                /* chdir */
+        e = slot == FS_NOTFOUND ? FS_ENOENT
+            : !is_dir(slot) ? FS_ENOTDIR : FS_EACCES;
+        break;
+    default: {                             /* unlink */
+        e = slot == FS_NOTFOUND ? FS_ENOENT
+            : slot == FS_ROOT ? FS_EPERM : FS_EACCES;
+        if (slot >= 0 && inode_type(&inodes[slot]) == FS_TYPE_DIR)
+            for (int i = 0; i < TFS3_MAX_FILES; i++)
+                if (inodes[i].used && inodes[i].parent == slot)
+                    e = FS_ENOTEMPTY;
+        break;
+    }
+    }
+    irq_restore(flags);
+    fs_set_errno(e);
+    return r;
+}
+
+static int t3_open_why(int cwd, const char *path, int create)
+{
+    return with_why(t3_open(cwd, path, create), cwd, path, create ? 1 : 0);
+}
+
+static int t3_mkdir_why(int cwd, const char *path)
+{
+    return with_why(t3_mkdir(cwd, path), cwd, path, 2);
+}
+
+static int t3_chdir_why(int cwd, const char *path, int *newcwd)
+{
+    return with_why(t3_chdir(cwd, path, newcwd), cwd, path, 3);
+}
+
+static int t3_unlink_why(int cwd, const char *path)
+{
+    return with_why(t3_unlink(cwd, path), cwd, path, 4);
+}
+
+static int t3_rename_why(int cwd, const char *from, const char *to)
+{
+    int r = t3_rename(cwd, from, to);
+    if (r < 0 && !fs_errno()) {
+        uint32_t flags = irq_save();
+        int e = resolve(cwd, from) == FS_NOTFOUND ? FS_ENOENT
+                : resolve(cwd, to) != FS_NOTFOUND ? FS_EEXIST
+                : why_make(cwd, to) == FS_ENOSPC ? FS_EACCES
+                : why_make(cwd, to);
+        irq_restore(flags);
+        fs_set_errno(e);
+    }
+    return r;
+}
+
+/* POSIX's metadata, which TFS3 has nowhere to keep: a change of mode,
+   owner or times is taken and dropped, as the C library always made it
+   look; a second name or a symbolic link it cannot make */
+static int t3_lstat_path(int cwd, const char *path, struct fs_stat *st)
+{
+    return t3_stat_path(cwd, path, st);
+}
+
+static int t3_open_mode(int cwd, const char *path, int create, uint32_t mode)
+{
+    (void)mode;
+    return t3_open_why(cwd, path, create);
+}
+
+static int t3_mkdir_mode(int cwd, const char *path, uint32_t mode)
+{
+    (void)mode;
+    return t3_mkdir_why(cwd, path);
+}
+
+static int t3_keep_nothing(int slot)
+{
+    if (slot != FS_ROOT &&
+        (slot < 0 || slot >= TFS3_MAX_FILES || !inodes[slot].used)) {
+        fs_set_errno(FS_ENOENT);
+        return -1;
+    }
+    return 0;
+}
+
+static int t3_chmod(int slot, uint32_t mode)
+{
+    (void)mode;
+    return t3_keep_nothing(slot);
+}
+
+static int t3_chown(int slot, int uid, int gid)
+{
+    (void)uid;
+    (void)gid;
+    return t3_keep_nothing(slot);
+}
+
+static int t3_utimes(int slot, int64_t atime, int64_t mtime)
+{
+    (void)atime;
+    (void)mtime;
+    return t3_keep_nothing(slot);
+}
+
+static int t3_link(int cwd, const char *from, const char *to)
+{
+    (void)cwd;
+    (void)from;
+    (void)to;
+    fs_set_errno(FS_EPERM);
+    return -1;
+}
+
+static int t3_symlink(int cwd, const char *target, const char *path)
+{
+    (void)cwd;
+    (void)target;
+    (void)path;
+    fs_set_errno(FS_EPERM);
+    return -1;
+}
+
+static int t3_readlink(int cwd, const char *path, char *buf, uint32_t cap)
+{
+    (void)cwd;
+    (void)path;
+    (void)buf;
+    (void)cap;
+    fs_set_errno(FS_EINVAL);           /* nothing on TFS3 is a link */
+    return -1;
+}
+
+static int t3_resolve(int cwd, const char *path, int follow)
+{
+    (void)follow;
+    irqflags_t flags = irq_save();
+    int slot = resolve(cwd, path);
+    irq_restore(flags);
+    if (slot == FS_NOTFOUND)
+        fs_set_errno(FS_ENOENT);
+    return slot == FS_NOTFOUND ? -2 : slot;
+}
+
+static int t3_access(int cwd, const char *path, int mode)
+{
+    irqflags_t flags = irq_save();
+    int slot = resolve(cwd, path);
+    int ok = slot != FS_NOTFOUND &&
+             (!(mode & 4) || slot == FS_ROOT || can_read(slot)) &&
+             (!(mode & 2) || can_access(slot));
+    irq_restore(flags);
+    if (!ok)
+        fs_set_errno(slot == FS_NOTFOUND ? FS_ENOENT : FS_EACCES);
+    return ok ? 0 : -1;
+}
+
 const struct fs_backend tfs3_backend = {
     .name = "TFS3",
-    .open = t3_open,
-    .mkdir = t3_mkdir,
-    .chdir = t3_chdir,
-    .unlink = t3_unlink,
-    .rename = t3_rename,
+    .open = t3_open_why,
+    .mkdir = t3_mkdir_why,
+    .chdir = t3_chdir_why,
+    .unlink = t3_unlink_why,
+    .rename = t3_rename_why,
     .getpath = t3_getpath,
     .stat_path = t3_stat_path,
     .stat_slot = t3_stat_slot,
+    .lstat_path = t3_lstat_path,
+    .open_mode = t3_open_mode,
+    .mkdir_mode = t3_mkdir_mode,
+    .chmod = t3_chmod,
+    .chown = t3_chown,
+    .utimes = t3_utimes,
+    .link = t3_link,
+    .symlink = t3_symlink,
+    .readlink = t3_readlink,
+    .access = t3_access,
+    .resolve = t3_resolve,
     .readdir_at = t3_readdir_at,
     .size = t3_size,
     .owner = t3_owner,

@@ -2296,6 +2296,24 @@ void proc_syscall(struct trap_frame *f)
     case SYS64_READDIR2:
         r = sys_readdir2(p, x[0], x[1], x[2]);
         break;
+    /* POSIX's file metadata: the phone has no disk to keep it on, and
+       says so the way the C library takes as "use the old way" */
+    case SYS64_OPEN2:
+    case SYS64_MKDIR2:
+    case SYS64_FDSTAT:
+    case SYS64_CHMOD:
+    case SYS64_CHOWN:
+    case SYS64_UTIMES:
+    case SYS64_LINK:
+    case SYS64_SYMLINK:
+    case SYS64_READLINK:
+    case SYS64_ACCESS:
+    case SYS64_FSERRNO:
+        r = -38;                         /* ENOSYS */
+        break;
+    case SYS64_UMASK:
+        r = 022;
+        break;
     case SYS64_FDINODE:
         /* A number that is the same for the same file */
         r = ipc_fd_kind((int)x[0]) == FDK_FILE ? ipc_fd_slot((int)x[0]) + 1

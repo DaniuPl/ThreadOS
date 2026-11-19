@@ -21,16 +21,49 @@
 #include "include/blk.h"
 
 static const struct fs_backend *be;
+static int err;
+
+int fs_errno(void)
+{
+    return err;
+}
+
+void fs_set_errno(int e)
+{
+    err = e;
+}
 
 /* A path the API takes: not empty, and short enough */
 static int path_fits(const char *path)
 {
-    if (!path || !path[0])
+    if (!path || !path[0]) {
+        err = FS_ENOENT;
         return 0;
+    }
     for (uint32_t i = 0; i < FS_PATH_MAX; i++)
         if (!path[i])
             return 1;
+    err = FS_ENAMETOOLONG;
     return 0;
+}
+
+/* Every call starts with no reason to fail yet; one that fails without
+   saying why says EIO rather than leave a stale reason behind */
+static int ready(void)
+{
+    err = 0;
+    if (!be) {
+        err = FS_EIO;
+        return 0;
+    }
+    return 1;
+}
+
+static int failed(int r)
+{
+    if (r < 0 && !err)
+        err = FS_EIO;
+    return r;
 }
 
 int fs_init(void)
@@ -93,31 +126,33 @@ int fs_open(int cwd, const char *path, int create)
 {
     if (create)
         changed();
-    return be && path_fits(path) ? be->open(cwd, path, create) : -1;
+    return ready() && path_fits(path) ? failed(be->open(cwd, path, create))
+                                      : -1;
 }
 
 int fs_mkdir(int cwd, const char *path)
 {
     changed();
-    return be && path_fits(path) ? be->mkdir(cwd, path) : -1;
+    return ready() && path_fits(path) ? failed(be->mkdir(cwd, path)) : -1;
 }
 
 int fs_chdir(int cwd, const char *path, int *newcwd)
 {
-    return be && path_fits(path) ? be->chdir(cwd, path, newcwd) : -1;
+    return ready() && path_fits(path)
+               ? failed(be->chdir(cwd, path, newcwd)) : -1;
 }
 
 int fs_unlink(int cwd, const char *path)
 {
     changed();
-    return be && path_fits(path) ? be->unlink(cwd, path) : -1;
+    return ready() && path_fits(path) ? failed(be->unlink(cwd, path)) : -1;
 }
 
 int fs_rename(int cwd, const char *from, const char *to)
 {
     changed();
-    return be && path_fits(from) && path_fits(to)
-               ? be->rename(cwd, from, to) : -1;
+    return ready() && path_fits(from) && path_fits(to)
+               ? failed(be->rename(cwd, from, to)) : -1;
 }
 
 int fs_getpath(int slot, char *buf, uint32_t cap)
@@ -134,12 +169,109 @@ int fs_getpath(int slot, char *buf, uint32_t cap)
 
 int fs_stat_path(int cwd, const char *path, struct fs_stat *st)
 {
-    return be && path_fits(path) && st ? be->stat_path(cwd, path, st) : -1;
+    return ready() && path_fits(path) && st
+               ? failed(be->stat_path(cwd, path, st)) : -1;
 }
 
 int fs_stat_slot(int slot, struct fs_stat *st)
 {
     return be && st ? be->stat_slot(slot, st) : -1;
+}
+
+int fs_lstat_path(int cwd, const char *path, struct fs_stat *st)
+{
+    if (!ready() || !path_fits(path) || !st)
+        return -1;
+    return failed(be->lstat_path(cwd, path, st));
+}
+
+/* --- POSIX's metadata --- */
+
+int fs_open_mode(int cwd, const char *path, int create, uint32_t mode)
+{
+    if (create)
+        changed();
+    if (!ready() || !path_fits(path))
+        return -1;
+    return failed(be->open_mode(cwd, path, create, mode));
+}
+
+int fs_mkdir_mode(int cwd, const char *path, uint32_t mode)
+{
+    changed();
+    if (!ready() || !path_fits(path))
+        return -1;
+    return failed(be->mkdir_mode(cwd, path, mode));
+}
+
+/* The calls on a path find the slot first; a symbolic link is
+   followed, as chmod, chown and utimes do */
+static int slot_at(int cwd, const char *path)
+{
+    if (!ready() || !path_fits(path))
+        return -2;
+    int slot = be->resolve(cwd, path, 1);
+    if (slot == -2 && !err)
+        err = FS_ENOENT;
+    return slot;
+}
+
+int fs_chmod(int cwd, const char *path, uint32_t mode)
+{
+    int slot = slot_at(cwd, path);
+    return slot == -2 ? -1 : failed(be->chmod(slot, mode));
+}
+
+int fs_fchmod(int slot, uint32_t mode)
+{
+    return ready() ? failed(be->chmod(slot, mode)) : -1;
+}
+
+int fs_chown(int cwd, const char *path, int uid, int gid)
+{
+    int slot = slot_at(cwd, path);
+    return slot == -2 ? -1 : failed(be->chown(slot, uid, gid));
+}
+
+int fs_utimes(int cwd, const char *path, int64_t atime, int64_t mtime)
+{
+    int slot = slot_at(cwd, path);
+    return slot == -2 ? -1 : failed(be->utimes(slot, atime, mtime));
+}
+
+int fs_futimes(int slot, int64_t atime, int64_t mtime)
+{
+    return ready() ? failed(be->utimes(slot, atime, mtime)) : -1;
+}
+
+int fs_link(int cwd, const char *from, const char *to)
+{
+    changed();
+    if (!ready() || !path_fits(from) || !path_fits(to))
+        return -1;
+    return failed(be->link(cwd, from, to));
+}
+
+int fs_symlink(int cwd, const char *target, const char *path)
+{
+    changed();
+    if (!ready() || !path_fits(target) || !path_fits(path))
+        return -1;
+    return failed(be->symlink(cwd, target, path));
+}
+
+int fs_readlink(int cwd, const char *path, char *buf, uint32_t cap)
+{
+    if (!ready() || !path_fits(path) || !buf || !cap)
+        return -1;
+    return failed(be->readlink(cwd, path, buf, cap));
+}
+
+int fs_access(int cwd, const char *path, int mode)
+{
+    if (!ready() || !path_fits(path))
+        return -1;
+    return failed(be->access(cwd, path, mode));
 }
 
 /* --- listings --- */

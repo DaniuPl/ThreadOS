@@ -295,6 +295,7 @@ static long vfile_new(int random)
  * one, changing the process's working directory for a moment - a
  * thread opening a relative path in that moment missed.) */
 #define T_READDIR2 116
+#define T_FSERRNO  130               /* why the last file call failed */
 #define T_DT_DIR     2
 #ifndef DT_DIR                       /* (<dirent.h> has them for BSD and GNU) */
 #define DT_DIR 4
@@ -597,7 +598,8 @@ NET_HIDDEN long __tos_open_dir(const char *path)
 	   empty one ends at once with 0 */
 	if (!bad && got < 0 && !cursor) {
 		free(buf);
-		return -ENOTDIR;
+		long why = tos(T_FSERRNO, 0, 0, 0, 0);
+		return why > 0 && why < 4096 ? -why : -ENOTDIR;
 	}
 	if (bad) {
 		free(buf);

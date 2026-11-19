@@ -18,6 +18,27 @@
 
 #define FS_ROOT (-1)              /* the root directory (a virtual inode) */
 
+/* Why the last call that failed did: Linux's errno numbers, so that a
+   C library hands them on as they are */
+#define FS_EPERM         1
+#define FS_ENOENT        2
+#define FS_EIO           5
+#define FS_EACCES        13
+#define FS_EEXIST        17
+#define FS_EXDEV         18
+#define FS_ENOTDIR       20
+#define FS_EISDIR        21
+#define FS_EINVAL        22
+#define FS_ENOSPC        28
+#define FS_EROFS         30
+#define FS_EMLINK        31
+#define FS_ENAMETOOLONG  36
+#define FS_ENOSYS        38
+#define FS_ENOTEMPTY     39
+#define FS_ELOOP         40
+int fs_errno(void);
+void fs_set_errno(int e);
+
 /* Detects the disk and reads the file system on it; formats an empty
    disk. Returns 1 when ready, 0 when there is no disk. */
 int fs_init(void);
@@ -59,6 +80,7 @@ int fs_getpath(int slot, char *buf, uint32_t cap);
 /* What a slot is */
 #define FS_T_FILE 1
 #define FS_T_DIR  2
+#define FS_T_LINK 3               /* a symbolic link (fs_lstat_path) */
 struct fs_stat {
     int type;                     /* FS_T_* */
     int slot;
@@ -67,7 +89,16 @@ struct fs_stat {
                                      for the root, as in ext2 */
     uint64_t size;
     int owner;                    /* the account that owns it */
+    /* What a format keeps of POSIX's (TFS4); 0 where it keeps nothing
+       (TFS3), and a C library supplies its own then */
+    uint32_t mode;                /* the permission bits, 07777 */
+    uint32_t gid;
+    uint32_t nlink;
+    uint32_t atime, mtime, ctime; /* seconds since 1970 */
+    uint64_t blocks512;
 };
+/* As fs_stat_path, but a symbolic link at the end is itself described */
+int fs_lstat_path(int cwd, const char *path, struct fs_stat *st);
 /* What a slot is, as fs_stat_path says it: 0, or -1 */
 int fs_stat_slot(int slot, struct fs_stat *st);
 /* What stands at a path: 0 and *st, or -1 (nothing there, or not
@@ -111,6 +142,30 @@ int fs_truncate_to(int slot, uint64_t size);
 void fs_slot_closed(int slot);
 int fs_read_at(int slot, uint64_t off, void *buf, uint32_t len);
 int fs_write_at(int slot, uint64_t off, const void *buf, uint32_t len);
+
+/* --- POSIX's metadata (TFS4; on TFS3 the changes are taken and kept
+   nowhere, as they always were) --- */
+
+/* Makes a file with these permission bits (the umask taken off) when
+   create is set; otherwise fs_open */
+int fs_open_mode(int cwd, const char *path, int create, uint32_t mode);
+int fs_mkdir_mode(int cwd, const char *path, uint32_t mode);
+int fs_chmod(int cwd, const char *path, uint32_t mode);
+int fs_fchmod(int slot, uint32_t mode);
+int fs_chown(int cwd, const char *path, int uid, int gid);  /* -1: keep */
+#define FS_TIME_NOW  (-1)
+#define FS_TIME_OMIT (-2)
+int fs_utimes(int cwd, const char *path, int64_t atime, int64_t mtime);
+int fs_futimes(int slot, int64_t atime, int64_t mtime);
+/* A second name for a file (not a directory) */
+int fs_link(int cwd, const char *from, const char *to);
+/* A symbolic link at 'path' holding 'target' */
+int fs_symlink(int cwd, const char *target, const char *path);
+/* A symbolic link's target into buf: its length, or -1 */
+int fs_readlink(int cwd, const char *path, char *buf, uint32_t cap);
+/* May the current task read (4), write (2), enter or run (1) what is
+   at path; 0 asks only that it exists. 0 or -1. */
+int fs_access(int cwd, const char *path, int mode);
 
 /* --- Raw blocks, for swap and file mappings ---
    They read and write a file's blocks straight through blk_*, past the

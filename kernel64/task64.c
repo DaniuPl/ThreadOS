@@ -119,6 +119,11 @@ struct task64 {
        what its parent had - the level travels with the process. */
     int level;
     int uid;
+    /* The bits a file or directory it makes is born without (umask(2)),
+       handed to its children; and why its last file system call failed,
+       for the C library's errno */
+    int umask;
+    int fserr;
     /* Where this task may be run.
        'anycore' = 1 means any core may take it. The default is zero
        and that is how it should be: a task reaching for the disk, the
@@ -391,6 +396,10 @@ struct task64 *task64_create(const char *name, void (*entry)(void *),
     t->uid = (current && current->space &&
               current->space != paging64_kernel_space())
                  ? current->uid : user_shell_uid();
+    t->umask = (current && current->space &&
+                current->space != paging64_kernel_space())
+                   ? current->umask : 022;
+    t->fserr = 0;
     t->vc = current ? current->vc : 0;
     t->id = next_id++;
     t->tgid = t->id;
@@ -440,6 +449,8 @@ struct task64 *task64_create_thread(const char *name, void (*entry)(void *),
     t->cwd = current->cwd;
     t->level = current->level;
     t->uid = current->uid;
+    t->umask = current->umask;
+    t->fserr = 0;
     t->vc = current->vc;
     t->anycore = current->anycore;
     t->tgid = current->tgid;
@@ -947,6 +958,8 @@ void task_core_enter(int nr)
     t->cwd = FS_ROOT;
     t->level = USER_ADMIN;       /* a kernel thread is the kernel */
     t->uid = 0;
+    t->umask = 022;
+    t->fserr = 0;
     t->vc = 0;
     t->anycore = 0;
     t->nolock = 1;         /* an idle task does not take the lock */
@@ -1542,6 +1555,10 @@ int task64_level(void)       { return current ? current->level : USER_ADMIN; }
 void task64_set_level(int l)  { if (current) current->level = l; }
 int task64_uid(void)          { return current ? current->uid : 0; }
 void task64_set_uid(int uid)  { if (current && uid >= 0) current->uid = uid; }
+int task64_umask(void)         { return current ? current->umask : 022; }
+void task64_set_umask(int m)   { if (current) current->umask = m & 0777; }
+int task64_fserr(void)         { return current ? current->fserr : 0; }
+void task64_set_fserr(int e)   { if (current) current->fserr = e; }
 void task64_set_identity_name(const char *name, int uid, int level, int cwd)
 {
     if (!current || !name || uid < 0)

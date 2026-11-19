@@ -225,6 +225,44 @@ static int name_from_ring3(uint64_t ptr, uint64_t len, char *out,
     return 0;
 }
 
+/* What a file call answers in the new calls: -errno (Linux's numbers)
+   when it failed. Every file call leaves its reason with the task, for
+   SYS64_FSERRNO - the older calls answer only -1. */
+static int64_t fs_answer(int r)
+{
+    int e = r < 0 ? (fs_errno() ? fs_errno() : FS_EIO) : 0;
+    task64_set_fserr(e);
+    return r < 0 ? -(int64_t)e : r;
+}
+
+static int fs_noted(int r)
+{
+    task64_set_fserr(r < 0 ? (fs_errno() ? fs_errno() : FS_EIO) : 0);
+    return r;
+}
+
+/* A file system's answer about a file in the shape programs read */
+static void stat_out(const struct fs_stat *st, struct stat64k *out)
+{
+    memset(out, 0, sizeof(*out));
+    out->type = st->type == FS_T_DIR ? DT2_DIR
+                : st->type == FS_T_LINK ? DT2_LINK : DT2_FILE;
+    out->mode = st->mode;
+    out->size = st->size;
+    out->ino = st->ino;
+    out->uid = (uint32_t)st->owner;
+    out->gid = st->gid;
+    out->nlink = st->nlink ? st->nlink : 1;
+    out->blksize = fs_block_size();
+    out->atime = st->atime;
+    out->mtime = st->mtime;
+    out->ctime = st->ctime;
+    out->blocks = st->blocks512 ? st->blocks512
+                  : out->blksize ? (st->size + out->blksize - 1) /
+                                       out->blksize * (out->blksize / 512)
+                                 : 0;
+}
+
 /* A path from program memory, up to FS_PATH_MAX with its NUL, onto the
    heap (kfree it): a path that long has no place on a kernel stack of
    16 KiB, two of them in a rename even less. NULL when it does not fit
@@ -599,7 +637,8 @@ static void handle(struct regs *r)
             return;
         }
 
-        int slot = fs_open(task64_cwd(), name, (int)(a3 & OPEN64_CREATE));
+        int slot = fs_noted(fs_open(task64_cwd(), name,
+                                    (int)(a3 & OPEN64_CREATE)));
         kfree(name);
         if (slot < 0) {
             r->rax = (uint64_t)-1;
@@ -642,14 +681,16 @@ static void handle(struct regs *r)
     }
     case SYS64_MKDIR: {
         char *name = path_from_ring3(a1, a2);
-        r->rax = (uint64_t)(int64_t)(name ? fs_mkdir(task64_cwd(), name) : -1);
+        r->rax = (uint64_t)(int64_t)(name ? fs_noted(fs_mkdir(task64_cwd(),
+                                                              name)) : -1);
         kfree(name);
         return;
     }
     case SYS64_CHDIR: {
         char *name = path_from_ring3(a1, a2);
         int fresh_one = FS_ROOT;
-        int ok = name && fs_chdir(task64_cwd(), name, &fresh_one) == 0;
+        int ok = name &&
+                 fs_noted(fs_chdir(task64_cwd(), name, &fresh_one)) == 0;
         kfree(name);
         if (!ok) {
             r->rax = (uint64_t)-1;
@@ -741,14 +782,15 @@ static void handle(struct regs *r)
         int dir;
         if (!path || !paging64_user_writable(a3, sizeof(uint64_t)) ||
             !paging64_user_writable(a4, sizeof(out)) ||
-            fs_chdir(task64_cwd(), path, &dir) < 0) {
+            fs_noted(fs_chdir(task64_cwd(), path, &dir)) < 0) {
             kfree(path);
             r->rax = (uint64_t)-1;
             return;
         }
         kfree(path);
         uint64_t cursor = *(uint64_t *)(uintptr_t)a3;
-        int got = fs_readdir_at(dir, &cursor, &e);
+        fs_set_errno(0);
+        int got = fs_noted(fs_readdir_at(dir, &cursor, &e));
         if (got == 1) {
             memset(&out, 0, sizeof(out));
             out.size = e.size;
@@ -767,27 +809,173 @@ static void handle(struct regs *r)
         struct stat64k out;
         char *path = path_from_ring3(a1, a2);
         int ok = path && paging64_user_writable(a3, sizeof(out)) &&
-                 fs_stat_path(task64_cwd(), path, &st) == 0;
+                 fs_noted((a4 & STAT64_NOFOLLOW)
+                              ? fs_lstat_path(task64_cwd(), path, &st)
+                              : fs_stat_path(task64_cwd(), path, &st)) == 0;
         kfree(path);
         if (!ok) {
             r->rax = (uint64_t)-1;
             return;
         }
-        memset(&out, 0, sizeof(out));
-        out.type = st.type == FS_T_DIR ? DT2_DIR : DT2_FILE;
-        out.size = st.size;
-        out.ino = st.ino;
-        out.uid = (uint32_t)st.owner;
-        out.nlink = 1;
-        out.blksize = fs_block_size();
-        out.blocks = out.blksize
-                         ? (st.size + out.blksize - 1) / out.blksize *
-                               (out.blksize / 512)
-                         : 0;
+        stat_out(&st, &out);
         memcpy((void *)(uintptr_t)a3, &out, sizeof(out));
         r->rax = 0;
         return;
     }
+    case SYS64_FDSTAT: {
+        struct fs_stat st;
+        struct stat64k out;
+        if (!paging64_user_writable(a2, sizeof(out)) ||
+            task64_fd_kind((int)a1) != FDK_FILE) {
+            r->rax = (uint64_t)-9;            /* EBADF */
+            return;
+        }
+        int64_t got = fs_answer(fs_stat_slot(task64_fd_slot((int)a1), &st));
+        if (got == 0) {
+            stat_out(&st, &out);
+            memcpy((void *)(uintptr_t)a2, &out, sizeof(out));
+        }
+        r->rax = (uint64_t)got;
+        return;
+    }
+    case SYS64_OPEN2: {
+        char *name = path_from_ring3(a1, a2);
+        int64_t got;
+        struct fs_stat st;
+        if (!name) {
+            r->rax = (uint64_t)-14;           /* EFAULT */
+            return;
+        }
+        int cwd = task64_cwd();
+        fs_set_errno(0);
+        if ((a3 & (OPEN64_CREATE | OPEN64_TRUNC)) &&
+            user_is_system_file(name) && task64_level() != USER_ADMIN) {
+            fs_set_errno(FS_EACCES);
+            got = fs_answer(-1);
+        } else if ((a3 & OPEN64_EXCL) &&
+                   fs_lstat_path(cwd, name, &st) == 0) {
+            fs_set_errno(FS_EEXIST);
+            got = fs_answer(-1);
+        } else {
+            int slot = fs_open_mode(cwd, name, (int)(a3 & OPEN64_CREATE),
+                                    (uint32_t)a4);
+            got = fs_answer(slot < 0 ? -1 : 0);
+            if (slot >= 0 && (a3 & (OPEN64_TRUNC | 8)) &&
+                !fs_can_write(slot)) {
+                fs_set_errno(FS_EACCES);   /* 8: opened for writing */
+                got = fs_answer(-1);
+            } else if (slot >= 0 && (a3 & OPEN64_TRUNC) &&
+                       fs_truncate(slot) < 0) {
+                got = fs_answer(-1);
+            } else if (slot >= 0) {
+                int fd = task64_fd_open(slot);
+                got = fd < 0 ? -24 : fd;      /* EMFILE */
+            }
+        }
+        kfree(name);
+        r->rax = (uint64_t)got;
+        return;
+    }
+    case SYS64_MKDIR2: {
+        char *name = path_from_ring3(a1, a2);
+        r->rax = (uint64_t)(name ? fs_answer(fs_mkdir_mode(task64_cwd(), name,
+                                                           (uint32_t)a3))
+                                 : -14);
+        kfree(name);
+        return;
+    }
+    case SYS64_CHMOD:
+    case SYS64_CHOWN:
+    case SYS64_UTIMES: {
+        int64_t times[2] = { 0, 0 };
+        if (nr == SYS64_UTIMES) {
+            if (!paging64_user_range(a3, sizeof(times))) {
+                r->rax = (uint64_t)-14;
+                return;
+            }
+            memcpy(times, (const void *)(uintptr_t)a3, sizeof(times));
+        }
+        int rc;
+        if (a2 == 0) {                         /* by descriptor */
+            if (task64_fd_kind((int)a1) != FDK_FILE) {
+                r->rax = (uint64_t)-9;
+                return;
+            }
+            int slot = task64_fd_slot((int)a1);
+            fs_set_errno(0);
+            rc = nr == SYS64_CHMOD ? fs_fchmod(slot, (uint32_t)a3)
+                 : nr == SYS64_CHOWN ? -1
+                 : fs_futimes(slot, times[0], times[1]);
+            if (nr == SYS64_CHOWN)
+                fs_set_errno(FS_EPERM);       /* fchown: not kept apart */
+        } else {
+            char *name = path_from_ring3(a1, a2);
+            if (!name) {
+                r->rax = (uint64_t)-14;
+                return;
+            }
+            int cwd = task64_cwd();
+            rc = nr == SYS64_CHMOD ? fs_chmod(cwd, name, (uint32_t)a3)
+                 : nr == SYS64_CHOWN ? fs_chown(cwd, name, (int)(int64_t)a3,
+                                                (int)(int64_t)a4)
+                 : fs_utimes(cwd, name, times[0], times[1]);
+            kfree(name);
+        }
+        r->rax = (uint64_t)fs_answer(rc);
+        return;
+    }
+    case SYS64_LINK:
+    case SYS64_SYMLINK: {
+        char *a = path_from_ring3(a1, a2);
+        char *b = path_from_ring3(a3, a4);
+        int64_t got = -14;
+        if (a && b)
+            got = fs_answer(nr == SYS64_LINK
+                                ? fs_link(task64_cwd(), a, b)
+                                : fs_symlink(task64_cwd(), a, b));
+        kfree(a);
+        kfree(b);
+        r->rax = (uint64_t)got;
+        return;
+    }
+    case SYS64_READLINK: {
+        char *name = path_from_ring3(a1, a2);
+        int64_t got = -14;
+        if (name && a4 && paging64_user_writable(a3, a4)) {
+            char *buf = kmalloc(FS_PATH_MAX);
+            int n = buf ? fs_readlink(task64_cwd(), name, buf, FS_PATH_MAX)
+                        : -1;
+            got = fs_answer(n);
+            if (n >= 0) {
+                if ((uint64_t)n > a4)
+                    n = (int)a4;
+                memcpy((void *)(uintptr_t)a3, buf, (uint32_t)n);
+                got = n;
+            }
+            kfree(buf);
+        }
+        kfree(name);
+        r->rax = (uint64_t)got;
+        return;
+    }
+    case SYS64_ACCESS: {
+        char *name = path_from_ring3(a1, a2);
+        r->rax = (uint64_t)(name ? fs_answer(fs_access(task64_cwd(), name,
+                                                       (int)a3))
+                                 : -14);
+        kfree(name);
+        return;
+    }
+    case SYS64_UMASK: {
+        int old = task64_umask();
+        if ((int64_t)a1 >= 0)
+            task64_set_umask((int)a1);
+        r->rax = (uint64_t)old;
+        return;
+    }
+    case SYS64_FSERRNO:
+        r->rax = (uint64_t)task64_fserr();
+        return;
     case SYS64_UNLINK: {
         char *name = path_from_ring3(a1, a2);
         if (!name)
@@ -795,7 +983,7 @@ static void handle(struct regs *r)
         else if (user_is_system_file(name) && task64_level() != USER_ADMIN)
             r->rax = (uint64_t)-2;
         else
-            r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), name);
+            r->rax = (uint64_t)(int64_t)fs_noted(fs_unlink(task64_cwd(), name));
         kfree(name);
         return;
     }
@@ -1395,7 +1583,8 @@ static void handle(struct regs *r)
                  task64_level() != USER_ADMIN)
             r->rax = (uint64_t)-2;
         else
-            r->rax = (uint64_t)(int64_t)fs_rename(task64_cwd(), from, to);
+            r->rax = (uint64_t)(int64_t)fs_noted(fs_rename(task64_cwd(), from,
+                                                          to));
         kfree(from);
         kfree(to);
         return;

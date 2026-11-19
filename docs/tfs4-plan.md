@@ -280,6 +280,9 @@ it, and to README's prerequisites.
   other `EACCES`, `chmod` opens it; `stat` from ThreadOS matches
   `debugfs -R stat`; a symlink made in ThreadOS reads back in `debugfs`
   and one made by `mke2fs -d` resolves in ThreadOS.
+- **Done** (journal: "TFS4 stage 4"). A task's group is "users" (100),
+  an administrator's 0; the kernel's mkfs makes the root 1777; atime is
+  kept but not moved by reading (as noatime).
 
 ### Stage 5 - the installer and migration - 1.5 to 2 days
 

@@ -58,6 +58,10 @@ void rtc_read(struct rtc_time *t)
 void random_bytes(void *out, uint32_t n) { memset(out, 0x5A, n); }
 static int held = 12;                      /* a file "still open" */
 int task64_slot_open(int slot) { return slot == held; }
+int task64_umask(void) { return 022; }
+static int last_err;                       /* kernel/fs.c's, for tfs4.c */
+void fs_set_errno(int e) { last_err = e; }
+int fs_errno(void) { return last_err; }
 int user_is_system_file(const char *n) { return !strcmp(n, "system.cfg"); }
 
 int part_scan(void) { return 0; }
@@ -176,6 +180,22 @@ mounted:
             b->read_at(f, 0, data, 4096);
             b->file_block(f, 40, 1);
         }
+        if (f >= 0) {
+            b->chmod(f, 0640);
+            b->utimes(f, 1000000000, FS_TIME_NOW);
+            b->chown(f, 1000, 100);
+        }
+        b->link(FS_ROOT, "/fuzz-new", "/fuzz-second");
+        b->symlink(FS_ROOT, "fuzz-new", "/fuzz-short");
+        b->symlink(FS_ROOT, "/a/target/long/enough/to/need/a/block/of/its/"
+                   "own/past/sixty/bytes/x", "/fuzz-long");
+        static char target[FS_PATH_MAX];
+        b->readlink(FS_ROOT, "/fuzz-short", target, sizeof(target));
+        b->readlink(FS_ROOT, "/fuzz-long", target, sizeof(target));
+        b->lstat_path(FS_ROOT, "/fuzz-long", &st);
+        b->access(FS_ROOT, "/fuzz-short", 4);
+        b->unlink(FS_ROOT, "/fuzz-short");
+        b->unlink(FS_ROOT, "/fuzz-second");
         b->mkdir(FS_ROOT, "/fuzz-dir");
         b->rename(FS_ROOT, "/fuzz-new", "/fuzz-dir/moved");
         b->unlink(FS_ROOT, "/fuzz-dir/moved");

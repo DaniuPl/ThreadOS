@@ -158,6 +158,12 @@ int task64_level_of(int pid);
 int task64_uid(void);
 int task64_uid_of(int pid);
 void task64_set_uid(int uid);
+/* umask(2), handed from parent to child; and why the task's last file
+   system call failed (FS_E*, Linux's errno numbers) */
+int task64_umask(void);
+void task64_set_umask(int mask);
+int task64_fserr(void);
+void task64_set_fserr(int err);
 void task64_set_identity_name(const char *name, int uid, int level, int cwd);
 void task64_set_level_name(const char *name, int level);
 void task64_kill_uid(int uid);

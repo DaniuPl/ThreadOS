@@ -394,7 +394,9 @@ static int ensure_home(const struct account *a)
         if (fs_chdir(FS_ROOT, path, &slot) < 0)
             goto fail;
     }
-    if (fs_set_owner(slot, a->uid) < 0)
+    /* a home is its owner's alone (TFS4 keeps the bits; TFS3's own
+       rule was the same) */
+    if (fs_set_owner(slot, a->uid) < 0 || fs_fchmod(slot, 0700) < 0)
         goto fail;
     static const char *const home_dirs[] = {"Desktop", ".Trash"};
     for (int i = 0; i < (int)(sizeof(home_dirs) / sizeof(home_dirs[0])); i++) {
@@ -835,7 +837,8 @@ int user_account_add(const char *name, const char *password, int level,
     a->level = (uint8_t)level;
     a->used = 1;
     set_hash(a, password);
-    if (fs_set_owner(home_slot, a->uid) < 0 || db_save() < 0) {
+    if (fs_set_owner(home_slot, a->uid) < 0 ||
+        fs_fchmod(home_slot, 0700) < 0 || db_save() < 0) {
         memset(a, 0, sizeof(*a));
         db.next_uid--;
         fs_unlink(FS_ROOT, path);

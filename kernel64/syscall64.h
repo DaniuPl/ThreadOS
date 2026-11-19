@@ -236,8 +236,50 @@
 #define SYS64_STAT     117
 #define SYS64_FDINFO2  118
 
+/* --- POSIX's file metadata (docs/tfs4-plan.md, stage 4) ---
+ * These answer -errno (Linux's numbers) rather than -1. A path is a
+ * pointer and a length; where a call also takes a descriptor, a length
+ * of 0 says a1 is one.
+ *
+ * SYS64_STAT      a4 = flags: STAT64_NOFOLLOW describes a symbolic link
+ *                 at the end rather than what it points at
+ * SYS64_OPEN2     a1/a2 = path, a3 = OPEN64_* (+ OPEN64_EXCL), a4 = the
+ *                 permission bits a new file gets (less the umask)
+ *                 -> a descriptor
+ * SYS64_MKDIR2    a1/a2 = path, a3 = permission bits
+ * SYS64_FDSTAT    a1 = fd, a2 = &struct stat64k
+ * SYS64_CHMOD     a1/a2 = path (or fd), a3 = bits
+ * SYS64_CHOWN     a1/a2 = path (or fd), a3 = uid, a4 = gid (-1 keeps)
+ * SYS64_UTIMES    a1/a2 = path (or fd), a3 = &int64_t[2], access and
+ *                 modification, each seconds, UTIME64_NOW or
+ *                 UTIME64_OMIT
+ * SYS64_LINK      a1/a2 = an existing file, a3/a4 = its new name
+ * SYS64_SYMLINK   a1/a2 = the target, a3/a4 = the link's path
+ * SYS64_READLINK  a1/a2 = path, a3 = buffer, a4 = its size -> length
+ * SYS64_ACCESS    a1/a2 = path, a3 = 4 read | 2 write | 1 run, 0 exists
+ * SYS64_UMASK     a1 = the new mask, or -1 to ask -> the old one
+ * SYS64_FSERRNO   -> why this task's last file call failed (an errno) */
+#define SYS64_OPEN2    119
+#define SYS64_MKDIR2   120
+#define SYS64_FDSTAT   121
+#define SYS64_CHMOD    122
+#define SYS64_CHOWN    123
+#define SYS64_UTIMES   124
+#define SYS64_LINK     125
+#define SYS64_SYMLINK  126
+#define SYS64_READLINK 127
+#define SYS64_ACCESS   128
+#define SYS64_UMASK    129
+#define SYS64_FSERRNO  130
+
+#define STAT64_NOFOLLOW 1
+#define OPEN64_EXCL     4
+#define UTIME64_NOW     (-1)
+#define UTIME64_OMIT    (-2)
+
 #define DT2_FILE 1
 #define DT2_DIR  2
+#define DT2_LINK 3
 struct dirent2_64 {
     uint64_t size;
     uint64_t ino;                /* the same for every name of a file */

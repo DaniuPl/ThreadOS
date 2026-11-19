@@ -230,7 +230,8 @@ def build_tfs4(workdir):
             f.write(text)
     with open(os.path.join(tree, "kernel64", "task64.h"), "w") as f:
         f.write("int task64_level(void);\nint task64_uid(void);\n"
-                "int task64_slot_open(int slot);\n")
+                "int task64_slot_open(int slot);\n"
+                "int task64_umask(void);\n")
     binary = os.path.join(workdir, "t4harness")
     must(["gcc", *SAN, "-w", "-I", os.path.join(tree, "kernel"), "-o", binary,
           os.path.join(FUZZ, "tfs4_harness.c"),

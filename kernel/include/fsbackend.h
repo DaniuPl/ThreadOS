@@ -18,6 +18,19 @@ struct fs_backend {
     int (*getpath)(int slot, char *buf, uint32_t cap);
     int (*stat_path)(int cwd, const char *path, struct fs_stat *st);
     int (*stat_slot)(int slot, struct fs_stat *st);
+    int (*lstat_path)(int cwd, const char *path, struct fs_stat *st);
+    int (*open_mode)(int cwd, const char *path, int create, uint32_t mode);
+    int (*mkdir_mode)(int cwd, const char *path, uint32_t mode);
+    int (*chmod)(int slot, uint32_t mode);
+    int (*chown)(int slot, int uid, int gid);
+    int (*utimes)(int slot, int64_t atime, int64_t mtime);
+    int (*link)(int cwd, const char *from, const char *to);
+    int (*symlink)(int cwd, const char *target, const char *path);
+    int (*readlink)(int cwd, const char *path, char *buf, uint32_t cap);
+    int (*access)(int cwd, const char *path, int mode);
+    /* the slot a path names, the last symbolic link not followed (for
+       the calls on a path above); -1 */
+    int (*resolve)(int cwd, const char *path, int follow);
     int (*readdir_at)(int dir, uint64_t *cursor, struct fs_dirent *e);
     int64_t (*size)(int slot);
     int (*owner)(int slot);

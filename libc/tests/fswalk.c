@@ -18,6 +18,7 @@
  */
 
 #include <dirent.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -115,6 +116,12 @@ static void walk(const char *dir)
 		}
 		char hex[2 * SHA256_SIZE + 1];
 		long long size;
+		if (access(path, R_OK) < 0 && errno == EACCES) {
+			/* not this account's to read (the system's swap file):
+			   said, not counted */
+			printf("P %s\n", path);
+			continue;
+		}
 		if (hash_file(path, hex, &size) < 0) {
 			printf("ERROR read %s\n", path);
 			continue;

@@ -787,36 +787,86 @@ static int write_bytes(struct inode *in, uint64_t off, const void *buf,
 }
 
 /* --- rights ---------------------------------------------------------------
- * Until stage 4 brings the whole of rwx, TFS3's: a file is its owner's
- * and an administrator's, and the bits that say so are written that
- * way (0600 files, 0711 directories - passable, not listable); a disk
- * made by mke2fs -d reads by its own bits. The root directory is
- * everybody's to make files in, as TFS3's was; the system's files in
- * it are the administrator's alone. */
+ * POSIX's: the owner's, the group's and everybody else's bits, read,
+ * write and enter (or run). An administrator's session passes every
+ * check, as root does, but for running a file nobody may run. A task's
+ * group is "users" (100), an administrator's 0 - ThreadOS has no other
+ * groups yet. A directory with the sticky bit (the root, 1777, as /tmp)
+ * lets anybody make files in it and only a file's owner take them away.
+ * The system's files in the root stay the administrator's alone to
+ * make, rename or remove, whatever the bits say. */
+
+#define USERS_GID 100
 
 static int admin(void)
 {
     return task64_level() == USER_ADMIN;
 }
 
+static uint32_t my_uid(void)
+{
+    return (uint32_t)task64_uid();
+}
+
+static uint32_t my_gid(void)
+{
+    return admin() ? 0 : USERS_GID;
+}
+
+/* want: 4 read, 2 write, 1 enter or run, or a sum */
+static int permits(const struct inode *in, int want)
+{
+    if (admin())
+        return !(want & 1) || is_dir_mode(in) || (in->mode & 0111);
+    uint32_t bits;
+    if (in->uid == my_uid())
+        bits = (in->mode >> 6) & 7;
+    else if (in->gid == my_gid())
+        bits = (in->mode >> 3) & 7;
+    else
+        bits = in->mode & 7;
+    return (bits & (uint32_t)want) == (uint32_t)want;
+}
+
 static int may_read(const struct inode *in)
 {
-    if (admin() || in->uid == (uint32_t)task64_uid())
-        return 1;
-    return (in->mode & 0004) != 0;
+    return permits(in, 4);
 }
 
 static int may_enter(const struct inode *in)
 {
-    if (admin() || in->uid == (uint32_t)task64_uid())
-        return 1;
-    return (in->mode & 0001) != 0;
+    return permits(in, 1);
 }
 
 static int may_write(const struct inode *in)
 {
-    return admin() || in->uid == (uint32_t)task64_uid() ||
-           in->num == ROOT_INO;
+    return permits(in, 2);
+}
+
+/* May the current task make or take away names in this directory, and
+   (with the sticky bit) take away this one, owned by 'owner' */
+static int may_change(const struct inode *dir)
+{
+    return permits(dir, 3);
+}
+
+static int may_remove(const struct inode *dir, const struct inode *victim)
+{
+    if (!may_change(dir))
+        return 0;
+    return !(dir->mode & 01000) || admin() || victim->uid == my_uid() ||
+           dir->uid == my_uid();
+}
+
+static int owner_or_admin(const struct inode *in)
+{
+    return admin() || in->uid == my_uid();
+}
+
+static int fail(int e)
+{
+    fs_set_errno(e);
+    return -1;
 }
 
 /* The files in the root only an administrator may make, change or
@@ -1084,23 +1134,29 @@ static uint32_t resolve_in(uint32_t start, const char *path, uint32_t n,
         uint32_t len = (uint32_t)(p - s);
         if (len == 1 && s[0] == '.')
             continue;
-        if (load_inode(cur, &in) < 0 || !is_dir_mode(&in) || !may_enter(&in))
-            return 0;
+        if (load_inode(cur, &in) < 0)
+            return fail(FS_EIO), 0;
+        if (!is_dir_mode(&in))
+            return fail(FS_ENOTDIR), 0;
+        if (!may_enter(&in))
+            return fail(FS_EACCES), 0;
         if (len > FS_NAME_LEN)
-            return 0;
+            return fail(FS_ENAMETOOLONG), 0;
         uint32_t next = len == 2 && s[0] == '.' && s[1] == '.'
                             ? (cur == ROOT_INO ? ROOT_INO
                                                : dir_lookup(&in, "..", 2))
                             : dir_lookup(&in, s, len);
-        if (!next || load_inode(next, &in) < 0)
-            return 0;
+        if (!next)
+            return fail(FS_ENOENT), 0;
+        if (load_inode(next, &in) < 0)
+            return fail(FS_EIO), 0;
         int last = p == end || (p < end && p + 1 == end && *p == '/');
         if ((in.mode & S_IFMT) == S_IFLNK && (!last || follow_last)) {
             if (depth >= SYMLINK_DEPTH)
-                return 0;
+                return fail(FS_ELOOP), 0;
             char *target = kmalloc(FS_PATH_MAX);
             if (!target)
-                return 0;
+                return fail(FS_EIO), 0;
             int tl = link_target(&in, target, FS_PATH_MAX);
             uint32_t to = tl > 0 ? resolve_in(cur, target, (uint32_t)tl, 1,
                                               depth + 1) : 0;
@@ -1131,18 +1187,24 @@ static uint32_t resolve_parent(int cwd, const char *path, char *base)
     while (s > 0 && path[s - 1] != '/')
         s--;
     uint32_t bl = n - s;
-    if (!bl || bl > FS_NAME_LEN ||
-        (bl == 1 && path[s] == '.') ||
+    if (bl > FS_NAME_LEN)
+        return fail(FS_ENAMETOOLONG), 0;
+    if (!bl || (bl == 1 && path[s] == '.') ||
         (bl == 2 && path[s] == '.' && path[s + 1] == '.'))
-        return 0;
+        return fail(FS_EINVAL), 0;
     memcpy(base, path + s, bl);
     base[bl] = '\0';
     uint32_t dir = s ? resolve_in(ino_of_slot(cwd), path, s, 1, 0)
                      : ino_of_slot(cwd);
     static struct inode in;
-    if (!dir || load_inode(dir, &in) < 0 || !is_dir_mode(&in) ||
-        !may_enter(&in))
+    if (!dir)
         return 0;
+    if (load_inode(dir, &in) < 0)
+        return fail(FS_EIO), 0;
+    if (!is_dir_mode(&in))
+        return fail(FS_ENOTDIR), 0;
+    if (!may_enter(&in))
+        return fail(FS_EACCES), 0;
     return dir;
 }
 
@@ -1158,34 +1220,54 @@ static int ft_of(const struct inode *in)
     }
 }
 
-/* A new inode named 'base' in directory 'dir': a file, or a directory
-   with its "." and ".." */
-static uint32_t make(uint32_t dir_ino, const char *base, int dir)
+#define MODE_UNSET 0xFFFFFFFFu        /* the caller gave no mode */
+#define K_FILE 0
+#define K_DIR  1
+#define K_LINK 2
+
+/* A new inode named 'base' in directory 'dir': a file, a directory with
+   its "." and "..", or a symbolic link holding 'target'. The mode asked
+   for loses the task's umask; with none asked for, a file is its
+   owner's alone (as TFS3's were - the kernel's own files among them)
+   and a directory is everybody's to pass and read. The system's files
+   in the root are the system's, 0644 when everybody reads them and
+   0600 when nobody else may. 0 and fs_errno when it cannot be made. */
+static uint32_t make(uint32_t dir_ino, const char *base, int kind,
+                     uint32_t mode, const char *target)
 {
     static struct inode parent;
     struct inode in;
-    if (load_inode(dir_ino, &parent) < 0 || !may_write(&parent) ||
+    if (!fs.writable)
+        return fail(FS_EROFS), 0;
+    if (load_inode(dir_ino, &parent) < 0)
+        return fail(FS_EIO), 0;
+    if (!may_change(&parent) ||
         (dir_ino == ROOT_INO && system_file(base) && !admin()))
-        return 0;
+        return fail(FS_EACCES), 0;
     uint32_t nl = (uint32_t)strlen(base);
     if (dir_lookup(&parent, base, nl))
-        return 0;
-    uint32_t ino = alloc_inode(dir ? 0 : dir_ino, dir);
+        return fail(FS_EEXIST), 0;
+    if (kind == K_DIR && parent.links >= 65000)
+        return fail(FS_EMLINK), 0;
+    uint32_t ino = alloc_inode(kind == K_DIR ? 0 : dir_ino, kind == K_DIR);
     if (!ino)
-        return 0;
+        return fail(FS_ENOSPC), 0;
+    int sys = dir_ino == ROOT_INO && system_file(base);
+    uint32_t mask = (uint32_t)task64_umask();
     memset(&in, 0, sizeof(in));
     in.num = ino;
-    in.uid = (dir_ino == ROOT_INO && system_file(base)) ? 0
-                                                         : (uint32_t)task64_uid();
+    in.uid = sys ? 0 : my_uid();
+    in.gid = sys ? 0 : my_gid();
     uint32_t t = now();
     in.atime = in.ctime = in.mtime = t;
-    if (dir) {
-        in.mode = S_IFDIR | 0711;
+    if (kind == K_DIR) {
+        in.mode = S_IFDIR | ((mode == MODE_UNSET ? 0777 : mode & 07777) &
+                             ~mask);
         in.links = 2;
         int fresh;
         uint32_t b = bmap_alloc(&in, 0, &fresh);
         if (!b)
-            goto undo;
+            goto full;
         memset(dblk, 0, fs.bs);
         dblk_no = 0;
         put_entry(dblk, ino, 12, ".", 1, FT_DIR);
@@ -1193,24 +1275,43 @@ static uint32_t make(uint32_t dir_ino, const char *base, int dir)
         if (write_block(b, dblk) < 0)
             goto undo;
         in.size = fs.bs;
+    } else if (kind == K_LINK) {
+        uint32_t tl = (uint32_t)strlen(target);
+        in.mode = S_IFLNK | 0777;
+        in.links = 1;
+        in.size = tl;
+        if (tl < 60) {
+            /* a short target lives in the block list, as ext2's "fast"
+               links do: no block at all */
+            memcpy(in.block, target, tl);
+        } else if (write_bytes(&in, 0, target, tl) != (int)tl) {
+            goto full;
+        }
     } else {
-        in.mode = S_IFREG | (dir_ino == ROOT_INO && public_file(base) ? 0644
-                                                                      : 0600);
+        in.mode = S_IFREG |
+                  (sys ? (public_file(base) ? 0644 : 0600)
+                       : mode == MODE_UNSET ? 0600 : (mode & 07777) & ~mask);
         in.links = 1;
     }
     /* the inode first, then the name: a crash between leaks an inode
        e2fsck gives back, rather than a name for nothing */
-    if (write_inode(&in, 1) < 0 ||
-        dir_add(&parent, base, nl, ino, dir ? FT_DIR : FT_REG) < 0)
+    if (write_inode(&in, 1) < 0)
         goto undo;
-    if (dir)
+    if (dir_add(&parent, base, nl, ino, (uint8_t)ft_of(&in)) < 0)
+        goto full;
+    if (kind == K_DIR)
         parent.links++;
     parent.mtime = parent.ctime = t;
     write_inode(&parent, 0);
     return ino;
+full:
+    fs_set_errno(FS_ENOSPC);
 undo:
-    cut_from(&in, 0);
-    free_inode_bit(ino, dir);
+    if (!fs_errno())
+        fs_set_errno(FS_EIO);
+    if (kind != K_LINK || in.size >= 60)
+        cut_from(&in, 0);
+    free_inode_bit(ino, kind == K_DIR);
     return 0;
 }
 
@@ -1289,19 +1390,29 @@ static void release(struct inode *in)
 
 /* --- the backend's calls --------------------------------------------------- */
 
-static int t4_open(int cwd, const char *path, int create)
+static int t4_open_mode(int cwd, const char *path, int create,
+                        uint32_t mode)
 {
     irqflags_t flags = irq_save();
     static struct inode in;
     uint32_t ino = resolve(cwd, path);
     int r = -1;
     if (ino) {
-        if (load_inode(ino, &in) == 0 && is_reg_mode(&in) && may_read(&in))
+        if (load_inode(ino, &in) < 0)
+            fail(FS_EIO);
+        else if (is_dir_mode(&in))
+            fail(FS_EISDIR);
+        else if (!is_reg_mode(&in))
+            fail(FS_EINVAL);
+        else if (!may_read(&in))
+            fail(FS_EACCES);
+        else
             r = slot_of_ino(ino);
-    } else if (create && fs.writable) {
+    } else if (create && fs_errno() == FS_ENOENT) {
         static char base[FS_NAME_LEN + 1];
+        fs_set_errno(0);
         uint32_t dir = resolve_parent(cwd, path, base);
-        uint32_t made = dir ? make(dir, base, 0) : 0;
+        uint32_t made = dir ? make(dir, base, K_FILE, mode, 0) : 0;
         if (made)
             r = slot_of_ino(made);
         meta_flush();
@@ -1310,19 +1421,32 @@ static int t4_open(int cwd, const char *path, int create)
     return r;
 }
 
-static int t4_mkdir(int cwd, const char *path)
+static int t4_open(int cwd, const char *path, int create)
+{
+    return t4_open_mode(cwd, path, create, MODE_UNSET);
+}
+
+static int t4_mkdir_mode(int cwd, const char *path, uint32_t mode)
 {
     irqflags_t flags = irq_save();
     static char base[FS_NAME_LEN + 1];
     int r = -1;
-    if (fs.writable && !resolve(cwd, path)) {
+    if (resolve(cwd, path)) {
+        fail(FS_EEXIST);
+    } else if (fs_errno() == FS_ENOENT) {
+        fs_set_errno(0);
         uint32_t dir = resolve_parent(cwd, path, base);
-        if (dir && make(dir, base, 1))
+        if (dir && make(dir, base, K_DIR, mode, 0))
             r = 0;
         meta_flush();
     }
     irq_restore(flags);
     return r;
+}
+
+static int t4_mkdir(int cwd, const char *path)
+{
+    return t4_mkdir_mode(cwd, path, MODE_UNSET);
 }
 
 /* A name taken away. A directory has to be empty; a file still open
@@ -1333,20 +1457,45 @@ static int t4_unlink(int cwd, const char *path)
     static char base[FS_NAME_LEN + 1];
     static struct inode parent, in;
     int r = -1;
-    uint32_t dir = fs.writable ? resolve_parent(cwd, path, base) : 0;
+    if (!fs.writable) {
+        fail(FS_EROFS);
+        goto done;
+    }
+    uint32_t dir = resolve_parent(cwd, path, base);
+    if (!dir)
+        goto done;
     uint32_t nl = (uint32_t)strlen(base);
-    uint32_t ino = dir ? (load_inode(dir, &parent) == 0
-                              ? dir_lookup(&parent, base, nl) : 0) : 0;
-    if (!ino || ino == ROOT_INO || load_inode(ino, &in) < 0 ||
-        !may_write(&in) || !may_write(&parent) ||
-        (dir == ROOT_INO && system_file(base) && !admin()) ||
-        ino == LOST_FOUND_INO)
+    if (load_inode(dir, &parent) < 0) {
+        fail(FS_EIO);
         goto done;
+    }
+    uint32_t ino = dir_lookup(&parent, base, nl);
+    if (!ino) {
+        fail(FS_ENOENT);
+        goto done;
+    }
+    if (ino == ROOT_INO || ino == LOST_FOUND_INO || load_inode(ino, &in) < 0) {
+        fail(FS_EPERM);
+        goto done;
+    }
+    if (!may_change(&parent) ||
+        (dir == ROOT_INO && system_file(base) && !admin())) {
+        fail(FS_EACCES);
+        goto done;
+    }
+    if (!may_remove(&parent, &in)) {
+        fail(FS_EPERM);                  /* the sticky bit: not one's own */
+        goto done;
+    }
     int isdir = is_dir_mode(&in);
-    if (isdir && !dir_empty(&in))
+    if (isdir && !dir_empty(&in)) {
+        fail(FS_ENOTEMPTY);
         goto done;
-    if (dir_remove(&parent, base, nl) < 0)
+    }
+    if (dir_remove(&parent, base, nl) < 0) {
+        fail(FS_EIO);
         goto done;
+    }
     uint32_t t = now();
     parent.mtime = parent.ctime = t;
     if (isdir && parent.links > 2)
@@ -1405,33 +1554,60 @@ static int t4_rename(int cwd, const char *from, const char *to)
     static char a[FS_NAME_LEN + 1], b[FS_NAME_LEN + 1];
     static struct inode pa, pb, in, old;
     int r = -1;
-    if (!fs.writable)
+    if (!fs.writable) {
+        fail(FS_EROFS);
         goto done;
+    }
     uint32_t da = resolve_parent(cwd, from, a);
+    if (!da)
+        goto done;
     uint32_t db = resolve_parent(cwd, to, b);
+    if (!db)
+        goto done;
     uint32_t al = (uint32_t)strlen(a), bl = (uint32_t)strlen(b);
-    if (!da || !db || load_inode(da, &pa) < 0 || load_inode(db, &pb) < 0)
+    if (load_inode(da, &pa) < 0 || load_inode(db, &pb) < 0) {
+        fail(FS_EIO);
         goto done;
+    }
     uint32_t ino = dir_lookup(&pa, a, al);
-    if (!ino || ino == LOST_FOUND_INO || load_inode(ino, &in) < 0 ||
-        !may_write(&in) || !may_write(&pa) || !may_write(&pb) ||
-        (da == ROOT_INO && system_file(a) && !admin()) ||
-        (db == ROOT_INO && system_file(b) && !admin()))
+    if (!ino) {
+        fail(FS_ENOENT);
         goto done;
+    }
+    if (ino == LOST_FOUND_INO || load_inode(ino, &in) < 0) {
+        fail(FS_EPERM);
+        goto done;
+    }
+    if (!may_change(&pa) || !may_change(&pb) ||
+        (da == ROOT_INO && system_file(a) && !admin()) ||
+        (db == ROOT_INO && system_file(b) && !admin())) {
+        fail(FS_EACCES);
+        goto done;
+    }
+    if (!may_remove(&pa, &in)) {
+        fail(FS_EPERM);
+        goto done;
+    }
     int isdir = is_dir_mode(&in);
     if (isdir) {
         /* not into itself: walk up from the target's directory */
         static struct inode up;
         uint32_t cur = db;
         for (int guard = 0; cur != ROOT_INO && guard < 4096; guard++) {
-            if (cur == ino || load_inode(cur, &up) < 0)
+            if (cur == ino || load_inode(cur, &up) < 0) {
+                fail(FS_EINVAL);
                 goto done;
+            }
             cur = dir_lookup(&up, "..", 2);
-            if (!cur)
+            if (!cur) {
+                fail(FS_EIO);
                 goto done;
+            }
         }
-        if (db == ino)
+        if (db == ino) {
+            fail(FS_EINVAL);
             goto done;
+        }
     }
     uint32_t there = dir_lookup(&pb, b, bl);
     if (there == ino) {
@@ -1439,10 +1615,22 @@ static int t4_rename(int cwd, const char *from, const char *to)
         goto done;
     }
     if (there) {
-        if (load_inode(there, &old) < 0 || !may_write(&old) ||
-            is_dir_mode(&old) != isdir || there == LOST_FOUND_INO ||
-            (isdir && !dir_empty(&old)))
+        if (load_inode(there, &old) < 0 || there == LOST_FOUND_INO) {
+            fail(FS_EPERM);
             goto done;
+        }
+        if (!may_remove(&pb, &old)) {
+            fail(FS_EPERM);
+            goto done;
+        }
+        if (is_dir_mode(&old) != isdir) {
+            fail(isdir ? FS_ENOTDIR : FS_EISDIR);
+            goto done;
+        }
+        if (isdir && !dir_empty(&old)) {
+            fail(FS_ENOTEMPTY);
+            goto done;
+        }
         if (dir_remove(&pb, b, bl) < 0)
             goto done;
         if (is_dir_mode(&old) && pb.links > 2)
@@ -1495,8 +1683,17 @@ static int t4_chdir(int cwd, const char *path, int *newcwd)
     irqflags_t flags = irq_save();
     static struct inode in;
     uint32_t ino = resolve(cwd, path);
-    int ok = ino && load_inode(ino, &in) == 0 && is_dir_mode(&in) &&
-             may_enter(&in);
+    int ok = 0;
+    if (ino) {
+        if (load_inode(ino, &in) < 0)
+            fail(FS_EIO);
+        else if (!is_dir_mode(&in))
+            fail(FS_ENOTDIR);
+        else if (!may_enter(&in))
+            fail(FS_EACCES);
+        else
+            ok = 1;
+    }
     if (ok)
         *newcwd = slot_of_ino(ino);
     irq_restore(flags);
@@ -1558,22 +1755,42 @@ static void fill(const struct inode *in, struct fs_stat *st)
     memset(st, 0, sizeof(*st));
     st->slot = slot_of_ino(in->num);
     st->ino = in->num;
-    st->type = is_dir_mode(in) ? FS_T_DIR : FS_T_FILE;
-    st->size = is_dir_mode(in) ? 0 : in->size;
+    st->type = is_dir_mode(in) ? FS_T_DIR
+               : (in->mode & S_IFMT) == S_IFLNK ? FS_T_LINK : FS_T_FILE;
+    st->size = in->size;
     st->owner = (int)in->uid;
+    st->mode = in->mode & 07777;
+    st->gid = in->gid;
+    st->nlink = in->links;
+    st->atime = in->atime;
+    st->mtime = in->mtime;
+    st->ctime = in->ctime;
+    st->blocks512 = in->blocks512;
 }
 
-static int t4_stat_path(int cwd, const char *path, struct fs_stat *st)
+/* What is at a path: asking needs only the way there, not the file's
+   own bits, as stat(2) */
+static int stat_at(int cwd, const char *path, struct fs_stat *st, int follow)
 {
     irqflags_t flags = irq_save();
     static struct inode in;
-    uint32_t ino = resolve(cwd, path);
-    int ok = ino && load_inode(ino, &in) == 0 &&
-             (is_dir_mode(&in) || may_read(&in));
+    uint32_t ino = resolve_in(ino_of_slot(cwd), path,
+                              (uint32_t)strlen(path), follow, 0);
+    int ok = ino && load_inode(ino, &in) == 0;
     if (ok)
         fill(&in, st);
     irq_restore(flags);
     return ok ? 0 : -1;
+}
+
+static int t4_stat_path(int cwd, const char *path, struct fs_stat *st)
+{
+    return stat_at(cwd, path, st, 1);
+}
+
+static int t4_lstat_path(int cwd, const char *path, struct fs_stat *st)
+{
+    return stat_at(cwd, path, st, 0);
 }
 
 static int t4_stat_slot(int slot, struct fs_stat *st)
@@ -1594,9 +1811,18 @@ static int t4_readdir_at(int dir, uint64_t *cursor, struct fs_dirent *out)
     static struct inode in, child;
     static struct dentry e;
     int r = -1;
-    if (load_inode(ino_of_slot(dir), &in) < 0 || !is_dir_mode(&in) ||
-        !may_read(&in))
+    if (load_inode(ino_of_slot(dir), &in) < 0) {
+        fail(FS_EIO);
         goto done;
+    }
+    if (!is_dir_mode(&in)) {
+        fail(FS_ENOTDIR);
+        goto done;
+    }
+    if (!may_read(&in)) {
+        fail(FS_EACCES);
+        goto done;
+    }
     for (;;) {
         r = dir_next(&in, cursor, &e);
         if (r != 1)
@@ -1608,10 +1834,6 @@ static int t4_readdir_at(int dir, uint64_t *cursor, struct fs_dirent *out)
         if (e.ino == LOST_FOUND_INO && in.num == ROOT_INO)
             continue;
         int have = load_inode(e.ino, &child) == 0;
-        /* TFS3's rule until stage 4: a file the caller may not read is
-           not shown (the system's swap file, somebody else's notes) */
-        if (have && is_reg_mode(&child) && !may_read(&child))
-            continue;
         memset(out, 0, sizeof(*out));
         memcpy(out->name, e.name, e.name_len + 1);
         out->ino = e.ino;
@@ -1668,6 +1890,7 @@ static int t4_set_owner(int slot, int uid)
     if (fs.writable && admin() && uid >= 0 &&
         load_inode(ino_of_slot(slot), &in) == 0) {
         in.uid = (uint32_t)uid;
+        in.gid = uid ? USERS_GID : 0;
         in.ctime = now();
         r = write_inode(&in, 0);
     }
@@ -1683,9 +1906,18 @@ static int t4_truncate_to(int slot, uint64_t size)
     static struct inode in;
     irqflags_t flags = irq_save();
     int r = -1;
-    if (!fs.writable || load_inode(ino_of_slot(slot), &in) < 0 ||
-        !is_reg_mode(&in) || !may_write(&in))
+    if (!fs.writable) {
+        fail(FS_EROFS);
         goto done;
+    }
+    if (load_inode(ino_of_slot(slot), &in) < 0 || !is_reg_mode(&in)) {
+        fail(FS_EINVAL);
+        goto done;
+    }
+    if (!may_write(&in)) {
+        fail(FS_EACCES);
+        goto done;
+    }
     if (size < in.size || size == 0) {
         cut_from(&in, (size + fs.bs - 1) / fs.bs);
         if (size % fs.bs) {
@@ -1778,6 +2010,212 @@ static void t4_usage(uint64_t *used, uint64_t *total)
         *total = fs.blocks;
 }
 
+/* --- POSIX's metadata ---------------------------------------------------- */
+
+static int t4_chmod(int slot, uint32_t mode)
+{
+    irqflags_t flags = irq_save();
+    static struct inode in;
+    int r = -1;
+    if (!fs.writable)
+        fail(FS_EROFS);
+    else if (load_inode(ino_of_slot(slot), &in) < 0)
+        fail(FS_ENOENT);
+    else if (!owner_or_admin(&in))
+        fail(FS_EPERM);
+    else {
+        in.mode = (uint16_t)((in.mode & S_IFMT) | (mode & 07777));
+        in.ctime = now();
+        r = write_inode(&in, 0) < 0 ? fail(FS_EIO) : 0;
+    }
+    irq_restore(flags);
+    return r;
+}
+
+/* Only an administrator gives a file away (-1 keeps what is there) */
+static int t4_chown(int slot, int uid, int gid)
+{
+    irqflags_t flags = irq_save();
+    static struct inode in;
+    int r = -1;
+    if (!fs.writable)
+        fail(FS_EROFS);
+    else if (load_inode(ino_of_slot(slot), &in) < 0)
+        fail(FS_ENOENT);
+    else if (!admin())
+        fail(FS_EPERM);
+    else {
+        if (uid >= 0)
+            in.uid = (uint32_t)uid;
+        if (gid >= 0)
+            in.gid = (uint32_t)gid;
+        in.ctime = now();
+        r = write_inode(&in, 0) < 0 ? fail(FS_EIO) : 0;
+    }
+    irq_restore(flags);
+    return r;
+}
+
+/* Times given outright are the owner's to set; "now" anybody's who may
+   write the file, as utimensat(2) */
+static int t4_utimes(int slot, int64_t atime, int64_t mtime)
+{
+    irqflags_t flags = irq_save();
+    static struct inode in;
+    int r = -1;
+    int explicit_time = (atime != FS_TIME_NOW && atime != FS_TIME_OMIT) ||
+                        (mtime != FS_TIME_NOW && mtime != FS_TIME_OMIT);
+    if (!fs.writable)
+        fail(FS_EROFS);
+    else if (load_inode(ino_of_slot(slot), &in) < 0)
+        fail(FS_ENOENT);
+    else if (explicit_time ? !owner_or_admin(&in)
+                           : !owner_or_admin(&in) && !may_write(&in))
+        fail(explicit_time ? FS_EPERM : FS_EACCES);
+    else {
+        uint32_t t = now();
+        if (atime != FS_TIME_OMIT)
+            in.atime = atime == FS_TIME_NOW ? t : (uint32_t)atime;
+        if (mtime != FS_TIME_OMIT)
+            in.mtime = mtime == FS_TIME_NOW ? t : (uint32_t)mtime;
+        in.ctime = t;
+        r = write_inode(&in, 0) < 0 ? fail(FS_EIO) : 0;
+    }
+    irq_restore(flags);
+    return r;
+}
+
+/* A second name for a file: not for a directory, which would make the
+   tree a graph */
+static int t4_link(int cwd, const char *from, const char *to)
+{
+    irqflags_t flags = irq_save();
+    static char base[FS_NAME_LEN + 1];
+    static struct inode in, parent;
+    int r = -1;
+    uint32_t ino = fs.writable ? resolve_in(ino_of_slot(cwd), from,
+                                            (uint32_t)strlen(from), 0, 0)
+                               : (fail(FS_EROFS), 0);
+    if (!ino)
+        goto done;
+    if (load_inode(ino, &in) < 0 || is_dir_mode(&in)) {
+        fail(FS_EPERM);
+        goto done;
+    }
+    if (in.links >= 65000) {
+        fail(FS_EMLINK);
+        goto done;
+    }
+    uint32_t dir = resolve_parent(cwd, to, base);
+    if (!dir)
+        goto done;
+    uint32_t nl = (uint32_t)strlen(base);
+    if (load_inode(dir, &parent) < 0) {
+        fail(FS_EIO);
+        goto done;
+    }
+    if (dir_lookup(&parent, base, nl)) {
+        fail(FS_EEXIST);
+        goto done;
+    }
+    if (!may_change(&parent) ||
+        (dir == ROOT_INO && system_file(base) && !admin())) {
+        fail(FS_EACCES);
+        goto done;
+    }
+    /* the count first: a crash between leaves one name too few counted
+       up, which e2fsck puts right, never a name past the count */
+    in.links++;
+    in.ctime = now();
+    if (write_inode(&in, 0) < 0 ||
+        dir_add(&parent, base, nl, ino, (uint8_t)ft_of(&in)) < 0) {
+        in.links--;
+        write_inode(&in, 0);
+        fail(FS_ENOSPC);
+        goto done;
+    }
+    parent.mtime = parent.ctime = in.ctime;
+    write_inode(&parent, 0);
+    r = 0;
+done:
+    meta_flush();
+    irq_restore(flags);
+    return r;
+}
+
+static int t4_symlink(int cwd, const char *target, const char *path)
+{
+    irqflags_t flags = irq_save();
+    static char base[FS_NAME_LEN + 1];
+    int r = -1;
+    if (resolve_in(ino_of_slot(cwd), path, (uint32_t)strlen(path), 0, 0)) {
+        fail(FS_EEXIST);
+    } else if (fs_errno() == FS_ENOENT) {
+        fs_set_errno(0);
+        uint32_t dir = resolve_parent(cwd, path, base);
+        if (dir && make(dir, base, K_LINK, 0777, target))
+            r = 0;
+        meta_flush();
+    }
+    irq_restore(flags);
+    return r;
+}
+
+static int t4_readlink(int cwd, const char *path, char *buf, uint32_t cap)
+{
+    irqflags_t flags = irq_save();
+    static struct inode in;
+    int r = -1;
+    uint32_t ino = resolve_in(ino_of_slot(cwd), path, (uint32_t)strlen(path),
+                              0, 0);
+    if (ino) {
+        if (load_inode(ino, &in) < 0 || (in.mode & S_IFMT) != S_IFLNK) {
+            fail(FS_EINVAL);
+        } else {
+            char *t = kmalloc(FS_PATH_MAX);
+            int n = t ? link_target(&in, t, FS_PATH_MAX) : -1;
+            if (n < 0) {
+                fail(FS_EIO);
+            } else {
+                r = n < (int)cap ? n : (int)cap;
+                memcpy(buf, t, (uint32_t)r);
+            }
+            kfree(t);
+        }
+    }
+    irq_restore(flags);
+    return r;
+}
+
+static int t4_access(int cwd, const char *path, int mode)
+{
+    irqflags_t flags = irq_save();
+    static struct inode in;
+    int r = -1;
+    uint32_t ino = resolve(cwd, path);
+    if (ino) {
+        if (load_inode(ino, &in) < 0)
+            fail(FS_EIO);
+        else if ((mode & 2) && !fs.writable)
+            fail(FS_EROFS);
+        else if (mode & 7 && !permits(&in, mode & 7))
+            fail(FS_EACCES);
+        else
+            r = 0;
+    }
+    irq_restore(flags);
+    return r;
+}
+
+static int t4_resolve(int cwd, const char *path, int follow)
+{
+    irqflags_t flags = irq_save();
+    uint32_t ino = resolve_in(ino_of_slot(cwd), path, (uint32_t)strlen(path),
+                              follow, 0);
+    irq_restore(flags);
+    return ino ? slot_of_ino(ino) : -2;
+}
+
 const struct fs_backend tfs4_backend = {
     .name = "TFS4",
     .open = t4_open,
@@ -1788,6 +2226,17 @@ const struct fs_backend tfs4_backend = {
     .getpath = t4_getpath,
     .stat_path = t4_stat_path,
     .stat_slot = t4_stat_slot,
+    .lstat_path = t4_lstat_path,
+    .open_mode = t4_open_mode,
+    .mkdir_mode = t4_mkdir_mode,
+    .chmod = t4_chmod,
+    .chown = t4_chown,
+    .utimes = t4_utimes,
+    .link = t4_link,
+    .symlink = t4_symlink,
+    .readlink = t4_readlink,
+    .access = t4_access,
+    .resolve = t4_resolve,
     .readdir_at = t4_readdir_at,
     .size = t4_size,
     .owner = t4_owner,
@@ -2134,7 +2583,9 @@ int tfs4_format(uint32_t base, uint32_t sectors)
     for (int k = 0; k < 2; k++) {
         uint32_t ino = k ? LOST_FOUND_INO : ROOT_INO;
         uint8_t *p = buf + (ino - 1) * isize;
-        wr16(p, S_IFDIR | (k ? 0700 : 0755));
+        /* the root as /tmp: anybody makes files in it, only their
+           owners take them away (TFS3's root let everybody write) */
+        wr16(p, S_IFDIR | (k ? 0700 : 01777));
         wr32(p + 4, bs);
         wr32(p + 8, t);
         wr32(p + 12, t);
