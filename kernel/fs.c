@@ -966,10 +966,14 @@ uint32_t fs_file_block(int slot, uint32_t index, int alloc)
     return blk;
 }
 
-/* The first ATA sector of a given TFS block */
+/* The first sector of a given TFS block, on the disk. Mapped files,
+   big programs and swap read and write straight through blk_*, so the
+   partition's start has to be in the number: without it, on a disk
+   where TFS lives in a partition, block 13 was sector 26 - the GPT's
+   entries. */
 uint32_t fs_block_lba(uint32_t block)
 {
-    return block * SECTORS_PER_BLOCK;
+    return fs_base + block * SECTORS_PER_BLOCK;
 }
 
 int fs_size(int slot)

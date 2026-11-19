@@ -141,6 +141,22 @@ def main():
             said = q.command("write proof.txt installed-beside-windows",
                              "write:", timeout=20)
             check("and a file goes onto it", "written" in said)
+
+            # A mapped file is read and written straight from its disk
+            # blocks, not through the file system's own block calls -
+            # and those blocks are counted from the partition's start,
+            # not the disk's (a block number taken for a sector wrote
+            # over the partition table)
+            q.command("run mkmap64 mapped.txt 12", "exit code", timeout=60)
+            said = q.command("run mmapzap64 mapped.txt write", "exit code",
+                             timeout=90)
+            said += q.command("run mmapzap64 mapped.txt check", "exit code",
+                              timeout=90)
+            check("a file mapped into memory is read and written in the "
+                  "partition",
+                  "the old pattern was read, bytes 12288" in said and
+                  "an ordinary read sees what" in said and
+                  "WRONG" not in said)
         finally:
             q.close()
 
@@ -160,6 +176,10 @@ def main():
             out = q.command("cat proof.txt", "installed", timeout=20)
             check("and the file written before the restart is there",
                   "installed-beside-windows" in out)
+            out = q.command("run mmapzap64 mapped.txt check", "exit code",
+                            timeout=90)
+            check("and what was written through the mapping too",
+                  "an ordinary read sees what" in out and "WRONG" not in out)
         finally:
             q.close()
     finally:
