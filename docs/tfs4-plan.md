@@ -1,170 +1,35 @@
-# TFS4: the plan
-
-TFS4 replaces TFS3 (`kernel/fs.c`) as the PC's file system. This file
-says why, what it is built from, in which order, how each step is
-tested and roughly how long it takes. It covers the file system only;
-the other gaps against Linux 1.0 come from the audit and get their own
-plan.
-
-## Where TFS3 stands
-
-TFS3 was right for the disk images the system started on, and it is
-what stops the system now:
-
-- 64 inodes for the whole disk, files and directories together;
-- a block bitmap of 4 KiB, so 32768 blocks of 1 KiB: 32 MiB of data
-  however large the partition is;
-- 64 MiB for one file (12 direct blocks, one indirect, one doubly
-  indirect), and 32-bit offsets throughout `fs.h`;
-- an owner and nothing else: no mode bits (`chmod` does nothing, the
-  `umask` is always 022), no group;
-- no times at all (`utimensat` does nothing, `ls -l` has no dates);
-- no hard links and no symbolic links (`readlink` says EINVAL);
-- names up to 63 bytes; a directory is not a file of entries but
-  every inode that names it as its parent, so a listing reads the
-  whole table;
-- every change written through at once with interrupts off, and
-  nothing that makes a change survive a power cut half done, apart
-  from orphans being freed at the next mount.
-
-## The decision
-
-TFS4's base is the **ext2 on-disk format** (revision 1), grown step by
-step to **ext4's** features, and ThreadOS's own additions go on top,
-each behind a feature flag of its own.
-
-Why:
-- ext2 is the file system of Linux 1.0, and everything TFS3 lacks above
-  is in it;
-- an independent implementation exists and is installed wherever the
-  tests run: `mke2fs`, `e2fsck` and `debugfs` from e2fsprogs. AGENTS.md
-  asks a test to compare against one where it exists; for a file system
-  that means every disk ThreadOS writes can be checked by `e2fsck -fn`
-  and read back by `debugfs`, and every disk `mke2fs` makes can be read
-  by ThreadOS;
-- Linux reads our disks and we read Linux's;
-- the superblock's three sets of feature flags (compatible, read-only
-  compatible, incompatible) were made for growing a format one feature
-  at a time without breaking the disks already written.
-
-What we do not take: no code from Linux or e2fsprogs (GPL); the
-driver is ours, written from the format's documentation (the kernel's
-`Documentation/filesystems/ext4/` and e2fsprogs' headers describe the
-bytes, which is all we need).
-
-## Stage 1: ext2 (TFS4.0) - about 4 to 6 days
-
-1. **The format, behind the same `fs.h`.** `kernel/fs.c` keeps its
-   interface; behind it: the superblock, block group descriptors, block
-   and inode bitmaps, the inode table, direct, indirect, doubly and
-   triply indirect blocks, directories as files of entries
-   (`rec_len`), 4 KiB blocks (1 KiB on small disks, as `mke2fs` does).
-   The `inodes[64]` array becomes an in-memory inode cache: a slot is
-   a cache entry, held while a descriptor, a working directory or a
-   mapping uses it, and loaded from disk on demand.
-2. **Formatting** in the kernel (what `fs_format_now` does today), with
-   the layout `mke2fs` would choose for the same size; the GPT
-   partition type and the installer follow.
-3. **Unix semantics.** Mode bits for user, group and others, checked in
-   open, create, unlink, rename and mkdir instead of owner-only; uid
-   and gid; a `umask` per process; atime, mtime and ctime; hard links
-   (the link count); symbolic links (in the inode up to 60 bytes, in a
-   block beyond); full `stat`. New system calls and their musl side:
-   chmod, chown, link, symlink, readlink, utimensat, umask.
-4. **64-bit sizes and offsets** in `fs.h`, the system calls and `lseek`
-   (ext2's `large_file`): files past 4 GiB.
-5. **Files unlinked while open** go on the superblock's orphan list,
-   which `e2fsck` also understands, instead of TFS3's orphan parent.
-6. **Moving off TFS3.** Installed systems (the laptop) have TFS3
-   partitions. TFS3 holds at most 32 MiB of data, so the conversion
-   reads all of it into memory, keeps a copy of the old metadata
-   where TFS3 never wrote, formats and writes everything back; a
-   conversion cut short is finished at the next boot from that copy.
-   The TFS3 code stays only for this.
-7. **Tests** (`t_tfs4`, new):
-   - files, directories, modes, owners, times and links made in
-     ThreadOS; then `e2fsck -fn` finds nothing and `debugfs` reads
-     back the same bytes, modes, owners, times and link targets;
-   - the reverse: an image made by `mke2fs` and filled by `debugfs`
-     on the host, read in ThreadOS;
-   - 10 000 files, deep directories, a file past 4 GiB (sparse),
-     a full disk;
-   - a TFS3 disk converted, every file the same afterwards, and a
-     conversion stopped half way finished at the next boot;
-   - the host's `TfsImage` in `scripts/ptest.py`, which every disk
-     test uses, reads through `debugfs` instead;
-   - a fuzz harness that mounts hostile images
-     (`tests/fuzz/ext2_harness.c`, seeds from `mke2fs`).
-
-About 3500 lines of C and 1000 of Python.
-
-## Stage 2: ext4's features (TFS4.1) - about 7 to 10 days
-
-1. **The journal** (JBD2, ordered mode: data written before the
-   metadata that points at it commits), replayed at mount, with a
-   write-back block cache beneath it. Test: QEMU killed at random
-   moments during writes, many times; afterwards `e2fsck -fn` is clean
-   and every file is either as before or as after. 2 to 3 days.
-2. **Extents**, read and written, trees deeper than the inode. 1 to 2
-   days.
-3. **Metadata checksums** (crc32c on the superblock, group descriptors,
-   bitmaps, inodes, directory blocks, extent blocks and the journal).
-   1 to 2 days.
-4. **Indexed directories** (htree), read and written. 1 to 2 days.
-5. **The rest:** 64-bit block numbers, flex_bg, huge_file, nanosecond
-   times and the creation time, dir_nlink. About 1 day.
-
-Each one tested with `e2fsck` and `debugfs` as in stage 1, and with
-images made by `mkfs.ext4` read in ThreadOS.
-
-## Stage 3: ThreadOS's own additions (TFS4.2 and on) - about 2 to 3 weeks
-
-Ideas taken from APFS (Apple publishes its format in the "Apple File
-System Reference"; we take ideas, not code - the Linux APFS drivers
-are GPL). Each addition has an incompatible feature flag of its own,
-so `e2fsck` refuses a disk that uses one: these get a host checker of
-their own (`scripts/tfs4check.py`, written apart from the driver) and
-a fuzz harness, while stages 1 and 2 stay checked by `e2fsck` on disks
-without them.
-
-| Addition | From | How | Days |
-|---|---|---|---|
-| Sealed system volume: the system read-only, every block checked against a hash tree signed with the update key | APFS's signed system volume | like ext4's fs-verity, over the whole system | 2-3 |
-| System and Data volumes sharing one partition's free space | APFS containers | a container superblock and volumes over one allocator | 3-5 |
-| File clones: an instant copy that takes no space until written | APFS clones | XFS's way: a reference count on shared extents, copy on write of shared blocks only | 3-4 |
-| The system before an update kept and returned to | APFS snapshots | two system volumes, A and B (Android, ChromeOS), not snapshots inside ext | 2-3 |
-| Encryption per file for home directories (optional) | APFS, ext4's fscrypt | keys from the user's password | 3-4 |
-
-What does not carry over: snapshots of everything and crash safety
-without a journal come from copy-on-write everywhere, the opposite of
-ext's writing in place. If they are ever needed, that is a new format
-(TFS5), written knowing what stages 1 to 3 taught.
-
-## The order and the whole
-
-Stage 1 alone ends the 64-file and 32 MiB limits and brings Unix
-semantics: about a week. Stages 1 and 2 give a file system at today's
-Linux level: about two to three weeks. With stage 3, about five to
-six weeks. These are estimates for work at the pace of the Wi-Fi and
-Bluetooth stages, within half again either way; every step also waits
-for its test groups and, before it is committed, the groups that read
-or write the disk.
-
-The phone's kernel (`kernelarm64/`) does not build `fs.c` today; once
-it has a disk (virtio-blk), it takes TFS4 as shared code.
-
 # TFS4: replacing TFS3 - the plan
 
 This is a work plan for whoever implements it (a person or an AI
 assistant). It was written from a read of the code on 2026-11-19, at
-commit `10d752b`; line numbers may have moved since. Read
-[AGENTS.md](../AGENTS.md) first: every rule there applies, above all
-"a test that would fail without the feature" and "never weaken a test".
+commit `10d752b`; line numbers may have moved since. Two sessions wrote
+it independently and arrived at the same decision; this file merges
+both. Read [AGENTS.md](../AGENTS.md) first: every rule there applies,
+above all "a test that would fail without the feature" and "never
+weaken a test". The rest of the system's gaps are in
+[audit.md](audit.md).
+
+It has three parts:
+
+- **Part I - ext2, then ext3** (stages 1-7): TFS3 replaced, Unix
+  semantics, the installer and migration, a cache, a journal. About
+  two and a half weeks.
+- **Part II - ext4's features**: extents, checksums, indexed
+  directories, 64-bit blocks. About one week.
+- **Part III - ThreadOS's own additions**, ideas from APFS: a sealed
+  system volume, volumes, clones, A/B system. About two to three weeks.
+
+The estimates are working days at the pace of the Wi-Fi and Bluetooth
+stages, within half again either way; every step also waits for its
+test groups and, before it is committed, the groups that read or write
+the disk.
 
 ## The decision
 
 **TFS4 is the ext2 on-disk format (revision 1), in our own
-implementation, under our own name.**
+implementation, under our own name**, grown step by step to ext4's
+features, with ThreadOS's own additions on top, each behind a feature
+flag of its own.
 
 - The name in the code, the messages, the installer, the tests and the
   documentation is **TFS4** (`kernel/tfs4.c`, `[ OK ] TFS4: ...`,
@@ -177,9 +42,9 @@ implementation, under our own name.**
   calls TFS3 "our own filesystem"; TFS4 must not be sold as an
   invention of ours.
 - **Written from the format's documentation, not from Linux's code**
-  (Linux is GPL; the kernel is MIT). Good sources: the kernel.org
-  "ext4 Data Structures and Algorithms" pages (they cover ext2's
-  structures), Dave Poirier's "The Second Extended File System".
+  (Linux and e2fsprogs are GPL; the kernel is MIT). Good sources: the
+  kernel.org "ext4 Data Structures and Algorithms" pages (they cover
+  ext2's structures), Dave Poirier's "The Second Extended File System".
   No third-party library: the best-known one, lwext4, is reportedly
   largely GPLv2 - check before ever considering it (AGENTS.md rule 6).
 - `s_creator_os` stays `0` (Linux): e2fsck reads the OS-dependent inode
@@ -187,17 +52,22 @@ implementation, under our own name.**
 
 ### Why ext2 and not a format of our own
 
-- **An independent implementation to test against** (AGENTS.md rule 1):
-  `mke2fs -d` builds images with a ready tree, `e2fsck -fn` checks every
-  piece of metadata ThreadOS wrote, `debugfs` reads files and attributes
-  back. A format of our own would need its own checker, which only
-  checks what its author thought of (like `TfsImage` in
-  `scripts/ptest.py` today).
-- It has what TFS3 lacks: inodes by the million, directories as files,
-  rwx/uid/gid, times, hard and symbolic links, files over 4 GiB
-  (`large_file`), partitions of terabytes.
-- A path forward: ext3 is ext2 plus a journal (JBD2), the same format,
-  still checked by e2fsck.
+- **An independent implementation to test against** (AGENTS.md rule 1),
+  installed wherever the tests run: `mke2fs -d` builds images with a
+  ready tree, `e2fsck -fn` checks every piece of metadata ThreadOS
+  wrote, `debugfs` reads files and attributes back. A format of our own
+  would need its own checker, which only checks what its author thought
+  of (like `TfsImage` in `scripts/ptest.py` today).
+- It is the file system of Linux 1.0, and it has what TFS3 lacks:
+  inodes by the million, directories as files, rwx/uid/gid, times, hard
+  and symbolic links, files over 4 GiB (`large_file`), partitions of
+  terabytes.
+- Linux reads our disks and we read Linux's.
+- A path forward: ext3 is ext2 plus a journal (JBD2), ext4 adds extents
+  and checksums - the same format, still checked by e2fsck. The
+  superblock's three sets of feature flags (compatible, read-only
+  compatible, incompatible) were made for growing a format one feature
+  at a time without breaking the disks already written.
 
 ## What TFS3 is today, and everything that leans on it
 
@@ -206,13 +76,16 @@ Limits (all in `kernel/fs.c` and `kernel/include/fs.h`):
 - `FS_MAX_FILES 64` (`fs.h:11`): 64 inodes on the whole disk, files and
   directories together, the table held in memory.
 - Directories are not files: each inode names its parent slot, so a
-  lookup or a listing scans all inodes (`dir_find`, `fs.c:600`).
+  lookup or a listing scans all inodes (`dir_find`, `fs.c:600`). Names
+  up to 63 bytes.
 - The bitmap is 4 blocks (`BITMAP_BLOCKS`, `fs.c:44`), so the
   filesystem is cut to 32768 blocks = 32 MiB (`fit`, `fs.c:367`), even
-  on a 500 GB whole-disk install. A file is at most ~64 MiB.
+  on a 500 GB whole-disk install. A file is at most ~64 MiB, and
+  offsets are 32-bit throughout `fs.h`.
 - Owner in 7 bits of the `type` byte (UID <= 127, `fs.c:66`); no rwx,
-  groups, times or links. Access is "owner or admin" (`can_access`,
-  `fs.c:559`) plus a list of system files in the root.
+  groups, times or links (`chmod` does nothing, the `umask` is always
+  022, `readlink` says EINVAL). Access is "owner or admin"
+  (`can_access`, `fs.c:559`) plus a list of system files in the root.
 - No cache: every table change goes to the disk at once; operations run
   under `irq_save` (`fs_open`, `fs.c:704`) and the big kernel lock.
 - Crash handling: orphans (unlinked while open) freed at mount
@@ -228,9 +101,9 @@ What depends on TFS3's internals outside `fs.c`:
 | `kernel64/task64.h:244` | `struct fd_entry { int slot; uint32_t pos; }`: a 32-bit file position |
 | `kernel/include/fs.h` | `fs_size` returns `int`, offsets are `uint32_t`: 2/4 GiB caps in the API |
 | `kernel/swap.c:26-27, 119, 132` | swap reserves `swap.sys` through the FS, then writes raw sectors by block number; assumes `FS_BLOCK` = 1 KiB (4 blocks per page) |
-| `kernel64/proc64.c:579-664`, `kernel64/isr64.c:181-187`, `kernel64/task64.c:1704` | file mappings keep block numbers and read/write raw sectors, again 1 KiB blocks |
+| `kernel64/proc64.c:579-664`, `kernel64/isr64.c:181-187`, `kernel64/task64.c:1704` | file mappings keep block numbers and read/write raw sectors, again 1 KiB blocks. (Those sector numbers left out the partition's start until `a33ed10`: inside a partition a mapping read and `msync` wrote somebody else's sectors.) |
 | `kernel/desktop.c:5249`, `kernel64/shell64.c:241-265, 871-873` | buffers sized by `FS_NAME_MAX`, `df` in `FS_BLOCK` units |
-| `fs_*` callers | `config.c`, `desktop.c`, `install.c`, `prog.c`, `swap.c`, `user.c`, `isr64.c`, `kmain64.c`, `proc64.c`, `shell64.c`, `syscall64.c`, `task64.c` |
+| `fs_*` callers | `bt.c`, `config.c`, `desktop.c`, `install.c`, `prog.c`, `swap.c`, `user.c`, `isr64.c`, `kmain64.c`, `proc64.c`, `shell64.c`, `syscall64.c`, `task64.c` |
 | `kernel/fs.c:423` | the system's partition is found **by the superblock magic alone** |
 | `kernel/gpt.c:98` | `GUID_TFS` = the bytes `THREADOS-TFS3\0\0\1`, written by the installer for the data partition |
 | `kernel/user.c` | the accounts database, `/home/<user>/{Desktop,.Trash}`; `update.key` and `desktop.icons` are system files in the root |
@@ -263,8 +136,9 @@ TFS4 (check each): `t_tfs`, `t_fsbounds`, `t_disk`, `t_disks`,
    descriptors, `cwd` and mappings keep an `int`, and the semantics of
    "unlinked while open" stay as they are (`fs_slot_closed` asks
    `task64_slot_open`). `FS_ROOT` stays `-1` in the API and maps to
-   inode 2 inside TFS4. A small inode cache inside `tfs4.c` is an
-   optimisation, not part of the contract.
+   inode 2 inside TFS4 (and inode 2 found through `..` maps back to
+   `FS_ROOT`). A small inode cache inside `tfs4.c` is an optimisation,
+   not part of the contract.
 3. **Two filesystems behind one API.** `kernel/fs.c` becomes the front
    (the public `fs_*` functions, the choice of backend at mount);
    today's code moves to `kernel/tfs3.c`; the new one is
@@ -274,9 +148,9 @@ TFS4 (check each): `t_tfs`, `t_fsbounds`, `t_disk`, `t_disks`,
    `fs_block_size()` instead of using `FS_BLOCK`.
 5. **Features.** Mount read-write when `incompat` has only `filetype`
    and `ro_compat` only `sparse_super` / `large_file`; refuse to mount
-   for any other `incompat` bit (ext4's `extents`, `64bit`, `flex_bg`,
-   `journal_dev`, ...); mount read-only for other `ro_compat` bits.
-   `compat` bits a modern `mke2fs -t ext2` sets:
+   for any other `incompat` bit (until Part II: ext4's `extents`,
+   `64bit`, `flex_bg`, `journal_dev`, ...); mount read-only for other
+   `ro_compat` bits. `compat` bits a modern `mke2fs -t ext2` sets:
    - `ext_attr`: ignore attributes, but when a file with `i_file_acl`
      is deleted, drop the reference on its attribute block (freeing it
      at zero) - e2fsck counts them;
@@ -310,7 +184,7 @@ TFS4 (check each): `t_tfs`, `t_fsbounds`, `t_disk`, `t_disks`,
     when `s_state` says "not clean": free the orphan list, recount free
     blocks and inodes from the bitmaps, mark it clean on unmount.
 
-## Stages
+## Part I: ext2, then ext3 - about 12 to 14 days
 
 Each stage is one commit with its test(s), a `docs/JOURNAL.md` entry
 and, where the user can see it, README. Build with no new warnings;
@@ -319,7 +193,7 @@ run the groups the stage touches. Host tools: `e2fsprogs` (`mke2fs`,
 `apt-get install` lines in `.github/workflows/*.yml` if a runner lacks
 it, and to README's prerequisites.
 
-### Stage 1 - a kernel ready for a second filesystem (still only TFS3)
+### Stage 1 - a kernel ready for a second filesystem (still only TFS3) - 1.5 to 2 days
 
 - Split `fs.c` into the front and `tfs3.c` (decision 3).
 - Callers stop using TFS3's constants: `fs_block_size()` in swap and
@@ -334,7 +208,7 @@ it, and to README's prerequisites.
   a musl program - this fails today; a listing through `opendir` leaves
   the working directory where it was.
 
-### Stage 2 - TFS4 read-only
+### Stage 2 - TFS4 read-only - 1 to 1.5 days
 
 - `kernel/tfs4.c`: superblock, group descriptors, inodes, direct,
   indirect, doubly and triply indirect blocks, directories, 1/2/4 KiB
@@ -357,7 +231,7 @@ it, and to README's prerequisites.
   every file; seed corpus from `mke2fs`; registered in
   `scripts/fuzz_parsers.py`.
 
-### Stage 3 - TFS4 read-write
+### Stage 3 - TFS4 read-write - about 2 days
 
 - Block and inode allocation (preferring the parent's group), create,
   unlink, rename (also across directories, also replacing a target),
@@ -374,24 +248,25 @@ it, and to README's prerequisites.
   A second case: an image made by the kernel's `mkfs` passes
   `e2fsck -fn`.
 
-### Stage 4 - real POSIX metadata
+### Stage 4 - real POSIX metadata - 1.5 to 2 days
 
 - rwx bits, 32-bit uid and gid (the UID <= 127 cap goes), access,
   modification and change times (from `rtc.c`), hard links, symbolic
-  links (fast ones inside the inode too).
+  links (fast ones inside the inode too), a `umask` per process.
 - System calls and the musl overlay: `stat`/`fstat` with the real mode,
   owner, inode number and times instead of the faked `0644`
   (`syscall.c:583`), and `chmod` (today it returns 0 and does nothing,
   `syscall.c:1753`), `chown`, `utimensat`, `link`, `symlink`,
-  `readlink`, `access`.
+  `readlink`, `access`, `umask`.
 - `can_access` becomes owner/group/other plus the admin role; the
-  system files in the root become ordinary `root:root 0644` files.
+  system files in the root become ordinary `root:root 0644` files
+  (the password database `0600`).
 - **Test `t_tfs4perm`:** two accounts; a `0600` file of one gives the
   other `EACCES`, `chmod` opens it; `stat` from ThreadOS matches
   `debugfs -R stat`; a symlink made in ThreadOS reads back in `debugfs`
   and one made by `mke2fs -d` resolves in ThreadOS.
 
-### Stage 5 - the installer and migration
+### Stage 5 - the installer and migration - 1.5 to 2 days
 
 - The installer formats the data partition as TFS4 with the type GUID
   `THREADOS-TFS4...` (`kernel/gpt.c`), label "ThreadOS partition
@@ -401,27 +276,31 @@ it, and to README's prerequisites.
   that finds TFS3 in ThreadOS's partition:
   1. copy the raw 32 MiB TFS3 area to `\EFI\ThreadOS\tfs3-backup.img`
      on the EFI partition (256 MiB or 1 GiB, `install.c:81, 89`);
-  2. read every file and directory into memory, with owners;
+  2. read every file and directory into memory, with owners (TFS3
+     holds at most 32 MiB, so it fits);
   3. `mkfs` TFS4 on the same partition;
   4. write them back (accounts, `update.key`, `desktop.icons`, homes);
      `swap.sys` is not copied but made anew;
   5. leave the partition table alone (fewer writes, less risk): the
      old `THREADOS-TFS3` GUID stays valid.
+  A conversion cut short is finished at the next start from the backup.
 - **Test `t_tfs3migrate`:** the host writes a TFS3 image (add writing
   to `TfsImage`; the format is frozen), boots, and checks: the same
   files and owners, signing in with the old password works, the backup
-  equals the original bytes, `e2fsck -fn` is clean.
+  equals the original bytes, `e2fsck -fn` is clean; and a migration
+  stopped half way (QEMU killed) finishes at the next start.
 - Move the existing disk tests from `TfsImage` to `debugfs`, keeping
   every assertion (AGENTS.md rule 2). `t_fsbounds` gets TFS4 cases: a
   block pointer past the end, a directory loop, `rec_len` 0, an inode
   number out of range.
 
-### Stage 6 - a block cache and concurrency
+### Stage 6 - a block cache and concurrency - about 2 days
 
 - A block cache (LRU, write-back, `sync` every few seconds and at
-  shutdown); a filesystem lock instead of disabling interrupts around
-  disk I/O; the filesystem out from under the big kernel lock (README
-  roadmap item).
+  shutdown, and `fsync` that really writes); a filesystem lock instead
+  of disabling interrupts around disk I/O; the filesystem out from
+  under the big kernel lock (README roadmap item). Disk write caches
+  flushed as well (audit, hardware 5).
 - With 4 KiB blocks the same cache can serve as a page cache, which
   lets file mappings be shared (`MAP_SHARED` is refused today).
 - Swap still writes raw sectors: its blocks must never sit in the cache
@@ -430,24 +309,67 @@ it, and to README's prerequisites.
   then `e2fsck -fn` clean and the contents right; after `sync` and a
   hard power-off through QMP the data is there.
 
-### Stage 7 - the journal (ext3, JBD2, ordered mode)
+### Stage 7 - the journal (ext3, JBD2, ordered mode) - 2 to 3 days
 
 - Metadata through the journal, data written before the commit, the
   journal replayed at mount; `has_journal` accepted.
 - **Test `t_tfs4crash`:** the system writes in a loop and the host kills
   QEMU at a random moment, a dozen times with different seeds; after
   each restart (replay by ThreadOS) and a clean shutdown `e2fsck -fn`
-  is clean.
+  is clean, and every file is either as before or as after.
+
+## Part II: ext4's features - about 5 to 7 days
+
+Each one accepted as an `incompat` or `ro_compat` bit only once it is
+written; tested with `e2fsck` and `debugfs` as in Part I, and with
+images made by `mkfs.ext4` read in ThreadOS - which is also what lets
+ThreadOS read the disks Linux formats today.
+
+1. **Extents**, read and written, trees deeper than the inode. 1 to 2
+   days.
+2. **Metadata checksums** (crc32c on the superblock, group descriptors,
+   bitmaps, inodes, directory blocks, extent blocks and the journal).
+   1 to 2 days.
+3. **Indexed directories** (htree), read and written. 1 to 2 days.
+4. **The rest:** 64-bit block numbers (with 64-bit LBAs in
+   `kernel/blk.c` for disks over 2 TiB), flex_bg, huge_file,
+   nanosecond times and the creation time, dir_nlink. About 1 day.
+
+## Part III: ThreadOS's own additions - about 2 to 3 weeks
+
+Ideas taken from APFS (Apple publishes its format in the "Apple File
+System Reference"; we take ideas, not code - the Linux APFS drivers
+are GPL). Each addition has an incompatible feature flag of its own,
+so `e2fsck` refuses a disk that uses one: these get a host checker of
+their own (`scripts/tfs4check.py`, written apart from the driver) and
+a fuzz harness, while Parts I and II stay checked by `e2fsck` on disks
+without them.
+
+| Addition | From | How | Days |
+|---|---|---|---|
+| Sealed system volume: the system read-only, every block checked against a hash tree signed with the update key | APFS's signed system volume | like ext4's fs-verity, over the whole system | 2-3 |
+| System and Data volumes sharing one partition's free space | APFS containers | a container superblock and volumes over one allocator | 3-5 |
+| File clones: an instant copy that takes no space until written | APFS clones | XFS's way: a reference count on shared extents, copy on write of shared blocks only | 3-4 |
+| The system before an update kept and returned to | APFS snapshots | two system volumes, A and B (Android, ChromeOS), not snapshots inside ext | 2-3 |
+| Encryption per file for home directories (optional) | APFS, ext4's fscrypt | keys from the user's password | 3-4 |
+
+What does not carry over: snapshots of everything and crash safety
+without a journal come from copy-on-write everywhere, the opposite of
+ext's writing in place. If they are ever needed, that is a new format
+(TFS5), written knowing what Parts I to III taught.
 
 ## Out of scope (later, separately)
 
-- 64-bit LBAs in `kernel/blk.c` (`blk_read(uint32_t lba, ...)`,
-  `blk.h:60`): disks over 2 TiB.
-- Reading ext4 with extents, to read disks Linux formats today.
-- Mount points: the EFI partition and USB sticks visible to programs.
+- Mount points: the EFI partition and USB sticks visible to programs;
+  mounting other people's ext2/ext3/ext4 disks.
+- The phone's kernel (`kernelarm64/`) does not build `fs.c` today; once
+  it has a disk (virtio-blk), it takes TFS4 as shared code
+  (decision 9).
 
 ## Risks
 
 - Stage 1 touches a dozen kernel files and the program ABI.
 - Stage 5 works on people's real data; the backup comes first, always.
 - Stages 2-4 are mostly new code that e2fsprogs checks well.
+- Part III leaves e2fsck behind for the disks that use it; its own
+  checker has to be written apart from the driver to mean anything.

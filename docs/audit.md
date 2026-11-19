@@ -527,3 +527,14 @@ Real hardware so far: a 2014 Broadwell Lenovo IdeaPad and a Dell
 One stale item found along the way: README's Roadmap still says the
 Intel 3160 "scans already", while commit `10d752b` has it joining WPA2
 networks and carrying traffic.
+
+## Since the audit
+
+- Found while planning TFS4 and fixed in `a33ed10`: `fs_block_lba()`
+  left out the partition's start, so inside a partition file mappings,
+  programs over 2 MiB and swap read and wrote other sectors of the disk
+  (`msync` could write over the GPT's entries). `t_foreigndisk` covers
+  it.
+- Hardware 13 is out of date: Bluetooth now pairs - classic Secure
+  Simple Pairing (`82e53e5`, Settings in `49c63ca`) and LE pairing
+  with the Security Manager (`467f43a`), over L2CAP.
