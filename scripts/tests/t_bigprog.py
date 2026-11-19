@@ -67,9 +67,17 @@ def run(q, command, timeout=120):
     name = command.split()[1]
     out = wait_after(q, seen, f"[{name}] done, exit code", timeout)
     m = re.search(r"\[%s\] done, exit code (-?\d+)" % re.escape(name), out)
-    lines = [l.strip("\r") for l in out.replace("\r", "").split("\n")]
-    body = [l for l in lines[1:] if l and not l.startswith(
-            (f"[{name}]", "[kernel]", "[ OK ]", "[ !! ]", PROMPT))]
+    # Only what follows the shell's echo of the command: the prompt the
+    # test waited for at boot can be another console's, printed while
+    # the first one is still writing out its command list, and the tail
+    # of that list would otherwise be read as the program's output
+    text = out.replace("\r", "")
+    cut = text.find(command + "\n")
+    lines = (text[cut + len(command) + 1:].split("\n") if cut >= 0
+             else text.split("\n")[1:])
+    body = [l for l in lines if l and not l.startswith(
+            (f"[{name}]", "[kernel]", "[ OK ]", "[ !! ]", PROMPT,
+             "ThreadOS 64 - console"))]
     return body, int(m.group(1)) if m else None
 
 
