@@ -273,6 +273,193 @@ static void remember(const char *uri, const char *title)
     g_strlcpy(history[0].title, title ? title : "", sizeof(history[0].title));
 }
 
+/* --- What Weft remembers from one run to the next -------------------------
+
+   ~/.weft, one file: the bookmarks, the history and the cookies a site
+   asked to keep. WebKit could keep them itself, but its store is a
+   directory of databases and cache entries - far more files than TFS3
+   has room for in a home - so the network session lives in memory and
+   this is written when a page has loaded and when Weft ends, and given
+   back to WebKit before the first page is asked for: a site one signed
+   in to is signed in to still. A cookie without an expiry ends with the
+   browser, as in every browser, and is not kept. With nobody's home to
+   keep it in (no disk, the guest, a phone without one) Weft remembers
+   nothing, as before. Two Weft windows at once: the last to save wins. */
+#define STATE_MAGIC "ThreadOS Weft 1"
+static char state_path[300];
+static gboolean state_quitting;
+static guint state_timer;
+
+static void state_clean(char *s)
+{
+    for (; *s; s++)
+        if (*s == '\t' || *s == '\n' || *s == '\r')
+            *s = ' ';
+}
+
+static int state_has_breaks(const char *s)
+{
+    return s && (strchr(s, '\t') || strchr(s, '\n') || strchr(s, '\r'));
+}
+
+static void state_write(GList *cookies)
+{
+    FILE *f = fopen(state_path, "w");
+    if (!f) {
+        say("[weft] could not keep the session in %s%s\n", state_path, NULL);
+        return;
+    }
+    fprintf(f, "%s\n", STATE_MAGIC);
+    char title[96];
+    for (int i = 0; i < nbookmarks; i++) {
+        g_strlcpy(title, bookmarks[i].title, sizeof(title));
+        state_clean(title);
+        fprintf(f, "bookmark\t%s\t%s\n", bookmarks[i].uri, title);
+    }
+    for (int i = 0; i < nhistory; i++) {
+        g_strlcpy(title, history[i].title, sizeof(title));
+        state_clean(title);
+        fprintf(f, "history\t%s\t%s\n", history[i].uri, title);
+    }
+    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    int kept = 0;
+    for (GList *l = cookies; l; l = l->next) {
+        SoupCookie *c = l->data;
+        GDateTime *when = soup_cookie_get_expires(c);
+        if (!when || g_date_time_to_unix(when) <= now)
+            continue;                /* ends with the browser, or has */
+        const char *domain = soup_cookie_get_domain(c);
+        const char *path = soup_cookie_get_path(c);
+        const char *name = soup_cookie_get_name(c);
+        const char *value = soup_cookie_get_value(c);
+        if (state_has_breaks(domain) || state_has_breaks(path) ||
+            state_has_breaks(name) || state_has_breaks(value))
+            continue;
+        fprintf(f, "cookie\t%s\t%s\t%s\t%s\t%lld\t%c%c%d\n", domain,
+                path ? path : "/", name, value,
+                (long long)g_date_time_to_unix(when),
+                soup_cookie_get_secure(c) ? 's' : '-',
+                soup_cookie_get_http_only(c) ? 'h' : '-',
+                (int)soup_cookie_get_same_site_policy(c));
+        kept++;
+    }
+    fclose(f);
+    printf("[weft] kept %d cookies, %d pages of history, %d bookmarks\n",
+           kept, nhistory, nbookmarks);
+    fflush(stdout);
+}
+
+static void state_got_cookies(GObject *object, GAsyncResult *result,
+                              gpointer data)
+{
+    (void)data;
+    GList *cookies = webkit_cookie_manager_get_all_cookies_finish(
+        WEBKIT_COOKIE_MANAGER(object), result, NULL);
+    state_write(cookies);
+    g_list_free_full(cookies, (GDestroyNotify)soup_cookie_free);
+    if (state_quitting)
+        g_main_loop_quit(loop);
+}
+
+static void state_save(void)
+{
+    if (!state_path[0]) {
+        if (state_quitting)
+            g_main_loop_quit(loop);
+        return;
+    }
+    webkit_cookie_manager_get_all_cookies(
+        webkit_network_session_get_cookie_manager(session), NULL,
+        state_got_cookies, NULL);
+}
+
+static gboolean state_due(gpointer data)
+{
+    (void)data;
+    state_timer = 0;
+    state_save();
+    return G_SOURCE_REMOVE;
+}
+
+/* Saved a little later: a page that sets its cookies as it loads, and
+   then a second one, are written once */
+static void state_soon(void)
+{
+    if (state_path[0] && !state_timer)
+        state_timer = g_timeout_add_seconds(2, state_due, NULL);
+}
+
+static gboolean quit_anyway(gpointer data)
+{
+    (void)data;
+    g_main_loop_quit(loop);          /* the network process did not answer:
+                                        what was saved last stays */
+    return G_SOURCE_REMOVE;
+}
+
+/* Weft ends - what it remembers written first */
+static void quit(void)
+{
+    if (state_quitting)
+        return;
+    state_quitting = TRUE;
+    if (state_timer) {
+        g_source_remove(state_timer);
+        state_timer = 0;
+    }
+    state_save();
+    g_timeout_add_seconds(5, quit_anyway, NULL);
+}
+
+/* ~/.weft read back: the bookmarks and the history into their lists,
+   the cookies still in date as a list for WebKit */
+static GList *state_read(void)
+{
+    gchar *text = NULL;
+    if (!g_file_get_contents(state_path, &text, NULL, NULL))
+        return NULL;
+    GList *cookies = NULL;
+    gchar **lines = g_strsplit(text, "\n", -1);
+    g_free(text);
+    gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+    if (!lines[0] || strcmp(lines[0], STATE_MAGIC)) {
+        g_strfreev(lines);
+        return NULL;                 /* not ours, or a later Weft's */
+    }
+    for (int i = 1; lines[i]; i++) {
+        gchar **f = g_strsplit(lines[i], "\t", -1);
+        int n = (int)g_strv_length(f);
+        if (n == 3 && !strcmp(f[0], "bookmark") &&
+            nbookmarks < BOOKMARKS_MAX) {
+            g_strlcpy(bookmarks[nbookmarks].uri, f[1], sizeof(bookmarks[0].uri));
+            g_strlcpy(bookmarks[nbookmarks].title, f[2],
+                      sizeof(bookmarks[0].title));
+            nbookmarks++;
+        } else if (n == 3 && !strcmp(f[0], "history") &&
+                   nhistory < HISTORY_MAX) {
+            g_strlcpy(history[nhistory].uri, f[1], sizeof(history[0].uri));
+            g_strlcpy(history[nhistory].title, f[2], sizeof(history[0].title));
+            nhistory++;
+        } else if (n == 7 && !strcmp(f[0], "cookie")) {
+            gint64 when = g_ascii_strtoll(f[5], NULL, 10);
+            if (when > now && strlen(f[6]) >= 3) {
+                SoupCookie *c = soup_cookie_new(f[3], f[4], f[1], f[2], -1);
+                GDateTime *d = g_date_time_new_from_unix_utc(when);
+                soup_cookie_set_expires(c, d);
+                g_date_time_unref(d);
+                soup_cookie_set_secure(c, f[6][0] == 's');
+                soup_cookie_set_http_only(c, f[6][1] == 'h');
+                soup_cookie_set_same_site_policy(
+                    c, (SoupSameSitePolicy)(f[6][2] - '0'));
+                cookies = g_list_prepend(cookies, c);
+            }
+        }
+        g_strfreev(f);
+    }
+    g_strfreev(lines);
+    return g_list_reverse(cookies);
+}
+
 static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
                          gpointer data)
 {
@@ -286,6 +473,7 @@ static void load_changed(WebKitWebView *view, WebKitLoadEvent event,
     } else if (event == WEBKIT_LOAD_FINISHED) {
         say("[weft] load finished %s%s\n", uri, NULL);
         remember(uri, t->title);
+        state_soon();
         if (mobile && tabs[front] == t)
             foot_watch(NULL);
         if (eval_script && index_of(view) == 0)
@@ -492,7 +680,7 @@ static void tab_close(int i)
     if (i < 0 || i >= ntabs)
         return;
     if (ntabs == 1) {                /* the last tab: the window goes */
-        g_main_loop_quit(loop);
+        quit();
         return;
     }
     struct tab *t = tabs[i];
@@ -1107,6 +1295,7 @@ static void bookmark_remove(int i)
     memmove(&bookmarks[i], &bookmarks[i + 1],
             (size_t)(nbookmarks - i - 1) * sizeof(bookmarks[0]));
     nbookmarks--;
+    state_soon();
 }
 
 /* The menu's star: the page in front into the bookmarks, or out again */
@@ -1127,6 +1316,7 @@ static void bookmark_toggle(void)
               sizeof(bookmarks[0].title));
     nbookmarks++;
     say("[weft] bookmark added %s%s\n", uri, NULL);
+    state_soon();
 }
 
 /* A five-pointed star, outlined: the points 10 pixels out, the dents 4 */
@@ -1324,6 +1514,16 @@ static void draw_engines(int win, const struct ud_look *l)
 static void set_agent(WebKitSettings *s);
 
 /* A setting changed: said, kept, put to work */
+
+/* Cleared in WebKit: cleared in ~/.weft too */
+static void cleared(GObject *object, GAsyncResult *result, gpointer data)
+{
+    (void)data;
+    webkit_website_data_manager_clear_finish(
+        WEBKIT_WEBSITE_DATA_MANAGER(object), result, NULL);
+    state_soon();
+}
+
 static void setting(int row)
 {
     WebKitWebView *v = tabs[front]->view;
@@ -1367,7 +1567,7 @@ static void setting(int row)
         nhistory = 0;
         webkit_website_data_manager_clear(
             webkit_network_session_get_website_data_manager(session),
-            WEBKIT_WEBSITE_DATA_ALL, 0, NULL, NULL, NULL);
+            WEBKIT_WEBSITE_DATA_ALL, 0, NULL, cleared, NULL);
         say("[weft] cleared history and cookies%s%s\n", NULL, NULL);
         break;
     }
@@ -1707,7 +1907,7 @@ static gboolean band_event(gpointer data, int type, int x, int y, int val)
         return TRUE;
     }
     case WEV_CLOSE:
-        g_main_loop_quit(loop);
+        quit();
         return TRUE;
     case WEV_CLICK:
         if (y < CHROME_H) {
@@ -1804,6 +2004,28 @@ static void set_languages(void)
 
 /* --- The program ---------------------------------------------------- */
 
+/* The first tab, and the rest of the start */
+static const char *first_uri;
+
+static void begin(void)
+{
+    tab_new(first_uri, NULL);
+    tab_front(0);
+    if (!first_uri)
+        address_edit();
+    g_timeout_add(20, watch_frames, NULL);
+    if (mobile)
+        g_timeout_add(1500, foot_watch, NULL);
+}
+
+static void cookies_back(GObject *object, GAsyncResult *result, gpointer data)
+{
+    (void)data;
+    webkit_cookie_manager_replace_cookies_finish(WEBKIT_COOKIE_MANAGER(object),
+                                                 result, NULL);
+    begin();
+}
+
 int main(int argc, char **argv)
 {
     const char *uri = NULL, *proxy = NULL;
@@ -1870,13 +2092,27 @@ int main(int argc, char **argv)
     }
 
     loop = g_main_loop_new(NULL, FALSE);
-    tab_new(uri, NULL);
-    tab_front(0);
-    if (!uri)
-        address_edit();
-    g_timeout_add(20, watch_frames, NULL);
-    if (mobile)
-        g_timeout_add(1500, foot_watch, NULL);
+    char home[256];
+    GList *kept = NULL;
+    if (wpe_threados_home(home, sizeof(home))) {
+        snprintf(state_path, sizeof(state_path), "%s/.weft", home);
+        kept = state_read();
+        printf("[weft] remembered %d cookies, %d pages of history, "
+               "%d bookmarks\n", (int)g_list_length(kept), nhistory,
+               nbookmarks);
+        fflush(stdout);
+    }
+    first_uri = uri;
+    if (kept) {
+        /* given back before the first page is asked for, which goes to
+           the network process another way and could overtake them */
+        webkit_cookie_manager_replace_cookies(
+            webkit_network_session_get_cookie_manager(session), kept, NULL,
+            cookies_back, NULL);
+        g_list_free_full(kept, (GDestroyNotify)soup_cookie_free);
+    } else {
+        begin();
+    }
     g_main_loop_run(loop);
 
     while (ntabs) {

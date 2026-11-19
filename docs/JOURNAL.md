@@ -10459,3 +10459,29 @@ works and is checked by `make test`.
       with media, the next step. The fuzz run builds libopus under ASan and UBSan and
       feeds mutated runs of Opus packets (made by libopus's own encoder)
       through opus_packet_parse and the decoder.
+- [x] **Weft remembers its session: sign-ins, history, bookmarks**
+      (apps/webkit/weft.c, wpethreados.c, user/userctl.h,
+      kernel64/syscall64.c, scripts/tests/t_weftstate.py)
+      Every Weft started from nothing: its network session was in
+      memory, so a site one had signed in to - YouTube's account among
+      them - had forgotten it by the next run. WebKit's own persistent
+      store is a directory of databases and cache entries, more files
+      than TFS3 gives a whole disk (64), so the session stays in memory
+      and Weft keeps what matters in one file in the person's home,
+      ~/.weft: the cookies a site asked to keep (those without an expiry
+      end with the browser, as in every browser), the history and the
+      bookmarks. It is written two seconds after a page has loaded and
+      when Weft ends, and the cookies are given back to WebKit before the
+      first page is asked for. Whose home it is the kernel now says:
+      SYS64_USER's USER_CTL_WHOAMI gives the signed-in account's name
+      and whether its home is there; with none (no disk, the guest, the
+      phone for now) Weft keeps nothing, as before. t_weftstate: on a
+      disk with the wizard's account, the first run finds the home and
+      nothing in it; a page's server sets a cookie for a day, one without
+      an expiry and one for fifteen seconds, the page sees all three, and
+      Weft keeps two and the page - after loading and again on Ctrl+W;
+      the shell's cat shows the file with the page and its title, the
+      day's cookie and its value, and not the browser-lifetime one;
+      fifteen seconds later the second run remembers one cookie and one
+      page, and the test's web server receives exactly "sid=<token>" with
+      the first request.

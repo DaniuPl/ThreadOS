@@ -79,6 +79,11 @@ guint64 wpe_threados_frames_shown(void);
    --trace) */
 void wpe_threados_trace(gboolean on);
 
+/* The signed-in person's home folder ("/home/<name>") into out, and
+   TRUE - FALSE when nobody's is there to keep things in (no disk, the
+   guest, a phone without one) */
+gboolean wpe_threados_home(char *out, size_t cap);
+
 G_END_DECLS
 
 #endif

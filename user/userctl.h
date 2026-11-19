@@ -23,6 +23,11 @@
    own password. -> 0, -2 wrong password, -3 not a PIN. */
 #define USER_CTL_UNLOCK_INFO 5
 #define USER_CTL_UNLOCK 6
+/* Who is signed in: name = the account's name, index = 1 when its home
+   folder (/home/<name>) is there to keep things in - a program that
+   remembers something for the person (Weft, its cookies) keeps it
+   there, and with 0 keeps nothing. */
+#define USER_CTL_WHOAMI 7
 
 struct user_ctl {
     int32_t op, index, uid, level;

@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "usys64.h"
+#include "userctl.h"
 
 /* The desktop's codes for keys that are not characters
    (kernel/include/keyboard.h) */
@@ -49,6 +50,18 @@
 
 static guint64 frames_shown;
 static gboolean tracing;
+
+gboolean wpe_threados_home(char *out, size_t cap)
+{
+    struct user_ctl ctl;
+    memset(&ctl, 0, sizeof(ctl));
+    ctl.op = USER_CTL_WHOAMI;
+    if (syscall64(SYS64_USER, (int64_t)(uintptr_t)&ctl, 0) != 0 ||
+        !ctl.index || !ctl.name[0])
+        return FALSE;
+    ctl.name[USER_NAME_MAX] = 0;
+    return (size_t)snprintf(out, cap, "/home/%s", ctl.name) < cap;
+}
 
 void wpe_threados_trace(gboolean on)
 {

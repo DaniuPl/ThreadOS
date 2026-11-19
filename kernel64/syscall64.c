@@ -1517,6 +1517,18 @@ static void handle(struct regs *r)
                 memset(ctl.admin_password, 0, sizeof(ctl.admin_password));
                 *(struct user_ctl *)(uintptr_t)a1 = ctl;
             }
+        } else if (ctl.op == USER_CTL_WHOAMI) {
+            const char *who = user_current_name();
+            int home = user_current_home() == 0;
+            rc = paging64_user_writable(a1, sizeof(ctl)) ? 0 : -1;
+            if (rc == 0) {
+                memset(&ctl, 0, sizeof(ctl));
+                ctl.op = USER_CTL_WHOAMI;
+                ctl.index = home;
+                for (int i = 0; who && who[i] && i < USER_NAME_MAX; i++)
+                    ctl.name[i] = who[i];
+                *(struct user_ctl *)(uintptr_t)a1 = ctl;
+            }
         } else if (ctl.op == USER_CTL_UNLOCK_INFO) {
             int mode, pin;
             rc = user_unlock_info(&mode, &pin);
