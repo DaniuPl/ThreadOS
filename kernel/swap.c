@@ -23,11 +23,15 @@
 #include "include/task.h"
 #include "include/printk.h"
 
-#define SLOT_BLOCKS   (PAGE_SIZE / FS_BLOCK)          /* 4 TFS blocks per page */
-#define SECT_PER_BLOCK (FS_BLOCK / ATA_SECTOR_SIZE)   /* 2 sectors per block */
+/* A page takes as many of the file system's blocks as fit in it: four
+   of TFS3's 1 KiB, one of TFS4's 4 KiB. The table has room for the
+   smallest blocks; what is kept is each block's first sector. */
+#define BLOCKS_MAX    (PAGE_SIZE / 1024)
 #define SLOTS_MAX     4096                            /* ceiling: 16 MiB */
 
-static uint32_t slot_blk[SLOTS_MAX][SLOT_BLOCKS];
+static uint32_t slot_lba[SLOTS_MAX][BLOCKS_MAX];
+static uint32_t per_slot;                 /* blocks in a page */
+static uint32_t sect_per_block;
 static uint8_t  slot_used[SLOTS_MAX];
 static uint32_t slot_count;
 static uint32_t slot_busy;
@@ -48,11 +52,17 @@ void swap_init(void)
 
     /* We take a quarter of the free space - enough for swapping to make
        sense, too little for the disk to stop serving anything else */
-    uint32_t used, total;
+    uint32_t bs = fs_block_size();
+    if (bs < 1024 || bs > PAGE_SIZE) {
+        printk("[ !! ] Swap: blocks of %u B do not fit a page\n", bs);
+        return;
+    }
+    per_slot = PAGE_SIZE / bs;
+    sect_per_block = bs / ATA_SECTOR_SIZE;
+    uint64_t used, total;
     fs_usage(&used, &total);
-    uint32_t slots = (total - used) / 4 / SLOT_BLOCKS;
-    if (slots > SLOTS_MAX)
-        slots = SLOTS_MAX;
+    uint64_t room = (total - used) / 4 / per_slot;
+    uint32_t slots = room > SLOTS_MAX ? SLOTS_MAX : (uint32_t)room;
     if (!slots) {
         printk("[ !! ] Swap: too little room on the disk\n");
         return;
@@ -65,13 +75,13 @@ void swap_init(void)
     }
 
     for (uint32_t s = 0; s < slots; s++) {
-        for (uint32_t b = 0; b < SLOT_BLOCKS; b++) {
-            uint32_t blk = fs_file_block(f, s * SLOT_BLOCKS + b, 1);
+        for (uint32_t b = 0; b < per_slot; b++) {
+            uint32_t blk = fs_file_block(f, s * per_slot + b, 1);
             if (!blk) {
                 slots = s;              /* the disk ran out sooner */
                 goto ready;
             }
-            slot_blk[s][b] = blk;
+            slot_lba[s][b] = fs_block_lba(blk);
         }
     }
 ready:
@@ -81,7 +91,7 @@ ready:
     }
     /* Set the file size so that 'fls' and 'df' show the space as taken */
     char zero = 0;
-    fs_write_at(f, slots * PAGE_SIZE - 1, &zero, 1);
+    fs_write_at(f, (uint64_t)slots * PAGE_SIZE - 1, &zero, 1);
     slot_count = slots;
 
     pmm_set_reclaim(task_reclaim_page);
@@ -114,9 +124,9 @@ int swap_write(int slot, const void *frame)
     if (slot < 0 || (uint32_t)slot >= slot_count)
         return -1;
     const uint8_t *p = frame;
-    for (uint32_t b = 0; b < SLOT_BLOCKS; b++)
-        if (blk_write(fs_block_lba(slot_blk[slot][b]), SECT_PER_BLOCK,
-                      p + b * FS_BLOCK) < 0)
+    for (uint32_t b = 0; b < per_slot; b++)
+        if (blk_write(slot_lba[slot][b], sect_per_block,
+                      p + b * (PAGE_SIZE / per_slot)) < 0)
             return -1;
     stat_out++;
     return 0;
@@ -127,9 +137,9 @@ int swap_read(int slot, void *frame)
     if (slot < 0 || (uint32_t)slot >= slot_count)
         return -1;
     uint8_t *p = frame;
-    for (uint32_t b = 0; b < SLOT_BLOCKS; b++)
-        if (blk_read(fs_block_lba(slot_blk[slot][b]), SECT_PER_BLOCK,
-                     p + b * FS_BLOCK) < 0)
+    for (uint32_t b = 0; b < per_slot; b++)
+        if (blk_read(slot_lba[slot][b], sect_per_block,
+                     p + b * (PAGE_SIZE / per_slot)) < 0)
             return -1;
     stat_in++;
     return 0;

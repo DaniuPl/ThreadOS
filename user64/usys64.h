@@ -126,6 +126,8 @@
 #define SYS64_MMAP      43
 #define SYS64_THREAD    44
 #define SYS64_GETRANDOM 98
+#define SYS64_READDIR2  116
+#define SYS64_STAT      117
 
 #define NAME_MAX64 63
 
@@ -448,6 +450,46 @@ static inline int64_t sys_pipe(int fd[2])
 static inline int64_t sys_dup2(int old, int fresh_one)
 {
     return syscall64(SYS64_DUP2, old, fresh_one);
+}
+
+/* A directory listed by its path, from a cursor (0 to start) the
+   kernel moves on: 1 an entry, 0 the end, -1. Names up to 255 bytes,
+   sizes past 4 GiB; the working directory stays where it is. The
+   layout is kernel64/syscall64.h's. */
+#define DT2_FILE 1
+#define DT2_DIR  2
+struct dirent2_64 {
+    uint64_t size;
+    uint64_t ino;
+    uint32_t type;               /* DT2_* */
+    uint32_t name_len;
+    char name[256];
+};
+
+static inline int64_t sys_readdir2(const char *dir, uint64_t *cursor,
+                                   struct dirent2_64 *out)
+{
+    return syscall64_4(SYS64_READDIR2, (int64_t)(uintptr_t)dir,
+                       (int64_t)ustrlen(dir), (int64_t)(uintptr_t)cursor,
+                       (int64_t)(uintptr_t)out);
+}
+
+/* What is at a path (kernel64/syscall64.h's struct stat64k) */
+struct stat64k {
+    uint32_t type;               /* DT2_* */
+    uint32_t mode;
+    uint64_t size;
+    uint64_t ino;
+    uint32_t uid, gid;
+    uint32_t nlink, blksize;
+    int64_t atime, mtime, ctime;
+    uint64_t blocks;
+};
+
+static inline int64_t sys_stat(const char *path, struct stat64k *out)
+{
+    return syscall64_3(SYS64_STAT, (int64_t)(uintptr_t)path,
+                       (int64_t)ustrlen(path), (int64_t)(uintptr_t)out);
 }
 
 /* One directory entry. The layout has to match what the kernel fills

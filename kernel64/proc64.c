@@ -576,7 +576,10 @@ uint64_t proc64_mmap_file(const char *name, uint64_t *size_out,
     if (len <= 0)
         return 0;
 
-    uint32_t nblocks = ((uint32_t)len + FS_BLOCK - 1) / FS_BLOCK;
+    uint32_t bs = fs_block_size();
+    if (!bs || bs > PAGE_SIZE)
+        return 0;
+    uint32_t nblocks = (uint32_t)(((uint64_t)len + bs - 1) / bs);
     uint64_t pages = ((uint64_t)len + PAGE_SIZE - 1) / PAGE_SIZE;
 
     uint64_t base = task64_mmap_next();
@@ -621,6 +624,9 @@ uint64_t proc64_msync(void)
     if (!task64_mmap_next())
         return 0;
     uint64_t sent_back_n = 0;
+    uint32_t bs = fs_block_size();
+    if (!bs)
+        return 0;
 
     for (int i = 0; i < MMAP_FILES; i++) {
         uint64_t start, end;
@@ -638,13 +644,13 @@ uint64_t proc64_msync(void)
             uint64_t offset = va - start;
             const uint8_t *src = phys_ptr(frame);
             int valid = 1;
-            for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
+            for (uint32_t b = 0; b < PAGE_SIZE / bs; b++) {
                 /* Past the end of the file there is nothing to flush - the block
                    either does not exist or already belongs to somebody
                    else */
-                if (offset + b * FS_BLOCK >= size)
+                if (offset + b * bs >= size)
                     break;
-                uint32_t index = (uint32_t)(offset / FS_BLOCK) + b;
+                uint32_t index = (uint32_t)(offset / bs) + b;
                 uint32_t block = task64_mmap_block(va, index);
                 if (!block || fs_file_block(file_slot, index, 0) != block) {
                     valid = 0;
@@ -655,13 +661,12 @@ uint64_t proc64_msync(void)
                 paging64_file_clean(va);
                 continue;
             }
-            for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK; b++) {
-                if (offset + b * FS_BLOCK >= size)
+            for (uint32_t b = 0; b < PAGE_SIZE / bs; b++) {
+                if (offset + b * bs >= size)
                     break;
                 uint32_t block = task64_mmap_block(va,
-                                    (uint32_t)(offset / FS_BLOCK) + b);
-                blk_write(fs_block_lba(block), FS_BLOCK / 512,
-                          src + b * FS_BLOCK);
+                                    (uint32_t)(offset / bs) + b);
+                blk_write(fs_block_lba(block), bs / 512, src + b * bs);
             }
             paging64_file_clean(va);
             sent_back_n++;

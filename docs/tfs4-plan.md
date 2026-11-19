@@ -207,6 +207,14 @@ it, and to README's prerequisites.
   open, mkdir, chdir, rename and unlink from a ring 3 program and from
   a musl program - this fails today; a listing through `opendir` leaves
   the working directory where it was.
+- **Done** (journal: "TFS4 stage 1"). As built, `SYS64_READDIR2` takes
+  the directory's path and a cursor rather than a descriptor (the C
+  library lists a directory whole when it opens it; directory
+  descriptors come with the `*at` calls, audit D), and two more calls
+  came with it: `SYS64_STAT` by path, so `stat` of a directory no
+  longer goes there, and `SYS64_FDINFO2` with a 64-bit size and the
+  inode number. The inode number a program sees is the backend's: 2
+  for the root, TFS3's slots from 3.
 
 ### Stage 2 - TFS4 read-only - 1 to 1.5 days
 

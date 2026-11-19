@@ -1818,6 +1818,49 @@ static int64_t sys_fdinfo(struct uproc *p, int64_t fd, uint64_t out)
     return 0;
 }
 
+/* The same with a 64-bit size and position and a file's inode number
+   (SYS64_FDINFO2), which the C library asks now */
+static int64_t sys_fdinfo2(struct uproc *p, int64_t fd, uint64_t out)
+{
+    struct fdinfo2_64 info;
+    if (fd < 0 || fd >= FD_MAX || !user_range(p, out, sizeof(info), 1))
+        return -1;
+    memset(&info, 0, sizeof(info));
+    info.kind = ipc_fd_kind((int)fd);
+    int slot = ipc_fd_slot((int)fd);
+    if (info.kind == FDK_FILE) {
+        info.size = rofiles[slot].size;
+        info.pos = fd_pos(p, fd);
+        info.ino = (uint64_t)slot + 3;   /* the root is 2, as on the PC */
+    } else if (info.kind == FDK_MEMFD) {
+        info.size = (uint64_t)memfd64_size(slot);
+        info.pos = fd_pos(p, fd);
+    } else if (info.kind == FDK_USOCK) {
+        uint32_t waiting;
+        int type;
+        usock64_info(slot, &waiting, &type);
+        info.size = waiting;
+        info.pos = (uint64_t)type;
+    }
+    memcpy((void *)(uintptr_t)out, &info, sizeof(info));
+    return 0;
+}
+
+/* A directory's entries (SYS64_READDIR2). The phone has no disk: the
+   root is its only directory, and the files a program reads are found
+   by name in the initrd, not listed - so the root lists empty, as the
+   old SYS64_READDIR left it, and anything else is not a directory. */
+static int64_t sys_readdir2(struct uproc *p, uint64_t path, uint64_t len,
+                            uint64_t cursor)
+{
+    char d[3] = { 0, 0, 0 };
+    if (!len || len > 2 || !user_range(p, path, len, 0) ||
+        !user_range(p, cursor, sizeof(uint64_t), 1))
+        return -1;
+    memcpy(d, (const void *)(uintptr_t)path, len);
+    return !strcmp(d, "/") || !strcmp(d, ".") ? 0 : -1;
+}
+
 static int64_t sys_seek(struct uproc *p, int64_t fd, uint64_t pos)
 {
     irqflags_t f = spin_lock_irq(&p->lock);
@@ -2246,6 +2289,12 @@ void proc_syscall(struct trap_frame *f)
         break;
     case SYS64_FDINFO:
         r = sys_fdinfo(p, (int64_t)x[0], x[1]);
+        break;
+    case SYS64_FDINFO2:
+        r = sys_fdinfo2(p, (int64_t)x[0], x[1]);
+        break;
+    case SYS64_READDIR2:
+        r = sys_readdir2(p, x[0], x[1], x[2]);
         break;
     case SYS64_FDINODE:
         /* A number that is the same for the same file */

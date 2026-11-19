@@ -10833,3 +10833,48 @@ works and is checked by `make test`.
       held to the README table, not to the file. checkcla.py was run by
       hand against the owner, an app's account, a signer, a signer of
       an older version and a stranger.
+- [x] **TFS4 stage 1: a kernel ready for a second file system**
+      (kernel/fs.c, kernel/tfs3.c, kernel/include/fs.h, fsbackend.h,
+      tfs3.h, kernel64/syscall64.c, syscall64.h, task64.c, proc64.c,
+      isr64.c, shell64.c, kernel/swap.c, kernel/desktop.c,
+      kernelarm64/proc.c, libc/overlay/src/threados/syscall.c,
+      socket.c, user64/usys64.h, user64/longpath64.c,
+      libc/tests/pathtest.c, scripts/tests/t_paths.py, scripts/ptest.py)
+      The first stage of docs/tfs4-plan.md. TFS3 moved to kernel/tfs3.c
+      behind a front (kernel/fs.c) that calls a format through struct
+      fs_backend, so TFS4 can stand beside it. The API lost TFS3's
+      limits: a path up to FS_PATH_MAX (1024 with its NUL) - every path
+      a program handed the kernel was cut at 63 bytes in all, so a file
+      three directories down could not be opened by its path - names
+      up to 255 in listings, 64-bit sizes and offsets (a descriptor's
+      position too), and the block size asked at run time (swap and
+      file mappings counted on 1 KiB). Paths from programs go onto the
+      heap rather than the kernel's stack. Three new calls, the old ones
+      kept for programs already built (Weft): SYS64_READDIR2 lists a
+      directory by its path from a cursor, SYS64_STAT says what is at a
+      path, SYS64_FDINFO2 gives a descriptor's 64-bit size and position
+      and its inode number; the old SYS64_READDIR leaves out names that
+      do not fit its 63 bytes rather than cut them. musl's opendir and
+      stat of a directory used to go into the directory and come back -
+      moving the whole process for that moment, under every other
+      thread - and now ask the kernel by path; stat and fstat give one
+      inode number for one file (2 for the root, as in ext2). A listing
+      by index carries on from where the last call stopped instead of
+      starting from the top. Three overruns found on the way: getcwd
+      built the working directory's path in a 252-byte buffer on the
+      kernel's stack with nothing to stop a deep chain of names (seven
+      60-byte names reach 427 bytes; it went unnoticed in a test run,
+      which is luck), the kernel shell's pwd did the same, and the
+      desktop read names from ~/Desktop into 32 bytes where TFS3 allows
+      63. The phone's kernel answers FDINFO2 and READDIR2 for its root,
+      as the shared C library now asks. t_paths (new):
+      user64/longpath64 through usys64.h - eight 40-byte directories made
+      by whole paths, a file at the bottom written, stat'ed, renamed and
+      read back by paths of over 300 bytes, the directory listed by its
+      path, chdir and getcwd by the whole path, all removed, then getcwd
+      of a working directory 427 bytes deep - and libc/tests/pathtest
+      through musl - the same with mkdir, fopen, stat, fstat (one inode
+      number), rename, chdir, getcwd, unlink and rmdir, and one thread
+      listing and stat'ing a subdirectory 70 000 times while another
+      opens a relative path 200 000 times, none missing. On the kernel
+      before this the first long mkdir already fails.

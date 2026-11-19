@@ -38,6 +38,7 @@
 #include "signal64.h"
 #include "keyboard64.h"
 #include "../kernel/include/fs.h"
+#include "../kernel/include/heap.h"
 #include "elf64.h"
 #include "pipe64.h"
 #include "../kernel/include/net.h"
@@ -210,16 +211,34 @@ void syscall64_forget_user(void)
  * Where the kernel WRITES, it asks paging64_user_writable instead: a
  * read() into the program's own code passes the first question, and
  * the write that followed would stop the whole system. */
-/* A file name from program memory into the kernel. Returns 0 or -1. */
-static int name_from_ring3(uint64_t ptr, uint64_t len, char *out)
+/* A short name from program memory into a buffer of cap bytes.
+   Returns 0 or -1. */
+static int name_from_ring3(uint64_t ptr, uint64_t len, char *out,
+                           uint64_t cap)
 {
-    if (len == 0 || len > FS_NAME_MAX || !paging64_user_range(ptr, len))
+    if (len == 0 || len >= cap || !paging64_user_range(ptr, len))
         return -1;
     const char *src = (const char *)(uintptr_t)ptr;
     for (uint64_t i = 0; i < len; i++)
         out[i] = src[i];
     out[len] = '\0';
     return 0;
+}
+
+/* A path from program memory, up to FS_PATH_MAX with its NUL, onto the
+   heap (kfree it): a path that long has no place on a kernel stack of
+   16 KiB, two of them in a rename even less. NULL when it does not fit
+   or is not the program's memory. */
+static char *path_from_ring3(uint64_t ptr, uint64_t len)
+{
+    if (len == 0 || len >= FS_PATH_MAX || !paging64_user_range(ptr, len))
+        return 0;
+    char *p = kmalloc(len + 1);
+    if (p && name_from_ring3(ptr, len, p, len + 1) < 0) {
+        kfree(p);
+        return 0;
+    }
+    return p;
 }
 
 /* A zero-terminated string from program memory into the kernel. We do
@@ -434,14 +453,14 @@ static void handle(struct regs *r)
            own, so the only place they can all agree on is the end -
            otherwise a shell's next prompt lands on top of what its
            child has just written. */
-        uint32_t at = task64_fd_pos((int)a1);
+        uint64_t at = task64_fd_pos((int)a1);
         if (a1 == FD_STDOUT) {
-            int sz = fs_size(slot);
-            at = sz > 0 ? (uint32_t)sz : 0;
+            int64_t sz = fs_size(slot);
+            at = sz > 0 ? (uint64_t)sz : 0;
         }
         int n = fs_write_at(slot, at, buf, (uint32_t)a3);
         if (n > 0)
-            task64_fd_seek((int)a1, at + (uint32_t)n);
+            task64_fd_seek((int)a1, at + (uint64_t)n);
         r->rax = (uint64_t)(int64_t)n;
         return;
     }
@@ -565,26 +584,23 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_OPEN: {
-        char name[FS_NAME_MAX + 1];
-        if (a2 == 0 || a2 > FS_NAME_MAX ||
-            !paging64_user_range(a1, a2)) {
+        char *name = path_from_ring3(a1, a2);
+        if (!name) {
             r->rax = (uint64_t)-1;
             return;
         }
-        const char *src = (const char *)(uintptr_t)a1;
-        for (uint64_t i = 0; i < a2; i++)
-            name[i] = src[i];
-        name[a2] = '\0';
 
         /* The system's own files may be read by anybody; opening one
            to create or truncate it is changing the system. */
         if (a3 && user_is_system_file(name) &&
             task64_level() != USER_ADMIN) {
+            kfree(name);
             r->rax = (uint64_t)-2;              /* not allowed */
             return;
         }
 
         int slot = fs_open(task64_cwd(), name, (int)(a3 & OPEN64_CREATE));
+        kfree(name);
         if (slot < 0) {
             r->rax = (uint64_t)-1;
             return;
@@ -625,22 +641,17 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_MKDIR: {
-        char name[FS_NAME_MAX + 1];
-        if (name_from_ring3(a1, a2, name) < 0) {
-            r->rax = (uint64_t)-1;
-            return;
-        }
-        r->rax = (uint64_t)(int64_t)fs_mkdir(task64_cwd(), name);
+        char *name = path_from_ring3(a1, a2);
+        r->rax = (uint64_t)(int64_t)(name ? fs_mkdir(task64_cwd(), name) : -1);
+        kfree(name);
         return;
     }
     case SYS64_CHDIR: {
-        char name[FS_NAME_MAX + 1];
+        char *name = path_from_ring3(a1, a2);
         int fresh_one = FS_ROOT;
-        if (name_from_ring3(a1, a2, name) < 0) {
-            r->rax = (uint64_t)-1;
-            return;
-        }
-        if (fs_chdir(task64_cwd(), name, &fresh_one) < 0) {
+        int ok = name && fs_chdir(task64_cwd(), name, &fresh_one) == 0;
+        kfree(name);
+        if (!ok) {
             r->rax = (uint64_t)-1;
             return;
         }
@@ -649,12 +660,17 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_GETCWD: {
-        char path[FS_NAME_MAX * 4];
-        if (a2 == 0 || !paging64_user_writable(a1, a2)) {
+        /* The path is put together here before it is copied out: a
+           chain of directories deep enough is longer than any fixed
+           buffer, and this one once sat on the kernel's stack with
+           nothing to stop the names running past it */
+        char *path = kmalloc(FS_PATH_MAX);
+        if (!path || a2 == 0 || !paging64_user_writable(a1, a2) ||
+            fs_getpath(task64_cwd(), path, FS_PATH_MAX) < 0) {
+            kfree(path);
             r->rax = (uint64_t)-1;
             return;
         }
-        fs_getpath(task64_cwd(), path);
         char *dst = (char *)(uintptr_t)a1;
         uint64_t i = 0;
         while (i + 1 < a2 && path[i]) {
@@ -662,6 +678,7 @@ static void handle(struct regs *r)
             i++;
         }
         dst[i] = '\0';
+        kfree(path);
         r->rax = i;
         return;
     }
@@ -669,45 +686,117 @@ static void handle(struct regs *r)
         /* One entry per call - the program asks for successive numbers
            as long as it keeps getting an answer. The buffer is described
            by struct dirent64 from usys64.h and lives on the program's
-           side. */
+           side: 63 bytes of name, a 32-bit size. Programs built for it
+           still run, so an entry whose name does not fit is left out
+           rather than cut - a cut name opens nothing, or the wrong
+           file - and the numbers count only what is shown. */
         struct {
-            char name[FS_NAME_MAX + 1];
+            char name[64];
             uint32_t size;
             int is_dir;
         } entry;
+        static struct fs_dirent e;
+        static struct {
+            int valid, dir, index;        /* where the last call stopped */
+            uint64_t cursor;
+        } at;
 
-        if (!paging64_user_writable(a2, sizeof(entry))) {
+        if (!paging64_user_writable(a2, sizeof(entry)) || (int64_t)a1 < 0) {
             r->rax = (uint64_t)-1;
             return;
         }
-        uint32_t size = 0;
-        int dir = 0;
-        /* fs_readdir returns 1 on a hit and 0 at the end of the
-           directory - not a negative value. Checking for "less than
-           zero" ends in an endless loop here, because the end of the
-           directory looks like success. */
-        if (fs_readdir(task64_cwd(), (int)a1, entry.name,
-                       &size, &dir) != 1) {
-            r->rax = (uint64_t)-1;
-            return;
+        int dir = task64_cwd(), want = (int)a1, n = 0;
+        uint64_t cursor = 0;
+        if (at.valid && at.dir == dir && at.index <= want) {
+            n = at.index;
+            cursor = at.cursor;
         }
-        entry.size = size;
-        entry.is_dir = dir;
+        at.valid = 0;
+        for (;;) {
+            if (fs_readdir_at(dir, &cursor, &e) != 1) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            if (strlen(e.name) >= sizeof(entry.name))
+                continue;
+            if (n++ == want)
+                break;
+        }
+        at.valid = 1;
+        at.dir = dir;
+        at.index = want + 1;
+        at.cursor = cursor;
+        memset(&entry, 0, sizeof(entry));
+        memcpy(entry.name, e.name, strlen(e.name));
+        entry.size = e.size > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)e.size;
+        entry.is_dir = e.is_dir;
         memcpy((void *)(uintptr_t)a2, &entry, sizeof(entry));
         r->rax = 0;
         return;
     }
-    case SYS64_UNLINK: {
-        char name[FS_NAME_MAX + 1];
-        if (name_from_ring3(a1, a2, name) < 0) {
+    case SYS64_READDIR2: {
+        static struct fs_dirent e;
+        struct dirent2_64 out;
+        char *path = path_from_ring3(a1, a2);
+        int dir;
+        if (!path || !paging64_user_writable(a3, sizeof(uint64_t)) ||
+            !paging64_user_writable(a4, sizeof(out)) ||
+            fs_chdir(task64_cwd(), path, &dir) < 0) {
+            kfree(path);
             r->rax = (uint64_t)-1;
             return;
         }
-        if (user_is_system_file(name) && task64_level() != USER_ADMIN) {
-            r->rax = (uint64_t)-2;
+        kfree(path);
+        uint64_t cursor = *(uint64_t *)(uintptr_t)a3;
+        int got = fs_readdir_at(dir, &cursor, &e);
+        if (got == 1) {
+            memset(&out, 0, sizeof(out));
+            out.size = e.size;
+            out.ino = e.ino;
+            out.type = e.is_dir ? DT2_DIR : DT2_FILE;
+            out.name_len = (uint32_t)strlen(e.name);
+            memcpy(out.name, e.name, out.name_len);
+            memcpy((void *)(uintptr_t)a4, &out, sizeof(out));
+            *(uint64_t *)(uintptr_t)a3 = cursor;
+        }
+        r->rax = (uint64_t)(int64_t)got;
+        return;
+    }
+    case SYS64_STAT: {
+        struct fs_stat st;
+        struct stat64k out;
+        char *path = path_from_ring3(a1, a2);
+        int ok = path && paging64_user_writable(a3, sizeof(out)) &&
+                 fs_stat_path(task64_cwd(), path, &st) == 0;
+        kfree(path);
+        if (!ok) {
+            r->rax = (uint64_t)-1;
             return;
         }
-        r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), name);
+        memset(&out, 0, sizeof(out));
+        out.type = st.type == FS_T_DIR ? DT2_DIR : DT2_FILE;
+        out.size = st.size;
+        out.ino = st.ino;
+        out.uid = (uint32_t)st.owner;
+        out.nlink = 1;
+        out.blksize = fs_block_size();
+        out.blocks = out.blksize
+                         ? (st.size + out.blksize - 1) / out.blksize *
+                               (out.blksize / 512)
+                         : 0;
+        memcpy((void *)(uintptr_t)a3, &out, sizeof(out));
+        r->rax = 0;
+        return;
+    }
+    case SYS64_UNLINK: {
+        char *name = path_from_ring3(a1, a2);
+        if (!name)
+            r->rax = (uint64_t)-1;
+        else if (user_is_system_file(name) && task64_level() != USER_ADMIN)
+            r->rax = (uint64_t)-2;
+        else
+            r->rax = (uint64_t)(int64_t)fs_unlink(task64_cwd(), name);
+        kfree(name);
         return;
     }
     case SYS64_PIPE: {
@@ -1050,7 +1139,9 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_SEEK:
-        r->rax = (uint64_t)(int64_t)task64_fd_seek((int)a1, (uint32_t)a2);
+        /* the whole register: a program built when positions were 32
+           bits passed them zero-extended, which reads the same */
+        r->rax = (uint64_t)(int64_t)task64_fd_seek((int)a1, a2);
         return;
     case SYS64_FDINODE:
         r->rax = (uint64_t)(int64_t)(task64_fd_kind((int)a1) == FDK_FILE
@@ -1064,12 +1155,12 @@ static void handle(struct regs *r)
         }
         int slot = task64_fd_kind((int)a1) == FDK_FILE
                        ? task64_fd_slot((int)a1) : -1;
-        if (slot < 0 || a2 > 0xFFFFFFFFULL)
+        if (slot < 0 || (int64_t)a2 < 0)
             r->rax = (uint64_t)-1;
         else if (!fs_can_write(slot))
             r->rax = (uint64_t)-2;
         else
-            r->rax = (uint64_t)(int64_t)fs_truncate_to(slot, (uint32_t)a2);
+            r->rax = (uint64_t)(int64_t)fs_truncate_to(slot, a2);
         return;
     }
     case SYS64_TRYWAIT: {
@@ -1154,14 +1245,15 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_MMAP_FILE: {
-        char name[FS_NAME_MAX + 1];
-        if (name_from_ring3(a1, a2, name) < 0 ||
-            !paging64_user_writable(a3, sizeof(uint64_t))) {
+        char *name = path_from_ring3(a1, a2);
+        if (!name || !paging64_user_writable(a3, sizeof(uint64_t))) {
+            kfree(name);
             r->rax = 0;
             return;
         }
         uint64_t size = 0;
         uint64_t addr = proc64_mmap_file(name, &size, a4);
+        kfree(name);
         if (addr)
             *(uint64_t *)(uintptr_t)a3 = size;
         r->rax = addr;
@@ -1292,21 +1384,20 @@ static void handle(struct regs *r)
         return;
     }
     case SYS64_RENAME: {
-        char from[FS_NAME_MAX + 1], to[FS_NAME_MAX + 1];
-        if (name_from_ring3(a1, a2, from) < 0 ||
-            name_from_ring3(a3, a4, to) < 0) {
+        char *from = path_from_ring3(a1, a2);
+        char *to = path_from_ring3(a3, a4);
+        if (!from || !to)
             r->rax = (uint64_t)-1;
-            return;
-        }
         /* The system's own files on both sides: renaming one away is
            as good as deleting it, and renaming onto its name puts a
            stranger's file where the system looks for its own. */
-        if ((user_is_system_file(from) || user_is_system_file(to)) &&
-            task64_level() != USER_ADMIN) {
+        else if ((user_is_system_file(from) || user_is_system_file(to)) &&
+                 task64_level() != USER_ADMIN)
             r->rax = (uint64_t)-2;
-            return;
-        }
-        r->rax = (uint64_t)(int64_t)fs_rename(task64_cwd(), from, to);
+        else
+            r->rax = (uint64_t)(int64_t)fs_rename(task64_cwd(), from, to);
+        kfree(from);
+        kfree(to);
         return;
     }
     case SYS64_WIN_BLIT: {
@@ -1614,9 +1705,13 @@ static void handle(struct regs *r)
             return;
         }
         if (info.kind == FDK_FILE) {
-            int sz = fs_size(task64_fd_slot((int)a1));
-            info.size = sz > 0 ? (uint32_t)sz : 0;
-            info.pos = task64_fd_pos((int)a1);
+            /* past 4 GiB the old shape cannot say it: it says as much
+               as it can, and SYS64_FDINFO2 says the rest */
+            int64_t sz = fs_size(task64_fd_slot((int)a1));
+            uint64_t pos = task64_fd_pos((int)a1);
+            info.size = sz <= 0 ? 0 : sz > 0xFFFFFFFFll ? 0xFFFFFFFFu
+                                                         : (uint32_t)sz;
+            info.pos = pos > 0xFFFFFFFFull ? 0xFFFFFFFFu : (uint32_t)pos;
         } else if (info.kind == FDK_MEMFD) {
             info.size = (uint32_t)memfd64_size(task64_fd_slot((int)a1));
             info.pos = task64_fd_pos((int)a1);
@@ -1630,10 +1725,43 @@ static void handle(struct regs *r)
         r->rax = 0;
         return;
     }
+    case SYS64_FDINFO2: {
+        struct fdinfo2_64 info;
+        if (!paging64_user_writable(a2, sizeof(info)) || (int64_t)a1 < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        memset(&info, 0, sizeof(info));
+        info.kind = task64_fd_kind((int)a1);
+        if (info.kind < 0) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        if (info.kind == FDK_FILE) {
+            struct fs_stat st;
+            if (fs_stat_slot(task64_fd_slot((int)a1), &st) == 0) {
+                info.size = st.size;
+                info.ino = st.ino;
+            }
+            info.pos = task64_fd_pos((int)a1);
+        } else if (info.kind == FDK_MEMFD) {
+            info.size = (uint64_t)memfd64_size(task64_fd_slot((int)a1));
+            info.pos = task64_fd_pos((int)a1);
+        } else if (info.kind == FDK_USOCK) {
+            uint32_t waiting;
+            int type;
+            usock64_info(task64_fd_slot((int)a1), &waiting, &type);
+            info.size = waiting;
+            info.pos = (uint64_t)type;
+        }
+        memcpy((void *)(uintptr_t)a2, &info, sizeof(info));
+        r->rax = 0;
+        return;
+    }
     case SYS64_INITRD_READ: {
-        char name[FS_NAME_MAX + 1];
+        char name[64];
         uint32_t size = 0;
-        if (name_from_ring3(a1, a2, name) < 0) {
+        if (name_from_ring3(a1, a2, name, sizeof(name)) < 0) {
             r->rax = (uint64_t)-1;
             return;
         }

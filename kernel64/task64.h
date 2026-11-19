@@ -244,7 +244,7 @@ void task64_set_mmap_next(uint64_t adr);
 struct fd_entry {
     int kind;
     int slot;                    /* a TFS inode, a pipe, a socket end, a memfd */
-    uint32_t pos;                /* where this particular reader stands */
+    uint64_t pos;                /* where this particular reader stands */
     uint32_t cloexec;            /* closed by exec (FD_CLOEXEC) */
 };
 
@@ -269,9 +269,9 @@ void task64_fd_close_all(void);
 int task64_fd_cloexec(int fd, int value);
 void task64_fd_close_on_exec(void);
 int task64_fd_slot(int fd);          /* TFS inode / pipe number */
-uint32_t task64_fd_pos(int fd);
+uint64_t task64_fd_pos(int fd);
 void task64_fd_advance(int fd, uint32_t n);
-int task64_fd_seek(int fd, uint32_t pos);
+int task64_fd_seek(int fd, uint64_t pos);
 int task64_fd_close(int fd);
 void task64_inherit_fds(struct task64 *child);
 

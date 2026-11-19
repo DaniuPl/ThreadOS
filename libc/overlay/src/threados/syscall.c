@@ -120,6 +120,11 @@ long __tos_unix(long n, long fd, long b, long c, long d, long e, long f);
 #define T_FDCTL    106               /* FD_CLOEXEC: (fd, -1 ask / 0 / 1) */
 #define T_SIGMASK  110               /* (how, bits, &old) */
 #define T_SIGSUSPEND 111
+#define T_READDIR2 116               /* (path, len, &cursor, &struct t_dirent2) */
+#define T_STAT     117               /* (path, len, &struct t_stat) */
+#define T_FDINFO2  118               /* (fd, &struct fdinfo) */
+#define T_PATH    1024               /* FS_PATH_MAX: a path with its NUL */
+#define T_DT_DIR     2
 
 /* SYS64_IPC's operations (kernel/include/ipc.h) used here */
 #define IPC_MEMFD 6
@@ -176,11 +181,19 @@ static void unlock(void)
 	__atomic_store_n(&shim_lock, 0, __ATOMIC_RELEASE);
 }
 
-struct fdinfo { int kind; unsigned size, pos; };
+/* kernel64/syscall64.h's struct fdinfo2_64 and struct stat64k */
+struct fdinfo { int kind; unsigned pad; unsigned long size, pos, ino; };
+struct t_stat {
+	unsigned type, mode;
+	unsigned long size, ino;
+	unsigned uid, gid, nlink, blksize;
+	long atime, mtime, ctime;
+	unsigned long blocks;
+};
 
 static int fdinfo(int fd, struct fdinfo *fi)
 {
-	return tos(T_FDINFO, fd, (long)fi, 0, 0) < 0 ? -1 : 0;
+	return tos(T_FDINFO2, fd, (long)fi, 0, 0) < 0 ? -1 : 0;
 }
 
 static int kind_of(int fd)
@@ -447,7 +460,7 @@ static int path_ok(const char *p)
 	size_t n = slen(p);
 	if (!n)
 		return -ENOENT;
-	if (n > 255)
+	if (n > T_PATH - 1)
 		return -ENAMETOOLONG;
 	return 0;
 }
@@ -459,7 +472,7 @@ static const char *tidy(const char *p, char *out)
 	size_t n = 0;
 	while (p[0] == '.' && p[1] == '/')
 		p += 2;
-	while (*p && n < 255)
+	while (*p && n < T_PATH - 1)
 		out[n++] = *p++;
 	while (n > 1 && out[n - 1] == '/')
 		n--;
@@ -467,24 +480,26 @@ static const char *tidy(const char *p, char *out)
 	return out;
 }
 
-/* A directory is a place one can go to. The kernel has no stat, so we
-   ask by going there and coming back. */
+/* What the kernel says is at a path. (This used to go to a directory
+   and come back to tell it was one - changing the whole process's
+   working directory for a moment, under every other thread's feet.) */
+static int kstat_path(const char *p, struct t_stat *ks)
+{
+	touch(ks, sizeof(*ks));
+	return tos(T_STAT, (long)p, slen(p), (long)ks, 0) < 0 ? -1 : 0;
+}
+
 static int is_dir(const char *p)
 {
-	char here[256];
+	struct t_stat ks;
 	if (!strcmp(p, ".") || !strcmp(p, "/"))
 		return 1;
-	if (tos(T_GETCWD, (long)here, sizeof(here), 0, 0) < 0)
-		return 0;
-	if (tos(T_CHDIR, (long)p, slen(p), 0, 0) < 0)
-		return 0;
-	tos(T_CHDIR, (long)here, slen(here), 0, 0);
-	return 1;
+	return kstat_path(p, &ks) == 0 && ks.type == T_DT_DIR;
 }
 
 static long do_open(const char *path, int flags)
 {
-	char buf[256];
+	char buf[T_PATH];
 	int e = path_ok(path);
 	if (e)
 		return e;
@@ -551,7 +566,8 @@ static long do_open(const char *path, int flags)
 	return fd;
 }
 
-static void fill_stat(struct kstat *st, unsigned mode, unsigned size, long ino)
+static void fill_stat(struct kstat *st, unsigned mode, unsigned long size,
+                      long ino)
 {
 	memset(st, 0, sizeof(*st));
 	st->st_mode = mode;
@@ -563,13 +579,14 @@ static void fill_stat(struct kstat *st, unsigned mode, unsigned size, long ino)
 	st->st_uid = st->st_gid = tos(T_LEVEL, 0, 0, 0, 0) == 0 ? 0 : 1000;
 }
 
-/* A file's inode number is its TFS slot (plus one: zero is no file),
-   the same through every descriptor and by its name - a database
-   compares the two to tell its file was not replaced under it */
+/* A file's inode number, as the kernel gives it by name (T_STAT) and
+   by descriptor (T_FDINFO2): the same through every descriptor and by
+   its name - a database compares the two to tell its file was not
+   replaced under it */
 static long file_ino(int fd)
 {
-	long slot = tos(T_FDINODE, fd, 0, 0, 0);
-	return slot < 0 ? 100 + fd : slot + 1;
+	struct fdinfo fi;
+	return fdinfo(fd, &fi) == 0 && fi.ino ? (long)fi.ino : 100 + fd;
 }
 
 static long do_fstat(int fd, struct kstat *st)
@@ -606,7 +623,8 @@ static long do_fstat(int fd, struct kstat *st)
 
 static long do_stat(const char *path, struct kstat *st)
 {
-	char buf[256];
+	char buf[T_PATH];
+	struct t_stat ks;
 	int e = path_ok(path);
 	if (e)
 		return e;
@@ -618,6 +636,14 @@ static long do_stat(const char *path, struct kstat *st)
 		st->st_rdev = 0x0103;
 		return 0;
 	}
+	if (kstat_path(path, &ks) == 0) {
+		int d = ks.type == T_DT_DIR;
+		fill_stat(st, d ? S_IFDIR | 0755 : S_IFREG | 0644, ks.size, ks.ino);
+		if (d)
+			st->st_nlink = 2;
+		return 0;
+	}
+	/* a kernel without T_STAT (the phone's): open it and ask */
 	long fd = tos(T_OPEN, (long)path, slen(path), 0, 0);
 	if (fd >= 0) {
 		struct fdinfo fi = { 0 };
@@ -652,8 +678,6 @@ static long do_lseek(int fd, long off, int whence)
 	}
 	if (at < 0)
 		return -EINVAL;
-	if (at > 0xFFFFFFFFL)
-		return -EOVERFLOW;
 	if (tos(T_SEEK, fd, at, 0, 0) < 0)
 		return -EINVAL;
 	return at;
@@ -760,7 +784,7 @@ static long do_ioctl(int fd, unsigned long req, void *arg)
 
 static long name_call(int nr, const char *path)
 {
-	char buf[256];
+	char buf[T_PATH];
 	int e = path_ok(path);
 	if (e)
 		return e;
@@ -779,7 +803,7 @@ static long name_call(int nr, const char *path)
 
 static long do_rename(const char *from, const char *to)
 {
-	char a[256], b[256];
+	char a[T_PATH], b[T_PATH];
 	int e = path_ok(from);
 	if (!e)
 		e = path_ok(to);
@@ -1554,8 +1578,6 @@ long __tos_syscall(long n, long a, long b, long c, long d, long e, long f)
 			long r = tos(T_FTRUNCATE, a, b, 0, 0);
 			return r < 0 ? (r == -ENOMEM ? -ENOMEM : -EINVAL) : 0;
 		}
-		if (b > 0xFFFFFFFFL)
-			return -EFBIG;
 		long r = tos(T_FTRUNCATE, a, b, 0, 0);
 		return r == -2 ? -EACCES : r < 0 ? -EIO : 0;
 	}

@@ -1701,7 +1701,10 @@ int task64_mmap_find(uint64_t addr, uint32_t *first_block,
             continue;
 
         uint64_t offset = page - m->start;
-        uint32_t index = (uint32_t)(offset / FS_BLOCK);
+        uint32_t bs = fs_block_size();
+        if (!bs)
+            return 0;
+        uint32_t index = (uint32_t)(offset / bs);
         if (index >= m->nblocks_of)
             return 0;
         *first_block = index;
@@ -1894,7 +1897,7 @@ static int seekable(int fd)
             current->fds[fd].kind == FDK_MEMFD);
 }
 
-uint32_t task64_fd_pos(int fd)
+uint64_t task64_fd_pos(int fd)
 {
     if (!seekable(fd))
         return 0;
@@ -1909,7 +1912,7 @@ void task64_fd_advance(int fd, uint32_t n)
 
 /* Puts the reading point where the program says. Only a file (or a
    memfd) has one - a pipe or the keyboard has nowhere to go back to. */
-int task64_fd_seek(int fd, uint32_t pos)
+int task64_fd_seek(int fd, uint64_t pos)
 {
     if (!seekable(fd))
         return -1;

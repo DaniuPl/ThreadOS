@@ -215,6 +215,57 @@
 /* a1=&struct now_playing (user64/usys64.h): what the program plays, for
    the island's play and pause, which come back as WEV_MEDIA -> 0/-1 */
 #define SYS64_NOW_PLAYING 115
+
+/* --- Files with no 63-byte or 4 GiB ceilings (docs/tfs4-plan.md) ---
+ * The calls before these keep their shapes for programs already built;
+ * these are what a program built now uses. Paths are a1 = pointer,
+ * a2 = length, up to FS_PATH_MAX - 1 bytes, relative to the working
+ * directory.
+ *
+ * SYS64_READDIR2  a1/a2 = a directory's path, a3 = &uint64_t cursor (0
+ *                 to start; moved past the entry), a4 = &struct
+ *                 dirent2_64 -> 1 an entry / 0 the end / -1. The
+ *                 working directory stays where it is.
+ * SYS64_STAT      a1/a2 = a path, a3 = &struct stat64k -> 0 / -1
+ * SYS64_FDINFO2   a1 = fd, a2 = &struct fdinfo2_64 -> 0 / -1:
+ *                 SYS64_FDINFO with a 64-bit size and position
+ *
+ * The structures, the same in user64/usys64.h and the C library's
+ * libc/overlay/src/threados/tos.h: */
+#define SYS64_READDIR2 116
+#define SYS64_STAT     117
+#define SYS64_FDINFO2  118
+
+#define DT2_FILE 1
+#define DT2_DIR  2
+struct dirent2_64 {
+    uint64_t size;
+    uint64_t ino;                /* the same for every name of a file */
+    uint32_t type;               /* DT2_* */
+    uint32_t name_len;
+    char name[256];              /* with its NUL */
+};
+
+/* What a stat call gives a program. mode, gid and the times are 0
+   until the file system keeps them (TFS4); the C library supplies what
+   it has to then. */
+struct stat64k {
+    uint32_t type;               /* DT2_* */
+    uint32_t mode;               /* permission bits, or 0: not kept */
+    uint64_t size;
+    uint64_t ino;
+    uint32_t uid, gid;
+    uint32_t nlink, blksize;
+    int64_t atime, mtime, ctime; /* seconds since 1970, or 0 */
+    uint64_t blocks;             /* of 512 bytes */
+};
+
+struct fdinfo2_64 {
+    int32_t kind;                /* FDK_* */
+    uint32_t pad;
+    uint64_t size, pos;          /* as SYS64_FDINFO's */
+    uint64_t ino;                /* a file's, as SYS64_STAT gives it */
+};
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

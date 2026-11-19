@@ -178,13 +178,15 @@ int isr64_page_in(uint64_t addr)
             return 0;
         uint8_t *dst = (uint8_t *)(uintptr_t)frame;
         memset(dst, 0, PAGE_SIZE);
-        for (uint32_t b = 0; b < PAGE_SIZE / FS_BLOCK &&
-                             remaining > b * FS_BLOCK; b++) {
+        /* the block size is the format's constant: asking for it
+           steps into no file system state */
+        uint32_t bs = fs_block_size();
+        for (uint32_t b = 0; bs && b < PAGE_SIZE / bs &&
+                             remaining > b * bs; b++) {
             uint32_t block = task64_mmap_block(addr, first + b);
             if (!block)
                 break;
-            blk_read(fs_block_lba(block), FS_BLOCK / 512,
-                     dst + b * FS_BLOCK);
+            blk_read(fs_block_lba(block), bs / 512, dst + b * bs);
         }
         uint64_t right = PG_USER | PG_NX;
         if (write)

@@ -196,9 +196,11 @@ static int path_append(char *out, int cap, const char *path,
 
 static int desktop_read_items(void)
 {
-    char home[64], path[80], name[32];
+    /* a name as long as a directory may hold: a shorter buffer here
+       was overrun by a file on the Desktop with a long name */
+    char home[64], path[80], name[FS_NAME_LEN + 1];
     const char *owner = user_current_name();
-    uint32_t size;
+    uint64_t size;
     int is_dir, dir;
     if (!owner || !owner[0])
         owner = "guest";
@@ -5246,7 +5248,7 @@ struct found {
     int index;                       /* the program, the window */
     int art;
     /* a file is opened by this name, so all of it */
-    char name[FS_NAME_MAX + 1];
+    char name[FS_NAME_LEN + 1];
 };
 
 static char search_q[32];
@@ -5355,8 +5357,8 @@ static void search_refresh(void)
         if (s)
             found_add(FIND_SETTING, i, art_of_app("gsettings"), n, s, scores);
     }
-    char name[64], where[64];
-    uint32_t size;
+    char name[FS_NAME_LEN + 1], where[64];
+    uint64_t size;
     int dir;
     int at = search_files_dir(where, sizeof(where));
     for (int i = 0; i < 64 && fs_readdir(at, i, name, &size, &dir); i++) {

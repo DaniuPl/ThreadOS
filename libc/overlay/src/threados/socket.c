@@ -288,25 +288,24 @@ static long vfile_new(int random)
 /* --- Directories ------------------------------------------------------
  *
  * opendir() and readdir(): musl opens the directory and reads Linux's
- * records from it (getdents64). The kernel lists only the working
- * directory, an entry a call by its number (SYS64_READDIR) - so opening
- * one goes there, lists it whole into records here, and comes back;
- * what readdir then hands out is that list. (Going there is changing
- * the process's working directory for a moment, as is_dir() in
- * syscall.c does; a thread opening a relative path in that moment would
- * miss.) */
-#define T_READDIR 19
-#define T_CHDIR   17
-#define T_GETCWD  18
+ * records from it (getdents64). The kernel lists a directory by its
+ * path, an entry a call from a cursor it hands back (SYS64_READDIR2):
+ * opening one lists it whole into records here, and readdir then hands
+ * out that list. (It used to go into the directory and list the working
+ * one, changing the process's working directory for a moment - a
+ * thread opening a relative path in that moment missed.) */
+#define T_READDIR2 116
+#define T_DT_DIR     2
 #ifndef DT_DIR                       /* (<dirent.h> has them for BSD and GNU) */
 #define DT_DIR 4
 #define DT_REG 8
 #endif
 
-struct k_dirent {
-	char name[64];
-	unsigned size;
-	int is_dir;
+/* kernel64/syscall64.h's struct dirent2_64 */
+struct k_dirent2 {
+	unsigned long size, ino;
+	unsigned type, name_len;
+	char name[256];
 };
 
 static int add_record(char **buf, int *len, int *cap, const char *name,
@@ -524,7 +523,7 @@ static const char *one_slash(const char *path, char *out, size_t cap)
 /* stat() of the fonts, their directory and the configuration */
 NET_HIDDEN long __tos_stat_virtual(const char *path, struct kstat *st)
 {
-	char tidy[256];
+	char tidy[1024];
 	path = one_slash(path, tidy, sizeof(tidy));
 	long size;
 	unsigned mode = S_IFREG | 0444;
@@ -579,24 +578,27 @@ NET_HIDDEN long __tos_open_dir(const char *path)
 {
 	if (is_font_dir(path))
 		return open_font_dir();
-	char here[256];
-	touch(here, sizeof(here));
-	if (tos(T_GETCWD, (long)here, sizeof(here), 0, 0) < 0)
-		return -EIO;
-	if (tos(T_CHDIR, (long)path, strlen(path), 0, 0) < 0)
-		return -ENOTDIR;
 	char *buf = NULL;
 	int len = 0, cap = 0;
 	int bad = add_record(&buf, &len, &cap, ".", DT_DIR, 1) ||
 	          add_record(&buf, &len, &cap, "..", DT_DIR, 2);
-	struct k_dirent e;
+	struct k_dirent2 e;
+	unsigned long cursor = 0;
 	touch(&e, sizeof(e));
-	for (int i = 0; !bad && tos(T_READDIR, i, (long)&e, 0, 0) == 0; i++) {
+	touch(&cursor, sizeof(cursor));
+	long got;
+	while (!bad && (got = tos(T_READDIR2, (long)path, strlen(path),
+	                          (long)&cursor, (long)&e)) == 1) {
 		e.name[sizeof(e.name) - 1] = 0;
 		bad = add_record(&buf, &len, &cap, e.name,
-		                 e.is_dir ? DT_DIR : DT_REG, 3 + i);
+		                 e.type == T_DT_DIR ? DT_DIR : DT_REG, (long)e.ino);
 	}
-	tos(T_CHDIR, (long)here, strlen(here), 0, 0);
+	/* the first call says whether it is a directory one may list; an
+	   empty one ends at once with 0 */
+	if (!bad && got < 0 && !cursor) {
+		free(buf);
+		return -ENOTDIR;
+	}
 	if (bad) {
 		free(buf);
 		return -ENOMEM;
@@ -751,7 +753,7 @@ static long open_bundle(void)
 
 NET_HIDDEN long __tos_open_virtual(const char *path)
 {
-	char tidy[256];
+	char tidy[1024];
 	path = one_slash(path, tidy, sizeof(tidy));
 	if (!strcmp(path, "/dev/urandom") || !strcmp(path, "/dev/random"))
 		return vfile_new(1);

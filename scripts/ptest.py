@@ -3679,17 +3679,17 @@ def no64():
 
 # --- A TFS3 disk image, read on the host -----------------------------
 #
-# Written from kernel/fs.c's description of the layout, not from its
+# Written from kernel/tfs3.c's description of the layout, not from its
 # code, so a test can see what the kernel left on the disk: a file a
 # program wrote, byte for byte, and which blocks the bitmap says are
 # taken. Read-only.
 
-TFS_BLOCK = _kernel_define("kernel/include/fs.h", "FS_BLOCK")
-TFS_FILES = _kernel_define("kernel/include/fs.h", "FS_MAX_FILES")
-TFS_DIRECT = _kernel_define("kernel/include/fs.h", "FS_DIRECT")
-TFS_NAME = _kernel_define("kernel/include/fs.h", "FS_NAME_MAX") + 1
-TFS_BITMAP = _kernel_define("kernel/fs.c", "BITMAP_START")
-TFS_BITMAP_BLOCKS = _kernel_define("kernel/fs.c", "BITMAP_BLOCKS")
+TFS_BLOCK = _kernel_define("kernel/include/tfs3.h", "TFS3_BLOCK")
+TFS_FILES = _kernel_define("kernel/include/tfs3.h", "TFS3_MAX_FILES")
+TFS_DIRECT = _kernel_define("kernel/include/tfs3.h", "TFS3_DIRECT")
+TFS_NAME = _kernel_define("kernel/include/tfs3.h", "TFS3_NAME_MAX") + 1
+TFS_BITMAP = _kernel_define("kernel/tfs3.c", "BITMAP_START")
+TFS_BITMAP_BLOCKS = _kernel_define("kernel/tfs3.c", "BITMAP_BLOCKS")
 
 
 class TfsImage:

@@ -238,9 +238,11 @@ static void cmd_disk(void)
  */
 static void cmd_pwd(void)
 {
-    char path[FS_NAME_MAX * 4];
-    fs_getpath(task64_cwd(), path);
-    printk("%s\n", path);
+    static char path[FS_PATH_MAX];
+    if (fs_getpath(task64_cwd(), path, sizeof(path)) < 0)
+        printk("pwd: the path is longer than %u bytes\n", FS_PATH_MAX - 1);
+    else
+        printk("%s\n", path);
 }
 
 static void cmd_fls(void)
@@ -252,17 +254,18 @@ static void cmd_fls(void)
 
     /* We list the directory the shell is standing in - not always the
    root one */
-    char name[FS_NAME_MAX + 1];
-    uint32_t size = 0;
+    static char name[FS_NAME_LEN + 1];
+    uint64_t size = 0;
     int dir = 0;
     cmd_pwd();
     for (int i = 0; fs_readdir(task64_cwd(), i, name,
                                &size, &dir) == 1; i++)
-        printk("  %s%s  (%u B)\n", name, dir ? "/" : "", size);
+        printk("  %s%s  (%u B)\n", name, dir ? "/" : "", (uint32_t)size);
 
-    uint32_t used = 0, total = 0;
+    uint64_t used = 0, total = 0;
     fs_usage(&used, &total);
-    printk("Used: %u/%u blocks of %u B\n", used, total, FS_BLOCK);
+    printk("Used: %u/%u blocks of %u B\n", (uint32_t)used, (uint32_t)total,
+           fs_block_size());
 }
 
 static void cmd_cat(const char *name)
@@ -888,15 +891,16 @@ static void cmd_format(const char *arg)
 
 static void cmd_df(void)
 {
-    uint32_t used, total;
+    uint64_t used, total;
     fs_usage(&used, &total);
     if (!total) {
         printk("df: there is no disk\n");
         return;
     }
-    uint32_t kib = FS_BLOCK / 1024;
+    uint64_t kib = fs_block_size() / 1024;
     printk("disk: %u KiB, used %u KiB, free %u KiB (blocks of %u B)\n",
-           total * kib, used * kib, (total - used) * kib, FS_BLOCK);
+           (uint32_t)(total * kib), (uint32_t)(used * kib),
+           (uint32_t)((total - used) * kib), fs_block_size());
 }
 
 /* Installing onto the machine's own disk.
