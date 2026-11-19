@@ -1737,6 +1737,23 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)(int64_t)iwlwifi_scan_start();
             return;
         }
+        if (a1 == 2) {                  /* join: started, not waited for */
+            if (!paging64_user_range(a2, sizeof(struct wifi_join))) {
+                r->rax = (uint64_t)-1;
+                return;
+            }
+            struct wifi_join j = *(const struct wifi_join *)(uintptr_t)a2;
+            j.ssid[sizeof(j.ssid) - 1] = 0;
+            j.password[sizeof(j.password) - 1] = 0;
+            r->rax = (uint64_t)(int64_t)iwlwifi_join_start(j.ssid, j.password);
+            memset(&j, 0, sizeof(j));
+            return;
+        }
+        if (a1 == 3) {
+            iwlwifi_leave();
+            r->rax = 0;
+            return;
+        }
         if (a1 != 0 ||
             !paging64_user_writable(a2, sizeof(struct wifi_info))) {
             r->rax = (uint64_t)-1;

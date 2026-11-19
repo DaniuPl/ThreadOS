@@ -3242,6 +3242,8 @@ static void copy_text(char *dst, uint32_t room, const char *src)
     dst[i] = 0;
 }
 
+static void link_info(struct wifi_info *o);
+
 void iwlwifi_info_fill(struct wifi_info *o)
 {
     memset(o, 0, sizeof(*o));
@@ -3256,6 +3258,7 @@ void iwlwifi_info_fill(struct wifi_info *o)
     if (st.mac_valid)
         hex_addr(o->mac, st.mac);
     copy_text(o->error, sizeof(o->error), st.last_error);
+    link_info(o);
     /* The loudest first: that is the order a person picks from */
     int used[IWLWIFI_MAX_BSS] = { 0 };
     for (int k = 0; k < WIFI_INFO_NETS && k < n_bss; k++) {
@@ -4285,14 +4288,29 @@ static volatile int join_wanted, leave_wanted, join_result;
 static volatile uint32_t join_gen;
 static char join_ssid[33], join_password[64];
 
-int iwlwifi_join(const char *ssid, const char *password)
+static char join_said[96];              /* the last join's outcome, kept */
+
+int iwlwifi_join_start(const char *ssid, const char *password)
 {
-    if (st.stage != IWL_STAGE_READY)
-        return IWL_ERR_STATE;
+    if (st.stage != IWL_STAGE_READY) {
+        fmt(join_said, sizeof(join_said), "%s",
+            st.stage == IWL_STAGE_NO_CARD || st.stage == IWL_STAGE_NONE
+            ? "there is no Wi-Fi card in this machine"
+            : "the Wi-Fi card is not ready");
+        return -1;
+    }
     fmt(join_ssid, sizeof(join_ssid), "%s", ssid);
     fmt(join_password, sizeof(join_password), "%s", password ? password : "");
-    uint32_t gen = join_gen;
+    join_said[0] = 0;
     join_wanted = 1;
+    return 0;
+}
+
+int iwlwifi_join(const char *ssid, const char *password)
+{
+    uint32_t gen = join_gen;
+    if (iwlwifi_join_start(ssid, password) < 0)
+        return IWL_ERR_STATE;
     for (int i = 0; i < 600 && join_gen == gen; i++)
         task_sleep(50);
     return join_gen == gen ? IWL_ERR_TIMEOUT : join_result;
@@ -4301,6 +4319,18 @@ int iwlwifi_join(const char *ssid, const char *password)
 void iwlwifi_leave(void)
 {
     leave_wanted = 1;
+}
+
+static void link_info(struct wifi_info *o)
+{
+    o->link = link.state;
+    if (join_wanted && link.state == IWLWIFI_LINK_DOWN)
+        o->link = IWLWIFI_LINK_JOINING;     /* asked for, not begun */
+    if (o->link != IWLWIFI_LINK_DOWN)
+        copy_text(o->joined, sizeof(o->joined),
+                  link.state != IWLWIFI_LINK_DOWN ? bss[link.idx].ssid
+                                                  : join_ssid);
+    copy_text(o->join_error, sizeof(o->join_error), join_said);
 }
 
 /* On the driver's thread: a scan for the name, then the join */
@@ -4329,6 +4359,8 @@ static void link_service(void)
     if (join_wanted) {
         join_wanted = 0;
         join_result = join_by_name();
+        if (join_result != IWL_OK)
+            fmt(join_said, sizeof(join_said), "%s", st.last_error);
         join_gen++;
     }
     if (leave_wanted) {

@@ -15,6 +15,12 @@ it shows is read off the screen:
   a hidden WPA2 network, -81 dBm: one bar
   and no "Broken": its checksum was wrong
 
+And joining, as far as a machine without the card goes: a click on
+ThreadOS-Test picks it (a ring round its row) and puts the keys in a
+password field - its letters shown as dots, one a letter - and Enter
+asks the driver to join; it answers that there is no card, and the
+page says so and forgets the password.
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -30,6 +36,9 @@ from ptest import check, summary, _kernel_define
 _GS = "user/gsettings.c"
 LIST_Y = _kernel_define(_GS, "WIFI_LIST_Y")
 ROW_H = _kernel_define(_GS, "WIFI_ROW_H")
+PICK_W = _kernel_define(_GS, "WIFI_PICK_W")
+JOIN_H = _kernel_define(_GS, "WIFI_JOIN_H")
+CHIP_H = _kernel_define(_GS, "CHIP_H")
 SEC_WIFI = GSET_SECTIONS.index("Wi-Fi")
 DARK = theme("dark")
 
@@ -72,6 +81,34 @@ def row(q, cx, cy, i, shot):
     return name, sec, bars
 
 
+def page_note(q, cx, cy, shot=None):
+    """The line at the foot of the Wi-Fi page: what to do, or how the
+    join went"""
+    top = GSET_H - GSET_NOTE_DY - 14
+    return q.read_ui(cx + GSET_PANE_X, cy + ui_font_baseline_in(11, top, 16),
+                     GSET_W - GSET_PANE_X - 8, px=11, fg=DARK["app_dim"],
+                     screen=shot)
+
+
+def password_dots(q, cx, cy, shot):
+    """How many dots the password field shows: small discs, each a cross
+    of text-coloured pixels - not the cursor, a line taller than one"""
+    _, _, at = shot
+    txt = DARK["app_text"]
+
+    def lit(x, y):
+        return sum(at(x, y)) > 3 * 170 and abs(sum(at(x, y)) - sum(txt)) < 60
+    top = cy + GSET_H - GSET_NOTE_DY - 14 - JOIN_H + 6
+    n = 0
+    for y in range(top + 4, top + CHIP_H - 4):
+        for x in range(cx + GSET_PANE_X + 2, cx + GSET_PANE_X + 196):
+            if (lit(x, y) and lit(x - 1, y) and lit(x + 1, y) and
+                    lit(x, y - 1) and lit(x, y + 1) and not lit(x, y - 2) and
+                    not lit(x, y + 2)):
+                n += 1
+    return n
+
+
 def main():
     slog = tempfile.mktemp(suffix=".log")
     q = Qemu(KERNEL, INITRD, serial=slog)
@@ -112,6 +149,41 @@ def main():
         check("and nothing of the frame with the broken checksum (%s)"
               % (rows[3],), rows[3][0] in ("", "(dim) ") and
               "Broken" not in str(rows))
+
+        # Joining ThreadOS-Test
+        said = page_note(q, cx, cy, shot)
+        check("the page asks for a network to be picked ('%s')" % said,
+              said == "Pick a network to join it.")
+        top = cy + LIST_Y
+        q.click(cx + GSET_PANE_X + 60, top + ROW_H // 2)
+        q.mouse_goto(W - 20, H // 2)
+        end = time.time() + 5
+        said = ""
+        while time.time() < end and said != "Type its password, then Join.":
+            time.sleep(0.3)
+            said = page_note(q, cx, cy)
+        shot = q.screen_raw()
+        _, _, px = shot
+        ring = px(cx + GSET_PANE_X - 6 + PICK_W // 2, top) == DARK["accent"]
+        check("a click on ThreadOS-Test picks it - a ring round its row - and "
+              "asks for its password ('%s')" % said,
+              ring and said == "Type its password, then Join.")
+        q.type_line("hunter22", enter=False)
+        time.sleep(1)
+        dots = password_dots(q, cx, cy, q.screen_raw())
+        check("what is typed goes into the password field, a dot a letter "
+              "(%d dots for 8 letters)" % dots, dots == 8)
+        q.sendkey("ret")
+        end = time.time() + 10
+        while time.time() < end and not said.startswith("Not joined"):
+            time.sleep(0.3)
+            said = page_note(q, cx, cy)
+        check("Enter asks to join, and the page says why it cannot: no card "
+              "('%s')" % said,
+              said == "Not joined: there is no Wi-Fi card in this machine")
+        shot = q.screen_raw()
+        check("the password is gone, and so is the field",
+              password_dots(q, cx, cy, shot) == 0)
     finally:
         q.close()
         if os.path.exists(slog):

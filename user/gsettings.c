@@ -61,6 +61,9 @@
 #define WIFI_LIST_Y 166       /* Wi-Fi: the first network's row (PANE_Y0,
                                  three lines, the button and a gap) */
 #define WIFI_ROW_H 20         /* ...and each one's height */
+#define WIFI_PICK_W 296       /* a row as a click and a pick see it */
+#define WIFI_JOIN_H 40        /* the password and Join under the list */
+#define WIFI_JOIN_W 70
 #define DEV_MAX 64            /* Devices: as many as are listed */
 #define DEV_LIST_Y 108        /* the first device's row: under two lines
                                  of figures (PANE_Y0 + 2 * INFO_H + 8) */
@@ -258,6 +261,18 @@ static void copy(char *d, const char *s, int max)
         i++;
     }
     d[i] = 0;
+}
+
+/* Three strings one after another, cut to the room */
+static void cat3(char *d, int max, const char *a, const char *b,
+                 const char *c)
+{
+    const char *part[3] = { a, b, c };
+    int n = 0;
+    for (int k = 0; k < 3; k++)
+        for (int i = 0; part[k][i] && n < max - 1; i++)
+            d[n++] = part[k][i];
+    d[n] = 0;
 }
 
 static int len(const char *s)
@@ -567,11 +582,15 @@ static void try_password(void)
 #define F_WALL 3
 #define F_PIN  4                  /* the lock's: a new PIN */
 #define F_LOCKPW 5                /* ...and one's own password, to change it */
-#define F_N    6
+#define F_WIFIPW 6                /* a network's password, to join it */
+#define F_N    7
 static const char *const field_setting[F_N] = {
-    "name", "resolution", "dns", "wallpaper", (const char *)0, (const char *)0
+    "name", "resolution", "dns", "wallpaper", (const char *)0, (const char *)0,
+    (const char *)0
 };
-static char fields[F_N][CFG_VAL_MAX];
+/* room for a WPA2 password (63) as well as a setting's value */
+#define FIELD_MAX 64
+static char fields[F_N][FIELD_MAX];
 static int focus = -1;            /* the field that has the keys */
 
 /* A field shows the setting until it is typed into */
@@ -594,6 +613,9 @@ static void fields_from_settings(void)
 #define A_TOGGLE  8               /* name flips between 0 and 1 */
 #define A_BT_SEARCH 12
 #define A_WIFI_SEARCH 15
+#define A_WIFI_PICK 17            /* a network in the list */
+#define A_WIFI_JOIN 18            /* ...joined, with the password typed */
+#define A_WIFI_LEAVE 19
 #define A_DEVICE 16               /* a device opened, or -1: the list */
 #define A_UNLOCK_PICK 13          /* the way the lock opens, chosen */
 #define A_UNLOCK_SAVE 14          /* ...and saved, with the password */
@@ -1062,6 +1084,25 @@ static void put_hex4(char *out, int at, uint32_t v)
 }
 
 static struct wifi_info wfi;
+static int wifi_pick = -1;          /* the network picked to join */
+static void secret_field(int x, int y, int w, int f, const char *empty);
+
+/* Joins the picked network with the password typed; the driver does it
+   in its own time, and the page says how it goes (wfi.link) */
+static void wifi_join(void)
+{
+    if (wifi_pick < 0 || wifi_pick >= WIFI_INFO_NETS)
+        return;
+    struct wifi_join j;
+    copy(j.ssid, wfi.net[wifi_pick].ssid, sizeof(j.ssid));
+    copy(j.password, fields[F_WIFIPW], sizeof(j.password));
+    sys_wifi_join(&j);
+    for (int i = 0; i < (int)sizeof(j.password); i++)
+        j.password[i] = 0;
+    for (int i = 0; i < FIELD_MAX; i++)
+        fields[F_WIFIPW][i] = 0;
+    wifi_pick = -1;
+}
 
 /* How strong, in four bars: the steps phones use, near enough */
 static void wifi_bars(int x, int y, int rssi)
@@ -1083,9 +1124,16 @@ static int draw_wifi_driver(void)
     if (sys_wifi(WIFI_INFO, &wfi) != 0 || (!wfi.present && !wfi.recorded))
         return 0;
     static const char *const kind[4] = { "open", "WEP", "WPA", "WPA2" };
+    char status[64];
+    if (wfi.link == WIFI_LINK_UP)
+        cat3(status, sizeof(status), "Joined ", wfi.joined, "");
+    else if (wfi.link != WIFI_LINK_DOWN)
+        cat3(status, sizeof(status), "Joining ", wfi.joined, "...");
+    else
+        copy(status, wfi.ready ? "on" : wfi.state, sizeof(status));
     if (wfi.present) {
         info(0, "Card", wfi.card);
-        info(1, "Status", wfi.ready ? "on" : wfi.state);
+        info(1, "Status", status);
         info(2, "Address", wfi.mac[0] ? wfi.mac : "-");
     } else {
         info(0, "Card", "none in this machine");
@@ -1107,9 +1155,17 @@ static int draw_wifi_driver(void)
         note(y, "No networks found.");
     } else {
         int n = wfi.found < WIFI_INFO_NETS ? wfi.found : WIFI_INFO_NETS;
-        for (int i = 0; i < n && y + WIFI_ROW_H < ch - NOTE_DY - 14; i++) {
+        int end = ch - NOTE_DY - 14 - (wifi_pick >= 0 ? WIFI_JOIN_H : 0);
+        if (wifi_pick >= n)
+            wifi_pick = -1;
+        for (int i = 0; i < n && y + WIFI_ROW_H < end; i++) {
             const struct wifi_net *w = &wfi.net[i];
             int base = ud_baseline(y, WIFI_ROW_H, UD_PX);
+            if (i == wifi_pick)
+                ud_ring(win, PANE_X - 6, y, WIFI_PICK_W, WIFI_ROW_H, 4,
+                        l.accent);
+            hot(PANE_X - 6, y, WIFI_PICK_W, WIFI_ROW_H, A_WIFI_PICK, i,
+                (const char *)0, (const char *)0);
             if (w->ssid[0])
                 ud_text(win, PANE_X, base, w->ssid, l.text, UD_SANS, UD_PX);
             else
@@ -1121,7 +1177,29 @@ static int draw_wifi_driver(void)
             y += WIFI_ROW_H;
         }
     }
-    note(ch - NOTE_DY - 14, "Joining a network comes in the next stage.");
+    /* The picked network: its password and Join; a joined one: Leave */
+    int jy = ch - NOTE_DY - 14 - WIFI_JOIN_H + 6;
+    if (wifi_pick >= 0) {
+        int x = PANE_X;
+        if (wfi.net[wifi_pick].security != WIFI_SEC_OPEN) {
+            secret_field(x, jy, FIELD_W, F_WIFIPW, "Password");
+            x += FIELD_W + 10;
+        }
+        button(x, jy, WIFI_JOIN_W, "Join", A_WIFI_JOIN, 0);
+    } else if (wfi.link == WIFI_LINK_UP) {
+        button(PANE_X, jy, WIFI_JOIN_W, "Leave", A_WIFI_LEAVE, 0);
+    }
+    char said[160];
+    if (wfi.join_error[0])
+        cat3(said, sizeof(said), "Not joined: ", wfi.join_error, "");
+    else if (wfi.link == WIFI_LINK_UP)
+        cat3(said, sizeof(said), "Joined ", wfi.joined, ".");
+    else if (wfi.link != WIFI_LINK_DOWN)
+        cat3(said, sizeof(said), "Joining ", wfi.joined, "...");
+    else
+        copy(said, wifi_pick >= 0 ? "Type its password, then Join."
+                                  : "Pick a network to join it.", sizeof(said));
+    note(ch - NOTE_DY - 14, said);
     return 1;
 }
 
@@ -1685,6 +1763,18 @@ static void click(int x, int y)
         case A_WIFI_SEARCH:
             sys_wifi(WIFI_SEARCH, (struct wifi_info *)0);
             break;
+        case A_WIFI_PICK:
+            wifi_pick = t->arg;
+            fields[F_WIFIPW][0] = 0;
+            if (wfi.net[t->arg].security != WIFI_SEC_OPEN)
+                focus = F_WIFIPW;       /* the password is what comes next */
+            break;
+        case A_WIFI_JOIN:
+            wifi_join();
+            break;
+        case A_WIFI_LEAVE:
+            sys_wifi(WIFI_LEAVE, (struct wifi_info *)0);
+            break;
         case A_DEVICE:
             dev_open = t->arg;
             break;
@@ -1749,10 +1839,14 @@ static void key(char c)
     if (focus >= 0) {
         char *f = fields[focus];
         int n = len(f);
+        /* a setting's value fits the configuration; a password, 63 */
+        int room = focus == F_WIFIPW ? FIELD_MAX : CFG_VAL_MAX;
         if (c == '\n' || c == '\r') {
             int was = focus;
             focus = -1;
-            if (!field_setting[was])
+            if (was == F_WIFIPW)
+                wifi_join();           /* Enter is Join */
+            else if (!field_setting[was])
                 unlock_save();         /* the lock's two: Enter is Save */
             else
                 apply(field_setting[was], fields[was]);
@@ -1762,14 +1856,14 @@ static void key(char c)
         } else if (c == KEY_PASTE) {
             char got[CLIP_MAX + 1];
             int k = (int)sys_clip_get(got, sizeof(got));
-            for (int i = 0; i < k && n < CFG_VAL_MAX - 1; i++)
+            for (int i = 0; i < k && n < room - 1; i++)
                 if (got[i] >= 0x20 && got[i] < 0x7F)
                     f[n++] = got[i];
             f[n] = 0;
         } else if (c == '\b') {
             if (n > 0)
                 f[n - 1] = 0;
-        } else if (c >= 0x20 && c < 0x7F && n < CFG_VAL_MAX - 1) {
+        } else if (c >= 0x20 && c < 0x7F && n < room - 1) {
             f[n] = c;
             f[n + 1] = 0;
         }

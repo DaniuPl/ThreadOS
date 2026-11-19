@@ -10675,3 +10675,20 @@ works and is checked by `make test`.
       read from inside its own handlers. The fuzzer has kernel/wlan.c
       too: 3000 corrupted frames, nothing found. No emulator has this
       card: a laptop with one is the next test.
+- [x] **Joining a Wi-Fi network from Settings** (user/gsettings.c,
+      user/uwifi.h, kernel/include/wifi_info.h, kernel64/syscall64.c,
+      kernel/iwlwifi.c, scripts/tests/t_wifiui.py)
+      Settings' Wi-Fi page said "Joining a network comes in the next
+      stage". A network in the list is now picked with a click (a ring
+      round its row); a protected one then takes the keys in a password
+      field - a dot a letter, room for WPA2's 63 - and Join or Enter
+      asks the driver to join it (SYS64_WIFI's new WIFI_JOIN: started on
+      the driver's thread, not waited for; WIFI_LEAVE leaves). The page
+      follows it through WIFI_INFO's new link state: "Joining X...",
+      "Joined X" with Leave, or "Not joined:" and why, and the password
+      is forgotten as soon as it has been handed over. The Status line
+      says the same. t_wifiui, on QEMU without the card: the page asks
+      for a network to be picked; a click on ThreadOS-Test rings it and
+      asks for its password; eight letters typed are eight dots; Enter
+      gets "Not joined: there is no Wi-Fi card in this machine", and the
+      password and its field are gone.

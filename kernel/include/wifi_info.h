@@ -13,6 +13,12 @@
 #define WIFI_SEC_WPA  2
 #define WIFI_SEC_WPA2 3
 
+/* SYS64_WIFI WIFI_JOIN's argument */
+struct wifi_join {
+    char ssid[33];
+    char password[64];
+};
+
 struct wifi_net {
     char ssid[33];              /* "" when the network hides its name */
     char bssid[18];
@@ -33,6 +39,9 @@ struct wifi_info {
     char mac[18];
     char error[96];
     struct wifi_net net[WIFI_INFO_NETS];   /* the loudest first */
+    int32_t link;               /* 0 not joined, 1 joining, 2 keys, 3 joined */
+    char joined[33];            /* the network joined or being joined */
+    char join_error[96];        /* why the last join did not happen */
 };
 
 #endif
