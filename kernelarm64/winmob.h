@@ -21,6 +21,7 @@ struct win_event {
 #define WEV_DRAG    6
 #define WEV_RELEASE 7
 #define WEV_LOOK    10          /* the look changed: draw again in it */
+#define WEV_MEDIA   11          /* play (1) or pause (2), from the shade */
 
 #define WINMOB_MAX 8
 
@@ -46,6 +47,8 @@ int64_t winmob_draw_cmd(int win, int owner, const struct win_draw *d,
 /* The display size changed: each window is told its new size */
 void winmob_rescale(void);
 void winmob_look_changed(void);
+/* The shade's play or pause, to the window that said it plays */
+void winmob_media(int win, int what);
 uint32_t winmob_edge_colour(int win, int bottom);
 /* SYS64_WIN_KEYBOARD: the program waits for typing - the shell shows
    its keyboard over the window - or no longer does */

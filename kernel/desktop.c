@@ -634,6 +634,7 @@ struct wevent {
 /* The look changed - light or dark: a program that asks for its
    colours (UI_LOOK) draws itself again in them */
 #define WEV_LOOK    10
+#define WEV_MEDIA   11          /* play (1) or pause (2), from the island */
 #define WEV_QLEN  8
 
 struct window {
@@ -6193,6 +6194,14 @@ static void island_size(int kind, int *w, int *h)
     }
 }
 
+/* What a program says it plays (SYS64_NOW_PLAYING): the island shows
+   play or pause for it, and sends it back to the window (WEV_MEDIA). One
+   at a time - the last to say it plays. -1 = none. */
+static int np_win = -1, np_owner = -1, np_state;
+static uint32_t np_until;           /* paused: the island goes at this frame */
+
+static struct window *np_window(void);
+
 /* What it should be showing, and at what size */
 static int island_want(int *w, int *h)
 {
@@ -6201,8 +6210,9 @@ static int island_want(int *w, int *h)
         kind = ISL_VOLUME;
     else if (note_n > 0)
         kind = ISL_NOTE;
-    else if (hda_stream_who() >= 0)
-        kind = ISL_PLAYING;
+    else if (hda_stream_who() >= 0 ||
+             (np_window() && np_state == 2 && (int32_t)(np_until - frames) > 0))
+        kind = ISL_PLAYING;        /* paused, it stays a while to play again */
     island_size(kind, w, h);
     return kind;
 }
@@ -6294,16 +6304,27 @@ static void island_step(void)
     }
 }
 
-/* The name of what is playing: its window's title, else its program's */
+/* The name of what is playing: its window's title, else its program's.
+   A program may play through a helper of its own that has no window -
+   a browser's web process plays a page's sound - so the window looked
+   for is the nearest the helper's parents have: Weft's, which is named
+   after its page. */
 static void playing_name(char *out, int cap)
 {
     int who = hda_stream_who();
     out[0] = 0;
-    for (int i = 0; i < MAX_WIN; i++)
-        if (wins[i].used && wins[i].owner == who && wins[i].title[0]) {
-            copy_cut(out, wins[i].title, cap);
-            return;
-        }
+    struct window *np = np_window();
+    if (who < 0 && np && np->title[0]) {       /* paused: nothing sounds */
+        copy_cut(out, np->title, cap);
+        return;
+    }
+    for (int pid = who, up = 0; pid > 0 && up < 4;
+         pid = task_parent_of(pid), up++)
+        for (int i = 0; i < MAX_WIN; i++)
+            if (wins[i].used && wins[i].owner == pid && wins[i].title[0]) {
+                copy_cut(out, wins[i].title, cap);
+                return;
+            }
     if (who < 0 || task_name_of(who, out, cap) < 0)
         copy_cut(out, locale_text("Playing"), cap);
 }
@@ -6398,6 +6419,28 @@ static void draw_island(void)
     char name[64], cut[72];
     playing_name(name, sizeof(name));
     int room = lx - 12 - (x + ISL_NAME_X);
+    if (np_window()) {
+        /* play or pause, for what the program said it plays: two bars
+           while it plays, a triangle while it is paused */
+        int bx = lx - ISL_NP_GAP - ISL_NP_W, cy = y + h / 2;
+        if (np_state == 1) {
+            gfx_rrect(bx + 7, cy - 6, 3, 12, 1, ISL_FG, 255);
+            gfx_rrect(bx + 14, cy - 6, 3, 12, 1, ISL_FG, 255);
+        } else {
+            /* filled a column at a time, its edges drawn smooth over it */
+            for (int i = 0; i <= 9; i++) {
+                int half = (6 * (9 - i) + 4) / 9;
+                gfx_fill(bx + 8 + i, cy - half, 1, 2 * half + 1, ISL_FG, 255);
+            }
+            gfx_line16((bx + 8) * 16, (cy - 6) * 16, (bx + 8) * 16,
+                       (cy + 6) * 16, 24, ISL_FG, 255);
+            gfx_line16((bx + 8) * 16, (cy - 6) * 16, (bx + 17) * 16, cy * 16,
+                       24, ISL_FG, 255);
+            gfx_line16((bx + 8) * 16, (cy + 6) * 16, (bx + 17) * 16, cy * 16,
+                       24, ISL_FG, 255);
+        }
+        room = bx - 8 - (x + ISL_NAME_X);
+    }
     ui_font_text(UI_SANS, ISL_PX, x + ISL_NAME_X,
                  ui_font_baseline_in(ISL_PX, y, ISL_PLAY_H),
                  fit_text(name, UI_SANS, ISL_PX, room, cut, sizeof(cut)),
@@ -6439,6 +6482,16 @@ static int island_press(int mx, int my)
         return 1;
     }
     if (isl_kind != ISL_VOLUME) {        /* what is playing -> how loud */
+        struct window *np = np_window();
+        int lev_w = HDA_LEVELS * ISL_LEV_W + (HDA_LEVELS - 1) * ISL_LEV_GAP;
+        int bx = (video_w() - ISL_PLAY_W) / 2 + ISL_PLAY_W - ISL_LEV_RIGHT -
+                 lev_w - ISL_NP_GAP - ISL_NP_W;
+        if (np && mx >= bx && mx < bx + ISL_NP_W) {
+            /* ... except on play or pause: that goes to the program,
+               which says back what it does now */
+            win_enqueue(np, WEV_MEDIA, 0, 0, np_state == 1 ? 2 : 1);
+            return 1;
+        }
         vol_until = frames + ISL_SHOW;
         return 1;
     }
@@ -7233,6 +7286,30 @@ static struct window *app_window(int winid, int owner)
     if (!w->used || !w->content || w->owner != owner)
         return (void *)0;
     return w;
+}
+
+int desktop_now_playing(int winid, int owner, int state, const char *title)
+{
+    (void)title;                       /* the island names the window */
+    if (!app_window(winid, owner))
+        return -1;
+    if (state == 0) {
+        if (np_win == winid)
+            np_win = -1;
+    } else {
+        np_win = winid;
+        np_owner = owner;
+        np_state = state;
+        np_until = frames + ISL_NP_HOLD * FRAME_HZ;
+    }
+    scene_changed();
+    return 0;
+}
+
+/* The window that said it plays, if it is still there */
+static struct window *np_window(void)
+{
+    return np_win >= 0 ? app_window(np_win, np_owner) : (void *)0;
 }
 
 int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,

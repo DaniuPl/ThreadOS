@@ -1952,6 +1952,18 @@ static void handle(struct regs *r)
         r->rax = (uint64_t)(int64_t)desktop_win_full(
             (int)a1, task64_current_id(), (int)a2);
         return;
+    case SYS64_NOW_PLAYING: {
+        struct { int32_t win, state; char title[64]; } np;
+        if (!paging64_user_range(a1, sizeof(np))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        np = *(const typeof(np) *)(uintptr_t)a1;
+        np.title[sizeof(np.title) - 1] = 0;
+        r->rax = (uint64_t)(int64_t)desktop_now_playing(
+            np.win, task64_current_id(), np.state, np.title);
+        return;
+    }
     case SYS64_WIN_BLIT32:
     case SYS64_WIN_BLITHI: {
         struct win_blit_cmd64 {

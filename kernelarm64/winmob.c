@@ -489,6 +489,14 @@ void winmob_look_changed(void)
     spin_unlock_irq(&lock, f);
 }
 
+void winmob_media(int win, int what)
+{
+    irqflags_t f = spin_lock_irq(&lock);
+    if (win >= 0 && win < WINMOB_MAX && wins[win].used)
+        push(&wins[win], WEV_MEDIA, 0, 0, what);
+    spin_unlock_irq(&lock, f);
+}
+
 int64_t winmob_poll(int win, int owner, struct win_event *ev)
 {
     irqflags_t f = spin_lock_irq(&lock);

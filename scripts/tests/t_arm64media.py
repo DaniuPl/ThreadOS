@@ -179,13 +179,13 @@ def main():
     work = tempfile.mkdtemp()
     files = wm.make_files(work)
     check(f"the host's FFmpeg makes the media ({sorted(files)})",
-          len(files) == 3)
-    if len(files) != 3:
+          len(files) == 4)
+    if len(files) != 4:
         return summary()
     kinds = {"mp4": "video/mp4", "webm": "video/webm"}
     for name, path in files.items():
         wm.serve(name, open(path, "rb").read(),
-                 "audio/webm" if name.startswith("tone") else
+                 "audio/webm" if name.startswith(("tone", "long")) else
                  kinds[name.rsplit(".", 1)[1]])
     for path, body in (("/video.html", wm.VIDEO), ("/mse.html", wm.MSE),
                        ("/audio.html", wm.AUDIO),

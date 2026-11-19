@@ -84,6 +84,11 @@ void wpe_threados_trace(gboolean on);
    guest, a phone without one) */
 gboolean wpe_threados_home(char *out, size_t cap);
 
+/* What the window plays (NOW_PLAYING, NOW_PAUSED, NOW_NONE), for the
+   system's own play and pause, which come back as WEV_MEDIA */
+void wpe_threados_toplevel_now_playing(WPEToplevel *toplevel, int state,
+                                       const char *title);
+
 G_END_DECLS
 
 #endif

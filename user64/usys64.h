@@ -90,6 +90,11 @@
 /* a1=win, a2=1 the whole screen (a page's video full screen), 0 back
    -> 0, or -1 */
 #define SYS64_WIN_FULL 114
+/* What the program plays, for the system's own controls (the island on
+   the PC, the shade on the phone): a1=&struct now_playing. state
+   NOW_NONE says nothing plays any more. The system's play and pause
+   come back to the window as WEV_MEDIA. -> 0, or -1 */
+#define SYS64_NOW_PLAYING 115
 #define SYS64_UI_LOOK  69
 #define SYS64_NOTIFY   70
 #define SYS64_BG_PREVIEW 71
@@ -638,6 +643,11 @@ struct win_text_cmd {
    panels in its window (WIN_DRAW's glass) draws itself again in it.
    One that does neither may let it go. */
 #define WEV_LOOK    10
+/* The system's controls for what the program said it plays
+   (SYS64_NOW_PLAYING): val WEV_MEDIA_PLAY or WEV_MEDIA_PAUSE */
+#define WEV_MEDIA   11
+#define WEV_MEDIA_PLAY  1
+#define WEV_MEDIA_PAUSE 2
 /* What a WEV_CLICK's val holds above its buttons: the modifiers held
    with the click */
 #define WEV_MOD_SHIFT 0x100
@@ -853,6 +863,27 @@ static inline int64_t win_blit_hi(int win, int x, int y, int w, int h,
 
 /* The program waits for typing, or no longer does: on a touchscreen
    the shell shows its keyboard, whose keys come as WEV_KEY */
+struct now_playing {
+    int32_t win;
+    int32_t state;              /* NOW_* */
+    char title[64];
+};
+#define NOW_NONE    0
+#define NOW_PLAYING 1
+#define NOW_PAUSED  2
+
+static inline int64_t now_playing(int win, int state, const char *title)
+{
+    struct now_playing np;
+    np.win = win;
+    np.state = state;
+    int i = 0;
+    for (; title && title[i] && i < (int)sizeof(np.title) - 1; i++)
+        np.title[i] = title[i];
+    np.title[i] = 0;
+    return syscall64(SYS64_NOW_PLAYING, (int64_t)(uintptr_t)&np, 0);
+}
+
 /* The window to the whole screen and back (SYS64_WIN_FULL); the new
    size comes as WEV_SIZE, as any other */
 static inline int64_t win_full(int win, int on)

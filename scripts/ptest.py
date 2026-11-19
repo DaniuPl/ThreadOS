@@ -1222,12 +1222,19 @@ def island_slider(q, w=SCREEN_W, screen=None):
     return sum(1 for x in range(x0, x0 + ISL_BAR_W) if min(at(x, y)) >= 200)
 
 
-def island_name(q, w=SCREEN_W, screen=None):
-    """The name the island shows while something plays, or ''"""
+def island_name(q, w=SCREEN_W, screen=None, np=False):
+    """The name the island shows while something plays, or ''; np: the
+    program said what it plays, and its play or pause takes the room
+    right of the name"""
     x = (w - ISL_PLAY_W) // 2 + ISL_NAME_X
+    room = island_np_x(w) - 8 - x if np else ISL_PLAY_W - ISL_NAME_X - 60
     return q.read_ui(x, ui_font_baseline_in(ISL_PX, ISL_TOP, ISL_PLAY_H),
-                     ISL_PLAY_W - ISL_NAME_X - 60, px=ISL_PX, fg=ISL_FG,
-                     screen=screen)
+                     room, px=ISL_PX, fg=ISL_FG, screen=screen)
+
+
+def island_np_x(w=SCREEN_W):
+    """The left edge of the island's play or pause"""
+    return island_level_x(0, w) - ISL_NP_GAP - ISL_NP_W
 
 
 ISL_DIM = (0xB4, 0xB4, 0xB4)

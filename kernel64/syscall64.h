@@ -212,6 +212,9 @@
 /* a1=win, a2=1 the whole screen (a page's video full screen), 0 back
    -> 0, or -1 */
 #define SYS64_WIN_FULL 114
+/* a1=&struct now_playing (user64/usys64.h): what the program plays, for
+   the island's play and pause, which come back as WEV_MEDIA -> 0/-1 */
+#define SYS64_NOW_PLAYING 115
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

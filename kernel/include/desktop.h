@@ -44,6 +44,9 @@ int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
 int desktop_win_truecolour(int winid, int owner);
 /* A program's window to the whole screen (on) and back */
 int desktop_win_full(int winid, int owner, int on);
+/* What a program's window plays (state: 0 nothing, 1 playing, 2 paused),
+   for the island's play and pause (WEV_MEDIA back to the window) */
+int desktop_now_playing(int winid, int owner, int state, const char *title);
 /* A block of colours. Only for a window that asked for them. */
 int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
                        const uint32_t *pixels);

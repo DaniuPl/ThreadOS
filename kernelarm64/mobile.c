@@ -122,6 +122,9 @@
 #define CC_NOTES_DOWN   38      /* "Notifications", below the grid */
 #define CC_CARDS_DOWN   14      /* ... and its first card, below that */
 #define MOB_SHADE_CARD_H 58
+#define MOB_NP_H        64      /* the Now Playing card, above the
+                                   notifications while something plays */
+#define MOB_NP_BTN      40      /* its play or pause, a circle at its right */
 #define MOB_SHADE_CARD_STEP 66
 #define MOB_SHADE_CARDS 3
 #define MOB_BANNER_Y   34
@@ -195,6 +198,11 @@ static int win_top;             /* programs' windows' top, panel pixels */
    program's call (full_ask), done here, on the shell's thread. */
 static int full_win = -1;
 static volatile int full_ask_win = -1, full_ask_on;
+/* What a program said it plays (SYS64_NOW_PLAYING): the shade's Now
+   Playing card. -1 = nothing. Set from the program's call, read here. */
+static struct spinlock np_lock = SPINLOCK_FREE;
+static int np_win = -1, np_state;
+static char np_title[64];
 static int recent[MOB_RECENTS], recent_count;  /* screens, newest first */
 static int about_from_settings;
 static int battery = -1, charging;  /* -1: mains power, no battery */
@@ -1413,6 +1421,45 @@ static int cc_left(void)
 
 /* Where the notifications go: their heading's baseline, their cards'
    left, width and first top */
+/* A title cut to the room it has, "..." where it is cut - never inside
+   a character's bytes */
+static const char *np_fit(const char *t, int room, char *out, int cap)
+{
+    if (ui_font_width(UI_BOLD, 15, t) <= room)
+        return t;
+    int n = 0;
+    while (t[n] && n < cap - 4)
+        n++;
+    while (n > 0) {
+        while (n > 0 && ((unsigned char)t[n] & 0xC0) == 0x80)
+            n--;
+        memcpy(out, t, (size_t)n);
+        memcpy(out + n, "...", 4);
+        if (ui_font_width(UI_BOLD, 15, out) <= room)
+            return out;
+        n--;
+    }
+    return "...";
+}
+
+/* Where the Now Playing card goes, while there is one: at the head of
+   the notifications' column, which moves down for it */
+static int np_card(int *x, int *y, int *w)
+{
+    if (np_win < 0)
+        return 0;
+    if (cc_wide()) {
+        *x = cc_left() + cc_width() + 2 * CC_GAP;
+        *w = lw - *x - CC_SIDE;
+        *y = CC_TOP;
+    } else {
+        *w = lw - 24 < cc_width() + 24 ? lw - 24 : cc_width() + 24;
+        *x = (lw - *w) / 2;
+        *y = CC_TOP + cc_width() + CC_GAP;
+    }
+    return 1;
+}
+
 static void notes_area(int *head, int *x, int *w, int *top)
 {
     if (cc_wide()) {
@@ -1424,6 +1471,8 @@ static void notes_area(int *head, int *x, int *w, int *top)
         *x = (lw - *w) / 2;
         *head = CC_TOP + cc_width() + CC_NOTES_DOWN;
     }
+    if (np_win >= 0)
+        *head += MOB_NP_H + CC_GAP;
     *top = *head + CC_CARDS_DOWN;
 }
 
@@ -1733,6 +1782,32 @@ static void draw_shade(void)
         cc_draw(i);
 
     int head, cx, cw, top;
+    int px, py, pw;
+    if (np_card(&px, &py, &pw)) {
+        /* Now Playing: what, and play or pause for it */
+        char t[64];
+        irqflags_t g = spin_lock_irq(&np_lock);
+        int state = np_state;
+        memcpy(t, np_title, sizeof(t));
+        spin_unlock_irq(&np_lock, g);
+        panel(px, py, pw, MOB_NP_H, 20, 0x2C2C2E, 240);
+        ui_font_text(UI_SANS, 12, px + 16, py + 22, "Now Playing", MUTED);
+        char cut[72];
+        ui_font_text(UI_BOLD, 15, px + 16, py + 44,
+                     np_fit(t[0] ? t : "Playing", pw - 32 - MOB_NP_BTN, cut,
+                            sizeof(cut)), WHITE);
+        int bx = px + pw - 12 - MOB_NP_BTN, by = py + (MOB_NP_H - MOB_NP_BTN) / 2;
+        gfx_rrect(bx, by, MOB_NP_BTN, MOB_NP_BTN, MOB_NP_BTN / 2, WHITE, 255);
+        int cx0 = bx + MOB_NP_BTN / 2, cy0 = by + MOB_NP_BTN / 2;
+        if (state == 1) {
+            gfx_rrect(cx0 - 7, cy0 - 8, 5, 16, 1, 0x1C1C1E, 255);
+            gfx_rrect(cx0 + 2, cy0 - 8, 5, 16, 1, 0x1C1C1E, 255);
+        } else {
+            for (int k = 0; k < 16; k++)    /* a triangle, row by row */
+                gfx_fill(cx0 - 5, cy0 - 8 + k, 1 + (k < 8 ? k : 15 - k) * 12 / 8,
+                         1, 0x1C1C1E, 255);
+        }
+    }
     notes_area(&head, &cx, &cw, &top);
     ui_font_text(UI_BOLD, 15, cx + 4, head, "Notifications", WHITE);
     irqflags_t f = spin_lock_irq(&notif_lock);
@@ -1908,6 +1983,23 @@ static void shade_tap(int x, int y)
     }
     }
     if (i >= 0) {
+        dirty = 1;
+        return;
+    }
+    int px, py, pw;
+    if (np_card(&px, &py, &pw) && x >= px && x < px + pw && y >= py &&
+        y < py + MOB_NP_H) {
+        int win = np_win;
+        if (x >= px + pw - 12 - MOB_NP_BTN - 8) {
+            /* play or pause: to the program, which says back what it
+               does now (SYS64_NOW_PLAYING) */
+            winmob_media(win, np_state == 1 ? 2 : 1);
+            printk("[mobile] now playing: %s\n",
+                   np_state == 1 ? "pause" : "play");
+        } else {
+            shade = 0;               /* the rest of it: to the program */
+            show(win, "now playing");
+        }
         dirty = 1;
         return;
     }
@@ -2239,6 +2331,26 @@ int mobile_init(const struct mobile_info *arg)
     return 0;
 }
 
+void mobile_now_playing(int win, int state, const char *title)
+{
+    irqflags_t f = spin_lock_irq(&np_lock);
+    if (state == 0) {
+        if (np_win == win)
+            np_win = -1;
+    } else {
+        np_win = win;
+        np_state = state;
+        int i = 0;
+        for (; title[i] && i < (int)sizeof(np_title) - 1; i++)
+            np_title[i] = title[i];
+        np_title[i] = 0;
+    }
+    spin_unlock_irq(&np_lock, f);
+    printk("[mobile] now playing %s\n", state == 1 ? "playing" :
+           state == 2 ? "paused" : "nothing");
+    dirty = 1;
+}
+
 void mobile_window_full(int win, int on)
 {
     full_ask_on = on;
@@ -2303,6 +2415,10 @@ void mobile_main(void *arg)
         }
         if (full_win >= 0 && !winmob_exists(full_win))
             full_set(-1);            /* its program ended full */
+        if (np_win >= 0 && !winmob_exists(np_win)) {
+            np_win = -1;             /* what played ended with its program */
+            dirty = 1;
+        }
         if (screen == APP_WINDOW && !winmob_exists(shown))
             go(HOME, "its program ended");
         if (winmob_changes() != changes) {

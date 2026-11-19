@@ -37,6 +37,13 @@ G_DECLARE_FINAL_TYPE(GstThreadOSSink, gst_threados_sink, GST, THREADOS_SINK,
 struct _GstThreadOSSink {
     GstAudioSink parent;
     gboolean begun;
+    /* Paused, the stream is ended: the HDA plays its two halves round
+       and round until told to stop, so a stream nobody writes to any
+       more says its last forty milliseconds for ever - and ended, it
+       lets another program play. The lock keeps the ring buffer's
+       thread, in a write when the pause comes, from beginning it again. */
+    gboolean paused;
+    GMutex lock;
 };
 
 G_DEFINE_TYPE(GstThreadOSSink, gst_threados_sink, GST_TYPE_AUDIO_SINK)
@@ -74,18 +81,21 @@ static gint sink_write(GstAudioSink *sink, gpointer data, guint length)
     GstThreadOSSink *self = GST_THREADOS_SINK(sink);
     const guint8 *p = data;
     guint left = length / 4;
-    if (!self->begun) {
-        /* another program's sound first: a few tries, then this block
-           goes by unheard rather than holding the page up */
-        int tries = 0;
-        while (stream(SND_STREAM_BEGIN, NULL, 0) < 0) {
-            if (++tries == 20)
-                return (gint)length;
-            g_usleep(50000);
+    g_mutex_lock(&self->lock);
+    /* another program's sound first: a few tries, then this block goes
+       by unheard rather than holding the page up */
+    for (int tries = 0; !self->begun && !self->paused; ) {
+        if (stream(SND_STREAM_BEGIN, NULL, 0) == 0) {
+            self->begun = TRUE;
+            break;
         }
-        self->begun = TRUE;
+        if (++tries == 20)
+            break;
+        g_mutex_unlock(&self->lock);
+        g_usleep(50000);
+        g_mutex_lock(&self->lock);
     }
-    while (left) {
+    while (left && self->begun && !self->paused) {
         guint n = left < BLOCK_FRAMES ? left : BLOCK_FRAMES;
         if (stream(SND_STREAM_WRITE, p, n) < 0) {
             self->begun = FALSE;     /* taken from us: try again later */
@@ -94,7 +104,34 @@ static gint sink_write(GstAudioSink *sink, gpointer data, guint length)
         p += n * 4;
         left -= n;
     }
+    g_mutex_unlock(&self->lock);
     return (gint)length;
+}
+
+/* The stream ended, so that nothing goes on sounding: a pause, a stop,
+   a seek's flush. The next write begins it again. */
+static void stream_stop(GstThreadOSSink *self)
+{
+    if (self->begun)
+        stream(SND_STREAM_END, NULL, 0);
+    self->begun = FALSE;
+}
+
+static void sink_pause(GstAudioSink *sink)
+{
+    GstThreadOSSink *self = GST_THREADOS_SINK(sink);
+    g_mutex_lock(&self->lock);
+    self->paused = TRUE;
+    stream_stop(self);
+    g_mutex_unlock(&self->lock);
+}
+
+static void sink_resume(GstAudioSink *sink)
+{
+    GstThreadOSSink *self = GST_THREADOS_SINK(sink);
+    g_mutex_lock(&self->lock);
+    self->paused = FALSE;
+    g_mutex_unlock(&self->lock);
 }
 
 static guint sink_delay(GstAudioSink *sink)
@@ -105,15 +142,19 @@ static guint sink_delay(GstAudioSink *sink)
 
 static void sink_reset(GstAudioSink *sink)
 {
-    (void)sink;
+    GstThreadOSSink *self = GST_THREADOS_SINK(sink);
+    g_mutex_lock(&self->lock);
+    stream_stop(self);
+    g_mutex_unlock(&self->lock);
 }
 
 static gboolean sink_unprepare(GstAudioSink *sink)
 {
     GstThreadOSSink *self = GST_THREADOS_SINK(sink);
-    if (self->begun)
-        stream(SND_STREAM_END, NULL, 0);
-    self->begun = FALSE;
+    g_mutex_lock(&self->lock);
+    stream_stop(self);
+    self->paused = FALSE;
+    g_mutex_unlock(&self->lock);
     return TRUE;
 }
 
@@ -121,6 +162,12 @@ static gboolean sink_close(GstAudioSink *sink)
 {
     (void)sink;
     return TRUE;
+}
+
+static void sink_finalize(GObject *object)
+{
+    g_mutex_clear(&GST_THREADOS_SINK(object)->lock);
+    G_OBJECT_CLASS(gst_threados_sink_parent_class)->finalize(object);
 }
 
 static void gst_threados_sink_class_init(GstThreadOSSinkClass *klass)
@@ -136,13 +183,18 @@ static void gst_threados_sink_class_init(GstThreadOSSinkClass *klass)
     audio->write = sink_write;
     audio->delay = sink_delay;
     audio->reset = sink_reset;
+    audio->pause = sink_pause;
+    audio->resume = sink_resume;
     audio->unprepare = sink_unprepare;
     audio->close = sink_close;
+    G_OBJECT_CLASS(klass)->finalize = sink_finalize;
 }
 
 static void gst_threados_sink_init(GstThreadOSSink *self)
 {
     self->begun = FALSE;
+    self->paused = FALSE;
+    g_mutex_init(&self->lock);
 }
 
 static gboolean plugin_init(GstPlugin *plugin)

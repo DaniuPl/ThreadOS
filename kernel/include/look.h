@@ -135,6 +135,11 @@
 #define ISL_LEV_RIGHT 16     /* the last bar's right edge, from the right end */
 #define ISL_LEV_MIN  3       /* a bar for silence */
 #define ISL_LEV_MAX  18      /* and for a full-scale sample */
+#define ISL_NP_W     24      /* play or pause, when the program said what it
+                                plays: a square left of the bars */
+#define ISL_NP_GAP   8       /* between it and the first bar */
+#define ISL_NP_HOLD  5       /* seconds it stays once paused from it, to
+                                play again - then the island goes */
 
 /* --- the question before logging out, restarting, shutting down ------- */
 #define ASK_W        320

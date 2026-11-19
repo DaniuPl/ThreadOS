@@ -41,6 +41,8 @@ int  task_count(void);
 /* The name a process runs under, into out (max bytes): 1, or 0 when
    there is no such process */
 int task_name_of(int pid, char *out, int max);
+/* The process that started this one, or -1 */
+int task_parent_of(int pid);
 
 int task_vc(void);                  /* the console this task writes to */
 int task_cwd(void);                 /* working directory (TFS slot, -1 = root) */

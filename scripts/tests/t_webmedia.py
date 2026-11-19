@@ -28,7 +28,19 @@ one - a browser lets a page make sound only after one:
   SourceBuffer and plays them - the three colours, in order, again
 
   <audio> with Opus in WebM: a 1000 Hz tone comes out of QEMU's sound
-  card for about the two seconds it lasts
+  card for about the two seconds it lasts, and the island at the top
+  of the screen names the page playing it - not the web process,
+  which has no window: Weft's, its parent's
+
+  a tab whose page plays wears a speaker, where there was nothing while
+  it was quiet; a click on it mutes the tab - 1000 Hz out of the card
+  before, nothing after - and another lets it be heard again
+
+  Weft tells the system what it plays (SYS64_NOW_PLAYING), and the
+  island has pause for it: a click there pauses the page - nothing out
+  of the card, and the island stays a while, naming the page, with play
+  in pause's place - and another plays it again; paused and left, the
+  island goes once that while is over
 
   Web Audio: an oscillator at 440 Hz started and stopped two seconds
   later by the page's script - 440 Hz out of the card for two seconds
@@ -48,8 +60,10 @@ import time
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ptest import *          # noqa: F401,F403
-from ptest import check, summary, make_iso64, no64, wav_tone, ROUTES
-from t_webkit import find_box, wait_line, tell
+from ptest import (check, summary, make_iso64, no64, wav_tone, ROUTES,
+                   island_name, island_np_x)
+from t_webkit import find_box, wait_line, tell, Band, SRC
+from ptest import _kernel_define as define
 
 BUILD = os.path.dirname(os.path.abspath(KERNEL64 or "build/x"))
 APPS = os.path.join(BUILD, "weft.tapp")
@@ -155,6 +169,18 @@ a.addEventListener('error', () => {
   document.title = 'error ' + (a.error ? a.error.code : '?'); });
 </script></body></html>""").encode()
 
+# Twenty seconds of the tone, for a tab muted and heard again on its
+# way, and paused and played again from the island
+LONG = (PAGE_HEAD + """
+<audio id="a" src="/long.webm" preload="auto"></audio>
+<script>
+const a = document.getElementById('a');
+a.addEventListener('canplaythrough', () => { document.title = 'long ready'; },
+                   { once: true });
+document.addEventListener('click', () => { a.play(); }, { once: true });
+a.addEventListener('playing', () => { document.title = 'long playing'; });
+</script></body></html>""").encode()
+
 WEBAUDIO = (PAGE_HEAD + """
 <script>
 // what happened, in the title, when it did not: the test says it
@@ -202,6 +228,9 @@ def make_files(work):
                                          "200k", "-deadline", "realtime",
                                          "-cpu-used", "8", "-g", "25"],
         "tone.webm": tone + ["-ac", "2", "-c:a", "libopus", "-b:a", "96k"],
+        "long.webm": ["-f", "lavfi", "-i", "sine=frequency=1000:"
+                      "sample_rate=48000:duration=20", "-ac", "2", "-c:a",
+                      "libopus", "-b:a", "96k"],
     }
     for name, args in jobs.items():
         path = os.path.join(work, name)
@@ -385,6 +414,170 @@ def controls_page(q, port):
     close_weft(q, seen)
 
 
+def tab_speaker(q, org):
+    """How many pixels of the first tab's speaker box are not the tab's
+    own colour: none while its page is quiet"""
+    band = Band(org[0] - 20, org[1] - 20)
+    tw = band.tw(1)
+    x0 = band.ox + 4 + tw - 2 - band.close_w - define(SRC, "SOUND_W")
+    y0 = band.top + 3
+    _, _, at = q.screen_raw()
+    bg = at(x0, y0 + 1)
+    return sum(1 for y in range(y0, band.top + band.tab_h)
+               for x in range(x0, x0 + define(SRC, "SOUND_W"))
+               if at(x, y) != bg), (x0 + 9, y0 + (band.tab_h - 3) // 2)
+
+
+def wav_at(wav):
+    """Where the sound QEMU writes has got to, in bytes of samples, and
+    how many bytes a second is"""
+    import struct
+    with open(wav, "rb") as fh:
+        head = fh.read(44)
+    rate, ch = struct.unpack_from("<I", head, 24)[0], \
+        struct.unpack_from("<H", head, 22)[0]
+    return max(os.path.getsize(wav) - 44, 0), rate * ch * 2
+
+
+def mute_page(q, port, wav):
+    """A tab that plays sound wears a speaker; a click on it mutes the
+    tab - silence out of the card - and another lets it be heard"""
+    seen, done = open_page(q, port, "/long.html")
+    ready = wait_line(q, seen, "[weft] title long ready", 120)
+    org = video_origin(q)
+    if ready is None or org is None:
+        check(f"/long.html: the page is ready ({ready})", False)
+        tell(q, seen)
+        close_weft(q, seen)
+        return
+    quiet, _ = tab_speaker(q, org)
+    q.click(*click_spot(org))
+    line = wait_line(q, seen, "[weft] sound playing", 60)
+    n, spot = 0, None
+    end = time.time() + 20
+    while line and n < 15 and time.time() < end:
+        n, spot = tab_speaker(q, org)
+    check(f"/long.html: as its sound plays, the tab wears a speaker ({n} "
+          f"pixels of it; {quiet} while the page was quiet)",
+          line is not None and quiet == 0 and n >= 15)
+    if spot is None:
+        close_weft(q, seen)
+        return
+    time.sleep(1)
+    played, per_s = wav_at(wav)
+    mark = len(q.serial())
+    q.click(*spot)
+    muted = wait_line(q, mark, "[weft] tab 1 muted", 20)
+    at_mute, _ = wav_at(wav)
+    time.sleep(2)
+    hush = wav_tone_between(wav, at_mute + per_s // 2, wav_at(wav)[0])
+    mark = len(q.serial())
+    q.click(*spot)
+    heard = wait_line(q, mark, "[weft] tab 1 heard", 20)
+    at_back, _ = wav_at(wav)
+    time.sleep(1.5)
+    back = wav_tone_between(wav, at_back + per_s // 2, wav_at(wav)[0])
+    before = wav_tone_between(wav, max(played - per_s, 0), played)
+    check(f"a click on the speaker mutes the tab: 1000 Hz before ({before}), "
+          f"nothing out of the card after ({muted}; {hush})",
+          before is not None and abs(before[2] - 1000) <= 20 and
+          muted is not None and hush is None)
+    check(f"and another lets it be heard: 1000 Hz again ({heard}; {back})",
+          heard is not None and back is not None and abs(back[2] - 1000) <= 20)
+    island_play_pause(q, seen, wav)
+    close_weft(q, seen)
+
+
+def island_shown(q):
+    """Whether the island's black is at the top centre"""
+    _, _, at = q.screen_raw()
+    return at(SCREEN_W // 2, ISL_TOP + 4) == ISL_BG
+
+
+def np_bars(q):
+    """How much of the island's play or pause looks like pause's two
+    bars: the bright pixels down the middle of the right one, above and
+    below its middle - five for pause; the play triangle narrows to its
+    point there, so none for play"""
+    _, _, at = q.screen_raw()
+    x = island_np_x() + 15
+    cy = ISL_TOP + ISL_PLAY_H // 2
+    return sum(1 for y in (cy - 5, cy - 4, cy - 3, cy + 3, cy + 4)
+               if min(at(x, y)) > 160)
+
+
+def island_play_pause(q, seen, wav):
+    """Weft tells the system what it plays; the island has play and
+    pause for it, which go back to Weft and to the page"""
+    said = wait_line(q, seen, "[weft] now playing: playing", 10)
+    bars = 0
+    end = time.time() + 10
+    while said and bars < 5 and time.time() < end:
+        bars = np_bars(q)
+    check(f"Weft says it plays, and the island has pause for it ({said}; "
+          f"{bars} of 5 pixels of its bar)", said is not None and bars == 5)
+    spot = (island_np_x() + ISL_NP_W // 2, ISL_TOP + ISL_PLAY_H // 2)
+    mark = len(q.serial())
+    q.click(*spot)
+    q.mouse_goto(400, 400)        # the pointer off the button it covers
+    paused = wait_line(q, mark, "[weft] pause from the system: 1 media", 20)
+    told = wait_line(q, mark, "[weft] now playing: paused", 20)
+    at_pause, per_s = wav_at(wav)
+    time.sleep(1.5)
+    hush = wav_tone_between(wav, at_pause + per_s // 2, wav_at(wav)[0])
+    shown = island_shown(q)
+    name = island_name(q, np=True)
+    bars = np_bars(q)
+    check(f"a click on it pauses the page: nothing out of the card ({paused}; "
+          f"{told}; {hush})", paused is not None and told is not None
+          and hush is None)
+    check(f"and the island stays a while, naming the page, with play in "
+          f"place of pause ({shown}; {name!r}; {bars} pixels of the bar)",
+          shown and name == "long playing" and bars == 0)
+    mark = len(q.serial())
+    q.click(*spot)
+    q.mouse_goto(400, 400)
+    played = wait_line(q, mark, "[weft] play from the system: 1 media", 20)
+    told = wait_line(q, mark, "[weft] now playing: playing", 20)
+    at_play, _ = wav_at(wav)
+    time.sleep(1.5)
+    back = wav_tone_between(wav, at_play + per_s // 2, wav_at(wav)[0])
+    check(f"and another plays it again: 1000 Hz ({played}; {told}; {back})",
+          played is not None and told is not None and back is not None
+          and abs(back[2] - 1000) <= 20)
+    if played is None or told is None:
+        tell(q, mark)
+    # Paused and left, the island goes once its while is over
+    mark = len(q.serial())
+    q.click(*spot)
+    q.mouse_goto(400, 400)
+    told = wait_line(q, mark, "[weft] now playing: paused", 20)
+    t0 = time.time()
+    while told and island_shown(q) and time.time() - t0 < ISL_NP_HOLD + 5:
+        time.sleep(0.2)
+    gone = time.time() - t0
+    check(f"paused again and left, the island goes after {ISL_NP_HOLD} s "
+          f"({told}; gone {gone:.1f} s on)", told is not None and
+          ISL_NP_HOLD - 1 <= gone <= ISL_NP_HOLD + 3)
+
+
+def wav_tone_between(wav, a, b):
+    """wav_tone over the bytes of samples from a to b"""
+    if b <= a:
+        return None
+    cut = wav + ".part"
+    with open(wav, "rb") as fh:
+        head = fh.read(44)
+        fh.seek(44 + a)
+        body = fh.read(b - a)
+    with open(cut, "wb") as fh:
+        fh.write(head + body)
+    try:
+        return wav_tone(cut)
+    finally:
+        os.unlink(cut)
+
+
 def mse_page(q, port, files):
     seen, done = open_page(q, port, "/mse.html")
     types = wait_line(q, seen, "[weft] title types", 60)
@@ -427,6 +620,15 @@ def sound_page(q, port, wav, path, ready, started, ended, hz):
     q.click(*click_spot(org))
     line = wait_line(q, seen, started, 60)
     check(f"clicked, its sound starts ({line})", line is not None)
+    # the island at the top names what plays: the web process has no
+    # window, Weft's - named after the page - is its parent's
+    want = started[len("[weft] title "):]
+    names = set()
+    end = time.time() + 2
+    while line and want not in names and time.time() < end:
+        names.add(island_name(q, np=True))
+    check(f"and the island names the page playing it, not the web process "
+          f"({names}, want {want!r})", want in names)
     line = wait_line(q, seen, ended, 60)
     check(f"and ends ({line})", line is not None)
     if line is None:
@@ -457,16 +659,17 @@ def main():
     try:
         files = make_files(work)
         check(f"the host's FFmpeg makes the media ({sorted(files)})",
-              len(files) == 3)
+              len(files) == 4)
         kinds = {"mp4": "video/mp4", "webm": "video/webm"}
         for name, path in files.items():
             serve(name, open(path, "rb").read(),
-                  "audio/webm" if name.startswith("tone") else
+                  "audio/webm" if name.startswith(("tone", "long")) else
                   kinds[name.rsplit(".", 1)[1]])
         for path, body in (("/video.html", VIDEO), ("/mse.html", MSE),
                            ("/audio.html", AUDIO),
                            ("/webaudio.html", WEBAUDIO),
-                           ("/controls.html", CONTROLS)):
+                           ("/controls.html", CONTROLS),
+                           ("/long.html", LONG)):
             ROUTES[path] = (lambda b: lambda h, body: (
                 200, [("Content-Type", "text/html; charset=utf-8")], b))(body)
         port, stop = start_http_server()
@@ -494,6 +697,7 @@ def main():
                            "[weft] title audio ready",
                            "[weft] title audio playing",
                            "[weft] title audio ended", 1000)
+                mute_page(q, port, wav)
                 sound_page(q, port, wav, "/webaudio.html",
                            "[weft] title webaudio ready",
                            "[weft] title oscillator running",

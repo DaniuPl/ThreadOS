@@ -70,6 +70,8 @@
 #define CHROME_H 60
 #define TAB_W    180         /* a tab at its widest */
 #define CLOSE_W  18          /* its close button, at its right end */
+#define SOUND_W  18          /* a tab's speaker, left of its close button,
+                                while its page plays sound or is muted */
 #define PLUS_W   26          /* the new-tab button after the tabs */
 #define BTN_X    6           /* back, forward, reload: from here, */
 #define BTN_W    28          /* this wide, */
@@ -624,6 +626,113 @@ static char *start_page(void)
     return g_string_free(g, FALSE);
 }
 
+/* What plays, for the system's own play and pause (the island on the
+   PC, the shade on the phone): the first tab that sounds, or the one
+   the system paused, which it can start again */
+static struct tab *np_tab;
+static gboolean np_paused;
+/* Which of the page's media the system paused, as their places among
+   its video and audio elements ("0,2"): kept here, not in the page - a
+   script world's globals do not outlive the call that set them - and
+   given back to the call that plays them again */
+static char np_which[128];
+
+
+static void np_say(void)
+{
+    struct tab *t = NULL;
+    int state = NOW_NONE;
+    for (int i = 0; i < ntabs && !t; i++)
+        if (webkit_web_view_is_playing_audio(tabs[i]->view))
+            t = tabs[i];
+    if (t) {
+        np_tab = t;
+        np_paused = FALSE;
+        state = NOW_PLAYING;
+    } else if (np_tab && np_paused) {
+        t = np_tab;
+        state = NOW_PAUSED;
+    } else {
+        np_tab = NULL;
+        np_which[0] = 0;
+    }
+    wpe_threados_toplevel_now_playing(toplevel, state, t ? t->title : "");
+    say("[weft] now playing: %s%s\n", state == NOW_PLAYING ? "playing"
+        : state == NOW_PAUSED ? "paused" : "nothing", NULL);
+}
+
+/* The system's play or pause: what the tab plays is paused, and those
+   are what play again - kept in a world of Weft's own, apart from the
+   page's scripts, which see only their media pause and play */
+static void np_done(GObject *object, GAsyncResult *result, gpointer data)
+{
+    gboolean pause = GPOINTER_TO_INT(data);
+    const char *what = pause ? "pause" : "play";
+    GError *error = NULL;
+    JSCValue *value = webkit_web_view_call_async_javascript_function_finish(
+        WEBKIT_WEB_VIEW(object), result, &error);
+    if (!value) {
+        say("[weft] %s from the system failed: %s\n", what,
+            error ? error->message : "?");
+        g_clear_error(&error);
+        return;
+    }
+    char *got = jsc_value_to_string(value);
+    int n = 0;
+    if (pause) {
+        g_strlcpy(np_which, got, sizeof(np_which));
+        for (const char *c = np_which; *c; c++)
+            n += c == np_which || *c == ',';
+    } else {
+        n = atoi(got);
+    }
+    char count[16];
+    snprintf(count, sizeof(count), "%d", n);
+    say("[weft] %s from the system: %s media\n", what, count);
+    g_free(got);
+    g_object_unref(value);
+}
+
+static void np_control(int what)
+{
+    if (!np_tab)
+        return;
+    np_paused = what == WEV_MEDIA_PAUSE;
+    /* play() as a person's click would - the call counts as one, which
+       a page's sound needs - and its promise waited for, so that a
+       refusal is heard of */
+    const char *js = np_paused
+        ? "const all = [...document.querySelectorAll('video, audio')]; "
+          "const p = all.filter(m => !m.paused); p.forEach(m => m.pause()); "
+          "return p.map(m => all.indexOf(m)).join(',');"
+        : "const all = [...document.querySelectorAll('video, audio')]; "
+          "const p = which.split(',').filter(i => i).map(i => all[+i])"
+          ".filter(m => m); await Promise.all(p.map(m => m.play())); "
+          "return String(p.length);";
+    GVariantDict args;
+    g_variant_dict_init(&args, NULL);
+    g_variant_dict_insert(&args, "which", "s", np_paused ? "" : np_which);
+    if (!np_paused)
+        np_which[0] = 0;
+    say("[weft] %s from the system%s\n", np_paused ? "pause" : "play", NULL);
+    webkit_web_view_call_async_javascript_function(np_tab->view, js, -1,
+        g_variant_dict_end(&args), "weft", NULL, NULL, np_done,
+        GINT_TO_POINTER(np_paused));
+}
+
+/* A tab began or stopped sounding: its speaker comes or goes */
+static void sound_changed(WebKitWebView *view, GParamSpec *pspec,
+                          gpointer data)
+{
+    (void)pspec;
+    (void)data;
+    printf("[weft] sound %s\n", webkit_web_view_is_playing_audio(view)
+                                ? "playing" : "stopped");
+    fflush(stdout);
+    draw_band();
+    np_say();
+}
+
 /* Into full screen or out of it: the band goes, or comes back */
 static void state_changed(WPEView *view, WPEToplevelState previous,
                           gpointer data)
@@ -653,6 +762,10 @@ static struct tab *tab_new(const char *uri, WebKitWebView *related)
     g_signal_connect(t->view, "load-changed", G_CALLBACK(load_changed), t);
     g_signal_connect(t->view, "load-failed", G_CALLBACK(load_failed), t);
     g_signal_connect(t->view, "notify::title", G_CALLBACK(title_changed), t);
+    g_signal_connect(t->view, "notify::is-playing-audio",
+                     G_CALLBACK(sound_changed), t);
+    g_signal_connect(t->view, "notify::is-muted", G_CALLBACK(sound_changed),
+                     t);
     g_signal_connect(t->view, "notify::estimated-load-progress",
                      G_CALLBACK(progress_changed), t);
     g_signal_connect(t->view, "notify::uri", G_CALLBACK(uri_changed), t);
@@ -703,6 +816,10 @@ static void tab_close(int i)
     wpe_view_set_toplevel(webkit_web_view_get_wpe_view(t->view), NULL);
     memmove(&tabs[i], &tabs[i + 1], (size_t)(ntabs - i - 1) * sizeof(tabs[0]));
     ntabs--;
+    if (np_tab == t) {               /* what played closed with it */
+        np_tab = NULL;
+        np_say();
+    }
     g_signal_handlers_disconnect_by_data(t->view, t);
     g_object_unref(t->view);
     g_free(t);
@@ -814,6 +931,34 @@ static int tab_width(void)
     return MIN(w, TAB_W);
 }
 
+/* A tab whose page plays sound, or has been muted, wears a speaker:
+   a click on it mutes the page, or lets it be heard again - as a
+   desktop browser's tabs do, so a tab somewhere behind the others can
+   be found and silenced without hunting through them */
+static gboolean tab_sounds(int i)
+{
+    return webkit_web_view_is_playing_audio(tabs[i]->view) ||
+           webkit_web_view_get_is_muted(tabs[i]->view);
+}
+
+static void speaker_glyph(int win, int x, int y, gboolean muted,
+                          uint32_t rgb)
+{
+    /* in a SOUND_W x SOUND_W box: the body, the cone, then waves or a
+       cross */
+    ud_fill(win, x + 2, y + 6, 4, 6, rgb);
+    ud_line(win, x + 6, y + 6, x + 10, y + 2, 1, rgb);
+    ud_line(win, x + 6, y + 11, x + 10, y + 15, 1, rgb);
+    ud_line(win, x + 10, y + 2, x + 10, y + 15, 1, rgb);
+    if (muted) {
+        ud_line(win, x + 12, y + 6, x + 16, y + 11, 1, rgb);
+        ud_line(win, x + 16, y + 6, x + 12, y + 11, 1, rgb);
+    } else {
+        ud_line(win, x + 13, y + 6, x + 13, y + 11, 1, rgb);
+        ud_line(win, x + 16, y + 4, x + 16, y + 13, 1, rgb);
+    }
+}
+
 static void cross(int win, int x, int y, int d, uint32_t rgb)
 {
     ud_line(win, x, y, x + d, y + d, 1, rgb);
@@ -864,10 +1009,16 @@ static void draw_band(void)
         const char *title = *tabs[i]->title ? tabs[i]->title
                           : *shown_uri(tabs[i]->view) ? shown_uri(tabs[i]->view)
                           : "New tab";
-        ud_clip(win, x + 8, 3, tw - 10 - CLOSE_W, TAB_H - 3);
+        int sound = tab_sounds(i) ? SOUND_W : 0;
+        ud_clip(win, x + 8, 3, tw - 10 - CLOSE_W - sound, TAB_H - 3);
         ud_text(win, x + 8, ud_baseline(3, TAB_H - 3, UD_PX), title,
                 i == front ? l.text : l.dim, UD_SANS, UD_PX);
         ud_unclip(win);
+        if (sound)
+            speaker_glyph(win, x + tw - 2 - CLOSE_W - SOUND_W,
+                          3 + (TAB_H - 3 - SOUND_W) / 2,
+                          webkit_web_view_get_is_muted(tabs[i]->view),
+                          i == front ? l.text : l.dim);
         cross(win, x + tw - 2 - CLOSE_W + 5, 3 + (TAB_H - 3) / 2 - 3, 6,
               l.dim);
     }
@@ -929,10 +1080,18 @@ static void band_click(int x, int y, int middle)
         int tw = tab_width();
         int i = (x - 4) / tw;
         if (x >= 4 && i < ntabs) {
-            if (middle || x >= 4 + i * tw + tw - 2 - CLOSE_W)
+            int close_x = 4 + i * tw + tw - 2 - CLOSE_W;
+            if (middle || x >= close_x) {
                 tab_close(i);
-            else
+            } else if (tab_sounds(i) && x >= close_x - SOUND_W) {
+                gboolean mute = !webkit_web_view_get_is_muted(tabs[i]->view);
+                webkit_web_view_set_is_muted(tabs[i]->view, mute);
+                printf("[weft] tab %d %s\n", i + 1, mute ? "muted" : "heard");
+                fflush(stdout);
+                draw_band();
+            } else {
                 tab_front(i);
+            }
             return;
         }
         int px = 4 + ntabs * tw + 4;
@@ -1930,6 +2089,9 @@ static gboolean band_event(gpointer data, int type, int x, int y, int val)
             NULL);
         return TRUE;
     }
+    case WEV_MEDIA:
+        np_control(val);
+        return TRUE;
     case WEV_CLOSE:
         quit();
         return TRUE;

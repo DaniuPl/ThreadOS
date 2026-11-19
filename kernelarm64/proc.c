@@ -2165,6 +2165,17 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
             return -1;
         mobile_window_full((int)x[0], (int)x[1]);
         return 0;
+    case SYS64_NOW_PLAYING: {
+        struct { int32_t win, state; char title[64]; } np;
+        if (!user_range(p, x[0], sizeof(np), 0))
+            return -1;
+        memcpy(&np, (const void *)(uintptr_t)x[0], sizeof(np));
+        np.title[sizeof(np.title) - 1] = 0;
+        if (!winmob_mine(np.win, p->pid))
+            return -1;
+        mobile_now_playing(np.win, np.state, np.title);
+        return 0;
+    }
     case SYS64_CFG_GET: {
         /* The PC's settings as the phone has them: the language, which
            a program tells the pages it fetches */
@@ -2489,6 +2500,7 @@ void proc_syscall(struct trap_frame *f)
     case SYS64_CFG_GET:
     case SYS64_WIN_KEYBOARD:
     case SYS64_WIN_FULL:
+    case SYS64_NOW_PLAYING:
         r = win_call(p, x[8], x);
         break;
     default:

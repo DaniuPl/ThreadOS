@@ -186,6 +186,16 @@ keyboard_char_handler_t keyboard_console_handler(void)
     return keyboard64_to_console;
 }
 
+/* task_parent_of(): the same rows, their parent */
+int task_parent_of(int pid)
+{
+    struct psinfo64 ps;
+    for (int i = 0; task64_ps(i, &ps) == 0; i++)
+        if (ps.pid == pid)
+            return ps.parent > 0 ? ps.parent : -1;
+    return -1;
+}
+
 /* task_name_of() for the shared desktop: the same rows task64_ps hands
    a program */
 int task_name_of(int pid, char *out, int max)

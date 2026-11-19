@@ -219,6 +219,16 @@ static WPEToplevelThreadOS *ours(WPEToplevel *toplevel)
     return (WPEToplevelThreadOS *)toplevel;
 }
 
+/* What the program plays, told to the system: it shows play and pause
+   for it, which come back as WEV_MEDIA */
+void wpe_threados_toplevel_now_playing(WPEToplevel *toplevel, int state,
+                                       const char *title)
+{
+    WPEToplevelThreadOS *t = ours(toplevel);
+    if (t && t->win >= 0)
+        now_playing(t->win, state, title);
+}
+
 /* The window of the view's toplevel, or -1 */
 int wpe_threados_view_window(WPEView *view)
 {

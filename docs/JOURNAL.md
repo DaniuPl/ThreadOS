@@ -10539,3 +10539,41 @@ works and is checked by `make test`.
       in its play button (white pixels where there were none), a click
       on it plays it, and with the pointer over it the bar's icons are
       there.
+- [x] **Playback control: the tab that plays, and play and pause from
+      the system** (apps/webkit/weft.c, apps/webkit/wpethreados.c,
+      apps/webkit/media/gstthreadossink.c, kernel/desktop.c,
+      kernel64/syscall64.c, kernelarm64/mobile.c, kernelarm64/proc.c,
+      kernelarm64/winmob.c, scripts/tests/t_webmedia.py)
+      A tab whose page makes sound wears a speaker; a click on it mutes
+      the tab (webkit_web_view_set_is_muted) and another lets it be
+      heard. Weft tells the system what it plays through a new call,
+      SYS64_NOW_PLAYING (115): playing, paused, or nothing. On the PC the
+      island shows pause next to the page's name while it plays; a
+      click sends WEV_MEDIA (11) back to the window, and Weft pauses the
+      page's playing media, or plays the ones it paused, through a
+      script that counts as a person's click - play() needs one - whose
+      promise Weft waits for, so a refusal is heard of. Which media it
+      paused Weft keeps itself: a script world's globals do not outlive
+      the call that set them. Paused, the island stays five seconds
+      (ISL_NP_HOLD) with play in pause's place, then goes. On the
+      phone the same call puts a Now Playing card at the head of the
+      pulled-down shade, with the title and a play or pause button.
+      The island also names what a page plays after Weft's window:
+      the web process that plays has no window, so the island looks up
+      the parents of the program that holds the sound (task_parent_of).
+      Pausing found a bug in the audio sink: GStreamer's pause stops
+      the writes, but the HDA plays its two halves round and round
+      until it is told to stop, so a paused page went on saying its
+      last forty milliseconds. The sink now ends the stream on pause,
+      stop and flush (a lock keeps the writing thread from beginning it
+      again under a pause), which also lets another program play.
+      t_webmedia, a twenty-second tone: the tab has
+      no speaker while quiet and one while it plays; muted, nothing
+      comes out of QEMU's sound card, heard again, 1000 Hz; the island
+      names the page, not the web process; it has pause (its bars, by
+      pixels), a click on it pauses the page - Weft says it paused one
+      medium and nothing comes out of the card - and the island shows
+      play and the page's name; another click plays it again (1000 Hz);
+      paused and left, the island goes after its five seconds. The
+      phone's card builds with the ARM64 kernel; its test comes with
+      the next aarch64 Weft build.

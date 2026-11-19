@@ -31,5 +31,9 @@ void mobile_sound(int volume, int mute);
    asked from the program's call, done by the shell's thread - the
    window is told its new size (WEV_SIZE) as when the phone turns */
 void mobile_window_full(int win, int on);
+/* What a program's window plays (SYS64_NOW_PLAYING: state 0 nothing,
+   1 playing, 2 paused, and its title): the shade's Now Playing card,
+   whose play and pause go back to the window (WEV_MEDIA) */
+void mobile_now_playing(int win, int state, const char *title);
 
 #endif
