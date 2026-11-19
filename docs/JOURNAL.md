@@ -10721,3 +10721,24 @@ works and is checked by `make test`.
       and came back empty); forgotten, asked again, refused with 'bt no'
       and not paired. LE pairing (SMP, for watches and mice) is not
       here yet.
+- [x] **Pairing a Bluetooth phone from Settings** (user/gsettings.c,
+      user/ubt.h, kernel/include/bt_info.h, kernel64/syscall64.c,
+      kernel/bt.c, scripts/tests/t_btui.py, scripts/run_tests.py)
+      Settings' Bluetooth page could search but do nothing with what it
+      found. A device in the list is now picked with a click; Pair
+      starts Secure Simple Pairing (SYS64_BT's new BT_PAIR), and while
+      the controllers wait for the person the page shows the six digits
+      large, asks "Does Pixel 8 show this number?" and offers Yes and No
+      (BT_ANSWER); then "Paired with X." or "Not paired:" and why. A
+      paired device's row says Paired, and Forget (BT_FORGET) forgets
+      it. The info a program reads carries the pairing's state, number,
+      name and reason, and which devices are paired. When pairing cannot
+      start the log now says why (the adapter busy with a search, not an
+      address, an LE device). t_btui (new group): the desktop with the
+      made-up adapter of t_bt; a search finds the phone by name; picked
+      and Pair, the page shows exactly the digits the controller made up
+      and asks; Yes pairs it - the page and the row say so, the
+      controller was told yes once; Forget clears the row. (The first
+      run clicked Pair while the search still ran - the list fills as
+      devices answer, Pair waits for the search's end - and the row's
+      Paired ran past the window's edge.)

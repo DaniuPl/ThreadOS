@@ -844,7 +844,12 @@ void bt_info_fill(struct bt_info *o)
         put_text(o->dev_addr[i], sizeof(o->dev_addr[i]), bt_found_addr(i));
         put_text(o->dev_name[i], sizeof(o->dev_name[i]), seen[i].name);
         o->dev_rssi[i] = seen[i].rssi;
+        o->dev_paired[i] = bt_paired(o->dev_addr[i]);
     }
+    o->pair_state = bt_pair_state();
+    o->pair_number = bt_pair_number();
+    put_text(o->pair_name, sizeof(o->pair_name), bt_pair_name());
+    put_text(o->pair_why, sizeof(o->pair_why), bt_pair_why());
 }
 
 /* A classic device found without its name is asked for it: a short
@@ -1396,8 +1401,11 @@ static void pair_thread(void *arg)
 
 int bt_pair_start(const char *addr_or_index)
 {
-    if (!present || scanning || scan_pending)
+    if (!present || scanning || scan_pending) {
+        printk("[bt] cannot pair now: %s\n", !present ? "no adapter"
+               : "the adapter is busy (a search)");
         return -1;
+    }
     uint8_t a[6];
     const struct neighbour *n = (const struct neighbour *)0;
     if (addr_or_index[0] >= '1' && addr_or_index[0] <= '9' &&
@@ -1414,20 +1422,29 @@ int bt_pair_start(const char *addr_or_index)
                 int d = ch >= '0' && ch <= '9' ? ch - '0'
                         : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10
                         : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
-                if (d < 0)
+                if (d < 0) {
+                    printk("[bt] cannot pair: '%s' is not an address\n",
+                           addr_or_index);
                     return -1;
+                }
                 v = v * 16 + d;
             }
             a[5 - i] = (uint8_t)v;
-            if (i < 5 && addr_or_index[k++] != ':')
+            if (i < 5 && addr_or_index[k++] != ':') {
+                printk("[bt] cannot pair: '%s' is not an address\n",
+                       addr_or_index);
                 return -1;
+            }
         }
         for (int i = 0; i < nseen; i++)
             if (!memcmp(seen[i].addr, a, 6))
                 n = &seen[i];
     }
-    if (n && !n->classic)
-        return -1;                      /* LE pairing is not here yet */
+    if (n && !n->classic) {
+        printk("[bt] cannot pair with %s: a Bluetooth LE device (LE "
+               "pairing is not here yet)\n", n->name);
+        return -1;
+    }
     memset(&pr, 0, sizeof(pr));
     if (n) {
         memcpy(pr.addr, n->addr, 6);

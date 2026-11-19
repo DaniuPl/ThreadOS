@@ -64,6 +64,11 @@
 #define WIFI_PICK_W 296       /* a row as a click and a pick see it */
 #define WIFI_JOIN_H 40        /* the password and Join under the list */
 #define WIFI_JOIN_W 70
+#define BT_ROW_H 18           /* Bluetooth: a device's row */
+#define BT_PAIRED_X 280       /* ...where it says Paired */
+#define BT_PICK_W 336         /* ...and its width, picked */
+#define BT_ASK_H 40           /* Pair, or Yes and No, under the list */
+#define BT_ASK_YES_X 110      /* Yes, after the number */
 #define DEV_MAX 64            /* Devices: as many as are listed */
 #define DEV_LIST_Y 108        /* the first device's row: under two lines
                                  of figures (PANE_Y0 + 2 * INFO_H + 8) */
@@ -614,6 +619,11 @@ static void fields_from_settings(void)
 #define A_BT_SEARCH 12
 #define A_WIFI_SEARCH 15
 #define A_WIFI_PICK 17            /* a network in the list */
+#define A_BT_PICK 20              /* a Bluetooth device in the list */
+#define A_BT_PAIR 21
+#define A_BT_YES 22               /* the numbers match */
+#define A_BT_NO 23
+#define A_BT_FORGET 24
 #define A_WIFI_JOIN 18            /* ...joined, with the password typed */
 #define A_WIFI_LEAVE 19
 #define A_DEVICE 16               /* a device opened, or -1: the list */
@@ -1398,6 +1408,8 @@ static void draw_devices(void)
 }
 
 static struct bt_info bti;
+static int bt_pick = -1;           /* the device picked */
+static char bt_pick_addr[18];
 
 static void draw_bluetooth(void)
 {
@@ -1429,7 +1441,10 @@ static void draw_bluetooth(void)
         note(y, "No devices found yet.");
         return;
     }
-    for (int i = 0; i < bti.found && y + INFO_H < ch - NOTE_DY - 12; i++) {
+    if (bt_pick >= bti.found)
+        bt_pick = -1;
+    int end = ch - NOTE_DY - 14 - BT_ASK_H;
+    for (int i = 0; i < bti.found && y + BT_ROW_H < end; i++) {
         char rssi[12];
         int v = bti.dev_rssi[i], at = 0;
         if (v < 0) {
@@ -1437,13 +1452,55 @@ static void draw_bluetooth(void)
             v = -v;
         }
         put_str(rssi, put_num(rssi, at, (uint32_t)v), " dBm");
-        int base = ud_baseline(y, 18, UD_PX);
+        int base = ud_baseline(y, BT_ROW_H, UD_PX);
+        if (i == bt_pick)
+            ud_ring(win, PANE_X - 6, y, BT_PICK_W, BT_ROW_H, 4, l.accent);
         ud_text(win, PANE_X, base,
                 bti.dev_name[i][0] ? bti.dev_name[i] : bti.dev_addr[i],
                 l.text, UD_SANS, UD_PX);
         ud_text(win, PANE_X + 220, base, rssi, l.dim, UD_SANS, UD_PX);
-        y += 18;
+        if (bti.dev_paired[i])
+            ud_text_l(win, PANE_X + BT_PAIRED_X, base, "Paired", l.dim,
+                      UD_SANS, UD_PX);
+        hot(PANE_X - 6, y, BT_PICK_W, BT_ROW_H, A_BT_PICK, i,
+            (const char *)0, (const char *)0);
+        y += BT_ROW_H;
     }
+    /* Under the list: the pairing's question, or what can be done with
+       the device picked; and a line on how it went */
+    int jy = ch - NOTE_DY - 14 - BT_ASK_H + 6;
+    char said[160];
+    said[0] = 0;
+    if (bti.pair_state == BT_PAIR_CONFIRM) {
+        char six[8];
+        for (int i = 5, v = (int)bti.pair_number; i >= 0; i--, v /= 10)
+            six[i] = (char)('0' + v % 10);
+        six[6] = 0;
+        ud_text(win, PANE_X, ud_baseline(jy, CHIP_H, UD_PX + 6), six, l.text,
+                UD_BOLD, UD_PX + 6);
+        button(PANE_X + BT_ASK_YES_X, jy, 60, "Yes", A_BT_YES, 0);
+        button(PANE_X + BT_ASK_YES_X + 70, jy, 60, "No", A_BT_NO, 0);
+        put_str(said, put_str(said, put_str(said, 0, "Does "),
+                              bti.pair_name), " show this number?");
+    } else if (bti.pair_state == BT_PAIR_CONNECTING ||
+               bti.pair_state == BT_PAIR_BONDING) {
+        put_str(said, put_str(said, put_str(said, 0, "Pairing with "),
+                              bti.pair_name), "...");
+    } else {
+        if (bt_pick >= 0 && !bti.scanning) {
+            if (bti.dev_paired[bt_pick])
+                button(PANE_X, jy, 80, "Forget", A_BT_FORGET, 0);
+            else
+                button(PANE_X, jy, 80, "Pair", A_BT_PAIR, 0);
+        }
+        if (bti.pair_state == BT_PAIR_PAIRED)
+            put_str(said, put_str(said, put_str(said, 0, "Paired with "),
+                                  bti.pair_name), ".");
+        else if (bti.pair_state == BT_PAIR_FAILED)
+            put_str(said, put_str(said, 0, "Not paired: "), bti.pair_why);
+    }
+    if (said[0])
+        note(ch - NOTE_DY - 14, said);
 }
 
 /* How the lock opens is the account's own, kept with its password in
@@ -1759,6 +1816,20 @@ static void click(int x, int y)
             break;
         case A_BT_SEARCH:
             sys_bt(BT_SEARCH, (struct bt_info *)0);
+            break;
+        case A_BT_PICK:
+            bt_pick = t->arg;
+            copy(bt_pick_addr, bti.dev_addr[t->arg], sizeof(bt_pick_addr));
+            break;
+        case A_BT_PAIR:
+            sys_bt_arg(BT_PAIR, (int64_t)(uintptr_t)bt_pick_addr);
+            break;
+        case A_BT_YES:
+        case A_BT_NO:
+            sys_bt_arg(BT_ANSWER, t->act == A_BT_YES);
+            break;
+        case A_BT_FORGET:
+            sys_bt_arg(BT_FORGET, (int64_t)(uintptr_t)bt_pick_addr);
             break;
         case A_WIFI_SEARCH:
             sys_wifi(WIFI_SEARCH, (struct wifi_info *)0);
