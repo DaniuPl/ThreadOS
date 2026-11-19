@@ -24,6 +24,8 @@ LE meta event, is off after a reset.
 What the host sent is kept in 'commands', for the test to look at.
 """
 
+import os
+import random
 import struct
 import threading
 import time
@@ -39,6 +41,12 @@ WRITE_INQUIRY_MODE, WRITE_LE_HOST = 0x0C45, 0x0C6D
 READ_VERSION, READ_BDADDR = 0x1001, 0x1009
 INQUIRY, INQUIRY_CANCEL, REMOTE_NAME = 0x0401, 0x0402, 0x0419
 LE_SCAN_PARAMS, LE_SCAN_ENABLE = 0x200B, 0x200C
+# Connections and Secure Simple Pairing (7.1, 7.3.59)
+CREATE_CONN, DISCONNECT, AUTH_REQUESTED = 0x0405, 0x0406, 0x0411
+LINK_KEY_REPLY, LINK_KEY_NEG = 0x040B, 0x040C
+IO_CAP_REPLY, USER_CONFIRM, USER_CONFIRM_NEG = 0x042B, 0x042C, 0x042D
+SET_ENCRYPTION, WRITE_SSP_MODE = 0x0413, 0x0C56
+HANDLE = 0x0042
 
 # The event mask after a reset (7.3.1): bits 0-44, and not the LE one
 DEFAULT_MASK = 0x00001FFFFFFFFFFF
@@ -144,8 +152,11 @@ class BtAdapter:
         """One event, in pieces of the endpoint's size"""
         if not self.redir:
             return
-        for at in range(0, len(ev), EVENTS_MAXPACKET):
-            self.redir.report(EVENTS_EP, ev[at:at + EVENTS_MAXPACKET])
+        try:
+            for at in range(0, len(ev), EVENTS_MAXPACKET):
+                self.redir.report(EVENTS_EP, ev[at:at + EVENTS_MAXPACKET])
+        except OSError:
+            pass                # a late event after the machine went away
 
     # --- the controller --------------------------------------------------
 
@@ -156,6 +167,15 @@ class BtAdapter:
         self.scan_active = False
         self.scanning = False
         self.inquiring = False
+        self.ssp = False
+        self.connected = False
+
+    # What the phone's controller and ours agreed, in a pairing: the six
+    # digits both screens show and the link key - the controllers' own
+    # (elliptic curve, f1..f3 of 7.7.7), made up here
+    number = None
+    link_key = None             # kept across resets: the phone keeps it too
+    pairings = 0
 
     def allowed(self, bit):
         return bool(self.mask >> bit & 1)
@@ -218,6 +238,13 @@ class BtAdapter:
                 name = self.phone.name.encode()
                 self.event(0x07, b"\0" + p[:6] + name +
                            bytes(248 - len(name)), later=0.4)
+        elif op == WRITE_SSP_MODE and len(p) == 1:
+            self.ssp = p[0] == 1
+            self.complete(op)
+        elif op in (CREATE_CONN, AUTH_REQUESTED, LINK_KEY_REPLY, LINK_KEY_NEG,
+                    IO_CAP_REPLY, USER_CONFIRM, USER_CONFIRM_NEG,
+                    SET_ENCRYPTION, DISCONNECT):
+            self.pairing(op, p)
         elif op == WRITE_INQUIRY_MODE:
             self.complete(op, b"\x12")        # invalid parameters
         else:
@@ -260,6 +287,68 @@ class BtAdapter:
         if self.scan_active:
             self.event(0x3E, report(0x04, ad(0x09, w.name.encode())),
                        later=0.35)
+
+    def pairing(self, op, p):
+        """The phone's side of a connection and of Secure Simple Pairing,
+        as the controller tells its host: every event behind the mask bit
+        the specification gives it (bit = event code - 1)"""
+        ph = addr_bytes(self.phone.addr)
+        h = struct.pack("<H", HANDLE)
+        if op == CREATE_CONN:
+            if len(p) != 13:
+                return self.status(op, 0x12)
+            self.status(op)
+            if p[:6] == ph and self.allowed(2):
+                self.connected = True
+                self.event(0x03, b"\0" + h + ph + b"\x01\x00", later=0.3)
+        elif op == AUTH_REQUESTED:
+            self.status(op, 0 if len(p) == 2 and p == h else 0x02)
+            if p == h and self.allowed(22):
+                self.event(0x17, ph, later=0.1)          # Link Key Request
+        elif op == LINK_KEY_REPLY and len(p) == 22:
+            self.complete(op, b"\0" + p[:6])
+            ok = self.link_key is not None and p[6:] == self.link_key
+            if self.allowed(5):
+                self.event(0x06, (b"\0" if ok else b"\x06") + h, later=0.1)
+        elif op == LINK_KEY_NEG and len(p) == 6:
+            self.complete(op, b"\0" + p)
+            if self.ssp and self.allowed(48):          # IO Capability Request
+                self.event(0x31, ph, later=0.1)
+        elif op == IO_CAP_REPLY and len(p) == 9:
+            self.complete(op, b"\0" + p[:6])
+            self.number = random.randint(0, 999999)
+            if self.allowed(49):     # the phone: a display and yes/no, MITM
+                self.event(0x32, ph + b"\x01\x00\x03", later=0.1)
+            if self.allowed(50):     # User Confirmation Request
+                self.event(0x33, ph + struct.pack("<I", self.number),
+                           later=0.2)
+        elif op == USER_CONFIRM and len(p) == 6:
+            self.complete(op, b"\0" + p)
+            self.link_key = os.urandom(16)
+            self.pairings += 1
+            if self.allowed(53):
+                self.event(0x36, b"\0" + ph, later=0.1)
+            if self.allowed(23):     # authenticated, P-192
+                self.event(0x18, ph + self.link_key + b"\x05", later=0.15)
+            if self.allowed(5):
+                self.event(0x06, b"\0" + h, later=0.2)
+        elif op == USER_CONFIRM_NEG and len(p) == 6:
+            self.complete(op, b"\0" + p)
+            if self.allowed(53):
+                self.event(0x36, b"\x05" + ph, later=0.1)
+            if self.allowed(5):
+                self.event(0x06, b"\x05" + h, later=0.2)
+        elif op == SET_ENCRYPTION and len(p) == 3:
+            self.status(op)
+            if self.allowed(7):
+                self.event(0x08, b"\0" + h + bytes([p[2]]), later=0.1)
+        elif op == DISCONNECT and len(p) == 3:
+            self.status(op)
+            self.connected = False
+            if self.allowed(4):
+                self.event(0x05, b"\0" + h + b"\x16", later=0.1)
+        else:
+            self.complete(op, b"\x12")
 
     # --- for the test ------------------------------------------------------
 

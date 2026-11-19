@@ -71,4 +71,27 @@ void bt_event(const uint8_t *pkt, int len);
    without an adapter, and it says so. */
 void bt_selftest(void);
 
+/* Pairing a classic device (Secure Simple Pairing), by its address
+   ("aa:bb:..") or its place in the last search ("1".."9"): started on a
+   thread of its own; 0 = started, -1 = no adapter, busy, or not a
+   classic device. The state goes CONNECTING, CONFIRM (the number both
+   devices show, to be answered with bt_pair_answer), BONDING, then
+   PAIRED or FAILED (bt_pair_why). A device paired before answers with
+   the key kept, and nothing is asked. */
+#define BT_PAIR_IDLE       0
+#define BT_PAIR_CONNECTING 1
+#define BT_PAIR_CONFIRM    2
+#define BT_PAIR_BONDING    3
+#define BT_PAIR_PAIRED     4
+#define BT_PAIR_FAILED     5
+int bt_pair_start(const char *addr_or_index);
+void bt_pair_answer(int yes);
+int bt_pair_state(void);
+uint32_t bt_pair_number(void);
+const char *bt_pair_name(void);
+const char *bt_pair_why(void);
+int bt_paired(const char *addr);
+int bt_forget(const char *addr);
+int bt_paired_list(char names[][32], char addrs[][18], int max);
+
 #endif

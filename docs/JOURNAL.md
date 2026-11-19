@@ -10692,3 +10692,32 @@ works and is checked by `make test`.
       asks for its password; eight letters typed are eight dots; Enter
       gets "Not joined: there is no Wi-Fi card in this machine", and the
       password and its field are gone.
+- [x] **Bluetooth pairing: Secure Simple Pairing with a phone** (kernel/bt.c,
+      kernel/include/bt.h, kernel64/shell64.c, scripts/btadapter.py,
+      scripts/tests/t_bt.py)
+      The driver could find devices but not pair with one. It now does
+      Secure Simple Pairing, the way every phone, headset and computer
+      since Bluetooth 2.1 pairs: Simple Pairing switched on at start-up;
+      'bt pair <address>' connects, asks for authentication, answers the
+      controller's Link Key Request with a key kept from before or a
+      negative reply, says what we are (a display with yes/no, MITM
+      protection, dedicated bonding), shows the six digits both
+      controllers worked out ("does it show 059527? 'bt yes' or 'bt
+      no'"), and on 'bt yes' keeps the link key the controller hands up,
+      encrypts the link and closes it. A device with no screen nor
+      buttons pairs without a question ("just works"). The keys are
+      secrets: they live in the root file .btkeys, read and written with
+      the system's rights. 'bt' lists the paired devices, 'bt forget'
+      forgets one. The made-up controller of t_bt now does connections
+      and the phone's side of Simple Pairing as a controller tells its
+      host - every event behind its mask bit - and makes up the digits
+      and the link key. t_bt: Simple Pairing on, the mask letting the
+      pairing's events through, the digits shown being the
+      controller's, our capabilities as said, a negative reply for an
+      unknown device; confirmed, paired and encrypted and closed; listed
+      as paired; paired again with the very key the controller gave and
+      nothing asked - also after a restart, from the disk (which first
+      failed: the root-owned file was read with the shell user's rights
+      and came back empty); forgotten, asked again, refused with 'bt no'
+      and not paired. LE pairing (SMP, for watches and mice) is not
+      here yet.
