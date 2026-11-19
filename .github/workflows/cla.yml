@@ -1,0 +1,38 @@
+# Every pull request: has its author accepted CLA.md?
+#
+# pull_request_target, so the check is the base branch's own: the
+# script and the agreement come from there, and of the pull request only
+# CLA-SIGNATURES.md is read - with 'git show', as data. Nothing the pull
+# request brings is run, so it cannot change the check it is checked by
+# (the reason not to use plain pull_request here), and the token can
+# only read.
+name: cla
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  cla:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The pull request's list of signatures
+        env:
+          NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          git fetch --depth=1 origin "+refs/pull/$NUMBER/head:refs/remotes/pr/head"
+          git show refs/remotes/pr/head:CLA-SIGNATURES.md \
+            > "$RUNNER_TEMP/signatures.md" 2>/dev/null || true
+
+      - name: Has the author accepted it?
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          python3 scripts/checkcla.py "$AUTHOR" "$OWNER" \
+            "$RUNNER_TEMP/signatures.md" CLA.md

@@ -13,7 +13,8 @@ holds), and the figures it shows are held to independent sources:
   the memory to the shell's 'mem', a different path out of the kernel
 
   the version under About to the 'version' file packed into the initrd
-  the machine booted with
+  the machine booted with, and its count of licensed components to the
+  rows of third_party/README.md (the fonts besides)
 
 Changing anything needs admin. The desktop signs in as the
 administrator, and a program started from that session is the admin
@@ -58,6 +59,17 @@ def initrd_version():
         if name.rstrip(b"\0") == b"version":
             return img[off:off + size].decode().split("\n")[0]
     return None
+
+
+def licensed_components():
+    """How many components LICENSES.txt has to cover: the rows of
+    third_party/README.md's table, and the DejaVu fonts, which live in
+    fonts/ - counted here, not taken from the file the window reads"""
+    root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__))))
+    with open(os.path.join(root, "third_party", "README.md"),
+              encoding="utf-8") as fh:
+        return sum(1 for line in fh if line.startswith("| `")) + 1
 
 
 def section(q, name):
@@ -208,8 +220,8 @@ def main():
             head = section(q, "About")
             shot = q.screen_raw()
             # System, Kernel, Version, Memory, In use, Running for,
-            # Signed in as
-            about = [q.gset_info(CX, CY, i, screen=shot) for i in range(7)]
+            # Signed in as, Licences
+            about = [q.gset_info(CX, CY, i, screen=shot) for i in range(8)]
             check("About names the system and its kernel (%s)"
                   % ", ".join(about[:2]),
                   head == "About" and about[0] == "ThreadOS" and
@@ -223,6 +235,10 @@ def main():
                   m is not None and about[3] == m.group(1) + " KiB")
             check("and the session is a plain user's ('%s')" % about[6],
                   about[6] == "user")
+            want = "%d in LICENSES.txt" % licensed_components()
+            check("it says how many components the licences cover and "
+                  "where they are ('%s', '%s')" % (about[7], want),
+                  about[7] == want)
 
             # --- regional date, time and number formats ------------------
             head = section(q, "Region")

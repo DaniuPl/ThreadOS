@@ -136,7 +136,9 @@ real. Use a separate `BUILD=` directory for experiments.
      next to the code that uses it (like `apps/browser/patches/`), or our
      own wrapper code;
    - **recorded** in `third_party/README.md`: version, licence, source,
-     and what was trimmed;
+     and what was trimmed; and its licence files named in `SOURCES` in
+     `scripts/mknotices.py`, which builds `LICENSES.txt` for the initrd
+     and the disc (the build stops on a library without an entry);
    - **licensed** MIT, BSD, Apache-2.0, zlib, ISC, LGPL or similar. GPL
      code would change the licence of what links it; ask the owner first;
    - **tested** like everything else: a QEMU test that exercises it on
@@ -147,6 +149,11 @@ real. Use a separate `BUILD=` directory for experiments.
 7. **Never commit secrets.** The update signing key belongs only in the
    repository secret `THREADOS_UPDATE_KEY`. Tests generate keys of their
    own.
+8. **Contributions come under the contributor agreement.** A pull
+   request from anyone but the owner adds its author's row to
+   `CLA-SIGNATURES.md` ([CLA.md](CLA.md); the `cla` workflow checks it).
+   Do not change `CLA.md`, `TRADEMARKS.md` or `LICENSE` unless the owner
+   asks; [docs/LICENSING.md](docs/LICENSING.md) says why they matter.
 
 ## Where things are
 
@@ -162,6 +169,7 @@ real. Use a separate `BUILD=` directory for experiments.
 | UEFI loader | `boot/efi/efiboot.c` |
 | Updates | `user/update.c`, `scripts/mkupdate.py`, `.github/workflows/release.yml` |
 | Test helpers (QEMU, QMP, screen reading) | `scripts/ptest.py` |
+| Licences shipped with the system, contributor agreement | `scripts/mknotices.py`, `docs/LICENSING.md`, `CLA.md`, `scripts/checkcla.py` |
 
 Test helpers in `scripts/ptest.py` read layout constants straight from the
 C sources (`_kernel_define("user/gfiles.c", "ROW_H")`). Keep such

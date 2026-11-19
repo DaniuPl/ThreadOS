@@ -19,3 +19,5 @@ An honest boundary is worth more than a green tick that means nothing.
 - [ ] The new feature has its own group in `scripts/tests/`, registered in `scripts/run_tests.py`
 - [ ] Comments, identifiers and everything the system says are in English
 - [ ] Anything worth remembering went into `docs/JOURNAL.md`
+- [ ] I have read [CLA.md](../CLA.md) and my GitHub login is in `CLA-SIGNATURES.md` (not needed for the owner)
+- [ ] A new library has a row in `third_party/README.md` and its licence files in `SOURCES` in `scripts/mknotices.py`

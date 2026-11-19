@@ -468,3 +468,13 @@ Licensed under the MIT license (see [LICENSE](LICENSE)). `third_party/`
 keeps each project's own license (MIT, BSD, Apache-2.0, LGPL; see
 [third_party/README.md](third_party/README.md)). `fonts/` is under the Bitstream Vera /
 DejaVu license ([fonts/LICENSE-DejaVu.txt](fonts/LICENSE-DejaVu.txt)).
+Every image carries all of these texts in `LICENSES.txt`, at the root
+of the disc and in the initrd; each release attaches it too, and its
+"Source code" archive is the complete source of what it contains
+([docs/LICENSING.md](docs/LICENSING.md)).
+
+Contributions come in under the [contributor agreement](CLA.md): you
+keep your copyright, and the project may publish your work under its
+licence, now or later. "ThreadOS" and its mark are trademarks and are
+not covered by the MIT license; [TRADEMARKS.md](TRADEMARKS.md) says
+what is fine without asking.

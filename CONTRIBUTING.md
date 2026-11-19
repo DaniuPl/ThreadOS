@@ -126,7 +126,11 @@ libraries are welcome. Bringing one in means:
   the library (like `apps/browser/patches/`), or wrapper code of our own,
   so updating a library still means replacing its directory;
 - **a row in `third_party/README.md`** with the version, licence, source
-  and anything that was trimmed;
+  and anything that was trimmed, and **its licence files named in
+  `SOURCES` in `scripts/mknotices.py`**. That script puts every
+  library's licence into `LICENSES.txt`, which every disc and update
+  carries, and it stops the build when a library in the table has no
+  entry there;
 - **a licence that allows redistribution with an MIT system:** MIT, BSD,
   Apache-2.0, zlib, ISC, LGPL and similar. GPL code would change the
   licence of everything linked with it, so ask before adding it;
@@ -136,6 +140,23 @@ libraries are welcome. Bringing one in means:
 
 Programs link libraries against `libc/` musl. Code that goes into the
 kernel must be freestanding (no libc) and build with the kernel's flags.
+
+## Your contribution's licence: the contributor agreement
+
+Before your first pull request is merged, you accept the
+[contributor agreement](CLA.md): add a row with your GitHub login to
+[CLA-SIGNATURES.md](CLA-SIGNATURES.md) in that pull request. The `cla`
+check on every pull request looks for it.
+
+The agreement is short; read it. You keep the copyright in what you
+wrote. The project gets a permanent licence to publish your work under
+whatever licence ThreadOS is under, now or later, and you promise the
+work is yours to give. The reason is that ThreadOS may one day ship on
+devices of its own, and that needs a clean record of who gave which
+rights. Every version published under the MIT licence stays MIT, your
+work in it too. [docs/LICENSING.md](docs/LICENSING.md) explains what
+the project hands out and what that asks of it. The name and the mark
+are covered separately, in [TRADEMARKS.md](TRADEMARKS.md).
 
 ## Before sending a patch
 
