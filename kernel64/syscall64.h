@@ -209,6 +209,9 @@
    (a2 = 0): a touchscreen's shell shows its keyboard. The PC's desktop
    has one of wood and plastic, and answers 0. */
 #define SYS64_WIN_KEYBOARD 113
+/* a1=win, a2=1 the whole screen (a page's video full screen), 0 back
+   -> 0, or -1 */
+#define SYS64_WIN_FULL 114
 #define SYS64_USER       78   /* a1=&struct user_ctl -> account operation */
 
 /* --- Threads the way a C library makes them (see kernel64/futex64.h) ---

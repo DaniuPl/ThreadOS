@@ -50,6 +50,13 @@ the way a person drives it and read off the screen:
   with --proxy, a page is asked of the proxy: one on a host that does
   not exist arrives from the test's own proxy, which saw the request
 
+  full screen, as a video player's button asks for it (the Fullscreen
+  API): a click on a page whose script puts a box full screen - the
+  window becomes the whole screen and the box all of it, every corner
+  of the screen its colour, no band, menu bar or dock left; the page
+  measures itself at the screen's size; Escape gives the window back,
+  the box where it was and the band with the page's address
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -504,6 +511,95 @@ def from_dock(q, port):
           end == "[kernel] process 'weft' has ended (code 0)")
 
 
+# A box a click puts full screen, as a video player's button puts its
+# player, and a second click takes out of it: blue in the page, red when
+# it is the whole screen
+FULL = (b'<!doctype html><html><head><meta charset="utf-8"><title>loading'
+        b'</title><style>html,body{margin:0;height:100%;background:#405070}'
+        b'#box{position:absolute;left:20px;top:20px;width:320px;'
+        b'height:240px;background:#3366cc}'
+        b'#box:fullscreen{width:100%;height:100%;background:#c03030}'
+        b'</style></head><body><div id="box"></div><script>'
+        b"const b = document.getElementById('box');"
+        b"const say = w => { document.title = w + ' ' + innerWidth + 'x' +"
+        b"  innerHeight; };"
+        b"document.addEventListener('click', () => {"
+        b"  if (document.fullscreenElement) document.exitFullscreen();"
+        b"  else b.requestFullscreen().catch(e => say('refused ' + e.name)); });"
+        b"const now = () =>"
+        b"  say(document.fullscreenElement ? 'full on' : 'full off');"
+        b"document.addEventListener('fullscreenchange', now);"
+        b"addEventListener('resize', now);"
+        b"say('full ready');"
+        b"</script></body></html>")
+
+
+def full_screen(q, port):
+    """A page's box put full screen by a click, and Escape out of it"""
+    q.click_desktop()
+    time.sleep(1)
+    seen = len(q.serial())
+    page = f"http://10.0.2.2:{port}/full.html"
+    q.type_line(f"run weft {page}")
+    ready = wait_line(q, seen, "[weft] title full ready", 180)
+    check(f"the page to put full screen loads ({ready})", ready is not None)
+    if ready is None:
+        tell(q, seen)
+        return
+    box = None
+    end = time.time() + 60
+    while box is None and time.time() < end:
+        sw, sh, at = q.screen_raw()
+        box = find_box(at, sw, sh, BLUE)
+        if box is None:
+            time.sleep(1)
+    if box is None:
+        check("its box is on the screen", False)
+        return
+    ox, oy = box[0] - 20, box[1] - 20
+    seen = len(q.serial())
+    q.click(box[0] + 100, box[1] + 100)
+    on = wait_line(q, seen, "[weft] full screen on", 30)
+    sw, sh, _ = q.screen_raw()
+    title = wait_line(q, seen, f"[weft] title full on {sw}x{sh}", 30)
+    check(f"a click puts the box full screen: Weft hears it ({on}) and the "
+          f"page measures the whole screen, {sw}x{sh} ({title})",
+          on is not None and title is not None)
+    if title is None:
+        tell(q, seen)
+    spots = [(2, 2), (sw - 3, 2), (sw // 2, sh // 2), (2, sh - 3),
+             (sw - 3, sh - 3)]
+    got = None
+    end = time.time() + 30
+    while time.time() < end:
+        _, _, at = q.screen_raw()
+        got = [at(x, y) for x, y in spots]
+        if all(c == RED for c in got):
+            break
+        time.sleep(0.5)
+    check(f"and it is all of the screen - its corners and middle the box's "
+          f"red: no band, no menu bar, no dock ({got})",
+          got is not None and all(c == RED for c in got))
+    seen = len(q.serial())
+    q.sendkey("esc")
+    off = wait_line(q, seen, "[weft] full screen off", 30)
+    want = f"{define(SRC, 'WIDTH')}x{define(SRC, 'HEIGHT')}"
+    title = wait_line(q, seen, f"[weft] title full off {want}", 30)
+    check(f"Escape leaves it: the page at its own size again ({off}; "
+          f"{title})", off is not None and title is not None)
+    back = None
+    end = time.time() + 30
+    while back != box and time.time() < end:
+        sw, sh, at = q.screen_raw()
+        back = find_box(at, sw, sh, BLUE)
+        time.sleep(0.5)
+    check(f"the box back where it was ({back}, was {box})", back == box)
+    shown = Band(ox, oy).address(q, page)
+    check(f"and the band with the page's address ({shown!r})", shown == page)
+    q.sendkey("ctrl-w")
+    wait_line(q, seen, "[weft] done, exit code", 60)
+
+
 def start_proxy():
     """A web proxy of the test's own. A browser asks a proxy for a page
     by its whole address; this one answers every such request with a
@@ -586,7 +682,8 @@ def main():
     # is a download, which a browser does not show
     agents = []
     for path, body in (("/page.html", PAGE), ("/two.html", TWO),
-                       ("/three.html", THREE), ("/tall.html", TALL)):
+                       ("/three.html", THREE), ("/tall.html", TALL),
+                       ("/full.html", FULL)):
         ROUTES[path] = (lambda b: lambda h, body: (
             agents.append(h.headers.get("User-Agent") or ""),
             (200, [("Content-Type", "text/html; charset=utf-8")], b))[1])(body)
@@ -685,6 +782,7 @@ def main():
 
             browse(q, port, ox, oy)
             from_dock(q, port)
+            full_screen(q, port)
             via_proxy(q)
         finally:
             q.close()

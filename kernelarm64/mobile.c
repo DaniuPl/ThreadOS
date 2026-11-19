@@ -189,6 +189,12 @@ static uint32_t frame_bytes;
 static int last_x, last_y;
 static int shade;               /* pulled down over the screen */
 static int win_top;             /* programs' windows' top, panel pixels */
+/* The window a program has put on the whole screen (a page's video):
+   over the status bar and the home indicator's strip, which are not
+   drawn over it, its top the screen's. -1 = none. Asked for by the
+   program's call (full_ask), done here, on the shell's thread. */
+static int full_win = -1;
+static volatile int full_ask_win = -1, full_ask_on;
 static int recent[MOB_RECENTS], recent_count;  /* screens, newest first */
 static int about_from_settings;
 static int battery = -1, charging;  /* -1: mains power, no battery */
@@ -396,6 +402,8 @@ static const int size_k16[MOB_SIZES] = { 32, 28, 24 };
    Android's buttons */
 void mob_windows_fit(void)
 {
+    if (full_win >= 0)
+        return;                      /* the whole screen, its foot too */
     int up = mob_prefs.nav_buttons ? MOB_NAV_UP : MOB_SAFE_UP;
     winmob_set_bottom(video_ph() - up * video_k() / 16);
 }
@@ -411,7 +419,7 @@ void mob_set_orientation(int landscape)
     canvas.w = video_pw();
     canvas.h = video_ph();
     canvas.stride = video_pw();
-    winmob_reshape(video_pw(), win_top, video_ph());
+    winmob_reshape(video_pw(), full_win >= 0 ? 0 : win_top, video_ph());
     paint_wallpaper();
     mob_set_size(mob_prefs.size);
     printk("[mobile] %s, %dx%d\n", mob_prefs.landscape ? "landscape" :
@@ -1317,6 +1325,12 @@ static int light(uint32_t c)
    what it says dark or light to read on that */
 static void draw_window(void)
 {
+    if (shown == full_win) {         /* the program's, edge to edge */
+        winmob_draw(shown);
+        if (winmob_keyboard(shown))
+            mob_kb_draw();
+        return;
+    }
     uint32_t top = winmob_edge_colour(shown, 0);
     gfx_fill(0, 0, lw, (win_top * 16 + video_k() - 1) / video_k(), top, 255);
     status_bar(light(top) ? 0x1C1C1E : WHITE);
@@ -2061,7 +2075,8 @@ static int bottom_edge(void)
 static void to_program(int kind, int x, int y)
 {
     int k = video_k();
-    winmob_touch(shown, kind, x * k / 16, y * k / 16 - win_top);
+    winmob_touch(shown, kind, x * k / 16,
+                 y * k / 16 - (full_win >= 0 ? 0 : win_top));
 }
 
 static void touch(const struct touch_event *e)
@@ -2076,7 +2091,8 @@ static void touch(const struct touch_event *e)
         /* The bottom edge is the home gesture's, the status bar the
            phone's; the rest of a window is its program's */
         finger.program = !shade && screen == APP_WINDOW &&
-                         e->y * video_k() / 16 >= win_top &&
+                         e->y * video_k() / 16 >=
+                             (shown == full_win ? 0 : win_top) &&
                          e->y < bottom_edge() &&
                          !(winmob_keyboard(shown) && e->y >= mob_kb_top());
         /* In the home gesture's edge a swipe up is the phone's, but a
@@ -2223,6 +2239,27 @@ int mobile_init(const struct mobile_info *arg)
     return 0;
 }
 
+void mobile_window_full(int win, int on)
+{
+    full_ask_on = on;
+    full_ask_win = win;
+}
+
+/* The whole screen given, or given back: every window is made again in
+   the new shape (they share one) and told its size */
+static void full_set(int win)
+{
+    if (win == full_win)
+        return;
+    full_win = win;
+    winmob_reshape(video_pw(), win >= 0 ? 0 : win_top, video_ph());
+    if (win < 0)
+        mob_windows_fit();
+    printk("[mobile] window %d %s\n", win >= 0 ? win : 0,
+           win >= 0 ? "full screen" : "back from full screen");
+    dirty = 1;
+}
+
 void mobile_main(void *arg)
 {
     (void)arg;
@@ -2256,6 +2293,16 @@ void mobile_main(void *arg)
             else
                 show(fresh, "opened");
         }
+        if (full_ask_win >= 0) {
+            int w = full_ask_win, on = full_ask_on;
+            full_ask_win = -1;
+            if (on)
+                full_set(w);
+            else if (w == full_win)
+                full_set(-1);
+        }
+        if (full_win >= 0 && !winmob_exists(full_win))
+            full_set(-1);            /* its program ended full */
         if (screen == APP_WINDOW && !winmob_exists(shown))
             go(HOME, "its program ended");
         if (winmob_changes() != changes) {

@@ -679,6 +679,11 @@ struct window {
        reaches the edge they stand at. A full window is maxed too, so
        the way back is maximising's. */
     int full;
+    /* Full screen as a program asks for it (a page's video): not the
+       green light's, which keeps the window's title bar - its frame and
+       title bar lie just beyond the screen's edges, the content is all
+       of the screen, and nothing is drawn round it. Full too. */
+    int bare;
     /* The application has been asked to close and has not yet ended.
        'closing' counts down the frames it has left; when it runs out we
        stop asking - an application that does not answer must not hold
@@ -2551,6 +2556,12 @@ static void draw_window(const struct window *win)
     if (win->minimized)            /* minimised - visible only in the dock */
         return;
 
+    if (win->bare) {               /* the content, edge to edge, and no
+                                      more: corners and a shadow would
+                                      only eat the screen's corners */
+        draw_body(win, focused, 0);
+        return;
+    }
     int x = win->x, y = win->y, w = win->w, h = win->h;
 
     /* The shadow first, under everything: deeper under the window that
@@ -2576,8 +2587,9 @@ static void draw_window(const struct window *win)
 static void draw_full_title(void)
 {
     int fw = full_win();
-    if (fw < 0 || !bar_peek)
-        return;
+    if (fw < 0 || !bar_peek || wins[fw].bare)
+        return;                        /* (a program's own full screen is
+                                          left the program's way) */
     static struct window strip;
     strip = wins[fw];
     strip.y = BAR_H;
@@ -3702,6 +3714,7 @@ static void toggle_max(int i)
         w->h = w->rh;
         w->maxed = 0;
         w->full = 0;
+        w->bare = 0;
         resize_content(w);             /* shrinking always has the memory */
     }
 
@@ -7248,6 +7261,53 @@ int desktop_win_rect(int winid, int owner, int x, int y, int w, int h,
  * it - but the program then has one path instead of two, and this
  * machine's eight-bit mode is a fallback for when there is no
  * framebuffer at all, not the case to design for. */
+/* A program's own ask for the whole screen and back - a page's video
+   its player puts full screen: what the window menu's Full Screen does,
+   and its way back. 0 = done, -1 = not its window, or no memory for a
+   buffer that size (the window then stays as it was). */
+int desktop_win_full(int winid, int owner, int on)
+{
+    struct window *win = app_window(winid, owner);
+    if (!win)
+        return -1;
+    int w = (int)(win - wins);
+    if (!!on == !!win->bare)
+        return 0;
+    if (!on) {
+        toggle_max(w);                 /* the way back is maximising's */
+        scene_changed();
+        return 0;
+    }
+    if (win->full)
+        toggle_max(w);                 /* the green light's first */
+    int ox = win->x, oy = win->y, ow = win->w, oh = win->h;
+    win->x = -1;
+    win->y = -(TITLE_H + 1);
+    win->w = video_w() + 2;
+    win->h = video_h() + TITLE_H + 2;
+    if (resize_content(win) < 0) {     /* no memory for that buffer */
+        win->x = ox;
+        win->y = oy;
+        win->w = ow;
+        win->h = oh;
+        return -1;
+    }
+    if (!win->maxed) {                 /* a maximised one keeps its own */
+        win->rx = ox;
+        win->ry = oy;
+        win->rw = ow;
+        win->rh = oh;
+    }
+    win->maxed = 1;
+    win->full = 1;
+    win->bare = 1;
+    win->minimized = 0;
+    focus_idx = w;
+    raise_win(w);
+    scene_changed();
+    return 0;
+}
+
 int desktop_win_truecolour(int winid, int owner)
 {
     scene_changed();

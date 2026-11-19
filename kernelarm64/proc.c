@@ -2160,6 +2160,11 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
     }
     case SYS64_WIN_KEYBOARD:
         return winmob_set_keyboard((int)x[0], p->pid, (int)x[1]);
+    case SYS64_WIN_FULL:
+        if (!winmob_mine((int)x[0], p->pid))
+            return -1;
+        mobile_window_full((int)x[0], (int)x[1]);
+        return 0;
     case SYS64_CFG_GET: {
         /* The PC's settings as the phone has them: the language, which
            a program tells the pages it fetches */
@@ -2483,6 +2488,7 @@ void proc_syscall(struct trap_frame *f)
     case SYS64_UI_LOOK:
     case SYS64_CFG_GET:
     case SYS64_WIN_KEYBOARD:
+    case SYS64_WIN_FULL:
         r = win_call(p, x[8], x);
         break;
     default:

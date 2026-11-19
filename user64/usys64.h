@@ -87,6 +87,9 @@
 #define SYS64_WIN_DRAW 68
 #define SYS64_WIN_BLITHI 112
 #define SYS64_WIN_KEYBOARD 113
+/* a1=win, a2=1 the whole screen (a page's video full screen), 0 back
+   -> 0, or -1 */
+#define SYS64_WIN_FULL 114
 #define SYS64_UI_LOOK  69
 #define SYS64_NOTIFY   70
 #define SYS64_BG_PREVIEW 71
@@ -850,6 +853,13 @@ static inline int64_t win_blit_hi(int win, int x, int y, int w, int h,
 
 /* The program waits for typing, or no longer does: on a touchscreen
    the shell shows its keyboard, whose keys come as WEV_KEY */
+/* The window to the whole screen and back (SYS64_WIN_FULL); the new
+   size comes as WEV_SIZE, as any other */
+static inline int64_t win_full(int win, int on)
+{
+    return syscall64(SYS64_WIN_FULL, win, on);
+}
+
 static inline int64_t win_keyboard(int win, int on)
 {
     return syscall64(SYS64_WIN_KEYBOARD, win, on);

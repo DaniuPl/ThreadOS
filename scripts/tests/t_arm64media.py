@@ -18,6 +18,11 @@ started by a tap on it, as a person starts a page's video or sound:
 
   <audio>, Opus in WebM, then Web Audio's oscillator: out of the
   speaker come 1000 Hz and then 440 Hz, about two seconds each
+
+  full screen, as a video player's button asks for it: a tap puts a
+  box on the whole screen - the status bar and the home indicator's
+  strip gone, every corner its colour, the page the phone's size - and
+  a second tap takes it out, the status bar back
 """
 
 import os
@@ -34,6 +39,7 @@ from ptest import (check, summary, noarm64, Phone, ARM64_INITRD, ROUTES,
                    start_http_server)
 from t_arm64sound import AUDIO, RATE, sound_env
 from t_arm64weft import wait_line
+from t_webkit import FULL, find_box, RED, BLUE
 import t_webmedia as wm
 
 WEFT = os.path.join(os.path.dirname(ARM64_INITRD), "aarch64", "weft.tapp")
@@ -107,6 +113,55 @@ def video(q, seen, files, name, org, ended):
           line is not None and line.endswith(f" 3.0 {size}"))
 
 
+def full(q, seen):
+    """A tap puts the page's box on the whole screen - over the status
+    bar and the home indicator's strip - and a second takes it out"""
+    ready = wait_line(q, seen, "[weft] title full ready", 300)
+    box = None
+    end = time.time() + 120
+    while ready and box is None and time.time() < end:
+        sw, sh, at = q.screen_raw()
+        box = find_box(at, sw, sh, BLUE)
+        if box is None:
+            time.sleep(1)
+    check(f"the page to put full screen is on the phone ({ready}; {box})",
+          ready is not None and box is not None)
+    if box is None:
+        return
+    mark = len(q.serial())
+    q.tap((box[0] + box[2]) // 2 // K, (box[1] + box[3]) // 2 // K)
+    on = wait_line(q, mark, "[weft] full screen on", 60)
+    lw, lh = Phone.LOGICAL
+    title = wait_line(q, mark, f"[weft] title full on {lw}x{lh}", 60)
+    check(f"a tap puts it full screen, the page the phone's whole screen "
+          f"({on}; {title})", on is not None and title is not None)
+    got = None
+    end = time.time() + 60
+    while time.time() < end:
+        sw, sh, at = q.screen_raw()
+        spots = [(4, 4), (sw // 2, 6), (sw - 5, 4), (sw // 2, sh // 2),
+                 (4, sh - 5), (sw - 5, sh - 5)]
+        got = [at(x, y) for x, y in spots]
+        if all(c == RED for c in got):
+            break
+        time.sleep(1)
+    check(f"all of it red, the status bar's and the home strip's places too "
+          f"({got})", got is not None and all(c == RED for c in got))
+    mark = len(q.serial())
+    q.tap(lw // 2, lh // 2)
+    off = wait_line(q, mark, "[weft] full screen off", 60)
+    check(f"a second tap takes it out ({off})", off is not None)
+    top = None
+    end = time.time() + 60
+    while time.time() < end:
+        _, _, at = q.screen_raw()
+        top = at(4, 4)
+        if top != RED:
+            break
+        time.sleep(1)
+    check(f"and the status bar is there again ({top})", top != RED)
+
+
 def main():
     print("--- A page's video and sound in Weft on the phone ---")
     why = noarm64()
@@ -134,12 +189,12 @@ def main():
                  kinds[name.rsplit(".", 1)[1]])
     for path, body in (("/video.html", wm.VIDEO), ("/mse.html", wm.MSE),
                        ("/audio.html", wm.AUDIO),
-                       ("/webaudio.html", wm.WEBAUDIO)):
+                       ("/webaudio.html", wm.WEBAUDIO), ("/full.html", FULL)):
         ROUTES[path] = (lambda b: lambda h, body: (
             200, [("Content-Type", "text/html; charset=utf-8")], b))(body)
     _, outfile = sound_env(work, 120)
     port, stop = start_http_server()
-    url = f"http://10.0.2.2:{port}/video.html?chain=mse,audio,webaudio"
+    url = f"http://10.0.2.2:{port}/video.html?chain=mse,audio,webaudio,full"
     q = Phone(cores=4, mib=2048, append="run=weft," + url,
               extra=["-fw_cfg", "name=opt/threados/apps/weft,file=" + WEFT,
                      "-netdev", "user,id=n0",
@@ -174,7 +229,7 @@ def main():
                   line is not None)
             line = wait_line(q, seen, "[weft] title " + end, 120)
             check(f"and ends ({line})", line is not None)
-        time.sleep(2)
+        full(q, seen)
         got = tones(outfile)
         check(f"out of the speaker come 1000 Hz and then 440 Hz, about two "
               f"seconds each (ms, Hz: {got})",

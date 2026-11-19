@@ -42,6 +42,8 @@ int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,
    eight-bit one the compositor trades each colour for the nearest
    index while composing. */
 int desktop_win_truecolour(int winid, int owner);
+/* A program's window to the whole screen (on) and back */
+int desktop_win_full(int winid, int owner, int on);
 /* A block of colours. Only for a window that asked for them. */
 int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,
                        const uint32_t *pixels);

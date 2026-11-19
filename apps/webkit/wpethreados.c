@@ -191,6 +191,16 @@ typedef struct {
     int scrolling;
     WPEThreadOSChromeFunc chrome;
     gpointer chrome_data;
+    /* Full screen (a page's video, by its player's button): the window
+       the whole screen, the page all of it - the program's bands and
+       what it draws over the page put aside here until it is over */
+    int full;
+    int saved_top, saved_bottom;
+    WPEThreadOSOverlayFunc saved_overlay;
+    /* WebKit is told of full screen once the window has its new size:
+       a page told before measures the old one (fullscreenchange) */
+    int full_told;
+    guint full_timer;
 } WPEToplevelThreadOS;
 typedef struct {
     WPEToplevelClass parent_class;
@@ -262,7 +272,10 @@ void wpe_threados_toplevel_set_overlay(WPEToplevel *toplevel,
     WPEToplevelThreadOS *t = ours(toplevel);
     if (!t)
         return;
-    t->overlay = func;
+    if (t->full)
+        t->saved_overlay = func;
+    else
+        t->overlay = func;
     t->overlay_data = data;
     t->ov_x = x;
     t->ov_y = y;
@@ -334,6 +347,10 @@ void wpe_threados_toplevel_set_bottom(WPEToplevel *toplevel, int bottom)
     WPEToplevelThreadOS *t = ours(toplevel);
     if (!t)
         return;
+    if (t->full) {
+        t->saved_bottom = MAX(bottom, 0);
+        return;
+    }
     t->bottom = MAX(bottom, 0);
     page_resized(t);
 }
@@ -356,7 +373,10 @@ void wpe_threados_toplevel_set_chrome(WPEToplevel *toplevel, int top,
     WPEToplevelThreadOS *t = ours(toplevel);
     if (!t)
         return;
-    t->top = MAX(top, 0);
+    if (t->full)
+        t->saved_top = MAX(top, 0);
+    else
+        t->top = MAX(top, 0);
     t->chrome = func;
     t->chrome_data = data;
     page_resized(t);
@@ -860,6 +880,28 @@ static int pointer_event(int type)
            type == WEV_RELEASE || type == WEV_SCROLL || type == WEV_ALTCLICK;
 }
 
+/* WebKit told the state full screen leaves the window in */
+static void tell_full(WPEToplevelThreadOS *t)
+{
+    if (t->full_timer) {
+        g_source_remove(t->full_timer);
+        t->full_timer = 0;
+    }
+    t->full_told = t->full;
+    WPEToplevelState state = wpe_toplevel_get_state(WPE_TOPLEVEL(t));
+    wpe_toplevel_state_changed(WPE_TOPLEVEL(t),
+        t->full ? (WPEToplevelState)(state | WPE_TOPLEVEL_STATE_FULLSCREEN)
+                : (WPEToplevelState)(state & ~WPE_TOPLEVEL_STATE_FULLSCREEN));
+}
+
+static gboolean full_late(gpointer data)
+{
+    WPEToplevelThreadOS *t = data;
+    t->full_timer = 0;
+    tell_full(t);
+    return G_SOURCE_REMOVE;
+}
+
 static gboolean poll_window(gpointer data)
 {
     WPEToplevelThreadOS *self = data;
@@ -875,11 +917,19 @@ static gboolean poll_window(gpointer data)
                 wpe_toplevel_scale_changed(WPE_TOPLEVEL(self), k / 16.0);
             }
             page_resized(self);
+            if (self->full != self->full_told)
+                tell_full(self);
+        }
+        /* Full screen: Escape leaves it, as in any browser, and the
+           page has every click - there is no band to have them */
+        if (self->full && ev.type == WEV_KEY && ev.val == 0x1B) {
+            wpe_toplevel_unfullscreen(WPE_TOPLEVEL(self));
+            continue;
         }
         /* The program's band hears everything first, in the window's
            own coordinates: a click on it, the keys while its address
            field has them, the window's new size to draw itself at */
-        if (self->chrome &&
+        if (self->chrome && !(self->full && pointer_event(ev.type)) &&
             self->chrome(self->chrome_data, ev.type, ev.x, ev.y, ev.val))
             continue;
         if (ev.type == WEV_CLOSE) {
@@ -946,6 +996,10 @@ static void toplevel_dispose(GObject *object)
         g_source_remove(self->poll_source);
         self->poll_source = 0;
     }
+    if (self->full_timer) {
+        g_source_remove(self->full_timer);
+        self->full_timer = 0;
+    }
     G_OBJECT_CLASS(wpe_toplevel_threados_parent_class)->dispose(object);
 }
 
@@ -973,6 +1027,43 @@ static void wpe_toplevel_threados_init(WPEToplevelThreadOS *self)
     self->x = self->y = -1;
 }
 
+/* WebKit asks for full screen (a page's requestFullscreen) or out of it:
+   the window is asked for the whole screen, its new size comes as
+   WEV_SIZE, and WebKit is told the state it is in */
+static gboolean toplevel_set_fullscreen(WPEToplevel *toplevel,
+                                        gboolean fullscreen)
+{
+    WPEToplevelThreadOS *t = (WPEToplevelThreadOS *)toplevel;
+    int on = !!fullscreen;
+    if (t->win < 0)
+        return FALSE;
+    if (on != t->full) {
+        if (win_full(t->win, on) < 0)
+            return FALSE;
+        if (on) {
+            t->saved_top = t->top;
+            t->saved_bottom = t->bottom;
+            t->saved_overlay = t->overlay;
+            t->top = t->bottom = 0;
+            t->overlay = NULL;
+        } else {
+            t->top = t->saved_top;
+            t->bottom = t->saved_bottom;
+            t->overlay = t->saved_overlay;
+        }
+        t->full = on;
+        page_resized(t);
+        /* told when the new size comes (poll_window), or in a moment
+           if it is the size the window had */
+        if (t->full_timer)
+            g_source_remove(t->full_timer);
+        t->full_timer = g_timeout_add(1000, full_late, t);
+        return TRUE;
+    }
+    tell_full(t);
+    return TRUE;
+}
+
 static void wpe_toplevel_threados_class_init(WPEToplevelThreadOSClass *klass)
 {
     GObjectClass *object_class = G_OBJECT_CLASS(klass);
@@ -980,6 +1071,7 @@ static void wpe_toplevel_threados_class_init(WPEToplevelThreadOSClass *klass)
     object_class->dispose = toplevel_dispose;
     WPEToplevelClass *toplevel_class = WPE_TOPLEVEL_CLASS(klass);
     toplevel_class->set_title = toplevel_set_title;
+    toplevel_class->set_fullscreen = toplevel_set_fullscreen;
     toplevel_class->resize = toplevel_resize;
 }
 

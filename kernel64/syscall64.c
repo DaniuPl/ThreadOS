@@ -1948,6 +1948,10 @@ static void handle(struct regs *r)
     case SYS64_WIN_KEYBOARD:
         r->rax = 0;                      /* the PC has a real one */
         return;
+    case SYS64_WIN_FULL:
+        r->rax = (uint64_t)(int64_t)desktop_win_full(
+            (int)a1, task64_current_id(), (int)a2);
+        return;
     case SYS64_WIN_BLIT32:
     case SYS64_WIN_BLITHI: {
         struct win_blit_cmd64 {

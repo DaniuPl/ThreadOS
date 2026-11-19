@@ -10485,3 +10485,30 @@ works and is checked by `make test`.
       fifteen seconds later the second run remembers one cookie and one
       page, and the test's web server receives exactly "sid=<token>" with
       the first request.
+- [x] **Full screen for a page's video in Weft** (kernel/desktop.c,
+      kernel64/syscall64.c, user64/usys64.h, kernelarm64/mobile.c,
+      proc.c, apps/webkit/wpethreados.c, weft.c,
+      scripts/tests/t_webkit.py, t_arm64media.py)
+      YouTube's full-screen button calls the Fullscreen API, and WPE
+      answers it through the platform: the toplevel's set_fullscreen.
+      A program can now ask for the whole screen itself -
+      SYS64_WIN_FULL. On the PC the window goes edge to edge with its
+      frame and title bar just beyond the screen ("bare": the green
+      light's full screen keeps its title bar, a video should not),
+      drawn without a shadow or round corners, the menu bar and dock
+      out of the way; on the phone every window is made again over the
+      whole panel (they share one shape) and the shell draws no status
+      bar or home strip over it, touches counted from the top. The
+      platform puts Weft's band and floating toolbar aside meanwhile -
+      what Weft sets in the meantime comes back afterwards - gives the
+      page every click, makes Escape leave full screen as any browser
+      does, and tells WebKit the window is full screen only when its new
+      size has come, so that a page measures the screen; Weft draws no
+      band while it is. t_webkit: a click on a page puts its box full
+      screen, Weft says so, the page measures 800x600, and the screen's
+      corners and middle are all the box's red - no band, menu bar or
+      dock; Escape gives back the page at its 640x400, the box where it
+      was and the band with the address. t_arm64media does the same on
+      the phone with taps, the status bar's and the home strip's places
+      red too, the second tap leaving it (document.exitFullscreen); it
+      runs with the aarch64 WebKit build.

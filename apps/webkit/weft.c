@@ -192,6 +192,7 @@ static struct {
 } prefs;
 
 static void draw_band(void);
+static gboolean full_screen(void);
 static void bar_show(gboolean show);
 static struct tab *tab_new(const char *uri, WebKitWebView *related);
 static void tab_front(int i);
@@ -623,6 +624,19 @@ static char *start_page(void)
     return g_string_free(g, FALSE);
 }
 
+/* Into full screen or out of it: the band goes, or comes back */
+static void state_changed(WPEView *view, WPEToplevelState previous,
+                          gpointer data)
+{
+    (void)view;
+    (void)data;
+    gboolean was = (previous & WPE_TOPLEVEL_STATE_FULLSCREEN) != 0;
+    if (was == full_screen())
+        return;
+    say("[weft] full screen %s%s\n", full_screen() ? "on" : "off", NULL);
+    draw_band();
+}
+
 static struct tab *tab_new(const char *uri, WebKitWebView *related)
 {
     if (ntabs == TABS_MAX)
@@ -643,6 +657,8 @@ static struct tab *tab_new(const char *uri, WebKitWebView *related)
                      G_CALLBACK(progress_changed), t);
     g_signal_connect(t->view, "notify::uri", G_CALLBACK(uri_changed), t);
     g_signal_connect(t->view, "close", G_CALLBACK(page_closed), t);
+    g_signal_connect(webkit_web_view_get_wpe_view(t->view),
+                     "toplevel-state-changed", G_CALLBACK(state_changed), t);
     g_signal_connect(t->view, "create", G_CALLBACK(page_wants_window), t);
     tabs[ntabs++] = t;
     if (uri) {
@@ -816,10 +832,18 @@ static void arrow(int win, int x, int y, int left, uint32_t rgb)
 
 static void draw_mobile(void);
 
+/* A page's video full screen (its player's button): the page has the
+   whole of it, no band and no toolbar */
+static gboolean full_screen(void)
+{
+    return (wpe_toplevel_get_state(toplevel) & WPE_TOPLEVEL_STATE_FULLSCREEN)
+           != 0;
+}
+
 static void draw_band(void)
 {
     int win = wpe_threados_toplevel_window(toplevel);
-    if (win < 0 || !ntabs)
+    if (win < 0 || !ntabs || full_screen())
         return;
     if (mobile) {
         draw_mobile();
