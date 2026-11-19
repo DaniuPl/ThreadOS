@@ -10675,3 +10675,101 @@ works and is checked by `make test`.
       read from inside its own handlers. The fuzzer has kernel/wlan.c
       too: 3000 corrupted frames, nothing found. No emulator has this
       card: a laptop with one is the next test.
+- [x] **Joining a Wi-Fi network from Settings** (user/gsettings.c,
+      user/uwifi.h, kernel/include/wifi_info.h, kernel64/syscall64.c,
+      kernel/iwlwifi.c, scripts/tests/t_wifiui.py)
+      Settings' Wi-Fi page said "Joining a network comes in the next
+      stage". A network in the list is now picked with a click (a ring
+      round its row); a protected one then takes the keys in a password
+      field - a dot a letter, room for WPA2's 63 - and Join or Enter
+      asks the driver to join it (SYS64_WIFI's new WIFI_JOIN: started on
+      the driver's thread, not waited for; WIFI_LEAVE leaves). The page
+      follows it through WIFI_INFO's new link state: "Joining X...",
+      "Joined X" with Leave, or "Not joined:" and why, and the password
+      is forgotten as soon as it has been handed over. The Status line
+      says the same. t_wifiui, on QEMU without the card: the page asks
+      for a network to be picked; a click on ThreadOS-Test rings it and
+      asks for its password; eight letters typed are eight dots; Enter
+      gets "Not joined: there is no Wi-Fi card in this machine", and the
+      password and its field are gone.
+- [x] **Bluetooth pairing: Secure Simple Pairing with a phone** (kernel/bt.c,
+      kernel/include/bt.h, kernel64/shell64.c, scripts/btadapter.py,
+      scripts/tests/t_bt.py)
+      The driver could find devices but not pair with one. It now does
+      Secure Simple Pairing, the way every phone, headset and computer
+      since Bluetooth 2.1 pairs: Simple Pairing switched on at start-up;
+      'bt pair <address>' connects, asks for authentication, answers the
+      controller's Link Key Request with a key kept from before or a
+      negative reply, says what we are (a display with yes/no, MITM
+      protection, dedicated bonding), shows the six digits both
+      controllers worked out ("does it show 059527? 'bt yes' or 'bt
+      no'"), and on 'bt yes' keeps the link key the controller hands up,
+      encrypts the link and closes it. A device with no screen nor
+      buttons pairs without a question ("just works"). The keys are
+      secrets: they live in the root file .btkeys, read and written with
+      the system's rights. 'bt' lists the paired devices, 'bt forget'
+      forgets one. The made-up controller of t_bt now does connections
+      and the phone's side of Simple Pairing as a controller tells its
+      host - every event behind its mask bit - and makes up the digits
+      and the link key. t_bt: Simple Pairing on, the mask letting the
+      pairing's events through, the digits shown being the
+      controller's, our capabilities as said, a negative reply for an
+      unknown device; confirmed, paired and encrypted and closed; listed
+      as paired; paired again with the very key the controller gave and
+      nothing asked - also after a restart, from the disk (which first
+      failed: the root-owned file was read with the shell user's rights
+      and came back empty); forgotten, asked again, refused with 'bt no'
+      and not paired. LE pairing (SMP, for watches and mice) is not
+      here yet.
+- [x] **Pairing a Bluetooth phone from Settings** (user/gsettings.c,
+      user/ubt.h, kernel/include/bt_info.h, kernel64/syscall64.c,
+      kernel/bt.c, scripts/tests/t_btui.py, scripts/run_tests.py)
+      Settings' Bluetooth page could search but do nothing with what it
+      found. A device in the list is now picked with a click; Pair
+      starts Secure Simple Pairing (SYS64_BT's new BT_PAIR), and while
+      the controllers wait for the person the page shows the six digits
+      large, asks "Does Pixel 8 show this number?" and offers Yes and No
+      (BT_ANSWER); then "Paired with X." or "Not paired:" and why. A
+      paired device's row says Paired, and Forget (BT_FORGET) forgets
+      it. The info a program reads carries the pairing's state, number,
+      name and reason, and which devices are paired. When pairing cannot
+      start the log now says why (the adapter busy with a search, not an
+      address, an LE device). t_btui (new group): the desktop with the
+      made-up adapter of t_bt; a search finds the phone by name; picked
+      and Pair, the page shows exactly the digits the controller made up
+      and asks; Yes pairs it - the page and the row say so, the
+      controller was told yes once; Forget clears the row. (The first
+      run clicked Pair while the search still ran - the list fills as
+      devices answer, Pair waits for the search's end - and the row's
+      Paired ran past the window's edge.)
+- [x] **Bluetooth LE pairing: watches and keyboards** (kernel/bt.c,
+      kernel/xhci.c, kernel/usbhc.c, scripts/btadapter.py,
+      scripts/usbredir.py, scripts/tests/t_bt.py, scripts/tests/t_intelusb.py)
+      Pairing stopped at classic devices; a watch, a mouse or a
+      keyboard speaks only LE and pairs through the Security Manager
+      over L2CAP channel 6. bt.c now connects over LE (the LE
+      Connection Complete event), sends the Pairing Request (a display
+      with yes/no, bonding with MITM), works out the confirm values with
+      c1 and the short term key with s1 on the kernel's AES, starts
+      encryption with it and keeps what the device hands out (the long
+      term key with its EDIV and Rand, the identity key and address)
+      next to the classic link keys in .btkeys. A device with no input
+      pairs "just works"; a keyboard gets six digits to type, shown in
+      the log and the pairing's info. Paired again, the link is
+      encrypted with the long term key and nothing is asked. SMP's
+      packets arrive in ACL fragments that bt.c puts back together.
+      LE needed bulk IN that does not block: the xHCI driver gets a
+      polled bulk IN endpoint (xhci_bulk_in_poll) whose completions are
+      kept apart from endpoint zero's, so a waiting read no longer
+      takes another transfer's event. The usbredir server of the tests
+      now passes bulk OUT to the device, answers bulk IN from a queue
+      and drops reads the guest cancels. The made-up controller gains a
+      watch and a keyboard advertising over LE and does the responder's
+      side of SMP from the Core specification on Python's own AES;
+      'bt test' checks c1 and s1 against the specification's sample
+      values. t_bt: the watch pairs without a question, our request
+      says what it should, the reconnect uses the kept key; the keyboard
+      is shown digits, typed right it pairs (both confirm values held),
+      typed wrong it does not and the reason says so. t_intelusb's host
+      build of the drivers gets stand-ins for the file system, the
+      task's rights and random bytes that bt.c now uses.

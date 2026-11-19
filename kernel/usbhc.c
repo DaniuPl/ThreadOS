@@ -1072,6 +1072,15 @@ int usbhc_bulk_out(int dev, int ep, const void *data, int len)
                      &u->toggle_out);
 }
 
+int usbhc_bulk_in_poll(int dev, int ep, void *data, int len)
+{
+    /* the xHCI's alone: a controller from before it has no way here to
+       leave a bulk transfer waiting */
+    if (dev < 1 || controller != XHCI)
+        return -1;
+    return xhci_bulk_in_poll(dev, ep, data, len);
+}
+
 int usbhc_bulk_in(int dev, int ep, void *data, int len)
 {
     if (dev < 1)

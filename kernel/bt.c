@@ -38,6 +38,14 @@
 #include "include/task.h"
 #include "include/printk.h"
 #include "include/string.h"
+#include "include/fs.h"
+#include "include/random.h"
+#include "include/user.h"
+#include "../kernel64/task64.h"
+/* AES alone, for LE pairing's c1 and s1 - not the programs' calls */
+#define THREADOS_UAPI_H
+#include "../user/uaes.h"
+#undef THREADOS_UAPI_H
 
 #define DEVICES_MAX 12          /* how many neighbours we remember */
 #define NAME_MAX    32
@@ -77,6 +85,7 @@ struct neighbour {
        how it listens for pages, and its clock against ours */
     uint8_t scan_mode;
     uint16_t clock;
+    uint8_t addr_type;          /* LE: 0 public, 1 random */
     uint32_t cod;               /* the class of device: phone, headset... */
 };
 
@@ -182,9 +191,15 @@ static void ad_data(struct neighbour *n, const uint8_t *p, int len)
     }
 }
 
+static void le_conn_complete(const uint8_t *p, int len);
+
 static void le_meta(const uint8_t *p, int len)
 {
-    if (len < 2 || p[0] != 0x02)         /* only the advertising report */
+    if (len >= 1 && p[0] == 0x01) {      /* LE connection complete */
+        le_conn_complete(p + 1, len - 1);
+        return;
+    }
+    if (len < 2 || p[0] != 0x02)         /* else only the advertising report */
         return;
 
     int reports = p[1];
@@ -198,6 +213,7 @@ static void le_meta(const uint8_t *p, int len)
 
         struct neighbour *n = remember(addr, 0);
         if (n) {
+            n->addr_type = p[i + 1] & 1;
             ad_data(n, p + i + 9, dlen);
             n->rssi = (int)(int8_t)p[i + 9 + dlen];
         }
@@ -263,6 +279,8 @@ static void remote_name(const uint8_t *p, int len)
         seen[i].name[k] = 0;
     }
 }
+
+static void pair_event(uint8_t code, const uint8_t *p, int plen);
 
 void bt_event(const uint8_t *pkt, int len)
 {
@@ -358,6 +376,7 @@ void bt_event(const uint8_t *pkt, int len)
         return;
 
     default:
+        pair_event(code, p, plen);
         return;
     }
 }
@@ -676,6 +695,9 @@ static int try_port(int port)
     /* A dual-mode adapter is told the host speaks LE too */
     static const uint8_t le_host[2] = { 0x01, 0x00 };
     command(OP_WRITE_LE_HOST, le_host, 2, 1000);
+    /* Secure Simple Pairing, the only kind a phone still does */
+    static const uint8_t ssp_on = 1;
+    command(0x0C56, &ssp_on, 1, 1000);
     command(OP_READ_BDADDR, (const uint8_t *)0, 0, 1000);
     command(OP_READ_LOCAL_NAME, (const uint8_t *)0, 0, 1000);
     command(OP_READ_VERSION, (const uint8_t *)0, 0, 1000);
@@ -835,7 +857,12 @@ void bt_info_fill(struct bt_info *o)
         put_text(o->dev_addr[i], sizeof(o->dev_addr[i]), bt_found_addr(i));
         put_text(o->dev_name[i], sizeof(o->dev_name[i]), seen[i].name);
         o->dev_rssi[i] = seen[i].rssi;
+        o->dev_paired[i] = bt_paired(o->dev_addr[i]);
     }
+    o->pair_state = bt_pair_state();
+    o->pair_number = bt_pair_number();
+    put_text(o->pair_name, sizeof(o->pair_name), bt_pair_name());
+    put_text(o->pair_why, sizeof(o->pair_why), bt_pair_why());
 }
 
 /* A classic device found without its name is asked for it: a short
@@ -942,6 +969,8 @@ int bt_found_rssi(int i)
  * of packets and nothing else - and saying which is which is the whole
  * point of having it.
  */
+int bt_smp_selftest(void);
+
 void bt_selftest(void)
 {
     /* Command Complete for Read BD_ADDR. On the wire the address goes
@@ -1075,9 +1104,904 @@ void bt_selftest(void)
 
     /* And what it does NOT prove, said out loud rather than left to be
        assumed from a row of green ticks. */
+    bt_smp_selftest();
     printk("bt: this checks how packets are built and read, not a conversation "
            "with an adapter\n");
 
     have_addr = have_name = have_version = 0;
     nseen = 0;
+}
+
+/* --- pairing ---------------------------------------------------------
+ *
+ * Secure Simple Pairing, the way every phone, headset and computer
+ * since Bluetooth 2.1 pairs (Core 5.4, vol 3 part C 5.2.2; the HCI side
+ * in vol 4 part E 7.1 and 7.7). The two controllers do the whole of the
+ * cryptography between them - the elliptic curve, the commitments, the
+ * link key - and ask their hosts only what a person has to answer:
+ *
+ *   Create Connection, then Authentication Requested; the controller
+ *   asks for a link key (Link Key Request) - a device paired before
+ *   gets the one kept, any other a negative reply - then for our input
+ *   and output (IO Capability Request: a display and yes/no, MITM
+ *   protection, dedicated bonding), says the other side's, and asks
+ *   the person to confirm the six digits both screens show (User
+ *   Confirmation Request). Confirmed, the controllers finish, and the
+ *   new link key comes up (Link Key Notification) to be kept: next
+ *   time it answers the Link Key Request and nothing is asked. The link
+ *   is then encrypted, and closed again - pairing for its own sake
+ *   ("dedicated bonding").
+ *
+ * Link keys are secrets: they are kept in the root file .btkeys, written
+ * with the system's rights as the account database is.
+ */
+
+#define OP_CREATE_CONN      0x0405
+#define OP_DISCONNECT       0x0406
+#define OP_LINK_KEY_REPLY   0x040B
+#define OP_LINK_KEY_NEG     0x040C
+#define OP_AUTH_REQUESTED   0x0411
+#define OP_SET_ENCRYPTION   0x0413
+#define OP_IO_CAP_REPLY     0x042B
+#define OP_USER_CONFIRM     0x042C
+#define OP_USER_CONFIRM_NEG 0x042D
+#define OP_WRITE_SSP_MODE   0x0C56
+
+#define EV_CONN_COMPLETE    0x03
+#define EV_DISCONN_COMPLETE 0x05
+#define EV_AUTH_COMPLETE    0x06
+#define EV_ENCRYPT_CHANGE   0x08
+#define EV_LINK_KEY_REQ     0x17
+#define EV_LINK_KEY_NOTIFY  0x18
+#define EV_IO_CAP_REQ       0x31
+#define EV_IO_CAP_RESP      0x32
+#define EV_USER_CONFIRM_REQ 0x33
+#define EV_SSP_COMPLETE     0x36
+
+#define IO_DISPLAY_YES_NO   0x01
+#define IO_NO_INPUT_OUTPUT  0x03
+#define AUTH_MITM_DEDICATED 0x03
+
+#define KEYS_FILE ".btkeys"
+#define KEYS_MAX  8
+#define CONFIRM_MS 60000
+
+struct bt_key {
+    uint8_t addr[6];
+    uint8_t type;
+    uint8_t used;
+    uint8_t key[16];                    /* the link key, or LE's LTK */
+    char name[NAME_MAX];
+    uint8_t le, addr_type;              /* an LE device's, and its address's type */
+    uint8_t ediv[2], rand[8];           /* what names the LTK to the device */
+};
+
+static struct {
+    char magic[8];                      /* "BTKEYS2" */
+    struct bt_key k[KEYS_MAX];
+} keys;
+static int keys_loaded;
+
+static struct {
+    volatile int state;                 /* BT_PAIR_* */
+    uint8_t addr[6];
+    char name[NAME_MAX];
+    uint16_t handle;
+    volatile int connected;             /* 1 up, -1 refused */
+    volatile uint32_t number;
+    volatile int answer;                /* 1 confirmed, -1 refused */
+    int remote_io;
+    volatile int auth_done, auth_status, enc_done, gone, got_key;
+    int known;
+    int typing;                         /* LE: the digits are to be typed
+                                           on the device, not compared */
+    char why[96];
+} pr;
+
+static void keys_load(void)
+{
+    if (keys_loaded || !fs_ready())
+        return;
+    keys_loaded = 1;
+    /* The file is the system's: read with its rights, whoever asked
+       first (a shell's user, a program through Settings) */
+    int old_level = task64_level(), old_uid = task64_uid();
+    task64_set_uid(0);
+    task64_set_level(USER_ADMIN);
+    int n = fs_read(KEYS_FILE, &keys, sizeof(keys));
+    task64_set_level(old_level);
+    task64_set_uid(old_uid);
+    if (n != (int)sizeof(keys) || memcmp(keys.magic, "BTKEYS2", 8))
+        memset(&keys, 0, sizeof(keys));
+}
+
+static int keys_save(void)
+{
+    if (!fs_ready())
+        return -1;
+    memcpy(keys.magic, "BTKEYS2", 8);
+    int old_level = task64_level(), old_uid = task64_uid();
+    task64_set_uid(0);
+    task64_set_level(USER_ADMIN);
+    int r = fs_write(KEYS_FILE, &keys, sizeof(keys));
+    task64_set_level(old_level);
+    task64_set_uid(old_uid);
+    return r;
+}
+
+static struct bt_key *key_find(const uint8_t *addr)
+{
+    keys_load();
+    for (int i = 0; i < KEYS_MAX; i++)
+        if (keys.k[i].used && !memcmp(keys.k[i].addr, addr, 6))
+            return &keys.k[i];
+    return (struct bt_key *)0;
+}
+
+static void key_keep(const uint8_t *addr, const uint8_t *key, uint8_t type)
+{
+    struct bt_key *k = key_find(addr);
+    for (int i = 0; i < KEYS_MAX && !k; i++)
+        if (!keys.k[i].used)
+            k = &keys.k[i];
+    if (!k)
+        k = &keys.k[0];                 /* full: the oldest goes */
+    memset(k, 0, sizeof(*k));
+    k->used = 1;
+    memcpy(k->addr, addr, 6);
+    memcpy(k->key, key, 16);
+    k->type = type;
+    put_text(k->name, sizeof(k->name), pr.name);
+    if (keys_save() < 0)
+        printk("[bt] the link key could not be kept on the disk\n");
+}
+
+static void pair_fail(const char *why)
+{
+    put_text(pr.why, sizeof(pr.why), why);
+    pr.state = BT_PAIR_FAILED;
+    printk("[bt] not paired with %s: %s\n", pr.name, why);
+}
+
+/* The events of a pairing, from bt_event: answers that need nobody are
+   sent from here; the person's answer is the pairing thread's */
+static void pair_event(uint8_t code, const uint8_t *p, int plen)
+{
+    if (pr.state == BT_PAIR_IDLE)
+        return;
+    uint8_t r[24];
+    switch (code) {
+    case EV_CONN_COMPLETE:
+        if (plen >= 11 && !memcmp(p + 3, pr.addr, 6)) {
+            pr.handle = (uint16_t)((p[1] | (p[2] << 8)) & 0x0FFF);
+            pr.connected = p[0] == 0 ? 1 : -1;
+        }
+        return;
+    case EV_LINK_KEY_REQ:
+        if (plen < 6 || memcmp(p, pr.addr, 6))
+            return;
+        {
+            const struct bt_key *k = key_find(p);
+            memcpy(r, p, 6);
+            if (k) {
+                memcpy(r + 6, k->key, 16);
+                pr.known = 1;
+                send_command(OP_LINK_KEY_REPLY, r, 22);
+            } else {
+                send_command(OP_LINK_KEY_NEG, r, 6);
+            }
+        }
+        return;
+    case EV_IO_CAP_REQ:
+        if (plen < 6 || memcmp(p, pr.addr, 6))
+            return;
+        memcpy(r, p, 6);
+        r[6] = IO_DISPLAY_YES_NO;
+        r[7] = 0;                       /* no out-of-band data */
+        r[8] = AUTH_MITM_DEDICATED;
+        send_command(OP_IO_CAP_REPLY, r, 9);
+        return;
+    case EV_IO_CAP_RESP:
+        if (plen >= 9 && !memcmp(p, pr.addr, 6))
+            pr.remote_io = p[6];
+        return;
+    case EV_USER_CONFIRM_REQ:
+        if (plen < 10 || memcmp(p, pr.addr, 6))
+            return;
+        pr.number = (uint32_t)(p[6] | (p[7] << 8) | (p[8] << 16) |
+                               ((uint32_t)p[9] << 24)) % 1000000;
+        /* A device with no screen and no buttons cannot show a number:
+           "just works", nothing to compare */
+        if (pr.remote_io == IO_NO_INPUT_OUTPUT) {
+            pr.answer = 1;
+        } else {
+            char six[7];                /* printk has no zero padding */
+            for (int i = 5, v = (int)pr.number; i >= 0; i--, v /= 10)
+                six[i] = (char)('0' + v % 10);
+            six[6] = 0;
+            printk("[bt] pairing with %s: does it show %s? "
+                   "('bt yes' or 'bt no')\n", pr.name, six);
+        }
+        pr.state = BT_PAIR_CONFIRM;
+        return;
+    case EV_SSP_COMPLETE:
+        if (plen >= 7 && !memcmp(p + 1, pr.addr, 6) && p[0] != 0)
+            pr.auth_status = p[0];
+        return;
+    case EV_LINK_KEY_NOTIFY:
+        if (plen >= 23 && !memcmp(p, pr.addr, 6)) {
+            key_keep(p, p + 6, p[22]);
+            pr.got_key = 1;
+        }
+        return;
+    case EV_AUTH_COMPLETE:
+        if (plen >= 3 && ((p[1] | (p[2] << 8)) & 0x0FFF) == pr.handle) {
+            if (p[0] != 0)
+                pr.auth_status = p[0];
+            pr.auth_done = 1;
+        }
+        return;
+    case EV_ENCRYPT_CHANGE:
+        if (plen >= 4 && ((p[1] | (p[2] << 8)) & 0x0FFF) == pr.handle)
+            pr.enc_done = p[0] == 0 && p[3] ? 1 : -1;
+        return;
+    case EV_DISCONN_COMPLETE:
+        if (plen >= 4 && ((p[1] | (p[2] << 8)) & 0x0FFF) == pr.handle)
+            pr.gone = 1;
+        return;
+    }
+}
+
+/* Reads events until a flag is set, for up to ms */
+static int pair_wait(volatile int *flag, uint32_t ms)
+{
+    for (uint32_t t = 0; t < ms && !*flag; t += 10)
+        if (poll_event() <= 0)
+            task_sleep(10);
+    return *flag;
+}
+
+static void pair_thread(void *arg)
+{
+    (void)arg;
+    const struct neighbour *n = (const struct neighbour *)0;
+    for (int i = 0; i < nseen; i++)
+        if (!memcmp(seen[i].addr, pr.addr, 6))
+            n = &seen[i];
+    uint8_t c[13];
+    memcpy(c, pr.addr, 6);
+    c[6] = 0x18;                        /* DM1 DH1 DM3 DH3 DM5 DH5 */
+    c[7] = 0xCC;
+    c[8] = n ? n->scan_mode : 0x01;     /* page scan repetition mode */
+    c[9] = 0;
+    uint16_t clock = n && n->clock ? (uint16_t)(n->clock | 0x8000) : 0;
+    c[10] = (uint8_t)clock;
+    c[11] = (uint8_t)(clock >> 8);
+    c[12] = 1;                          /* the other side may lead */
+    printk("[bt] pairing with %s\n", pr.name);
+    if (send_command(OP_CREATE_CONN, c, 13) < 0 ||
+        !pair_wait(&pr.connected, 10000) || pr.connected < 0) {
+        pair_fail(pr.connected < 0 ? "it would not connect"
+                                   : "it did not answer");
+        scanning = 0;
+        return;
+    }
+    uint8_t h[3] = { (uint8_t)pr.handle, (uint8_t)(pr.handle >> 8), 1 };
+    send_command(OP_AUTH_REQUESTED, h, 2);
+    for (uint32_t t = 0; t < CONFIRM_MS && !pr.auth_done; t += 10) {
+        if (pr.state == BT_PAIR_CONFIRM && pr.answer) {
+            send_command(pr.answer > 0 ? OP_USER_CONFIRM : OP_USER_CONFIRM_NEG,
+                         pr.addr, 6);
+            pr.state = BT_PAIR_BONDING;
+        }
+        if (poll_event() <= 0)
+            task_sleep(10);
+    }
+    if (!pr.auth_done || pr.auth_status) {
+        pair_fail(pr.answer < 0 ? "refused here"
+                  : !pr.auth_done ? "no answer in time"
+                  : pr.auth_status == 0x05 ? "the numbers did not match, or "
+                                             "it was refused there"
+                  : pr.known ? "the key kept from before was refused - forget "
+                               "it and pair again"
+                  : "it did not complete");
+    } else {
+        send_command(OP_SET_ENCRYPTION, h, 3);
+        pair_wait(&pr.enc_done, 3000);
+        pr.state = BT_PAIR_PAIRED;
+        printk("[bt] paired with %s%s%s\n", pr.name,
+               pr.known ? " (the key kept from before)" : "",
+               pr.enc_done > 0 ? ", encrypted" : "");
+    }
+    uint8_t d[3] = { (uint8_t)pr.handle, (uint8_t)(pr.handle >> 8), 0x13 };
+    send_command(OP_DISCONNECT, d, 3);
+    pair_wait(&pr.gone, 3000);
+    scanning = 0;
+}
+
+static int le_pair_start(const struct neighbour *n);
+
+int bt_pair_start(const char *addr_or_index)
+{
+    if (!present || scanning || scan_pending) {
+        printk("[bt] cannot pair now: %s\n", !present ? "no adapter"
+               : "the adapter is busy (a search)");
+        return -1;
+    }
+    uint8_t a[6];
+    const struct neighbour *n = (const struct neighbour *)0;
+    if (addr_or_index[0] >= '1' && addr_or_index[0] <= '9' &&
+        !addr_or_index[1]) {
+        int i = addr_or_index[0] - '1';
+        if (i < nseen)
+            n = &seen[i];
+    } else {
+        /* aa:bb:cc:dd:ee:ff, written highest byte first */
+        for (int i = 0, k = 0; i < 6; i++) {
+            int v = 0;
+            for (int j = 0; j < 2; j++, k++) {
+                char ch = addr_or_index[k];
+                int d = ch >= '0' && ch <= '9' ? ch - '0'
+                        : ch >= 'a' && ch <= 'f' ? ch - 'a' + 10
+                        : ch >= 'A' && ch <= 'F' ? ch - 'A' + 10 : -1;
+                if (d < 0) {
+                    printk("[bt] cannot pair: '%s' is not an address\n",
+                           addr_or_index);
+                    return -1;
+                }
+                v = v * 16 + d;
+            }
+            a[5 - i] = (uint8_t)v;
+            if (i < 5 && addr_or_index[k++] != ':') {
+                printk("[bt] cannot pair: '%s' is not an address\n",
+                       addr_or_index);
+                return -1;
+            }
+        }
+        for (int i = 0; i < nseen; i++)
+            if (!memcmp(seen[i].addr, a, 6))
+                n = &seen[i];
+    }
+    if (n && !n->classic)
+        return le_pair_start(n);
+    memset(&pr, 0, sizeof(pr));
+    if (n) {
+        memcpy(pr.addr, n->addr, 6);
+        put_text(pr.name, sizeof(pr.name), n->name[0] ? n->name : "the device");
+    } else {
+        memcpy(pr.addr, a, 6);
+        const struct bt_key *k = key_find(a);
+        put_text(pr.name, sizeof(pr.name), k && k->name[0] ? k->name
+                                                            : "the device");
+    }
+    pr.state = BT_PAIR_CONNECTING;
+    scanning = 1;                       /* one user of the adapter */
+    if (!task_create("btpair", pair_thread, (void *)0)) {
+        scanning = 0;
+        pr.state = BT_PAIR_IDLE;
+        return -1;
+    }
+    return 0;
+}
+
+void bt_pair_answer(int yes)
+{
+    if (pr.state == BT_PAIR_CONFIRM && !pr.answer)
+        pr.answer = yes ? 1 : -1;
+}
+
+int bt_pair_state(void)
+{
+    return pr.state;
+}
+
+uint32_t bt_pair_number(void)
+{
+    return pr.number;
+}
+
+const char *bt_pair_name(void)
+{
+    return pr.name;
+}
+
+const char *bt_pair_why(void)
+{
+    return pr.why;
+}
+
+int bt_paired(const char *addr_text_in)
+{
+    keys_load();
+    char t[18];
+    for (int i = 0; i < KEYS_MAX; i++) {
+        if (!keys.k[i].used)
+            continue;
+        addr_text(keys.k[i].addr, t);
+        if (!strcmp(t, addr_text_in))
+            return 1;
+    }
+    return 0;
+}
+
+int bt_forget(const char *addr_text_in)
+{
+    keys_load();
+    char t[18];
+    for (int i = 0; i < KEYS_MAX; i++) {
+        if (!keys.k[i].used)
+            continue;
+        addr_text(keys.k[i].addr, t);
+        if (!strcmp(t, addr_text_in)) {
+            memset(&keys.k[i], 0, sizeof(keys.k[i]));
+            return keys_save();
+        }
+    }
+    return -1;
+}
+
+/* The devices paired: their names and addresses, for 'bt' and Settings */
+int bt_paired_list(char names[][NAME_MAX], char addrs[][18], int max)
+{
+    keys_load();
+    int n = 0;
+    for (int i = 0; i < KEYS_MAX && n < max; i++)
+        if (keys.k[i].used) {
+            put_text(names[n], NAME_MAX, keys.k[i].name);
+            addr_text(keys.k[i].addr, addrs[n]);
+            n++;
+        }
+    return n;
+}
+
+/* --- LE pairing --------------------------------------------------------
+ *
+ * Watches, mice, keyboards and tags pair over Bluetooth Low Energy, by
+ * the Security Manager Protocol on L2CAP channel 6 (Core 5.4, vol 3
+ * part H). The Intel 3160's controller is Bluetooth 4.0, which leaves
+ * the host LE legacy pairing - the elliptic curve of Secure Connections
+ * needs 4.2 - and that is what every LE device still accepts:
+ *
+ *   we connect (LE Create Connection) and send a Pairing Request: a
+ *   display and yes/no (so a keyboard is shown six digits to type, and
+ *   anything with no keyboard pairs without a question - "Just Works"),
+ *   bonding with MITM protection, and the device to hand us its long
+ *   term key and identity; it answers with its own Pairing Response;
+ *   the temporary key TK is 0 (Just Works) or the six digits; each side
+ *   sends a confirm value c1(TK, random, ...) and then the random, and
+ *   checks the other's; both then hold the short term key s1(TK, ...),
+ *   which encrypts the link; over it the device sends its long term key
+ *   (LTK, EDIV, Rand) and identity, which are kept - next time the link
+ *   is encrypted with the LTK at once, and nothing is asked.
+ *
+ * c1 and s1 are AES (user/uaes.h); their values are little-endian here,
+ * AES's big-endian, hence the turning round. The Core specification's
+ * own example values are checked in 'bt test'.
+ */
+
+#define OP_LE_CREATE_CONN   0x200D
+#define OP_LE_START_ENC     0x2019
+#define L2CAP_CID_SMP       0x0006
+#define SMP_PAIRING_REQ     0x01
+#define SMP_PAIRING_RSP     0x02
+#define SMP_CONFIRM         0x03
+#define SMP_RANDOM          0x04
+#define SMP_FAILED          0x05
+#define SMP_ENC_INFO        0x06
+#define SMP_MASTER_ID       0x07
+#define SMP_ID_INFO         0x08
+#define SMP_ID_ADDR         0x09
+#define SMP_SECURITY_REQ    0x0B
+#define SMP_IO_KEYBOARD     0x02
+#define SMP_IO_KEYB_DISPLAY 0x04
+#define SMP_AUTH_BOND_MITM  0x05
+#define SMP_KD_ENC_ID       0x03
+
+static struct {
+    volatile int conn;                  /* 1 up, -1 refused */
+    uint16_t handle;
+    uint8_t preq[7], pres[7];
+    uint8_t tk[16], mrand[16], sconfirm[16], srand[16];
+    volatile int got_rsp, got_confirm, got_random, failed;
+    volatile int got_ltk, got_mid, got_irk, got_idaddr;
+    uint8_t ltk[16], ediv[2], rand[8];
+    uint8_t smp[64];                    /* the message waiting, in order */
+    volatile int enc;                   /* 1 on, -1 refused */
+} le;
+
+static void smp_e(const uint8_t k[16], const uint8_t in[16], uint8_t out[16])
+{
+    uint8_t kb[16], ib[16];
+    for (int i = 0; i < 16; i++) {
+        kb[i] = k[15 - i];
+        ib[i] = in[15 - i];
+    }
+    struct aes a;
+    aes_key(&a, kb, 128);
+    aes_encrypt_block(&a, ib, ib);
+    for (int i = 0; i < 16; i++)
+        out[i] = ib[15 - i];
+}
+
+/* c1(k, r, preq, pres, iat, rat, ia, ra) (vol 3 part H 2.2.3) */
+static void smp_c1(const uint8_t k[16], const uint8_t r[16],
+                   const uint8_t preq[7], const uint8_t pres[7], uint8_t iat,
+                   uint8_t rat, const uint8_t ia[6], const uint8_t ra[6],
+                   uint8_t out[16])
+{
+    uint8_t p1[16], p2[16], t[16];
+    p1[0] = iat;
+    p1[1] = rat;
+    memcpy(p1 + 2, preq, 7);
+    memcpy(p1 + 9, pres, 7);
+    memcpy(p2, ra, 6);
+    memcpy(p2 + 6, ia, 6);
+    memset(p2 + 12, 0, 4);
+    for (int i = 0; i < 16; i++)
+        t[i] = (uint8_t)(r[i] ^ p1[i]);
+    smp_e(k, t, t);
+    for (int i = 0; i < 16; i++)
+        t[i] ^= p2[i];
+    smp_e(k, t, out);
+}
+
+/* s1(k, r1, r2): the low halves, r1's above r2's (2.2.4) */
+static void smp_s1(const uint8_t k[16], const uint8_t r1[16],
+                   const uint8_t r2[16], uint8_t out[16])
+{
+    uint8_t r[16];
+    memcpy(r, r2, 8);
+    memcpy(r + 8, r1, 8);
+    smp_e(k, r, out);
+}
+
+static void le_conn_complete(const uint8_t *p, int len)
+{
+    /* status, handle, role, peer address type, peer address, ... */
+    if (pr.state == BT_PAIR_IDLE || len < 11 || memcmp(p + 5, pr.addr, 6))
+        return;
+    le.handle = (uint16_t)((p[1] | (p[2] << 8)) & 0x0FFF);
+    le.conn = p[0] == 0 ? 1 : -1;
+}
+
+static int smp_send(const uint8_t *msg, int n)
+{
+    uint8_t pkt[4 + 64];
+    pkt[0] = (uint8_t)n;
+    pkt[1] = 0;
+    pkt[2] = L2CAP_CID_SMP;
+    pkt[3] = 0;
+    memcpy(pkt + 4, msg, (uint32_t)n);
+    return bt_acl_send(le.handle, 0x00, 0, pkt, (uint16_t)(4 + n));
+}
+
+/* One SMP message from the device */
+static void smp_rx(const uint8_t *m, int n)
+{
+    if (n < 1)
+        return;
+    switch (m[0]) {
+    case SMP_PAIRING_RSP:
+        if (n >= 7) {
+            memcpy(le.pres, m, 7);
+            le.got_rsp = 1;
+        }
+        return;
+    case SMP_CONFIRM:
+        if (n >= 17) {
+            memcpy(le.sconfirm, m + 1, 16);
+            le.got_confirm = 1;
+        }
+        return;
+    case SMP_RANDOM:
+        if (n >= 17) {
+            memcpy(le.srand, m + 1, 16);
+            le.got_random = 1;
+        }
+        return;
+    case SMP_FAILED:
+        le.failed = n >= 2 ? m[1] : 0xFF;
+        return;
+    case SMP_ENC_INFO:
+        if (n >= 17) {
+            memcpy(le.ltk, m + 1, 16);
+            le.got_ltk = 1;
+        }
+        return;
+    case SMP_MASTER_ID:
+        if (n >= 11) {
+            memcpy(le.ediv, m + 1, 2);
+            memcpy(le.rand, m + 3, 8);
+            le.got_mid = 1;
+        }
+        return;
+    case SMP_ID_INFO:
+        le.got_irk = 1;
+        return;
+    case SMP_ID_ADDR:
+        le.got_idaddr = 1;
+        return;
+    }
+}
+
+/* ACL data in: L2CAP frames, put together from their pieces */
+static uint8_t l2_buf[512];
+static int l2_have, l2_want;
+
+static void acl_in(const uint8_t *pkt, int n)
+{
+    uint16_t handle;
+    uint8_t pb, bc;
+    const uint8_t *d;
+    uint16_t dl;
+    if (acl_parse(pkt, n, &handle, &pb, &bc, &d, &dl) < 0)
+        return;
+    if (pb != 0x01) {                   /* a start: the L2CAP header */
+        if (dl < 4)
+            return;
+        l2_want = 4 + (d[0] | (d[1] << 8));
+        l2_have = 0;
+        if (l2_want > (int)sizeof(l2_buf)) {
+            l2_want = 0;
+            return;
+        }
+    }
+    if (!l2_want || l2_have + dl > l2_want)
+        return;
+    memcpy(l2_buf + l2_have, d, dl);
+    l2_have += dl;
+    if (l2_have < l2_want)
+        return;
+    uint16_t cid = (uint16_t)(l2_buf[2] | (l2_buf[3] << 8));
+    if (handle == le.handle && cid == L2CAP_CID_SMP)
+        smp_rx(l2_buf + 4, l2_want - 4);
+    l2_want = 0;
+}
+
+/* Events and ACL data, one look at each */
+static int le_pump(void)
+{
+    int got = poll_event() > 0;
+    if (acl_ready) {
+        int n = usbhc_bulk_in_poll(dev, ep_acl_in, acl_rx, sizeof(acl_rx));
+        if (n > 0) {
+            acl_in(acl_rx, n);
+            got = 1;
+        }
+    }
+    return got;
+}
+
+static int le_wait(volatile int *flag, uint32_t ms)
+{
+    for (uint32_t t = 0; t < ms && !*flag && !le.failed; t += 10)
+        if (!le_pump())
+            task_sleep(10);
+    return *flag;
+}
+
+static int le_encrypt(const uint8_t ltk[16], const uint8_t ediv[2],
+                      const uint8_t rand[8])
+{
+    uint8_t c[28];
+    c[0] = (uint8_t)le.handle;
+    c[1] = (uint8_t)(le.handle >> 8);
+    memcpy(c + 2, rand, 8);
+    memcpy(c + 10, ediv, 2);
+    memcpy(c + 12, ltk, 16);
+    pr.enc_done = 0;
+    pr.handle = le.handle;              /* Encryption Change comes to pr */
+    if (send_command(OP_LE_START_ENC, c, 28) < 0)
+        return 0;
+    pair_wait(&pr.enc_done, 3000);
+    return pr.enc_done > 0;
+}
+
+static void le_pair_thread(void *arg)
+{
+    const struct neighbour *n = (const struct neighbour *)arg;
+    uint8_t c[25];
+    memset(c, 0, sizeof(c));
+    c[0] = 0x60;                        /* scan interval, 60 ms */
+    c[2] = 0x30;                        /* window, 30 ms */
+    c[5] = n->addr_type;
+    memcpy(c + 6, n->addr, 6);
+    c[13] = 0x18;                       /* connection interval 30-50 ms */
+    c[15] = 0x28;
+    c[19] = 0xF4;                       /* supervision timeout 5 s */
+    c[20] = 0x01;
+    printk("[bt] pairing with %s (LE)\n", pr.name);
+    if (send_command(OP_LE_CREATE_CONN, c, 25) < 0 ||
+        !le_wait(&le.conn, 10000) || le.conn < 0) {
+        pair_fail(le.conn < 0 ? "it would not connect" : "it did not answer");
+        scanning = 0;
+        return;
+    }
+    const struct bt_key *k = key_find(pr.addr);
+    if (k && k->le) {
+        /* Bonded before: the long term key, and nothing asked */
+        pr.known = 1;
+        if (le_encrypt(k->key, k->ediv, k->rand)) {
+            pr.state = BT_PAIR_PAIRED;
+            printk("[bt] paired with %s (the key kept from before), "
+                   "encrypted\n", pr.name);
+        } else {
+            pair_fail("the key kept from before was refused - forget it "
+                      "and pair again");
+        }
+    } else {
+        static const uint8_t req[7] = { SMP_PAIRING_REQ, 0x01, 0x00,
+                                        SMP_AUTH_BOND_MITM, 16, 0x00,
+                                        SMP_KD_ENC_ID };
+        memcpy(le.preq, req, 7);
+        smp_send(req, 7);
+        if (!le_wait(&le.got_rsp, 10000)) {
+            pair_fail(le.failed ? "it refused to pair" : "it did not answer");
+            goto out;
+        }
+        /* A keyboard is given six digits to type; anything else, Just
+           Works (legacy pairing's table, vol 3 part H 2.3.5.1) */
+        memset(le.tk, 0, 16);
+        if (le.pres[1] == SMP_IO_KEYBOARD || le.pres[1] == SMP_IO_KEYB_DISPLAY) {
+            uint32_t v;
+            random_bytes(&v, sizeof(v));
+            v %= 1000000;
+            le.tk[0] = (uint8_t)v;
+            le.tk[1] = (uint8_t)(v >> 8);
+            le.tk[2] = (uint8_t)(v >> 16);
+            pr.number = v;
+            pr.typing = 1;
+            pr.state = BT_PAIR_CONFIRM;
+            char six[7];
+            for (int i = 5, x = (int)v; i >= 0; i--, x /= 10)
+                six[i] = (char)('0' + x % 10);
+            six[6] = 0;
+            printk("[bt] pairing with %s: type %s on it, then Enter\n",
+                   pr.name, six);
+        }
+        random_bytes(le.mrand, 16);
+        uint8_t mconfirm[17];
+        mconfirm[0] = SMP_CONFIRM;
+        smp_c1(le.tk, le.mrand, le.preq, le.pres, 0, n->addr_type,
+               local_addr, n->addr, mconfirm + 1);
+        smp_send(mconfirm, 17);
+        if (!le_wait(&le.got_confirm, pr.typing ? CONFIRM_MS : 10000)) {
+            pair_fail(le.failed ? "the digits were not typed right, or it "
+                                  "refused" : "no answer in time");
+            goto out;
+        }
+        uint8_t rnd[17];
+        rnd[0] = SMP_RANDOM;
+        memcpy(rnd + 1, le.mrand, 16);
+        smp_send(rnd, 17);
+        if (!le_wait(&le.got_random, 10000)) {
+            pair_fail(le.failed ? "it refused our confirm value (the "
+                                  "digits typed wrong?)" : "no answer in time");
+            goto out;
+        }
+        uint8_t check[16];
+        smp_c1(le.tk, le.srand, le.preq, le.pres, 0, n->addr_type,
+               local_addr, n->addr, check);
+        if (memcmp(check, le.sconfirm, 16)) {
+            static const uint8_t fail[2] = { SMP_FAILED, 0x04 };
+            smp_send(fail, 2);
+            pair_fail("its confirm value does not hold up");
+            goto out;
+        }
+        pr.state = BT_PAIR_BONDING;
+        uint8_t stk[16];
+        static const uint8_t zero[8];
+        smp_s1(le.tk, le.srand, le.mrand, stk);
+        if (!le_encrypt(stk, zero, zero)) {
+            pair_fail("the link would not encrypt");
+            goto out;
+        }
+        /* The keys it hands over, now that nobody else can read them */
+        le_wait(&le.got_mid, 5000);
+        if (le.pres[6] & 0x02)          /* its identity is to come too */
+            le_wait(&le.got_idaddr, 2000);
+        if (!le.got_ltk || !le.got_mid) {
+            pair_fail("it gave no long term key");
+            goto out;
+        }
+        struct bt_key *slot;
+        key_keep(pr.addr, le.ltk, 0);
+        slot = key_find(pr.addr);
+        if (slot) {
+            slot->le = 1;
+            slot->addr_type = n->addr_type;
+            memcpy(slot->ediv, le.ediv, 2);
+            memcpy(slot->rand, le.rand, 8);
+            keys_save();
+        }
+        pr.state = BT_PAIR_PAIRED;
+        printk("[bt] paired with %s, encrypted%s\n", pr.name,
+               le.got_irk ? ", its identity kept" : "");
+    }
+out:;
+    uint8_t d[3] = { (uint8_t)le.handle, (uint8_t)(le.handle >> 8), 0x13 };
+    pr.handle = le.handle;
+    pr.gone = 0;
+    send_command(OP_DISCONNECT, d, 3);
+    pair_wait(&pr.gone, 3000);
+    scanning = 0;
+}
+
+static int le_pair_start(const struct neighbour *n)
+{
+    if (!acl_ready) {
+        printk("[bt] cannot pair with %s: no data path to the adapter (LE "
+               "pairing needs its bulk endpoints on an xHCI)\n", n->name);
+        return -1;
+    }
+    memset(&le, 0, sizeof(le));
+    memset(&pr, 0, sizeof(pr));
+    memcpy(pr.addr, n->addr, 6);
+    put_text(pr.name, sizeof(pr.name), n->name[0] ? n->name : "the device");
+    pr.state = BT_PAIR_CONNECTING;
+    scanning = 1;
+    if (!task_create("btlepair", le_pair_thread, (void *)n)) {
+        scanning = 0;
+        pr.state = BT_PAIR_IDLE;
+        return -1;
+    }
+    return 0;
+}
+
+/* The Core specification's own values for c1 and s1 (vol 3 part H
+   2.2.3, 2.2.4), for 'bt test' */
+int bt_smp_selftest(void)
+{
+    static const uint8_t k[16];
+    uint8_t r[16], preq[7], pres[7], ia[6], ra[6], out[16];
+    static const uint8_t r_be[16] = { 0x57, 0x83, 0xD5, 0x21, 0x56, 0xAD,
+                                      0x6F, 0x0E, 0x63, 0x88, 0x27, 0x4E,
+                                      0xC6, 0x70, 0x2E, 0xE0 };
+    static const uint8_t preq_be[7] = { 0x07, 0x07, 0x10, 0x00, 0x00, 0x01,
+                                        0x01 };
+    static const uint8_t pres_be[7] = { 0x05, 0x00, 0x08, 0x00, 0x00, 0x03,
+                                        0x02 };
+    static const uint8_t ia_be[6] = { 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6 };
+    static const uint8_t ra_be[6] = { 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6 };
+    static const uint8_t c1_be[16] = { 0x1E, 0x1E, 0x3F, 0xEF, 0x87, 0x89,
+                                       0x88, 0xEA, 0xD2, 0xA7, 0x4D, 0xC5,
+                                       0xBE, 0xF1, 0x3B, 0x86 };
+    static const uint8_t r1_be[16] = { 0x00, 0x0F, 0x0E, 0x0D, 0x0C, 0x0B,
+                                       0x0A, 0x09, 0x11, 0x22, 0x33, 0x44,
+                                       0x55, 0x66, 0x77, 0x88 };
+    static const uint8_t r2_be[16] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+                                       0x07, 0x08, 0x99, 0xAA, 0xBB, 0xCC,
+                                       0xDD, 0xEE, 0xFF, 0x00 };
+    static const uint8_t s1_be[16] = { 0x9A, 0x1F, 0xE1, 0xF0, 0xE8, 0xB0,
+                                       0xF4, 0x9B, 0x5B, 0x42, 0x16, 0xAE,
+                                       0x79, 0x6D, 0xA0, 0x62 };
+    /* the specification writes its values most significant octet first */
+    for (int i = 0; i < 16; i++)
+        r[i] = r_be[15 - i];
+    for (int i = 0; i < 7; i++) {
+        preq[i] = preq_be[6 - i];
+        pres[i] = pres_be[6 - i];
+    }
+    for (int i = 0; i < 6; i++) {
+        ia[i] = ia_be[5 - i];
+        ra[i] = ra_be[5 - i];
+    }
+    smp_c1(k, r, preq, pres, 1, 0, ia, ra, out);
+    int ok = 1;
+    for (int i = 0; i < 16; i++)
+        ok &= out[i] == c1_be[15 - i];
+    uint8_t r1[16], r2[16];
+    for (int i = 0; i < 16; i++) {
+        r1[i] = r1_be[15 - i];
+        r2[i] = r2_be[15 - i];
+    }
+    smp_s1(k, r1, r2, out);
+    int ok2 = 1;
+    for (int i = 0; i < 16; i++)
+        ok2 &= out[i] == s1_be[15 - i];
+    printk("SMP c1 (the Core specification's example): %s\n",
+           ok ? "OK" : "WRONG");
+    printk("SMP s1 (the Core specification's example): %s\n",
+           ok2 ? "OK" : "WRONG");
+    return ok && ok2;
 }

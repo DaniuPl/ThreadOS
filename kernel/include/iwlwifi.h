@@ -213,6 +213,9 @@ const uint8_t *iwlwifi_mac(void);
    for the driver's. IWL_OK, or IWL_ERR_* with the reason in
    iwlwifi_state()->last_error */
 int iwlwifi_join(const char *ssid, const char *password);
+/* The same, not waited for: 0 started, -1 no card ready to (the reason
+   then in last_error); the link state says how it goes */
+int iwlwifi_join_start(const char *ssid, const char *password);
 /* The same on the driver's thread (or a test standing in for it), by
    the network's BSSID */
 int iwlwifi_join_now(const uint8_t bssid[6], const char *password);

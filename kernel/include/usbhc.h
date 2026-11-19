@@ -100,6 +100,8 @@ int usbhc_iso_close(int dev);
 
 int usbhc_bulk_out(int dev, int ep, const void *data, int len);
 int usbhc_bulk_in(int dev, int ep, void *data, int len);
+/* A bulk IN looked at, not waited on: 0 nothing yet, n bytes, -1 */
+int usbhc_bulk_in_poll(int dev, int ep, void *data, int len);
 
 /* The two requests every driver above here makes, spelled once.
  *

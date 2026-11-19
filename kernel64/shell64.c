@@ -595,11 +595,37 @@ static void cmd_bt(const char *arg)
         return;
     }
 
+    if (starts_with(arg, "pair ")) {
+        const char *who = arg + 5;
+        while (*who == ' ')
+            who++;
+        if (bt_pair_start(who) < 0)
+            printk("bt: cannot pair with '%s' now (busy, not a classic "
+                   "device, or not heard in the last 'bt scan')\n", who);
+        return;
+    }
+    if (!strcmp(arg, "yes") || !strcmp(arg, "no")) {
+        if (bt_pair_state() != BT_PAIR_CONFIRM)
+            printk("bt: no pairing is waiting for an answer\n");
+        else
+            bt_pair_answer(arg[0] == 'y');
+        return;
+    }
+    if (starts_with(arg, "forget ")) {
+        printk(bt_forget(arg + 7) == 0 ? "bt: forgotten\n"
+                                       : "bt: not a paired device\n");
+        return;
+    }
+
     if (arg[0] != 's') {                 /* status */
         printk("adapter: %s\n", bt_address());
         printk("name:    %s\n", bt_name());
         printk("version: %s\n", bt_version());
-        printk("( 'bt scan' - who is within reach )\n");
+        static char names[8][32], addrs[8][18];
+        int np = bt_paired_list(names, addrs, 8);
+        for (int i = 0; i < np; i++)
+            printk("paired:  %s  %s\n", addrs[i], names[i]);
+        printk("( 'bt scan' - who is within reach; 'bt pair <address|n>' )\n");
         return;
     }
 
