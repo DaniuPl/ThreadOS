@@ -18,6 +18,7 @@
 #include "include/tfs4.h"
 #include "include/string.h"
 #include "include/printk.h"
+#include "include/blk.h"
 
 static const struct fs_backend *be;
 
@@ -51,6 +52,14 @@ int fs_init(void)
 int fs_ready(void)
 {
     return be != 0;
+}
+
+int fs_format_tfs4(void)
+{
+    if (!blk_present() || !tfs4_format(0, blk_sectors()) || !tfs4_mount())
+        return 0;
+    be = &tfs4_backend;
+    return 1;
 }
 
 int fs_format_now(int partition)

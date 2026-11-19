@@ -258,6 +258,10 @@ it, and to README's prerequisites.
   `e2fsck -fn` exits 0 and `debugfs -R 'cat ...'` gives the same bytes.
   A second case: an image made by the kernel's `mkfs` passes
   `e2fsck -fn`.
+- **Done** (journal: "TFS4 stage 3"). The kernel's mkfs is reached by
+  `format4` (the whole disk) until stage 5 moves `format` and the
+  installer to TFS4; e2fsck's report is read, not only its exit code,
+  which is 0 for a wrong free count in the superblock.
 
 ### Stage 4 - real POSIX metadata - 1.5 to 2 days
 

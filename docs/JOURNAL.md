@@ -10913,3 +10913,44 @@ works and is checked by `make test`.
       damaged images (mke2fs's, then corrupted) under ASan and UBSan and
       walks all of each: 1500 cases, none failed, about two thirds still
       mounting.
+- [x] **TFS4 stage 3: writing the ext2 format, and the kernel's mkfs**
+      (kernel/tfs4.c, kernel/include/tfs4.h, kernel/fs.c,
+      kernel/include/fs.h, kernel64/shell64.c, libc/tests/fswrite.c,
+      scripts/tests/t_tfs4write.py, tests/fuzz/tfs4_harness.c,
+      scripts/fuzz_parsers.py)
+      TFS4 now writes: blocks taken from the group bitmaps near a file's
+      last block, inodes near their directory (a new directory goes to a
+      group with fewer directories than most), files made, filled
+      through their direct, indirect, doubly and triply indirect blocks,
+      cut back and grown with holes, directories made with "." and "..",
+      entries added in a record's slack or a new block and removed by
+      joining the record before them, renames across directories (also
+      over an existing name; a directory never into itself; its ".." and
+      the link counts follow), the group descriptors' and the
+      superblock's counts kept exact. A file removed while open goes on
+      the superblock's orphan list and is given back at its last close,
+      or at the next mount if the system stopped first. Mounting marks
+      the file system as not cleanly unmounted. Without a journal the
+      order of the writes is what protects it: an inode before the name
+      that points at it, a new name before the old one goes. Rights stay
+      TFS3's until stage 4: files are written 0600, directories 0711
+      (passable, not listable), the root's public files 0644. 'format4'
+      formats the whole disk with TFS4: revision 1, 4 KiB blocks,
+      256-byte inodes, filetype, sparse_super, large_file, the label
+      ThreadOS, root and lost+found - what mke2fs -t ext2 makes, less
+      what this does not keep. t_tfs4write (new): format4, then
+      libc/tests/fswrite makes 5000 files in one directory and removes
+      every odd one, moves fifty into another directory and that one
+      under a third, writes a file into its doubly indirect blocks with
+      a hole, cuts it, grows it by ftruncate, removes a file while it is
+      open; sqlite3 builds a database. Then on the host Linux's e2fsck
+      -fn finds nothing to fix (its report read, not only its exit code,
+      which is 0 for a wrong free count), dumpe2fs sees the features and
+      label, debugfs copies the tree out and every file is what ThreadOS
+      listed and what fswrite was asked to write, and Python's sqlite3
+      finds the database whole. The fuzz harness writes on damaged
+      images too (2000 cases, none failed), and scripts/fuzz_parsers.py
+      now also runs e2fsck over the kernel's mkfs at 2 MiB to 1.1 GiB
+      (one to nine groups) and over mke2fs's images after the harness's
+      writing: all clean. (The first such run found the orphan list
+      unhandled after a crash: an orphan is now released at mount.)

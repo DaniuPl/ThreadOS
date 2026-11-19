@@ -7,7 +7,11 @@
  * each one's path asked, every name looked up again by its path and
  * through ".." and its symbolic links, every file read at its start, in
  * its middle and at its end, its blocks asked the way a mapping asks.
- * The sanitizers watch every read; a mount that fails is a fine answer.
+ * Then it is written: a file made, filled past its direct blocks,
+ * cut back, moved into a new directory, the first file found renamed
+ * and removed - on a damaged disk the bitmaps, counts and directories
+ * the writing trusts are damaged too. The sanitizers watch every read
+ * and write; a mount that fails is a fine answer.
  *
  * Built by scripts/fuzz_parsers.py with stand-ins for the block layer,
  * the partition table and the task's rights (none of which the image
@@ -19,6 +23,7 @@
 #include <string.h>
 
 #include "include/tfs4.h"
+#include "include/rtc.h"
 
 static unsigned char *disk;
 static size_t disk_len;
@@ -34,6 +39,27 @@ int blk_read(uint32_t lba, uint32_t count, void *buf)
     return 0;
 }
 
+int blk_write(uint32_t lba, uint32_t count, const void *buf)
+{
+    if ((uint64_t)(lba + (uint64_t)count) * 512 > disk_len)
+        return -1;
+    memcpy(disk + (size_t)lba * 512, buf, (size_t)count * 512);
+    return 0;
+}
+
+void rtc_read(struct rtc_time *t)
+{
+    t->year = 2026;
+    t->month = 11;
+    t->day = 19;
+    t->hour = t->min = t->sec = 0;
+}
+
+void random_bytes(void *out, uint32_t n) { memset(out, 0x5A, n); }
+static int held = 12;                      /* a file "still open" */
+int task64_slot_open(int slot) { return slot == held; }
+int user_is_system_file(const char *n) { return !strcmp(n, "system.cfg"); }
+
 int part_scan(void) { return 0; }
 int part_get(int i, struct partition *p) { (void)i; (void)p; return 0; }
 int task64_level(void) { return 2; }      /* the administrator: sees all */
@@ -44,6 +70,7 @@ static const struct fs_backend *b = &tfs4_backend;
 static long budget = 4000;                /* entries walked, at most */
 static long files_read;
 static char path[FS_PATH_MAX];
+static char first_file[FS_PATH_MAX];
 
 static void walk(int dir, int depth)
 {
@@ -72,6 +99,8 @@ static void walk(int dir, int depth)
         int f = b->open(FS_ROOT, path, 0);
         if (f < 0)
             continue;
+        if (!first_file[0])
+            memcpy(first_file, path, strlen(path) + 1);
         files_read++;
         int64_t size = b->size(f);
         static unsigned char buf[8192];
@@ -87,10 +116,27 @@ static void walk(int dir, int depth)
     free(mine);
 }
 
+/* --format <MiB>: the kernel's mkfs on a blank disk of that size, then
+   the same writing as for a case, the disk left in TFS4_OUT for e2fsck */
+static int format_case(long mib)
+{
+    disk_len = (size_t)mib << 20;
+    disk = calloc(1, disk_len);
+    if (!disk || !tfs4_format(0, (uint32_t)(disk_len / 512)) ||
+        !tfs4_mount())
+        return 1;
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     if (argc < 2)
         return 2;
+    if (!strcmp(argv[1], "--format") && argc > 2) {
+        if (format_case(atol(argv[2])))
+            return 1;
+        goto mounted;
+    }
     FILE *fh = fopen(argv[1], "rb");
     if (!fh)
         return 2;
@@ -107,6 +153,7 @@ int main(int argc, char **argv)
     disk_len = fread(disk, 1, (size_t)n, fh);
     fclose(fh);
     if (tfs4_mount()) {
+mounted:
         walk(FS_ROOT, 0);
         /* for whoever wants to see that the cases reach the files */
         if (getenv("TFS4_SAY"))
@@ -117,6 +164,39 @@ int main(int argc, char **argv)
         b->stat_path(FS_ROOT, "/../../.", &st);
         b->stat_path(FS_ROOT, "link/link/link/link/link/link/link/link/x",
                      &st);
+
+        static unsigned char data[20000];
+        for (size_t i = 0; i < sizeof(data); i++)
+            data[i] = (unsigned char)(i * 7);
+        int f = b->open(FS_ROOT, "/fuzz-new", 1);
+        if (f >= 0) {
+            b->write_at(f, 0, data, sizeof(data));
+            b->write_at(f, 5u << 20, data, 4096);
+            b->truncate_to(f, 3000);
+            b->read_at(f, 0, data, 4096);
+            b->file_block(f, 40, 1);
+        }
+        b->mkdir(FS_ROOT, "/fuzz-dir");
+        b->rename(FS_ROOT, "/fuzz-new", "/fuzz-dir/moved");
+        b->unlink(FS_ROOT, "/fuzz-dir/moved");
+        b->unlink(FS_ROOT, "/fuzz-dir");
+        if (first_file[0]) {
+            b->rename(FS_ROOT, first_file, "/renamed-first");
+            b->unlink(FS_ROOT, "/renamed-first");
+        }
+        b->unlink(FS_ROOT, "/lost+found");
+        held = 0;                          /* and now closed */
+        b->slot_closed(12);
+    }
+    /* the disk as the writing left it, for e2fsck to judge (a clean
+       image in must come out clean) */
+    const char *out = getenv("TFS4_OUT");
+    if (out) {
+        FILE *o = fopen(out, "wb");
+        if (o) {
+            fwrite(disk, 1, disk_len, o);
+            fclose(o);
+        }
     }
     free(disk);
     return 0;

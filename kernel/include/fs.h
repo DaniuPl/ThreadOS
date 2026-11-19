@@ -27,6 +27,9 @@ int fs_ready(void);
    and every other partition are left exactly as they were. Startup
    never does this to a disk that has anything on it - see tfs3.c. */
 int fs_format_now(int partition);
+/* The same with TFS4, the whole disk only for now (the installer's
+   partitions follow it in stage 5 of docs/tfs4-plan.md) */
+int fs_format_tfs4(void);
 
 /* --- Path operations (relative to the working directory cwd) ---
    cwd is a directory slot or FS_ROOT. A path may be absolute ("/a/b"),

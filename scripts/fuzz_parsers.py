@@ -204,14 +204,17 @@ def build_tfs4(workdir):
     inc = os.path.join(tree, "kernel", "include")
     os.makedirs(inc)
     os.makedirs(os.path.join(tree, "kernel64"))
-    for name in ("tfs4.h", "fsbackend.h", "fs.h", "part.h"):
+    for name in ("tfs4.h", "fsbackend.h", "fs.h", "part.h", "rtc.h"):
         shutil.copy(os.path.join(ROOT, "kernel", "include", name), inc)
     shutil.copy(os.path.join(ROOT, "kernel", "tfs4.c"),
                 os.path.join(tree, "kernel"))
     stubs = {
         "blk.h": "#include <stdint.h>\nint blk_present(void);\n"
                  "uint32_t blk_sectors(void);\n"
-                 "int blk_read(uint32_t lba, uint32_t n, void *buf);\n",
+                 "int blk_read(uint32_t lba, uint32_t n, void *buf);\n"
+                 "int blk_write(uint32_t lba, uint32_t n, const void *buf);\n",
+        "random.h": "#include <stdint.h>\n"
+                    "void random_bytes(void *out, uint32_t n);\n",
         "heap.h": "#include <stdlib.h>\n#define kmalloc malloc\n"
                   "#define kfree free\n",
         "string.h": "#include <string.h>\n",
@@ -219,13 +222,15 @@ def build_tfs4(workdir):
         "io.h": "typedef unsigned long irqflags_t;\n"
                 "static inline irqflags_t irq_save(void) { return 0; }\n"
                 "static inline void irq_restore(irqflags_t f) { (void)f; }\n",
-        "user.h": "#define USER_ADMIN 2\n",
+        "user.h": "#define USER_ADMIN 2\n"
+                  "int user_is_system_file(const char *name);\n",
     }
     for name, text in stubs.items():
         with open(os.path.join(inc, name), "w") as f:
             f.write(text)
     with open(os.path.join(tree, "kernel64", "task64.h"), "w") as f:
-        f.write("int task64_level(void);\nint task64_uid(void);\n")
+        f.write("int task64_level(void);\nint task64_uid(void);\n"
+                "int task64_slot_open(int slot);\n")
     binary = os.path.join(workdir, "t4harness")
     must(["gcc", *SAN, "-w", "-I", os.path.join(tree, "kernel"), "-o", binary,
           os.path.join(FUZZ, "tfs4_harness.c"),
@@ -262,6 +267,36 @@ def tfs4_seeds(workdir):
         with open(img, "rb") as f:
             seeds.append(f.read())
     return seeds
+
+
+def tfs4_e2fsck(binary, workdir, seeds):
+    """What TFS4 writes, judged by Linux's e2fsck: the kernel's mkfs on
+    disks of one to nine block groups, and mke2fs's own images after the
+    harness's writing (a file made, filled past its direct blocks, cut,
+    moved, removed; a file renamed and removed). A clean disk in has to
+    come out clean - e2fsck -fn says nothing it would fix."""
+    wrong = []
+    if not shutil.which("e2fsck"):
+        return [("e2fsck", "e2fsprogs is not installed")]
+    out = os.path.join(workdir, "tfs4-out.img")
+    cases = [(["--format", str(m)], "mkfs of %d MiB" % m)
+             for m in (2, 64, 130, 300, 1100)]
+    for i, seed in enumerate(seeds):
+        p = os.path.join(workdir, "tfs4-seed%d.img" % i)
+        with open(p, "wb") as f:
+            f.write(seed)
+        cases.append(([p], "writing on mke2fs's image %d" % i))
+    for args, what in cases:
+        run = subprocess.run([binary] + args, capture_output=True,
+                             env={"TFS4_OUT": out}, timeout=120)
+        fsck = subprocess.run(["e2fsck", "-fn", out], capture_output=True,
+                              text=True)
+        if run.returncode or fsck.returncode or "? no" in fsck.stdout:
+            wrong.append((what, fsck.stdout[-800:] + run.stderr.decode(
+                errors="replace")[-800:]))
+        if os.path.exists(out):
+            os.unlink(out)
+    return wrong
 
 
 def wlan_seeds():
@@ -1652,6 +1687,10 @@ def main():
         for name, got, want in wrong:
             failures.append(("fdtlayout", name,
                              "got  %s\nwant %s" % (got, want)))
+        wrong = tfs4_e2fsck(mbinaries["tfs4"], workdir, corpus["tfs4"])
+        print("  TFS4's writing against e2fsck: %d wrong" % len(wrong))
+        for what, why in wrong:
+            failures.append(("tfs4e2fsck", what, why))
         bad = gif_pixels(binary)
         print("  GIFs against Pillow's reading of them: %d wrong" % len(bad))
         for b in bad:

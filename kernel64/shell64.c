@@ -830,10 +830,14 @@ static void read_word(char *out, int max)
  * Windows on it becomes a disk with TFS on it, or how one partition of
  * it does while the rest stays. It is deliberately a thing one has to
  * mean: the confirmation is a word typed out, not a key. */
-static void cmd_format(const char *arg)
+static void cmd_format(const char *arg, int tfs4)
 {
     if (!confirm_admin_action("format"))
         return;
+    if (tfs4 && *arg) {
+        printk("format4: the whole disk only, for now\n");
+        return;
+    }
     if (!blk_present()) {
         printk("format: there is no disk\n");
         return;
@@ -882,9 +886,10 @@ static void cmd_format(const char *arg)
         printk("format: nothing was erased\n");
         return;
     }
-    if (fs_format_now(which))
-        printk("format: done - %s is a ThreadOS TFS now\n",
-               which ? "this partition" : "the whole disk");
+    if (tfs4 ? fs_format_tfs4() : fs_format_now(which))
+        printk("format: done - %s is a ThreadOS %s now\n",
+               which ? "this partition" : "the whole disk",
+               tfs4 ? "TFS4" : "TFS");
     else
         printk("format: it did not work\n");
 }
@@ -1420,10 +1425,14 @@ static void execute(const char *line)
     } else if (!strcmp(line, "disks")) {
         hwinfo_disks();
     } else if (!strcmp(line, "format")) {
-        cmd_format("");
+        cmd_format("", 0);
+    } else if (!strcmp(line, "format4")) {
+        cmd_format("", 1);
+    } else if (starts_with(line, "format4 ")) {
+        cmd_format("1", 1);                /* refused: the whole disk only */
     } else if (starts_with(line, "format ")) {
         const char *which = argument(line, sizeof("format ") - 1);
-        cmd_format(which ? which : "");
+        cmd_format(which ? which : "", 0);
     } else if (starts_with(line, "disks read")) {
         hwinfo_disk_read(line + sizeof("disks read") - 1);
     } else if (!strcmp(line, "df")) {
