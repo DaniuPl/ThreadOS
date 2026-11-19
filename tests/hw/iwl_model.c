@@ -46,6 +46,7 @@
 #include "kernel/include/pci.h"
 #include "kernel/include/device_info.h"
 #include "iwl/card.h"
+#include "iwl/ap.h"
 #include "devices_rec.h"
 
 int scenario;
@@ -568,6 +569,179 @@ static void scenario_scan(int rc)
           "a probe response, WEP, WPA on 5 GHz)", found == 5);
 }
 
+/* --- stage 3: joining ThreadOS-Home ----------------------------------------------- */
+
+/* The network stack's side: what the driver hands up, and DHCP asked */
+static uint8_t net_got[8][2048];
+static int net_got_len[8], net_frames, dhcp_asked;
+
+void net_rx(const uint8_t *frame, uint16_t len)
+{
+    if (net_frames < 8) {
+        memcpy(net_got[net_frames], frame, len < 2048 ? len : 2048);
+        net_got_len[net_frames] = len;
+    }
+    net_frames++;
+}
+
+void dhcp_start(void)
+{
+    dhcp_asked++;
+}
+
+/* The SNonce: random on the system, fixed here so that every run is the
+   same (the access point's nonce is OpenSSL's random) */
+void random_bytes(void *out, uint32_t n)
+{
+    for (uint32_t i = 0; i < n; i++)
+        ((uint8_t *)out)[i] = (uint8_t)(0x5A ^ (i * 29));
+}
+
+static int join_run(const char *password)
+{
+    volatile int r = -999;
+    deadline = now_ns + 60000 * MS;
+    armed = 1;
+    if (!setjmp(escape)) {
+        if (iwlwifi_scan_now() >= 0) {
+            ap_reset(nvm_mac);
+            r = iwlwifi_join_now(ap_bssid, password);
+        }
+    }
+    armed = 0;
+    return r;
+}
+
+/* Serves the card for a while, as the driver's thread does */
+static void serve(int ms)
+{
+    deadline = now_ns + (uint64_t)(ms + 5000) * MS;
+    armed = 1;
+    if (!setjmp(escape))
+        for (int i = 0; i < ms / 10; i++) {
+            model_advance(10 * MS);
+            iwlwifi_poll();
+        }
+    armed = 0;
+}
+
+static void scenario_join(int rc)
+{
+    check("join: the card came up first", rc == IWL_OK);
+    if (rc != IWL_OK)
+        return;
+    int r = join_run(ap_password);
+    printf("  iwlwifi_join_now returned %d; the driver: %s\n", r,
+           iwlwifi_state()->last_error);
+    check("join: it joined ThreadOS-Home, the link up",
+          r == IWL_OK && iwlwifi_link_state() == IWLWIFI_LINK_UP &&
+          iwlwifi_link() == 1);
+    check("join: the MAC added, bound to PHY context 0 moved to channel 6, "
+          "its power table before the quota, station 0 added and modified",
+          fj.mac_added && fj.bound && fj.phy_moved && fj.power_sent &&
+          fj.quota && fj.sta && fj.sta_modified);
+    check("join: the four AC queues on their FIFOs", fj.q_on[0] &&
+          fj.q_on[1] && fj.q_on[2] && fj.q_on[3]);
+    check("join: open authentication and the association, each answered "
+          "once, the MAC context then associated with AID 1 and the DTIM "
+          "from the scanned beacon",
+          aps.auth == 1 && aps.assoc == 1 && fj.mac_assoc);
+    check("join: the four-way handshake as the access point (OpenSSL) "
+          "wants it: message 2 and message 4 taken",
+          aps.msg2_ok && aps.msg4_ok);
+    check("join: the pairwise key the driver installed is the access "
+          "point's TK", fj.tk_set && !memcmp(fj.tk, aps.tk, 16));
+    check("join: the group key installed is the access point's, at its "
+          "index", fj.gtk_set && !memcmp(fj.gtk, aps.gtk, 16) &&
+          fj.gtk_idx == aps.gtk_idx);
+    check("join: DHCP asked for once joined", dhcp_asked == 1);
+    if (r != IWL_OK)
+        return;
+
+    /* Data from the network: unicast, then the same again (a replay),
+       then a broadcast with the group key, then one whose MIC failed */
+    static const uint8_t ip[] = { 0x45, 0, 0, 28, 0, 1, 0, 0, 64, 17, 0, 0,
+                                  192, 168, 1, 1, 192, 168, 1, 50,
+                                  0, 67, 0, 68, 0, 8, 0, 0 };
+    static const uint8_t gw[6] = { 0x02, 0x11, 0x22, 0x33, 0x44, 0x55 };
+    static const uint8_t bcast[6] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+    ap_send_data(nvm_mac, gw, 0x0800, ip, sizeof(ip), 1);
+    serve(50);
+    int first = net_frames;
+    uint8_t want[14 + sizeof(ip)];
+    memcpy(want, nvm_mac, 6);
+    memcpy(want + 6, gw, 6);
+    want[12] = 0x08;
+    want[13] = 0x00;
+    memcpy(want + 14, ip, sizeof(ip));
+    check("data: a unicast frame from the network reaches the stack as the "
+          "Ethernet frame it carried (CCMP header and MIC gone)",
+          first == 1 && net_got_len[0] == (int)sizeof(want) &&
+          !memcmp(net_got[0], want, sizeof(want)));
+    ap_send_data(nvm_mac, gw, 0x0800, ip, sizeof(ip), 1);
+    serve(50);
+    check("data: the same frame again - its packet number not new - is "
+          "dropped (a replay)", net_frames == first);
+    ap_send_data(bcast, gw, 0x0806, ip, sizeof(ip), 1);
+    serve(50);
+    check("data: a broadcast under the group key reaches the stack",
+          net_frames == first + 1 && net_got[1][12] == 0x08 &&
+          net_got[1][13] == 0x06);
+    fj.mic_fail_next = 1;
+    ap_send_data(nvm_mac, gw, 0x0800, ip, sizeof(ip), 2);
+    serve(50);
+    check("data: one the card says failed its MIC is dropped",
+          net_frames == first + 1);
+
+    /* Data to the network */
+    uint8_t eth[14 + sizeof(ip)];
+    memcpy(eth, gw, 6);
+    memcpy(eth + 6, nvm_mac, 6);
+    eth[12] = 0x08;
+    eth[13] = 0x00;
+    memcpy(eth + 14, ip, sizeof(ip));
+    int before = fj.encrypted_frames;
+    int sent = iwlwifi_send(eth, sizeof(eth));
+    serve(50);
+    int ok = sent == 0 && aps.data_frames == 1 &&
+             fj.encrypted_frames == before + 1 && fj.bad_key_frames == 0;
+    if (ok) {
+        const uint8_t *f = aps.last_data;
+        ok = f[0] == 0x08 && f[1] == 0x01 && !memcmp(f + 4, ap_bssid, 6) &&
+             !memcmp(f + 10, nvm_mac, 6) && !memcmp(f + 16, gw, 6) &&
+             f[24] == 0xAA && f[30] == 0x08 && f[31] == 0x00 &&
+             aps.last_len == 32 + sizeof(ip) &&
+             !memcmp(f + 32, ip, sizeof(ip));
+    }
+    check("data: an Ethernet frame from the stack goes to the access point "
+          "encrypted with its TK, a new packet number, to the DS, with "
+          "LLC/SNAP", ok);
+    iwlwifi_leave();
+    serve(100);
+    check("leave: the link down, the station and its MAC gone",
+          iwlwifi_link_state() == IWLWIFI_LINK_DOWN && !fj.sta &&
+          !fj.mac_added && !fj.bound);
+}
+
+static void scenario_badpass(int rc)
+{
+    check("wrong password: the card came up first", rc == IWL_OK);
+    if (rc != IWL_OK)
+        return;
+    int r = join_run("not the password!");
+    const char *why = iwlwifi_state()->last_error;
+    printf("  iwlwifi_join_now returned %d; the driver: %s\n", r, why);
+    check("wrong password: not joined, and the reason says the handshake "
+          "did not finish", r != IWL_OK &&
+          iwlwifi_link_state() == IWLWIFI_LINK_DOWN &&
+          strstr(why, "four-way handshake"));
+    check("wrong password: the access point refused message 2, and no key "
+          "went into the card", aps.msg2_refused >= 1 && !aps.msg4_ok &&
+          !fj.tk_set && !fj.gtk_set);
+    check("wrong password: everything set up was taken down again",
+          !fj.sta && !fj.mac_added && !fj.bound && dhcp_asked == 0);
+}
+
 /* The milestone lines of the contract, in order */
 static const char *milestones[] = {
     "^\\[wifi\\] Intel Wireless 3160 at 0*2:0*0\\.0, hw rev 0x0*165$",
@@ -833,7 +1007,7 @@ int main(int argc, char **argv)
 {
     setvbuf(stdout, (char *)0, _IONBF, 0);
     if (argc < 3) {
-        fprintf(stderr, "usage: %s ok|nofw-ack|assert|rfkill|scan|nofile "
+        fprintf(stderr, "usage: %s ok|nofw-ack|assert|rfkill|scan|nofile|join|join-badpass "
                 "<ucode>\n",
                 argv[0]);
         return 2;
@@ -850,6 +1024,10 @@ int main(int argc, char **argv)
         scenario = SC_SCAN;
     else if (!strcmp(argv[1], "nofile"))
         scenario = SC_NOFILE;
+    else if (!strcmp(argv[1], "join"))
+        scenario = SC_JOIN;
+    else if (!strcmp(argv[1], "join-badpass"))
+        scenario = SC_BADPASS;
     else {
         fprintf(stderr, "unknown scenario %s\n", argv[1]);
         return 2;
@@ -931,6 +1109,12 @@ int main(int argc, char **argv)
         break;
     case SC_NOFILE:
         scenario_nofile(rc);
+        break;
+    case SC_JOIN:
+        scenario_join(rc);
+        break;
+    case SC_BADPASS:
+        scenario_badpass(rc);
         break;
     }
     if (tasks)

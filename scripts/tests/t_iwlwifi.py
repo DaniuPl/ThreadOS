@@ -54,6 +54,8 @@ SCENARIOS = (
     ("rfkill", "the radio switch off", 10),
     ("scan", "a scan of the networks around", 8),
     ("nofile", "no firmware file on the system", 4),
+    ("join", "joining a WPA2 network and passing data", 17),
+    ("join-badpass", "joining with a wrong password", 6),
 )
 
 
@@ -68,6 +70,14 @@ def build(work):
         shutil.copy(os.path.join(HW, "iwl", "include", name), inc)
     shutil.copy(os.path.join(ROOT, "kernel", "include", "iwlwifi.h"), inc)
     shutil.copy(os.path.join(ROOT, "kernel", "include", "wifi_info.h"), inc)
+    for name in ("wpa.h", "wlan.h"):
+        shutil.copy(os.path.join(ROOT, "kernel", "include", name), inc)
+    udir = os.path.join(work, "user")
+    os.makedirs(udir)
+    for name in ("uwpa.h", "uaes.h", "usha1.h", "uapi.h"):
+        shutil.copy(os.path.join(ROOT, "user", name), udir)
+    for name in ("wpa.c", "wlan.c"):
+        shutil.copy(os.path.join(ROOT, "kernel", name), kdir)
     for name in ("devices.h", "device_info.h"):
         shutil.copy(os.path.join(ROOT, "kernel", "include", name), inc)
     shutil.copy(os.path.join(HW, "devices_rec.c"), kdir)
@@ -81,8 +91,10 @@ def build(work):
     shutil.copy(driver, kdir)
     shutil.copy(os.path.join(HW, "iwl_model.c"), work)
     os.makedirs(os.path.join(work, "iwl"))
-    for name in ("card.h", "card.c", "fw.c"):
+    for name in ("card.h", "card.c", "fw.c", "ap.c", "ap.h"):
         shutil.copy(os.path.join(HW, "iwl", name), os.path.join(work, "iwl"))
+    for name in ("wpa_ap.c", "wpa_ap.h"):
+        shutil.copy(os.path.join(HW, name), work)
     binary = os.path.join(work, "model")
     out = subprocess.run(
         ["gcc", "-std=gnu11", "-Wall", "-Wextra", "-g", "-O1",
@@ -90,7 +102,10 @@ def build(work):
          "-I", work, "-o", binary,
          os.path.join(kdir, "iwlwifi.c"), os.path.join(work, "iwl_model.c"),
          os.path.join(kdir, "devices_rec.c"),
-         os.path.join(work, "iwl", "card.c"), os.path.join(work, "iwl", "fw.c")],
+         os.path.join(kdir, "wpa.c"), os.path.join(kdir, "wlan.c"),
+         os.path.join(work, "iwl", "card.c"), os.path.join(work, "iwl", "fw.c"),
+         os.path.join(work, "iwl", "ap.c"), os.path.join(work, "wpa_ap.c"),
+         "-lcrypto"],
         capture_output=True, text=True)
     if out.returncode != 0:
         print(out.stderr[:4000])

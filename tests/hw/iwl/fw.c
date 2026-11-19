@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "card.h"
+#include "ap.h"
 
 struct fw_stats fs;
 
@@ -972,10 +973,20 @@ static int scan_frame(uint8_t *f, const struct scan_ap *a)
     f[n++] = 3;
     f[n++] = 1;
     f[n++] = a->channel;
+    if (!a->probe_resp) {
+        /* the TIM: one beacon to the next DTIM, one every two */
+        static const uint8_t tim[] = { 5, 4, 1, 2, 0, 0 };
+        memcpy(f + n, tim, sizeof(tim));
+        n += sizeof(tim);
+        for (int i = 0; i < 8; i++)
+            f[24 + i] = (uint8_t)(AP_TSF >> (8 * i));
+    }
     if (a->sec == SEC_WPA2) {
+        /* as the access point says it again in message 3 (wpa_ap.c):
+           16 replay counters, as hostapd's */
         static const uint8_t rsn[] = { 48, 20, 1, 0, 0x00, 0x0F, 0xAC, 4,
                                        1, 0, 0x00, 0x0F, 0xAC, 4, 1, 0,
-                                       0x00, 0x0F, 0xAC, 2, 0, 0 };
+                                       0x00, 0x0F, 0xAC, 2, 0x0C, 0 };
         memcpy(f + n, rsn, sizeof(rsn));
         n += sizeof(rsn);
     } else if (a->sec == SEC_WPA) {
@@ -993,6 +1004,9 @@ static void scan_heard(const struct scan_ap *a, int as_data)
     uint8_t phy[68];
     memset(phy, 0, sizeof(phy));
     phy[0] = 8;                             /* non_cfg_phy_cnt */
+    wr32(phy + 4, (uint32_t)(now_ns / 1000));   /* GP2, us */
+    if (!memcmp(a->bssid, ap_bssid, 6) && !as_data)
+        fj.beacon_ts = (uint32_t)(now_ns / 1000);
     wr16(phy + 22, a->channel);
     wr32(phy + 24 + 4, (uint32_t)(-a->rssi) & 0xFF);
     batch_add(0xC0, 0x8000, phy, sizeof(phy), 0);
@@ -1148,6 +1162,426 @@ static void scan_request(const struct cmd *c)
                  ((gen & 0xFFFFFF) << 8) | (uint32_t)i);
 }
 
+/* --- stage 3: joining ThreadOS-Home ------------------------------------------------
+ *
+ * The commands iwlmvm (Linux 4.9, the non-DQA era of this file) sends to
+ * join a WPA2 network, each held to the layout of the firmware API
+ * headers and to the values iwlmvm puts in it, and the order the
+ * firmware needs: queues 0..3 for the station's ACs, its MAC context
+ * (148 bytes) added before the binding (24) puts it on PHY context 0,
+ * moved to the network's channel; the MAC's power table before the
+ * time quota; the access point as station 0 (ADD_STA v7, 44 bytes); a
+ * time event (36 bytes) that puts the radio on the channel - no frame
+ * goes out before it has started; the rate table (LQ, 88 bytes) before
+ * a data frame asks for the station's rates; the keys (ADD_STA_KEY
+ * version 1, 64 bytes: this file lacks API bit 29).
+ *
+ * Frames from the data queues go to the access point (ap.c) as they
+ * would go on the air: one the driver asked the card to encrypt (CCM,
+ * the key in the TX command) arrives decrypted only if that key is the
+ * access point's and the CCMP header it wrote is whole and its packet
+ * number new. Frames from the access point come back through
+ * REPLY_RX_PHY_CMD + REPLY_RX_MPDU_CMD; a protected one is reported
+ * decrypted (SEC CCM, MIC OK) only if the key the driver installed for
+ * it is the access point's - else "could not decrypt" (SEC 7).
+ */
+
+struct fw_join fj;
+static const uint8_t ac_fifo[4] = { 3, 2, 1, 0 };   /* VO VI BE BK */
+
+int fw_queue_enabled(int q)
+{
+    return q >= 0 && q < 32 && fj.q_on[q];
+}
+
+static void scd_data_queue(const struct cmd *c)
+{
+    const uint8_t *p = c->data;
+    int q = p[3];
+    if (q > 3) {
+        violation("SCD_QUEUE_CFG for queue %d: a station's queues are 0..3 "
+                  "(VO, VI, BE, BK) beside 8, 9 and 15", q);
+    } else if (p[4] == 1) {
+        if (p[1] != 0 || p[2] != 8 || p[5] != 0 || p[6] != ac_fifo[q] ||
+            p[7] != 64 || rd16(p + 8) != 0)
+            violation("SCD_QUEUE_CFG for queue %d: sta_id %u tid %u aggregate "
+                      "%u fifo %u window %u ssn %u, not 0, 8, 0, %u, 64, 0 "
+                      "(iwl_mvm_enable_ac_txq)", q, p[1], p[2], p[5], p[6],
+                      p[7], rd16(p + 8), ac_fifo[q]);
+        fj.q_on[q] = 1;
+        card_queue_reset(q, rd16(p + 8));
+    } else {
+        fj.q_on[q] = 0;
+    }
+    uint8_t r[4] = { p[0], p[1], p[2], p[3] };
+    answer(c, r, 4);
+}
+
+/* ADD_STA for station 0: the access point (the aux station is 1) */
+static void ap_sta(const struct cmd *c)
+{
+    const uint8_t *p = c->data;
+    if (p[0] == 0) {
+        if (!fj.mac_added || !fj.bound)
+            violation("ADD_STA for the access point before its MAC was added "
+                      "and bound to a channel");
+        if (memcmp(p + 8, ap_bssid, 6) || rd32(p + 4) != 0 ||
+            rd32(p + 40) != 0x0F || rd16(p + 2) != 0xFFFF ||
+            rd32(p + 24) != 0x3C000000u)
+            violation("ADD_STA (add) for the access point: its BSSID, MAC 0, "
+                      "queues 0..3 (0xF), no aggregation (0xFFFF), the "
+                      "FAT/MIMO mask - as iwl_mvm_sta_send_to_fw");
+        fj.sta = 1;
+    } else {
+        if (!fj.sta)
+            violation("ADD_STA modify of a station never added");
+        if (rd32(p + 40) != 0 || memcmp(p + 8, "\0\0\0\0\0\0", 6))
+            note("ADD_STA modify carries an address or queues (iwlmvm: only "
+                 "on add)");
+        fj.sta_modified = 1;
+    }
+    answer_status(c, 1);
+}
+
+static void mac_context_cmd(const struct cmd *c)
+{
+    if (c->len == 8 && rd32(c->data + 4) == 3) {
+        fj.mac_added = 0;                   /* REMOVE: the header alone */
+        answer_status(c, 0);
+        return;
+    }
+    if (!want_len(c, 148, "MAC_CONTEXT_API_S_VER_1"))
+        return;
+    const uint8_t *p = c->data;
+    uint32_t action = rd32(p + 4);
+    if (rd32(p) != 0 || rd32(p + 8) != 5 || rd32(p + 12) != 0 ||
+        memcmp(p + 16, nvm_mac, 6))
+        violation("MAC_CONTEXT_CMD: id 0, a BSS station (type 5), TSF 0 and "
+                  "the card's own address, as iwlmvm's first MAC");
+    if (action == 1) {
+        if (fj.mac_added)
+            violation("MAC_CONTEXT_CMD ADD of a MAC that exists");
+        fj.mac_added = 1;
+    } else if (action == 2) {
+        if (!fj.mac_added)
+            violation("MAC_CONTEXT_CMD MODIFY before ADD");
+    } else {
+        violation("MAC_CONTEXT_CMD action %u", action);
+    }
+    if (!(rd32(p + 52) & 0x04))
+        violation("MAC_CONTEXT_CMD without MAC_FILTER_ACCEPT_GRP: no "
+                  "broadcast would reach the host");
+    if (rd32(p + 32) != 0x0F || rd32(p + 36) != 0x15)
+        violation("MAC_CONTEXT_CMD ACK rates 0x%x/0x%x, not 0xF/0x15 "
+                  "(iwl_mvm_ack_rates for 1-11 Mb/s basic)", rd32(p + 32),
+                  rd32(p + 36));
+    for (int f = 0; f < 4; f++)
+        if (p[60 + 8 * f + 5] != (1u << f))
+            violation("MAC_CONTEXT_CMD ac[%d].fifos_mask 0x%x, not 0x%x", f,
+                      p[60 + 8 * f + 5], 1u << f);
+    if (memcmp(p + 24, ap_bssid, 6) == 0) {
+        fj.mac_bssid_set = 1;
+        if (rd32(p + 116) != 100 || rd32(p + 120) != 0xFFFFFFFFu / 100)
+            violation("MAC_CONTEXT_CMD beacon interval %u (reciprocal 0x%x): "
+                      "the network's is 100 TU", rd32(p + 116), rd32(p + 120));
+    }
+    if (rd32(p + 100) == 1) {               /* associated */
+        if (!fj.assoc_answered)
+            violation("MAC_CONTEXT_CMD associated before the access point "
+                      "answered the association");
+        uint32_t want_time = fj.beacon_ts + 1 * 100 * 1024;
+        uint64_t want_tsf = AP_TSF + 1 * 100 * 1024;
+        uint64_t tsf = rd32(p + 108) | (uint64_t)rd32(p + 112) << 32;
+        if (rd32(p + 136) != 1 || rd32(p + 124) != 200 ||
+            rd32(p + 128) != 0xFFFFFFFFu / 200 || rd32(p + 104) != want_time ||
+            tsf != want_tsf || (rd32(p + 52) & 0x40))
+            violation("MAC_CONTEXT_CMD associated: AID %u (1), DTIM interval "
+                      "%u (200), its reciprocal, dtim_time %u (%u: the beacon "
+                      "plus one interval), dtim_tsf 0x%llx (0x%llx), filter "
+                      "0x%x (no IN_BEACON once associated)", rd32(p + 136),
+                      rd32(p + 124), rd32(p + 104), want_time,
+                      (unsigned long long)tsf, (unsigned long long)want_tsf,
+                      rd32(p + 52));
+        fj.mac_assoc = 1;
+    }
+    answer_status(c, 0);
+}
+
+static void phy_context_modify(const struct cmd *c)
+{
+    const uint8_t *p = c->data;
+    if (rd32(p) != 0 || p[16] != 1 || p[17] != 6 || p[18] != 0 ||
+        rd32(p + 20) != valid_tx() || rd32(p + 24) != 0x1402)
+        violation("PHY_CONTEXT_CMD MODIFY: context 0 to 2.4 GHz channel 6 "
+                  "(the network's), 20 MHz, the init's chains - it is %u, band "
+                  "%u, channel %u", rd32(p), p[16], p[17]);
+    else
+        fj.phy_moved = 1;
+    answer_status(c, 0);
+}
+
+static void binding_cmd(const struct cmd *c)
+{
+    if (!want_len(c, 24, "BINDING_CMD_API_S_VER_1"))
+        return;
+    const uint8_t *p = c->data;
+    uint32_t action = rd32(p + 4);
+    if (action == 1) {
+        if (!fj.mac_added)
+            violation("BINDING_CONTEXT_CMD ADD before the MAC it binds was "
+                      "added");
+        if (rd32(p) != 0 || rd32(p + 8) != 0 || rd32(p + 12) != 0xFFFFFFFFu ||
+            rd32(p + 16) != 0xFFFFFFFFu || rd32(p + 20) != 0)
+            violation("BINDING_CONTEXT_CMD ADD: binding 0, MAC 0, the other "
+                      "two invalid, PHY 0");
+        fj.bound = 1;
+    } else if (action == 3) {
+        fj.bound = 0;
+    }
+    answer_status(c, 0);                    /* success is 0 here */
+}
+
+static void power_table_mac(const struct cmd *c)
+{
+    if (!want_len(c, 40, "MAC_POWER_TABLE_CMD_API_S_VER_1"))
+        return;
+    if (rd32(c->data) != 0)
+        violation("MAC_PM_POWER_TABLE for MAC %u", rd32(c->data));
+    fj.power_sent = 1;
+    answer_status(c, 0);
+}
+
+static void time_quota_cmd(const struct cmd *c)
+{
+    if (!want_len(c, 48, "TIME_QUOTA_ALLOCATION_CMD_API_S_VER_1"))
+        return;
+    const uint8_t *p = c->data;
+    if (rd32(p) == 0) {
+        if (!fj.power_sent)
+            violation("TIME_QUOTA_CMD before the MAC's power table: \"Power "
+                      "state must be updated before quotas, otherwise fw "
+                      "will complain\" (iwlmvm)");
+        if (rd32(p + 4) != 128)
+            violation("TIME_QUOTA_CMD gives binding 0 %u, not the whole 128",
+                      rd32(p + 4));
+        fj.quota = 1;
+    } else {
+        fj.quota = 0;
+    }
+    answer_status(c, 0);
+}
+
+static void te_start(uint32_t g)
+{
+    if (g != gen || st != FW_RUNNING || fj.te != 1)
+        return;
+    fj.te = 2;
+    uint8_t n[24];
+    memset(n, 0, sizeof(n));
+    wr32(n, (uint32_t)(now_ns / 1000));
+    wr32(n + 8, 0x77);
+    wr32(n + 16, 1);                        /* start */
+    wr32(n + 20, 1);                        /* scheduled */
+    batch_begin();
+    batch_add(0x2A, 0x8000, n, sizeof(n), 0);
+    batch_send(0);
+}
+
+static void time_event_cmd(const struct cmd *c)
+{
+    if (!want_len(c, 36, "MAC_TIME_EVENT_CMD_API_S_VER_2"))
+        return;
+    const uint8_t *p = c->data;
+    uint8_t r[16];
+    memset(r, 0, sizeof(r));
+    if (rd32(p + 4) == 1) {
+        if (!fj.bound)
+            violation("TIME_EVENT_CMD for a MAC not bound to a channel");
+        if (rd32(p) != 0 || rd32(p + 8) != 0 || rd32(p + 28) == 0 ||
+            !(rd16(p + 34) & 1))
+            violation("TIME_EVENT_CMD ADD: MAC 0, type 0 (aggressive assoc), "
+                      "a duration, and the start notified");
+        fj.te = 1;
+        model_at(2 * MS, te_start, gen);
+        wr32(r, 1);
+        wr32(r + 8, 0x77);
+    } else if (rd32(p + 4) == 3) {
+        if (rd32(p + 8) != 0x77)
+            violation("TIME_EVENT_CMD REMOVE of unique id %u, not 0x77",
+                      rd32(p + 8));
+        fj.te = 0;
+        wr32(r, 1);
+        wr32(r + 8, rd32(p + 8));
+    }
+    answer(c, r, sizeof(r));
+}
+
+static void lq_cmd(const struct cmd *c)
+{
+    if (!want_len(c, 88, "TLC_MNG_CONFIG / LQ_CMD_API_S_VER_1"))
+        return;
+    const uint8_t *p = c->data;
+    int ok = p[0] == 0 && (p[6] & 1);
+    for (int i = 0; i < 16; i++) {
+        uint32_t r = rd32(p + 20 + 4 * i);
+        /* a legacy rate on antenna A: CCK 1/2/5.5/11 or OFDM's PLCPs */
+        if (!(r & 0x4000) || (r & ~0x420Fu & ~0x00FFu))
+            ok = 0;
+    }
+    if (!ok)
+        violation("LQ_CMD: station 0, antenna A, sixteen legacy rates on "
+                  "antenna A");
+    fj.lq = 1;
+    answer_status(c, 0);
+}
+
+static void sta_key_cmd(const struct cmd *c)
+{
+    if (!want_len(c, 64, "ADD_MODIFY_STA_KEY_API_S_VER_1 (API bit 29 clear)"))
+        return;
+    const uint8_t *p = c->data;
+    uint16_t flags = rd16(p + 2);
+    if (p[0] != 0)
+        violation("ADD_STA_KEY for station %u: the keys go on the access "
+                  "point's, 0", p[0]);
+    if ((flags & 7) != 2 || !(flags & 0x0008))
+        violation("ADD_STA_KEY flags 0x%04x: CCM (2) with WEP_KEY_MAP (0x8)",
+                  flags);
+    if (flags & 0x4000) {
+        if (p[1] == 0)
+            violation("ADD_STA_KEY: the group key at the pairwise key's "
+                      "offset 0");
+        memcpy(fj.gtk, p + 4, 16);
+        fj.gtk_idx = (flags >> 8) & 3;
+        fj.gtk_set = 1;
+    } else {
+        if (p[1] != 0)
+            note("the pairwise key at offset %u (iwlmvm: 0)", p[1]);
+        memcpy(fj.tk, p + 4, 16);
+        fj.tk_set = 1;
+    }
+    answer_status(c, 1);                    /* ADD_STA_SUCCESS */
+}
+
+/* A frame the card sends: the TX command, then the frame */
+void fw_tx(int q, uint32_t idx, const uint8_t *b, uint32_t len)
+{
+    if (len < 4 + 56 + 24) {
+        violation("queue %d: a frame of %u bytes, less than a TX command and "
+                  "a header", q, len);
+        return;
+    }
+    if (b[0] != 0x1C || rd16(b + 2) != (uint16_t)((q << 8) | idx))
+        violation("queue %d index %u: command 0x%02x sequence 0x%04x, not "
+                  "TX_CMD with the queue and index", q, idx, b[0], rd16(b + 2));
+    const uint8_t *tx = b + 4;
+    uint32_t flen = rd16(tx);
+    uint32_t pad = (rd32(tx + 4) & 0x00100000) ? 2 : 0;
+    const uint8_t *f = tx + 56;
+    if (60 + 24 + pad + (flen - 24) > len || flen < 24) {
+        violation("queue %d: TX_CMD len %u, but %u bytes came", q, flen, len);
+        return;
+    }
+    static uint8_t frame[4096];
+    memcpy(frame, f, 24);
+    memcpy(frame + 24, f + 24 + pad, flen - 24);
+    fj.frames++;
+    /* on the channel: the time event while joining, the binding's time
+       quota once associated */
+    if (fj.te != 2 && !(fj.mac_assoc && fj.quota))
+        violation("a frame sent while the radio was not on the network's "
+                  "channel (no time event started, not associated with a "
+                  "time quota)");
+    if (tx[16] != 0)
+        violation("TX_CMD for station %u, not the access point's 0", tx[16]);
+    if (!(rd32(tx + 4) & 0x8))
+        violation("TX_CMD without TX_CMD_FLG_ACK: unicast frames are "
+                  "acknowledged");
+    if (rd32(tx + 4) & 0x10) {
+        if (!fj.lq)
+            violation("a data frame at the station's rates (STA_RATE) before "
+                      "its rate table (LQ_CMD)");
+    } else if (!(rd32(tx + 12) & 0x4000)) {
+        violation("TX_CMD rate_n_flags 0x%x without antenna A", rd32(tx + 12));
+    }
+    int status = 0x01;                      /* TX_STATUS_SUCCESS */
+    uint32_t n = flen;
+    if (tx[17] == 2) {                      /* CCM: the card encrypts */
+        const uint8_t *ccmp = frame + 24;
+        uint64_t pn = (uint64_t)ccmp[0] | (uint64_t)ccmp[1] << 8 |
+                      (uint64_t)ccmp[4] << 16 | (uint64_t)ccmp[5] << 24 |
+                      (uint64_t)ccmp[6] << 32 | (uint64_t)ccmp[7] << 40;
+        if (!(frame[1] & 0x40) || ccmp[2] != 0 || ccmp[3] != 0x20)
+            violation("an encrypted frame without Protected, or a CCMP header "
+                      "that is not PN0 PN1 0 0x20 PN2..PN5 (key 0, Ext IV)");
+        if (pn <= fj.tx_pn)
+            violation("CCMP packet number %llu after %llu: never twice",
+                      (unsigned long long)pn, (unsigned long long)fj.tx_pn);
+        fj.tx_pn = pn;
+        if (!aps.msg4_ok || memcmp(tx + 20, aps.tk, 16)) {
+            note("a frame encrypted with a key the access point does not "
+                 "hold: it hears noise");
+            fj.bad_key_frames++;
+        } else {
+            memmove(frame + 24, frame + 32, n - 32);
+            n -= 8;
+            frame[1] &= (uint8_t)~0x40;
+            fj.encrypted_frames++;
+            ap_frame(frame, n);
+        }
+    } else {
+        if (aps.msg4_ok && fj.tk_set && (frame[0] & 0x0C) == 0x08)
+            violation("a data frame in the clear after the keys were in");
+        ap_frame(frame, n);
+    }
+    uint8_t r[44];
+    memset(r, 0, sizeof(r));
+    r[0] = 1;
+    wr32(r + 4, rd32(tx + 12));
+    r[33] = (uint8_t)(tx[16] << 4 | 8);
+    wr16(r + 34, rd16(frame));
+    wr16(r + 36, (uint16_t)status);
+    wr32(r + 40, (idx + 1) & 0xFF);         /* the scheduler's SSN */
+    batch_begin();
+    batch_add(0x1C, (uint16_t)((q << 8) | idx), r, sizeof(r), 0);
+    batch_send(50 * US);
+}
+
+/* A frame the card hears from the access point */
+void fw_air_rx(const uint8_t *f, uint32_t n, int decrypted)
+{
+    (void)decrypted;
+    uint8_t phy[68];
+    memset(phy, 0, sizeof(phy));
+    phy[0] = 8;
+    wr32(phy + 4, (uint32_t)(now_ns / 1000));
+    wr16(phy + 22, 6);
+    wr32(phy + 28, 48);                     /* -48 dBm */
+    uint32_t status = 0x3;                  /* CRC, no overrun */
+    if (f[1] & 0x40) {
+        int group = f[4] & 1;
+        int ok = group ? fj.gtk_set && !memcmp(fj.gtk, aps.gtk, 16)
+                       : fj.tk_set && !memcmp(fj.tk, aps.tk, 16);
+        if (fj.mic_fail_next) {
+            fj.mic_fail_next = 0;
+            status |= (2u << 8) | (1u << 11);   /* CCM, MIC not OK */
+        } else if (ok) {
+            status |= (2u << 8) | (1u << 6) | (1u << 11);
+        } else {
+            status |= 7u << 8;              /* could not decrypt */
+        }
+    }
+    static uint8_t m[4 + 4096 + 4];
+    wr16(m, (uint16_t)n);
+    wr16(m + 2, 0);
+    memcpy(m + 4, f, n);
+    wr32(m + 4 + n, status);
+    batch_begin();
+    batch_add(0xC0, 0x8000, phy, sizeof(phy), 0);
+    batch_add(0xC1, 0x8000, m, 4 + n + 4, 0);
+    batch_send(100 * US);
+}
+
 static void rt_command(const struct cmd *c)
 {
     rt_cmds++;
@@ -1193,16 +1627,59 @@ static void rt_command(const struct cmd *c)
         phy_cfg_check(c, 0);
         break;
     case 0x1D:
+        if (c->len == 12 && c->data[3] != 15) {
+            scd_data_queue(c);
+            break;
+        }
         rt_step(S_SCDQ);
         scd_queue_cfg(c);
         break;
     case 0x18:
+        if (c->len == 44 && c->data[16] == 0) {
+            ap_sta(c);
+            break;
+        }
         rt_step(S_ADDSTA);
         add_sta(c);
         break;
+    case 0x19:
+        if (want_len(c, 4, "REMOVE_STA_CMD_API_S_VER_2"))
+            answer_status(c, 1);
+        fj.sta = 0;
+        break;
     case 0x08:
+        if (c->len == 36 && rd32(c->data + 4) == 2) {
+            phy_context_modify(c);
+            break;
+        }
         rt_step(S_PHYCTX);
         phy_context(c);
+        break;
+    case 0x28:
+        mac_context_cmd(c);
+        break;
+    case 0x2B:
+        binding_cmd(c);
+        break;
+    case 0xA9:
+        power_table_mac(c);
+        break;
+    case 0x2C:
+        time_quota_cmd(c);
+        break;
+    case 0x29:
+        time_event_cmd(c);
+        break;
+    case 0x4E:
+        lq_cmd(c);
+        break;
+    case 0x17:
+        sta_key_cmd(c);
+        break;
+    case 0xD0:
+        if (c->len < 12 || !c->data[3])
+            violation("MCAST_FILTER_CMD without pass_all");
+        answer_status(c, 0);
         break;
     case 0x77:
         if (!want_len(c, 4, "SPEC_I 7.12"))

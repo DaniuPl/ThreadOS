@@ -147,7 +147,7 @@ static void cmd_help(void)
     printk("          bt [scan|test] - Bluetooth\n");
     printk("          camera [grab <mode> <n>] - the camera, its modes, "
            "frames\n");
-    printk("          wifi [scan|test] - the Wi-Fi card, the networks\n");
+    printk("          wifi [scan|test|join|leave] - the Wi-Fi card, the networks\n");
     printk("          beep [Hz] [ms] - sound, volume [0-100|mute]\n");
     printk("          mic [record <s> <file>] - the microphone\n");
     printk("          format [N] - the whole disk, or partition N, as TFS\n");
@@ -509,8 +509,50 @@ static void cmd_wifi(void)
         printk("  calibration: %d results\n", s->calib_results);
     if (s->last_error[0])
         printk("  last error: %s\n", s->last_error);
+    static const char *const link[] = { "not joined", "joining",
+                                         "associated, exchanging keys",
+                                         "joined" };
     if (s->stage == IWL_STAGE_READY)
-        printk("( 'wifi scan' - the networks around )\n");
+        printk("  network:  %s\n", link[iwlwifi_link_state() & 3]);
+    if (s->stage == IWL_STAGE_READY)
+        printk("( 'wifi scan' - the networks around; 'wifi join <name> "
+               "[password]' )\n");
+}
+
+/* 'wifi join <name> [password]': a name with spaces goes in quotes */
+static void cmd_wifi_join(const char *arg)
+{
+    static char ssid[33], password[64];
+    uint32_t n = 0;
+    while (*arg == ' ')
+        arg++;
+    if (*arg == '"') {
+        arg++;
+        while (*arg && *arg != '"' && n < 32)
+            ssid[n++] = *arg++;
+        if (*arg == '"')
+            arg++;
+    } else {
+        while (*arg && *arg != ' ' && n < 32)
+            ssid[n++] = *arg++;
+    }
+    ssid[n] = 0;
+    while (*arg == ' ')
+        arg++;
+    n = 0;
+    while (*arg && n < 63)
+        password[n++] = *arg++;
+    password[n] = 0;
+    if (!ssid[0]) {
+        printk("usage: wifi join <name> [password]\n");
+        return;
+    }
+    printk("wifi: joining %s...\n", ssid);
+    int r = iwlwifi_join(ssid, password);
+    if (r == IWL_OK)
+        printk("wifi: joined %s\n", ssid);
+    else
+        printk("wifi: not joined: %s\n", iwlwifi_state()->last_error);
 }
 
 /* 'wifi scan': every channel the card may use, and what was heard */
@@ -1334,6 +1376,11 @@ static void execute(const char *line)
         cmd_wifi_scan();
     } else if (!strcmp(line, "wifi test")) {
         iwlwifi_selftest();
+    } else if (starts_with(line, "wifi join ")) {
+        cmd_wifi_join(line + sizeof("wifi join ") - 1);
+    } else if (!strcmp(line, "wifi leave")) {
+        iwlwifi_leave();
+        printk("wifi: left the network\n");
     } else if (!strcmp(line, "font")) {
         fonts_command("");
     } else if (starts_with(line, "font ")) {

@@ -10616,3 +10616,62 @@ works and is checked by `make test`.
       frame and as message 3's and a group key's key data, wrapped and
       signed so that it reaches the element parser: 3000 cases, nothing
       found.
+- [x] **Wi-Fi stage 3b: the Intel 3160 joins a WPA2 network and carries
+      its traffic** (kernel/iwlwifi.c, kernel/wlan.c, kernel/netdev.c,
+      kernel64/shell64.c, tests/hw/iwl/ap.c, tests/hw/iwl/fw.c,
+      tests/hw/iwl/card.c, tests/hw/iwl_model.c, tests/fuzz/wlan_harness.c,
+      scripts/tests/t_iwlwifi.py, scripts/fuzz_parsers.py)
+      The driver now does what Linux 4.9's iwlmvm, driven by mac80211,
+      sends this firmware to join a network as a station (the non-DQA
+      era this file was made for; the layouts from the API headers Linux
+      carries under BSD-3-Clause, the values iwlmvm puts in them): the
+      four AC queues, the MAC context, PHY context 0 moved to the
+      network's channel, the binding, the MAC's power table, the access
+      point as station 0, a time event that puts the radio on the
+      channel; open authentication and the association over the air
+      (kernel/wlan.c builds and reads the frames); the station modified,
+      a rate table, the MAC context associated with the AID and the next
+      DTIM worked out from the scanned beacon, the time quota, multicast
+      let through; then the four-way handshake in EAPOL data frames and
+      the pairwise and group keys into the firmware (ADD_STA_KEY version
+      1: this file lacks API bit 29). Data goes out encrypted by the card
+      with the TK in the TX command and a CCMP header - the packet
+      number - written by the driver; what comes in decrypted keeps its
+      CCMP header, whose packet number must grow per key (a replay is
+      dropped), and a frame the card could not decrypt or whose MIC
+      failed is dropped. The network layer takes the card as its last
+      choice (no wire): frames out wait in a small queue for the
+      driver's thread, frames in go to net_rx, and DHCP starts once the
+      network is joined. 'wifi join <name> [password]' (a scan, then
+      the loudest network of that name), 'wifi leave', and 'wifi' says
+      where the link is.
+      The card's model plays the network "ThreadOS-Home": its data
+      queues are read now (a frame's TFD buffers handed to the
+      firmware, which answers REPLY_TX), the firmware holds every join
+      command to its layout, values and order (MAC before binding,
+      power table before quota, no frame before the time event put the
+      radio on the channel, no STA_RATE frame before the rate table),
+      and the access point (tests/hw/iwl/ap.c, the handshake of
+      tests/hw/wpa_ap.c on OpenSSL) answers authentication and
+      association and runs the handshake. A frame the driver asked to
+      have encrypted reaches it only with the access point's TK and a
+      new packet number; one the access point sends is reported
+      decrypted only if the key the driver installed for it is the
+      access point's. Scenario join: joined, every step as the firmware
+      wants it, the keys both sides hold, DHCP asked for; a unicast
+      frame from the network reaches the stack as the Ethernet frame it
+      carried, the same again is dropped, a broadcast under the group
+      key arrives, one with a failed MIC does not; a frame from the
+      stack reaches the access point encrypted, to the DS, with LLC/SNAP;
+      leaving takes everything down. Scenario join-badpass: refused at
+      message 2, the reason given, no key in the card, everything taken
+      down. The model found two bugs on the way: the answer to message
+      1 - which comes right behind the association response - went out
+      before the rate table its STA_RATE needs, and the keys were
+      installed from inside the receive path, whose command wait read
+      the receive ring again and saw message 3 twice (the replay check
+      caught it). Message 1 now waits for the station to be ready, keys
+      go in from outside the receive path, and the receive ring is never
+      read from inside its own handlers. The fuzzer has kernel/wlan.c
+      too: 3000 corrupted frames, nothing found. No emulator has this
+      card: a laptop with one is the next test.

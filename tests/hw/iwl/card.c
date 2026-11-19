@@ -287,6 +287,7 @@ static uint32_t q9_read, q9_wptr;
 static int cmdq_ok;
 static int cmds_pending;
 static int q15_wptr_set;
+static uint32_t dq_read[32];             /* the data queues, as read */
 
 /* Device memory */
 static uint8_t sram_inst[SRAM_INST_SIZE];
@@ -469,6 +470,7 @@ static void sw_reset(void)
     cmdq_ok = 0;
     cmds_pending = 0;
     q15_wptr_set = 0;
+    memset(dq_read, 0, sizeof(dq_read));
     rxq_head = rxq_n = 0;
     stalling = 0;
 }
@@ -868,6 +870,71 @@ static void cmdq_wptr(uint32_t idx)
     q9_read = q9_wptr = idx;
 }
 
+/* --- the data queues (stage 3) ---------------------------------------------
+ *
+ * A frame to send: the TFD's buffers in order - the TX command's first
+ * bytes (TB0, the scratch the card writes back into), the rest of it
+ * with the 802.11 header, then the frame's body - handed to the
+ * firmware as one, which sends it and says so (REPLY_TX). Only a queue
+ * the firmware was told about (SCD_QUEUE_CFG) is read. */
+static uint32_t dq_read[32];
+
+static void fetch_frame(int q, uint32_t idx)
+{
+    uint64_t t = ((uint64_t)cbbc[q] << 8) + 128 * idx;
+    const uint8_t *tfd = dma_ptr(t);
+    int ntb = tfd[3] & 0x1F;
+    if (ntb < 2 || ntb > 20) {
+        violation("queue %d TFD %u has %d transfer buffers: a frame needs "
+                  "the TX command and its header at least (SPEC_T 7.2)",
+                  q, idx, ntb);
+        return;
+    }
+    static uint8_t buf[20 * 4096];
+    uint32_t len = 0;
+    for (int k = 0; k < ntb; k++) {
+        uint32_t lo = rd32(tfd + 4 + 6 * k);
+        uint16_t hn = rd16(tfd + 8 + 6 * k);
+        uint64_t a = lo | (uint64_t)(hn & 0xF) << 32;
+        uint32_t l = hn >> 4;
+        if (!l || !dma_ok(a, l)) {
+            violation("queue %d TFD %u: transfer buffer %d (0x%llx+%u) is "
+                      "empty or not memory the driver allocated", q, idx, k,
+                      (unsigned long long)a, l);
+            return;
+        }
+        memcpy(buf + len, dma_ptr(a), l);
+        len += l;
+    }
+    last_busy = now_ns;
+    fw_tx(q, idx, buf, len);
+}
+
+static void dataq_wptr(int q, uint32_t idx)
+{
+    if (!fw_on() || !fw_queue_enabled(q)) {
+        violation("HBUS_TARG_WRPTR: queue %d index %u, a queue the firmware "
+                  "was not given (SCD_QUEUE_CFG)", q, idx);
+        dq_read[q] = idx;
+        return;
+    }
+    if (!cbbc[q] || !dma_ok((uint64_t)cbbc[q] << 8, 256 * 128)) {
+        violation("queue %d has no TFD ring (FH_MEM_CBBC_QUEUE)", q);
+        dq_read[q] = idx;
+        return;
+    }
+    uint32_t n = (idx - dq_read[q]) & 0xFF;
+    for (uint32_t i = 0; i < n; i++)
+        fetch_frame(q, (dq_read[q] + i) & 0xFF);
+    dq_read[q] = idx;
+}
+
+void card_queue_reset(int q, uint32_t ssn)
+{
+    if (q >= 0 && q < 32)
+        dq_read[q] = ssn & 0xFF;
+}
+
 static void wrptr_write(uint32_t v)
 {
     uint32_t q = (v >> 8) & 0x1F, idx = v & 0xFF;
@@ -882,11 +949,12 @@ static void wrptr_write(uint32_t v)
     }
     if (q == 9)
         cmdq_wptr(idx);
-    else if (q == 15 && idx == 0)
+    else if (q == 15 && idx == 0 && !fw_queue_enabled(15))
         q15_wptr_set = 1;
+    else if (!fw_queue_enabled((int)q) && idx == dq_read[q])
+        dq_read[q] = idx;               /* the SSN, before SCD_QUEUE_CFG */
     else
-        violation("HBUS_TARG_WRPTR: queue %u index %u - stage 1 transmits "
-                  "nothing on data queues", q, idx);
+        dataq_wptr((int)q, idx);
 }
 
 /* --- PRPH ------------------------------------------------------------------- */

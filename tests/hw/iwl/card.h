@@ -43,7 +43,7 @@
 #define EVLOG_PTR  0x00812800u
 
 enum scenario { SC_OK, SC_NOFW_ACK, SC_ASSERT, SC_RFKILL, SC_SCAN,
-                SC_NOFILE };
+                SC_NOFILE, SC_JOIN, SC_BADPASS };
 extern int scenario;
 
 /* --- time: nanoseconds of card time; it moves only when the driver
@@ -134,6 +134,11 @@ int fw_running(void);
 void fw_command(const uint8_t *cmd, uint32_t len, int index);
 uint32_t fw_scd_base(void);               /* 0 until the firmware runs */
 void fw_flood(int n);                     /* notifications after bring-up */
+/* Stage 3: a frame from a data queue (TX command, header, body), and
+   whether the firmware was given that queue */
+void fw_tx(int queue, uint32_t idx, const uint8_t *buf, uint32_t len);
+int fw_queue_enabled(int queue);
+void card_queue_reset(int queue, uint32_t ssn);
 struct fw_stats {
     int init_starts, rt_starts;
     int init_alive, rt_alive;
@@ -155,6 +160,23 @@ struct fw_stats {
 };
 extern struct fw_stats fs;
 void fw_rt_report(void);
+/* Stage 3: what the driver set up to join, for the checks */
+#define AP_TSF 0x0000001234567890ull      /* the access point's clock */
+struct fw_join {
+    int q_on[32];
+    int mac_added, mac_bssid_set, mac_assoc, bound, power_sent, quota;
+    int phy_moved;
+    int te;                                /* 0, 1 asked, 2 on the channel */
+    int lq, sta, sta_modified;
+    int assoc_answered;                    /* ap.c answered the association */
+    uint32_t beacon_ts;                    /* GP2 of its beacon in the scan */
+    uint8_t tk[16], gtk[16];               /* as the driver installed them */
+    int tk_set, gtk_set, gtk_idx;
+    uint64_t tx_pn;
+    int frames, encrypted_frames, bad_key_frames;
+    int mic_fail_next;                     /* the next protected frame fails */
+};
+extern struct fw_join fj;
 /* The model's NVM, for the checks */
 extern const uint8_t nvm_mac[6];
 extern const uint16_t nvm_chan_flags[39];

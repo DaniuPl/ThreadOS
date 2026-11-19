@@ -5,8 +5,8 @@ Six fronts: the ring 3 programs (certificates, HTML, HTTP, cookies), the
 packet path in the kernel (net.c + tcp.c), the kernel's TrueType
 reader (ttf.c), because a font is a file and files come from anywhere,
 the kernel's HID report descriptor reader (hid.c), because a descriptor
-comes from whatever is plugged in, the kernel's WPA2 handshake (wpa.c),
-because its frames come from the air, Mbed TLS's certificate and key
+comes from whatever is plugged in, the kernel's WPA2 handshake (wpa.c)
+and 802.11 frame reader (wlan.c), because their frames come from the air, Mbed TLS's certificate and key
 parsers, which curl hands whatever a server sends, and the ARM64
 kernel's device tree reader (kernelarm64/fdt.c), because the tree is
 the firmware's and the firmware is somebody else's - and GLib, under
@@ -184,6 +184,43 @@ def build_wpa(workdir):
           os.path.join(FUZZ, "wpa_harness.c"),
           os.path.join(ROOT, "kernel", "wpa.c")], "the WPA harness")
     return binary
+
+
+def build_wlan(workdir):
+    """The kernel's wlan.c: the 802.11 frames a station reads"""
+    binary = os.path.join(workdir, "lharness")
+    must(["gcc", *SAN, "-w", "-I", ROOT, "-o", binary,
+          os.path.join(FUZZ, "wlan_harness.c"),
+          os.path.join(ROOT, "kernel", "wlan.c")], "the 802.11 harness")
+    return binary
+
+
+def wlan_seeds():
+    """A beacon with the elements a station reads, an authentication and
+    an association response, a deauthentication, data frames from the DS
+    plain, QoS and protected"""
+    me = bytes([0x7C, 0x5C, 0xF8, 0x12, 0x34, 0x56])
+    ap = bytes([0x02, 0x7A, 0, 0, 0, 1])
+
+    def hdr(fc, fl, a1, a2, a3):
+        return bytes([fc, fl, 0, 0]) + a1 + a2 + a3 + bytes(2)
+    beacon = (hdr(0x80, 0, b"\xff" * 6, ap, ap) + bytes(8) +
+              bytes([100, 0, 0x11, 0x04]) + bytes([0, 4]) + b"Home" +
+              bytes([1, 8, 0x82, 0x84, 0x8B, 0x96, 0x0C, 0x12, 0x18, 0x24,
+                     50, 4, 0x30, 0x48, 0x60, 0x6C, 3, 1, 6, 5, 4, 1, 2, 0, 0,
+                     48, 20, 1, 0, 0, 0x0F, 0xAC, 4, 1, 0, 0, 0x0F, 0xAC, 4,
+                     1, 0, 0, 0x0F, 0xAC, 2, 0x0C, 0, 221, 7, 0, 0x50, 0xF2,
+                     2, 0, 1, 0]))
+    auth = hdr(0xB0, 0, me, ap, ap) + bytes([0, 0, 2, 0, 0, 0])
+    assoc = hdr(0x10, 0, me, ap, ap) + bytes([0x11, 4, 0, 0, 1, 0xC0,
+                                               1, 4, 0x82, 0x84, 0x8B, 0x96])
+    deauth = hdr(0xC0, 0, me, ap, ap) + bytes([3, 0])
+    snap = bytes([0xAA, 0xAA, 3, 0, 0, 0, 0x08, 0]) + bytes(range(40))
+    data = hdr(0x08, 0x02, me, ap, ap) + snap
+    qos = hdr(0x88, 0x02, me, ap, ap) + bytes(2) + snap
+    prot = (hdr(0x08, 0x42, me, ap, ap) + bytes([1, 0, 0, 0x20, 0, 0, 0, 0])
+            + snap + bytes(8))
+    return [beacon, auth, assoc, deauth, data, qos, prot]
 
 
 def wpa_seeds():
@@ -1518,12 +1555,14 @@ def main():
         mbinaries.update(nbinaries)
         hbinary = build_hid(workdir)
         mbinaries["wpa"] = build_wpa(workdir)
+        mbinaries["wlan"] = build_wlan(workdir)
         fbinary = build_fdt(workdir)
         corpus = seeds(workdir)
         corpus["frames"] = frames()
         corpus["ttf"] = fonts()
         corpus["hid"] = hid_seeds()
         corpus["wpa"] = wpa_seeds()
+        corpus["wlan"] = wlan_seeds()
         corpus["fdt"] = [t for _, t, want in FDT_TREES
                          if want.startswith("r=0")]
         corpus["mbedtls-x509crt"] = list(corpus["x509"])

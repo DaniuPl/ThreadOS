@@ -62,6 +62,12 @@
 #include "include/pit.h"
 #include "include/string.h"
 #include "include/io.h"
+#include "include/wlan.h"
+#include "include/wpa.h"
+#include "include/net.h"
+#include "include/dhcp.h"
+#include "include/random.h"
+#include "include/spinlock.h"
 
 /* The registers are in memory and have to be mapped; the window's
    address comes from the BAR. */
@@ -1098,8 +1104,12 @@ static void rx_parse_buffer(const uint8_t *rb)
 
 static void rx_process(void)
 {
-    if (!rx_ready)
+    /* A handler that waited for a command's answer would read the ring
+       again from inside its own buffer, and see that buffer twice */
+    static int reading;
+    if (!rx_ready || reading)
         return;
+    reading = 1;
     /* closed_rb_num, read in one access: the card may be writing it */
     uint32_t closed = *(volatile uint16_t *)rx_status & 0x0FFF;
     closed &= RX_QUEUE_SIZE - 1;
@@ -1109,11 +1119,14 @@ static void rx_process(void)
         rx_parse_buffer(rx_buf[rx_read]);
         rx_read = (rx_read + 1) & (RX_QUEUE_SIZE - 1);
         n++;
-        if (!rx_ready)
+        if (!rx_ready) {
+            reading = 0;
             return;     /* a handler stopped the card */
+        }
     }
     if (n)
         rx_restock();
+    reading = 0;
 }
 
 /* ===================================================================
@@ -2887,6 +2900,8 @@ int iwlwifi_run(void)
 
 /* The running card: notifications taken in, the switch and the
    firmware watched */
+static void link_service(void);
+
 void iwlwifi_poll(void)
 {
     if (st.stage != IWL_STAGE_READY)
@@ -2916,7 +2931,9 @@ void iwlwifi_poll(void)
     if (err) {
         report_failure(err);
         stop_device();
+        return;
     }
+    link_service();
 }
 
 /* ===================================================================
@@ -2958,6 +2975,11 @@ static int bss_recorded;            /* the list is the self-test's */
 /* The PHY half of the frame being received: where and how loud */
 static uint16_t rx_channel;
 static int rx_signal;
+static uint32_t rx_device_ts;
+/* What each network's beacon said, beside bss[] (stage 3 joins from it) */
+static struct wlan_bss_info bss_info[IWLWIFI_MAX_BSS];
+static uint32_t bss_seen_ts[IWLWIFI_MAX_BSS];
+static void link_rx(const uint8_t *f, uint32_t n, uint32_t status);
 
 static uint32_t scan_cmd_size(void)
 {
@@ -3037,6 +3059,7 @@ static void rx_phy(uint32_t id, const uint8_t *p, uint32_t len, uint16_t seq)
     if (len < 68)
         return;
     rx_channel = get16(p + 22);
+    rx_device_ts = get32(p + 4);        /* GP2, in us: when it was heard */
     /* The energy the antennas heard, as a positive number: -dBm */
     uint32_t e = get32(p + 24 + 4 * 1);
     int a = (int)(e & 0xFF), b = (int)((e >> 8) & 0xFF);
@@ -3051,7 +3074,9 @@ static struct iwlwifi_bss *bss_for(const uint8_t *bssid)
             return &bss[i];
     if (n_bss >= IWLWIFI_MAX_BSS)
         return 0;
-    struct iwlwifi_bss *b = &bss[n_bss++];
+    struct iwlwifi_bss *b = &bss[n_bss];
+    memset(&bss_info[n_bss], 0, sizeof(bss_info[0]));
+    n_bss++;
     memset(b, 0, sizeof(*b));
     memcpy(b->bssid, bssid, 6);
     b->rssi = -128;
@@ -3068,12 +3093,15 @@ static void rx_mpdu(uint32_t id, const uint8_t *p, uint32_t len, uint16_t seq)
     if (len < 4)
         return;
     uint32_t n = get16(p);
-    if (n < 36 || 4 + n + 4 > len)
+    if (n < WLAN_HDR || 4 + n + 4 > len)
         return;
     uint32_t status = get32(p + 4 + n);
     if ((status & 3) != 3)              /* CRC and no overrun */
         return;
     const uint8_t *f = p + 4;
+    link_rx(f, n, status);
+    if (n < 36)                         /* shorter than a beacon */
+        return;
     uint16_t fc = get16(f);
     uint32_t type = (fc >> 2) & 3, sub = (fc >> 4) & 0xF;
     if (type != 0 || (sub != 5 && sub != 8))
@@ -3081,6 +3109,18 @@ static void rx_mpdu(uint32_t id, const uint8_t *p, uint32_t len, uint16_t seq)
     struct iwlwifi_bss *b = bss_for(f + 16);
     if (!b)
         return;
+    struct wlan_bss_info info;
+    if (wlan_parse_beacon(f, n, &info) == 0) {
+        int k = (int)(b - bss);
+        /* a probe response has no TIM: the beacon's DTIM stays */
+        if (!info.has_tim && bss_info[k].has_tim) {
+            info.has_tim = 1;
+            info.dtim_count = bss_info[k].dtim_count;
+            info.dtim_period = bss_info[k].dtim_period;
+        }
+        bss_info[k] = info;
+        bss_seen_ts[k] = rx_device_ts;
+    }
     int privacy = (get16(f + 34) & 0x10) != 0;
     int rsn = 0, wpa = 0, channel = rx_channel;
     for (uint32_t i = 36; i + 2 <= n;) {
@@ -3317,6 +3357,994 @@ int iwlwifi_scan(void)
     return scan_gen == gen ? IWL_ERR_TIMEOUT : scan_result;
 }
 
+/* ===================================================================
+ * Stage 3: joining a network
+ *
+ * What Linux 4.9's iwlmvm, driven by mac80211, sends this firmware to
+ * join a WPA2 network as a station, cut to what the firmware needs
+ * (the API headers Linux carries under BSD-3-Clause give the layouts):
+ *
+ *   the station's four TX queues (VO, VI, BE, BK -> queues 0..3, FIFOs
+ *   3..0); its MAC context (a BSS station, not yet associated); PHY
+ *   context 0 moved to the network's channel; the binding of the two;
+ *   the MAC's power table (no power saving); the MAC context again with
+ *   the BSSID and the beacon interval; the access point as station 0;
+ *   a time event keeping the radio on the channel while we join;
+ *
+ *   then over the air, as kernel/wlan.c builds and reads them: open
+ *   system authentication and the association, management frames at
+ *   1 Mb/s on the VO queue;
+ *
+ *   then: the station modified, a rate table (LQ) for the data frames,
+ *   the MAC context associated (the AID, the DTIM taken from the last
+ *   beacon), the time quota for the binding, every multicast frame let
+ *   through - and for WPA2 the four-way handshake (kernel/wpa.c) in
+ *   EAPOL data frames on the BE queue, after which the pairwise key and
+ *   the group key go into the firmware's key table (ADD_STA_KEY,
+ *   version 1 for this file).
+ *
+ * The card encrypts what we send with the key in the TX command, but
+ * the CCMP header - the packet number - is ours to write; it decrypts
+ * what comes in and leaves the header and MIC in place, and the replay
+ * check is ours too.
+ * =================================================================== */
+
+#define ADD_STA_KEY_CMD        0x17
+#define REMOVE_STA             0x19
+#define MAC_CONTEXT_CMD        0x28
+#define TIME_EVENT_CMD         0x29
+#define TIME_EVENT_NOTIFICATION 0x2A
+#define BINDING_CONTEXT_CMD    0x2B
+#define TIME_QUOTA_CMD         0x2C
+#define LQ_CMD                 0x4E
+#define MAC_PM_POWER_TABLE     0xA9
+#define MCAST_FILTER_CMD       0xD0
+
+#define FW_CTXT_ACTION_MODIFY  2
+#define FW_CTXT_ACTION_REMOVE  3
+#define FW_CTXT_INVALID        0xFFFFFFFFu
+#define FW_MAC_TYPE_BSS_STA    5
+#define MAC_FILTER_ACCEPT_GRP  0x04
+#define MAC_FILTER_IN_BEACON   0x40
+#define MAC_QOS_FLG_UPDATE_EDCA 0x01
+#define MAC_PROT_FLG_TGG_PROTECT 0x08
+#define MAC_FLG_SHORT_PREAMBLE 0x20
+#define MAC_FLG_SHORT_SLOT     0x10
+#define STA_FLG_FAT_MIMO_MSK   0x3C000000u
+#define TE_BSS_STA_AGGRESSIVE_ASSOC 0
+#define TE_POLICY_JOIN         0x0803       /* start, end, at once */
+
+#define TX_FLG_ACK             0x00000008u
+#define TX_FLG_STA_RATE        0x00000010u
+#define TX_FLG_BT_PRIO_3       0x00001800u
+#define TX_FLG_SEQ_CTL         0x00002000u
+#define TX_SEC_CCM             2
+#define TX_RATE_1M_CCK_ANT_A   0x0000420Au
+#define TID_NON_QOS            8
+#define PM_FRAME_MGMT          2
+#define PM_FRAME_ASSOC         3
+#define TX_STATUS_SUCCESS      0x01
+#define TX_STATUS_DIRECT_DONE  0x02
+
+#define STA_KEY_FLG_CCM        0x0002
+#define STA_KEY_FLG_WEP_KEY_MAP 0x0008
+#define STA_KEY_MULTICAST      0x4000
+
+#define RX_RES_STATUS_MIC_OK   (1u << 6)
+#define RX_RES_STATUS_SEC_SHIFT 8
+#define RX_RES_STATUS_SEC_CCM  2
+
+#define Q_VO 0
+#define Q_BE 2
+#define AP_STA_ID 0
+#define JOIN_TRIES 3
+#define JOIN_WAIT_MS 500
+#define KEYS_WAIT_MS 5000
+#define TXQ_SOFT 16                     /* frames waiting for the thread */
+
+static struct {
+    volatile int state;                 /* IWLWIFI_LINK_* */
+    int idx;                            /* in bss[] / bss_info[] */
+    struct wlan_bss_info info;
+    uint32_t info_ts;                   /* GP2 when its beacon came */
+    int secure;
+    struct wpa_sm wpa;
+    uint16_t aid;
+    int queues_on, mac_added, bound, sta_added;
+    uint32_t te_id;
+    int te_state;                       /* 0 none, 1 asked, 2 on, 3 over */
+    volatile int got_auth, got_assoc;
+    uint16_t status;
+    int tx_status;                      /* the last management frame's */
+    int keys_in;
+    volatile int keys_pending, gtk_pending;
+    uint64_t tx_pn;                     /* the last packet number sent */
+    uint8_t rx_pn[4][6];                /* per key: the last one heard */
+    int rx_pn_set[4];
+    uint32_t rx_frames, tx_frames;
+} link;
+
+static void link_say(const char *what, const char *detail)
+{
+    say("[wifi] %s%s\n", what, detail ? detail : "");
+}
+
+static int ack_status_ok(uint32_t v)
+{
+    return (v & 0xFF) == ADD_STA_SUCCESS;
+}
+
+/* A command that answers with a 4-byte status: 0 if it is 'ok' */
+static int cmd_status(uint32_t id, const void *b, uint32_t n, uint32_t *status)
+{
+    uint8_t resp[32];
+    struct iwl_hcmd c;
+    memset(&c, 0, sizeof(c));
+    c.id = id;
+    c.data[0] = b;
+    c.len[0] = n;
+    c.flags = IWL_CMD_WANT_RESP;
+    c.resp = resp;
+    c.resp_cap = sizeof(resp);
+    int r = iwl_send_cmd(&c);
+    if (r < 0)
+        return r;
+    *status = c.resp_len >= 4 ? get32(resp) : 0xFFFFFFFFu;
+    return IWL_OK;
+}
+
+/* --- the MAC context ----------------------------------------------- */
+
+static void put_ac(uint8_t *ac, int fifo, uint16_t cw_min, uint16_t cw_max,
+                   uint8_t aifsn, uint16_t txop_us)
+{
+    uint8_t *e = ac + 8 * fifo;
+    put16(e, cw_min);
+    put16(e + 2, cw_max);
+    e[4] = aifsn;
+    e[5] = (uint8_t)(1u << fifo);
+    put16(e + 6, txop_us);
+}
+
+static uint32_t reciprocal(uint32_t v)
+{
+    return v ? 0xFFFFFFFFu / v : 0;
+}
+
+/* MAC_CONTEXT_API_S_VER_1, 148 bytes: phase 0 = added, 1 = told the
+   BSSID, 2 = associated */
+static int mac_context(uint32_t action, int phase)
+{
+    uint8_t b[148];
+    memset(b, 0, sizeof(b));
+    put32(b + 4, action);
+    put32(b + 8, FW_MAC_TYPE_BSS_STA);
+    memcpy(b + 16, st.mac, 6);
+    if (phase >= 1)
+        memcpy(b + 24, link.info.bssid, 6);
+    /* the rates frames are acknowledged at: CCK 1-11, OFDM 6, 12, 24 */
+    put32(b + 32, 0x0F);
+    put32(b + 36, 0x15);
+    uint16_t cap = link.info.capability;
+    if (phase == 2) {
+        if (cap & WLAN_CAP_SHORT_PRE)
+            put32(b + 44, MAC_FLG_SHORT_PREAMBLE);
+        if (cap & WLAN_CAP_SHORT_SLOT)
+            put32(b + 48, MAC_FLG_SHORT_SLOT);
+        put32(b + 52, MAC_FILTER_ACCEPT_GRP);
+        put32(b + 56, MAC_QOS_FLG_UPDATE_EDCA);
+        /* the EDCA mac80211 gives a network without WMM, in ERP mode */
+        put_ac(b + 60, 0, 15, 1023, 7, 0);       /* BK */
+        put_ac(b + 60, 1, 15, 1023, 3, 0);       /* BE */
+        put_ac(b + 60, 2, 7, 15, 2, 3008);       /* VI */
+        put_ac(b + 60, 3, 3, 7, 2, 1504);        /* VO */
+    } else {
+        put32(b + 52, MAC_FILTER_ACCEPT_GRP | MAC_FILTER_IN_BEACON);
+        for (int f = 0; f < 4; f++)
+            put_ac(b + 60, f, 15, 1023, 2, 0);
+    }
+    uint32_t bi = phase >= 1 ? link.info.beacon_int : 0;
+    uint32_t dtim = link.info.dtim_period ? link.info.dtim_period : 1;
+    if (phase == 2) {
+        /* the next DTIM beacon, from the last beacon heard: its clock
+           and ours, plus the beacons still to come before it */
+        uint32_t offs = (uint32_t)link.info.dtim_count * bi * 1024;
+        put32(b + 100, 1);
+        put32(b + 104, link.info_ts + offs);
+        uint64_t tsf = link.info.tsf + offs;
+        put32(b + 108, (uint32_t)tsf);
+        put32(b + 112, (uint32_t)(tsf >> 32));
+        put32(b + 124, bi * dtim);
+        put32(b + 128, reciprocal(bi * dtim));
+        put32(b + 136, link.aid);
+    }
+    put32(b + 116, bi);
+    put32(b + 120, reciprocal(bi));
+    put32(b + 132, 10);                     /* listen interval */
+    return iwl_send_cmd_pdu(MAC_CONTEXT_CMD, b, sizeof(b), 0);
+}
+
+static int phy_context_move(void)
+{
+    uint8_t b[36];
+    memset(b, 0, sizeof(b));
+    put32(b + 4, FW_CTXT_ACTION_MODIFY);
+    b[16] = link.info.channel <= 14 ? PHY_BAND_24 : PHY_BAND_5;
+    b[17] = link.info.channel;
+    put32(b + 20, valid_tx_ant());
+    put32(b + 24, (valid_rx_ant() << 1) | (1u << 10) | (1u << 12));
+    return iwl_send_cmd_pdu(PHY_CONTEXT_CMD, b, sizeof(b), 0);
+}
+
+static int binding(uint32_t action)
+{
+    uint8_t b[24];
+    put32(b, 0);
+    put32(b + 4, action);
+    put32(b + 8, action == FW_CTXT_ACTION_REMOVE ? FW_CTXT_INVALID : 0);
+    put32(b + 12, FW_CTXT_INVALID);
+    put32(b + 16, FW_CTXT_INVALID);
+    put32(b + 20, 0);
+    uint32_t status;
+    int r = cmd_status(BINDING_CONTEXT_CMD, b, sizeof(b), &status);
+    if (r == IWL_OK && status != 0) {
+        why("BINDING_CONTEXT_CMD answered status 0x%x", status);
+        return IWL_ERR_REJECTED;
+    }
+    return r;
+}
+
+static int power_table(void)
+{
+    uint8_t b[40];
+    memset(b, 0, sizeof(b));
+    put16(b + 4, 0x0001);                   /* power save allowed, not on */
+    put16(b + 6, 25);                       /* keep alive, seconds */
+    return iwl_send_cmd_pdu(MAC_PM_POWER_TABLE, b, sizeof(b), 0);
+}
+
+static int time_quota(int on)
+{
+    uint8_t b[48];
+    for (int i = 0; i < 4; i++) {
+        put32(b + 12 * i, i == 0 && on ? 0 : FW_CTXT_INVALID);
+        put32(b + 12 * i + 4, i == 0 && on ? 128 : 0);
+        put32(b + 12 * i + 8, 0);
+    }
+    return iwl_send_cmd_pdu(TIME_QUOTA_CMD, b, sizeof(b), 0);
+}
+
+/* ADD_STA_CMD_API_S_VER_7 for the access point: add, then modify */
+static int ap_station(int modify)
+{
+    uint8_t b[44];
+    memset(b, 0, sizeof(b));
+    b[0] = (uint8_t)modify;
+    put16(b + 2, 0xFFFF);                   /* no aggregation */
+    if (!modify)
+        memcpy(b + 8, link.info.bssid, 6);
+    b[16] = AP_STA_ID;
+    put32(b + 24, STA_FLG_FAT_MIMO_MSK);    /* 20 MHz, one stream */
+    if (!modify)
+        put32(b + 40, 0x0F);                /* queues 0..3 */
+    uint32_t status;
+    int r = cmd_status(ADD_STA, b, sizeof(b), &status);
+    if (r == IWL_OK && !ack_status_ok(status)) {
+        why("ADD_STA for the access point answered status 0x%x", status);
+        return IWL_ERR_REJECTED;
+    }
+    return r;
+}
+
+static int remove_station(void)
+{
+    uint8_t b[4] = { AP_STA_ID, 0, 0, 0 };
+    return iwl_send_cmd_pdu(REMOVE_STA, b, sizeof(b), 0);
+}
+
+/* Every data frame to the access point goes at the rates of its table:
+   1 Mb/s on the one antenna, as iwlmvm's rate scaling starts it */
+static int rate_table(void)
+{
+    uint8_t b[88];
+    memset(b, 0, sizeof(b));
+    b[0] = AP_STA_ID;
+    b[6] = 1;                               /* antenna A */
+    b[7] = 3;
+    put16(b + 12, 4000);
+    b[14] = 3;
+    b[15] = 63;
+    for (int i = 0; i < 16; i++)
+        put32(b + 20 + 4 * i, TX_RATE_1M_CCK_ANT_A);
+    return iwl_send_cmd_pdu(LQ_CMD, b, sizeof(b), 0);
+}
+
+static int multicast_all(void)
+{
+    uint8_t b[12];
+    memset(b, 0, sizeof(b));
+    b[3] = 1;                               /* pass all */
+    memcpy(b + 4, link.info.bssid, 6);
+    return iwl_send_cmd_pdu(MCAST_FILTER_CMD, b, sizeof(b), 0);
+}
+
+/* --- the time event: the radio kept on the channel ------------------ */
+
+static void te_notif(uint32_t id, const uint8_t *p, uint32_t len, uint16_t seq)
+{
+    (void)id;
+    (void)seq;
+    if (len < 24 || get32(p + 8) != link.te_id || !link.te_state)
+        return;
+    if (get32(p + 16) == 1)                 /* start */
+        link.te_state = get32(p + 20) == 1 ? 2 : 3;
+    else
+        link.te_state = 3;                  /* over */
+}
+
+static int time_event_add(void)
+{
+    uint8_t b[36], resp[16];
+    memset(b, 0, sizeof(b));
+    put32(b + 4, FW_CTXT_ACTION_ADD);
+    put32(b + 8, TE_BSS_STA_AGGRESSIVE_ASSOC);
+    put32(b + 16, 500);                     /* max delay, TU */
+    put32(b + 24, 1);                       /* interval */
+    put32(b + 28, 600);                     /* duration, TU */
+    b[32] = 1;                              /* once */
+    put16(b + 34, TE_POLICY_JOIN);
+    struct iwl_hcmd c;
+    memset(&c, 0, sizeof(c));
+    c.id = TIME_EVENT_CMD;
+    c.data[0] = b;
+    c.len[0] = sizeof(b);
+    c.flags = IWL_CMD_WANT_RESP;
+    c.resp = resp;
+    c.resp_cap = sizeof(resp);
+    link.te_state = 1;
+    link.te_id = 0xFFFFFFFFu;
+    int r = iwl_send_cmd(&c);
+    if (r < 0)
+        return r;
+    if (c.resp_len < 16 || !(get32(resp) & 1)) {
+        why("TIME_EVENT_CMD was not taken (status 0x%x)",
+            c.resp_len >= 4 ? get32(resp) : 0);
+        return IWL_ERR_REJECTED;
+    }
+    link.te_id = get32(resp + 8);
+    /* on the channel before the first frame goes */
+    struct waiter w;
+    wait_begin(&w, 1000);
+    do {
+        service();
+        if (fw_err || hw_gone)
+            return IWL_ERR_FW;
+    } while (link.te_state == 1 && wait_more(&w));
+    if (link.te_state != 2) {
+        why("the firmware did not go to channel %u (time event %s)",
+            (uint32_t)link.info.channel,
+            link.te_state == 1 ? "never started" : "not scheduled");
+        return IWL_ERR_TIMEOUT;
+    }
+    return IWL_OK;
+}
+
+static void time_event_remove(void)
+{
+    if (link.te_state != 2)
+        return;
+    uint8_t b[36];
+    memset(b, 0, sizeof(b));
+    put32(b + 4, FW_CTXT_ACTION_REMOVE);
+    put32(b + 8, link.te_id);
+    iwl_send_cmd_pdu(TIME_EVENT_CMD, b, sizeof(b), 0);
+    link.te_state = 0;
+}
+
+/* --- frames out ------------------------------------------------------ */
+
+static void tx_status(uint32_t id, const uint8_t *p, uint32_t len, uint16_t seq)
+{
+    (void)id;
+    if (len >= 40 && ((seq >> 8) & 0x1F) == Q_VO)
+        link.tx_status = (int)(get16(p + 36) & 0xFF);
+}
+
+/* A management frame to the access point: 1 Mb/s, acknowledged, the
+   firmware numbering it */
+static int send_mgmt(const uint8_t *f, uint32_t n, int pm)
+{
+    uint8_t tx[56];
+    memset(tx, 0, sizeof(tx));
+    put16(tx, n);
+    put32(tx + 4, TX_FLG_ACK | TX_FLG_BT_PRIO_3 | TX_FLG_SEQ_CTL);
+    put32(tx + 12, TX_RATE_1M_CCK_ANT_A);
+    tx[16] = AP_STA_ID;
+    put32(tx + 40, 0xFFFFFFFFu);            /* no life time limit */
+    tx[49] = 60;
+    tx[50] = 15;
+    tx[51] = TID_NON_QOS;
+    put16(tx + 52, (uint32_t)pm);
+    link.tx_status = -1;
+    return iwl_tx_frame(Q_VO, tx, f, WLAN_HDR, f + WLAN_HDR, n - WLAN_HDR);
+}
+
+/* A data frame (24-byte header, then the body): at the station's
+   rates, encrypted by the card once the pairwise key is in */
+static int send_data(const uint8_t *hdr, const uint8_t *body, uint32_t n,
+                     int eapol)
+{
+    uint8_t tx[56], h[WLAN_HDR];
+    static uint8_t frame[WLAN_FRAME_MAX];
+    memcpy(h, hdr, WLAN_HDR);
+    memset(tx, 0, sizeof(tx));
+    put32(tx + 4, TX_FLG_ACK | TX_FLG_STA_RATE | TX_FLG_SEQ_CTL);
+    tx[16] = AP_STA_ID;
+    put32(tx + 40, 0xFFFFFFFFu);
+    tx[49] = 60;
+    tx[50] = 15;
+    tx[51] = TID_NON_QOS;
+    put16(tx + 52, eapol ? PM_FRAME_MGMT : 0);
+    uint32_t len = n;
+    if (link.keys_in) {
+        /* The CCMP header: the packet number, never used twice, and
+           the key id (0, pairwise) with Ext IV */
+        if (n + WLAN_CCMP_HDR > sizeof(frame))
+            return IWL_ERR_STATE;
+        uint64_t pn = ++link.tx_pn;
+        h[1] |= WLAN_FC1_PROTECTED;
+        frame[0] = (uint8_t)pn;
+        frame[1] = (uint8_t)(pn >> 8);
+        frame[2] = 0;
+        frame[3] = 0x20;
+        for (int i = 0; i < 4; i++)
+            frame[4 + i] = (uint8_t)(pn >> (16 + 8 * i));
+        memcpy(frame + WLAN_CCMP_HDR, body, n);
+        body = frame;
+        len = n + WLAN_CCMP_HDR;
+        tx[17] = TX_SEC_CCM;
+        memcpy(tx + 20, link.wpa.keys.tk, WPA_TK_LEN);
+    }
+    put16(tx, WLAN_HDR + len);
+    int r = iwl_tx_frame(Q_BE, tx, h, WLAN_HDR, body, len);
+    if (r == IWL_OK)
+        link.tx_frames++;
+    return r;
+}
+
+static int send_eapol(const uint8_t *e, uint32_t n)
+{
+    static uint8_t eth[14 + WPA_FRAME_MAX], body[WLAN_FRAME_MAX];
+    uint8_t hdr[WLAN_HDR];
+    memcpy(eth, link.info.bssid, 6);
+    memcpy(eth + 6, st.mac, 6);
+    eth[12] = 0x88;
+    eth[13] = 0x8E;
+    memcpy(eth + 14, e, n);
+    uint32_t bn = wlan_from_eth(eth, 14 + n, link.info.bssid, 0, hdr, body);
+    if (!bn)
+        return IWL_ERR_STATE;
+    return send_data(hdr, body, bn, 1);
+}
+
+/* --- keys -------------------------------------------------------------- */
+
+/* ADD_MODIFY_STA_KEY_API_S_VER_1, 64 bytes */
+static int install_key(int offset, uint16_t flags, const uint8_t *key,
+                       uint32_t len)
+{
+    uint8_t b[64];
+    memset(b, 0, sizeof(b));
+    b[0] = AP_STA_ID;
+    b[1] = (uint8_t)offset;
+    put16(b + 2, flags);
+    memcpy(b + 4, key, len > 32 ? 32 : len);
+    uint32_t status;
+    int r = cmd_status(ADD_STA_KEY_CMD, b, sizeof(b), &status);
+    memset(b, 0, sizeof(b));
+    if (r == IWL_OK && !ack_status_ok(status)) {
+        why("ADD_STA_KEY answered status 0x%x", status);
+        return IWL_ERR_REJECTED;
+    }
+    return r;
+}
+
+static int install_keys(void)
+{
+    const struct wpa_keys *k = &link.wpa.keys;
+    int r = install_key(0, STA_KEY_FLG_CCM | STA_KEY_FLG_WEP_KEY_MAP,
+                        k->tk, WPA_TK_LEN);
+    if (r == IWL_OK)
+        r = install_key(1, (uint16_t)(STA_KEY_FLG_CCM | STA_KEY_FLG_WEP_KEY_MAP |
+                                      STA_KEY_MULTICAST | (k->gtk_idx << 8)),
+                        k->gtk, k->gtk_len);
+    if (r == IWL_OK) {
+        link.keys_in = 1;
+        memset(link.rx_pn_set, 0, sizeof(link.rx_pn_set));
+    }
+    return r;
+}
+
+/* --- frames in ----------------------------------------------------------- */
+
+/* The CCMP header's packet number must grow, per key: a frame heard
+   twice, or replayed, is dropped (802.11 12.5.3.4.4) */
+static int pn_fresh(const uint8_t *f, uint32_t hdr, int group)
+{
+    const uint8_t *c = f + hdr;
+    uint8_t pn[6] = { c[7], c[6], c[5], c[4], c[1], c[0] };   /* PN5..PN0 */
+    int key = group ? (c[3] >> 6) & 3 : 0;
+    if (group && key == 0)
+        return 0;
+    if (link.rx_pn_set[key] && memcmp(pn, link.rx_pn[key], 6) <= 0)
+        return 0;
+    memcpy(link.rx_pn[key], pn, 6);
+    link.rx_pn_set[key] = 1;
+    return 1;
+}
+
+/* A handshake frame that came before the station was ready for data
+   (message 1 follows the association response at once): kept until the
+   rate table is in, since an answer before it would ask the firmware
+   for a station's rates it does not have */
+static uint8_t eapol_early[WPA_FRAME_MAX + 512];
+static uint32_t eapol_early_len;
+
+static void got_eapol(const uint8_t *e, uint32_t n)
+{
+    static uint8_t out[WPA_FRAME_MAX];
+    uint32_t out_len;
+    if (!link.secure)
+        return;
+    if (link.state == IWLWIFI_LINK_JOINING) {
+        if (n <= sizeof(eapol_early)) {
+            memcpy(eapol_early, e, n);
+            eapol_early_len = n;
+        }
+        return;
+    }
+    int r = wpa_rx(&link.wpa, e, n, out, sizeof(out), &out_len);
+    if (r == WPA_DROP) {
+        if (link.wpa.why[0])
+            link_say("handshake: a frame refused: ", link.wpa.why);
+        return;
+    }
+    if (send_eapol(out, out_len) != IWL_OK)
+        return;
+    /* The keys go in from outside the receive path: a command waits for
+       its answer, which comes through the receive ring being read now */
+    if (r == WPA_KEYS)
+        link.keys_pending = 1;
+    else if (r == WPA_GROUP && link.keys_in)
+        link.gtk_pending = 1;
+}
+
+static void keys_waiting(void)
+{
+    if (link.keys_pending) {
+        link.keys_pending = 0;
+        if (install_keys() == IWL_OK)
+            link_say("handshake done: keys in", 0);
+        else
+            link_say("the keys did not go into the card", 0);
+    }
+    if (link.gtk_pending) {
+        link.gtk_pending = 0;
+        const struct wpa_keys *k = &link.wpa.keys;
+        install_key(1, (uint16_t)(STA_KEY_FLG_CCM | STA_KEY_FLG_WEP_KEY_MAP |
+                                  STA_KEY_MULTICAST | (k->gtk_idx << 8)),
+                    k->gtk, k->gtk_len);
+        link.rx_pn_set[k->gtk_idx & 3] = 0;
+        link_say("a new group key", 0);
+    }
+}
+
+static void link_rx(const uint8_t *f, uint32_t n, uint32_t status)
+{
+    if (link.state == IWLWIFI_LINK_DOWN || n < WLAN_HDR)
+        return;
+    const uint8_t *bssid = link.info.bssid;
+    uint16_t code, aid;
+    if (f[0] == WLAN_FC_BEACON && !memcmp(f + 16, bssid, 6)) {
+        struct wlan_bss_info b;
+        if (wlan_parse_beacon(f, n, &b) == 0 && b.has_tim) {
+            link.info.tsf = b.tsf;
+            link.info.dtim_count = b.dtim_count;
+            link.info.dtim_period = b.dtim_period;
+            link.info_ts = rx_device_ts;
+        }
+        return;
+    }
+    if (wlan_auth_resp(f, n, st.mac, bssid, &code) == 0) {
+        link.status = code;
+        link.got_auth = 1;
+        return;
+    }
+    if (wlan_assoc_resp(f, n, st.mac, bssid, &code, &aid) == 0) {
+        link.status = code;
+        link.aid = aid;
+        link.got_assoc = 1;
+        return;
+    }
+    int kicked = wlan_kicked(f, n, st.mac, bssid);
+    if (kicked >= 0) {
+        char r[16];
+        fmt(r, sizeof(r), "%d", kicked);
+        link_say("the access point sent us away, reason ", r);
+        link.state = IWLWIFI_LINK_DOWN;
+        return;
+    }
+    if ((f[0] & 0x0C) != 0x08)
+        return;
+    /* A data frame: decrypted by the card, or plain before the keys */
+    int ccmp = 0;
+    if (f[1] & WLAN_FC1_PROTECTED) {
+        uint32_t sec = (status >> RX_RES_STATUS_SEC_SHIFT) & 7;
+        if (sec != RX_RES_STATUS_SEC_CCM || !(status & RX_RES_STATUS_MIC_OK))
+            return;                     /* not decrypted, or tampered with */
+        uint32_t hdr = WLAN_HDR + ((f[0] & 0x80) ? 2 : 0);
+        if (n < hdr + WLAN_CCMP_HDR + WLAN_CCMP_MIC ||
+            !pn_fresh(f, hdr, f[4] & 1))
+            return;
+        ccmp = 1;
+    } else if (link.keys_in) {
+        return;                         /* plain text after the keys: no */
+    }
+    static uint8_t eth[WLAN_FRAME_MAX];
+    int len = wlan_to_eth(f, n, bssid, ccmp, eth);
+    if (len < 14)
+        return;
+    if (eth[12] == 0x88 && eth[13] == 0x8E) {
+        got_eapol(eth + 14, (uint32_t)len - 14);
+        return;
+    }
+    if (link.state == IWLWIFI_LINK_UP) {
+        link.rx_frames++;
+        net_rx(eth, (uint16_t)len);
+    }
+}
+
+/* --- joining ------------------------------------------------------------ */
+
+/* Waits for a flag the receive path sets, serving the card */
+static int wait_flag(volatile int *flag, uint32_t ms)
+{
+    struct waiter w;
+    wait_begin(&w, ms);
+    do {
+        service();
+        if (fw_err || hw_gone)
+            return IWL_ERR_FW;
+        if (link.state == IWLWIFI_LINK_DOWN)
+            return IWL_ERR_REJECTED;
+        keys_waiting();
+    } while (!*flag && wait_more(&w));
+    return *flag ? IWL_OK : IWL_ERR_TIMEOUT;
+}
+
+/* Sends a management frame and waits for the answer, a few times */
+static int exchange(const uint8_t *f, uint32_t n, int pm, volatile int *got,
+                    const char *what)
+{
+    for (int i = 0; i < JOIN_TRIES; i++) {
+        *got = 0;
+        int r = send_mgmt(f, n, pm);
+        if (r != IWL_OK)
+            return r;
+        r = wait_flag(got, JOIN_WAIT_MS);
+        if (r == IWL_OK)
+            return link.status == 0 ? IWL_OK : IWL_ERR_REJECTED;
+        if (r != IWL_ERR_TIMEOUT)
+            return r;
+    }
+    why("no answer to the %s request from the access point", what);
+    return IWL_ERR_TIMEOUT;
+}
+
+static void undo_join(void)
+{
+    time_event_remove();
+    if (link.sta_added)
+        remove_station();
+    if (link.state >= IWLWIFI_LINK_KEYS || link.aid)
+        time_quota(0);
+    if (link.bound)
+        binding(FW_CTXT_ACTION_REMOVE);
+    if (link.mac_added) {
+        uint8_t b[8];
+        put32(b, 0);
+        put32(b + 4, FW_CTXT_ACTION_REMOVE);
+        iwl_send_cmd_pdu(MAC_CONTEXT_CMD, b, sizeof(b), 0);
+    }
+    if (link.queues_on)
+        for (int q = 0; q < 4; q++)
+            iwl_txq_disable(q);
+    wpa_end(&link.wpa);
+    memset(&link, 0, sizeof(link));
+    eapol_early_len = 0;
+}
+
+static int join_steps(const char *password)
+{
+    struct wlan_bss_info *b = &link.info;
+    if (!b->channel || !b->beacon_int) {
+        why("the network's beacon was not heard whole: no channel or "
+            "beacon interval");
+        return IWL_ERR_STATE;
+    }
+    if (b->beacon_int < 16) {
+        why("the network's beacon interval (%u TU) is one this firmware "
+            "falls over on", (uint32_t)b->beacon_int);
+        return IWL_ERR_STATE;
+    }
+    if (b->capability & WLAN_CAP_PRIVACY) {
+        if (!b->rsn_len || wpa_rsn_usable(b->rsn, b->rsn_len) < 0) {
+            why("the network is protected some other way than WPA2 with "
+                "CCMP and a password");
+            return IWL_ERR_STATE;
+        }
+        uint32_t pl = 0;
+        while (password && password[pl])
+            pl++;
+        if (pl < 8 || pl > 63) {
+            why("a WPA2 password has 8 to 63 characters");
+            return IWL_ERR_STATE;
+        }
+        uint8_t pmk[WPA_PMK_LEN], snonce[WPA_NONCE_LEN];
+        wpa_password_pmk(password, b->ssid, b->ssid_len, pmk);
+        random_bytes(snonce, sizeof(snonce));
+        wpa_begin(&link.wpa, pmk, b->bssid, st.mac, b->rsn, b->rsn_len,
+                  snonce);
+        memset(pmk, 0, sizeof(pmk));
+        link.secure = 1;
+    }
+    link.state = IWLWIFI_LINK_JOINING;
+    iwl_notif_register(TIME_EVENT_NOTIFICATION, te_notif);
+    iwl_notif_register(TX_CMD, tx_status);
+    iwl_notif_register(REPLY_RX_PHY_CMD, rx_phy);
+    iwl_notif_register(REPLY_RX_MPDU_CMD, rx_mpdu);
+
+    static const uint8_t fifo[4] = { 3, 2, 1, 0 };
+    for (int q = 0; q < 4; q++)
+        STEP("the station's TX queues", iwl_txq_enable(q, fifo[q], 0, TID_NON_QOS));
+    link.queues_on = 1;
+    STEP("MAC_CONTEXT_CMD (add)", mac_context(FW_CTXT_ACTION_ADD, 0));
+    link.mac_added = 1;
+    STEP("PHY_CONTEXT_CMD (to the network's channel)", phy_context_move());
+    STEP("BINDING_CONTEXT_CMD", binding(FW_CTXT_ACTION_ADD));
+    link.bound = 1;
+    STEP("MAC_PM_POWER_TABLE", power_table());
+    STEP("MAC_CONTEXT_CMD (the BSSID)", mac_context(FW_CTXT_ACTION_MODIFY, 1));
+    STEP("ADD_STA (the access point)", ap_station(0));
+    link.sta_added = 1;
+    STEP("TIME_EVENT_CMD (staying on the channel)", time_event_add());
+
+    uint8_t f[256];
+    step = "authentication";
+    uint32_t n = wlan_auth_req(f, b->bssid, st.mac);
+    int r = exchange(f, n, PM_FRAME_MGMT, &link.got_auth, "authentication");
+    if (r == IWL_ERR_REJECTED)
+        why("the access point refused the authentication (status %u)",
+            (uint32_t)link.status);
+    if (r != IWL_OK)
+        return r;
+    link_say("authenticated", 0);
+    step = "association";
+    n = wlan_assoc_req(f, b, st.mac, link.secure ? link.wpa.ie : 0,
+                       link.secure ? link.wpa.ie_len : 0);
+    r = exchange(f, n, PM_FRAME_ASSOC, &link.got_assoc, "association");
+    if (r == IWL_ERR_REJECTED)
+        why("the access point refused the association (status %u)",
+            (uint32_t)link.status);
+    if (r != IWL_OK)
+        return r;
+    {
+        char a[16];
+        fmt(a, sizeof(a), "%u", (uint32_t)link.aid);
+        link_say("associated, AID ", a);
+    }
+    STEP("ADD_STA (modify)", ap_station(1));
+    STEP("LQ_CMD", rate_table());
+    STEP("MAC_CONTEXT_CMD (associated)", mac_context(FW_CTXT_ACTION_MODIFY, 2));
+    STEP("TIME_QUOTA_CMD", time_quota(1));
+    STEP("MCAST_FILTER_CMD", multicast_all());
+    if (link.secure) {
+        link.state = IWLWIFI_LINK_KEYS;
+        step = "the four-way handshake";
+        if (eapol_early_len) {
+            uint32_t len = eapol_early_len;
+            eapol_early_len = 0;
+            got_eapol(eapol_early, len);
+        }
+        r = wait_flag(&link.keys_in, KEYS_WAIT_MS);
+        if (r == IWL_ERR_TIMEOUT)
+            why("the four-way handshake did not finish%s%s",
+                link.wpa.why[0] ? ": " : " (a wrong password?)",
+                link.wpa.why);
+        if (r != IWL_OK)
+            return r;
+    }
+    time_event_remove();
+    link.state = IWLWIFI_LINK_UP;
+    return IWL_OK;
+}
+
+int iwlwifi_join_now(const uint8_t bssid[6], const char *password)
+{
+    if (st.stage != IWL_STAGE_READY)
+        return IWL_ERR_STATE;
+    reason[0] = 0;
+    if (link.state != IWLWIFI_LINK_DOWN || link.queues_on)
+        undo_join();
+    int k = -1;
+    for (int i = 0; i < n_bss; i++)
+        if (!memcmp(bss[i].bssid, bssid, 6))
+            k = i;
+    if (k < 0) {
+        why("that network was not heard in the last scan");
+        return IWL_ERR_STATE;
+    }
+    link.idx = k;
+    link.info = bss_info[k];
+    link.info_ts = bss_seen_ts[k];
+    char name[40];
+    fmt(name, sizeof(name), "%s", bss[k].ssid);
+    link_say("joining ", name);
+    int r = join_steps(password);
+    if (r != IWL_OK) {
+        link_say("not joined: ", reason);
+        char keep[sizeof(reason)];
+        memcpy(keep, reason, sizeof(keep));
+        undo_join();
+        memcpy(reason, keep, sizeof(reason));
+        fmt(st.last_error, sizeof(st.last_error), "%s", reason);
+        return r;
+    }
+    link_say("joined ", name);
+    st.last_error[0] = 0;
+    dhcp_start();
+    return IWL_OK;
+}
+
+/* --- the network layer's side ------------------------------------------ */
+
+static struct spinlock txq_soft_lock = SPINLOCK_FREE;
+static uint8_t txq_soft[TXQ_SOFT][1600];
+static uint16_t txq_soft_len[TXQ_SOFT];
+static volatile uint32_t txq_soft_head, txq_soft_tail;
+
+int iwlwifi_send(const void *eth, uint16_t len)
+{
+    if (link.state != IWLWIFI_LINK_UP || len < 14 || len > 1600)
+        return -1;
+    spin_lock(&txq_soft_lock);
+    if (txq_soft_head - txq_soft_tail >= TXQ_SOFT) {
+        spin_unlock(&txq_soft_lock);
+        return -1;
+    }
+    uint32_t i = txq_soft_head % TXQ_SOFT;
+    memcpy(txq_soft[i], eth, len);
+    txq_soft_len[i] = len;
+    txq_soft_head++;
+    spin_unlock(&txq_soft_lock);
+    return 0;
+}
+
+/* On the driver's thread: what the network layer left to send */
+static void send_waiting(void)
+{
+    static uint8_t hdr[WLAN_HDR], body[WLAN_FRAME_MAX];
+    while (txq_soft_tail != txq_soft_head) {
+        uint32_t i = txq_soft_tail % TXQ_SOFT;
+        if (link.state == IWLWIFI_LINK_UP) {
+            uint32_t n = wlan_from_eth(txq_soft[i], txq_soft_len[i],
+                                       link.info.bssid, 0, hdr, body);
+            if (n && send_data(hdr, body, n, 0) == IWL_ERR_BUSY)
+                return;                 /* the ring is full: later */
+        }
+        spin_lock(&txq_soft_lock);
+        txq_soft_tail++;
+        spin_unlock(&txq_soft_lock);
+    }
+}
+
+int iwlwifi_present(void)
+{
+    struct pci_dev dev;
+    return find_card(&dev);
+}
+
+const uint8_t *iwlwifi_mac(void)
+{
+    static const uint8_t zeros[6];
+    return st.mac_valid ? st.mac : zeros;
+}
+
+int iwlwifi_link(void)
+{
+    return link.state == IWLWIFI_LINK_UP;
+}
+
+int iwlwifi_link_state(void)
+{
+    return link.state;
+}
+
+uint32_t iwlwifi_rx_packets(void)
+{
+    return link.rx_frames;
+}
+
+uint32_t iwlwifi_tx_packets(void)
+{
+    return link.tx_frames;
+}
+
+/* From other threads: the driver's thread does the joining */
+static volatile int join_wanted, leave_wanted, join_result;
+static volatile uint32_t join_gen;
+static char join_ssid[33], join_password[64];
+
+int iwlwifi_join(const char *ssid, const char *password)
+{
+    if (st.stage != IWL_STAGE_READY)
+        return IWL_ERR_STATE;
+    fmt(join_ssid, sizeof(join_ssid), "%s", ssid);
+    fmt(join_password, sizeof(join_password), "%s", password ? password : "");
+    uint32_t gen = join_gen;
+    join_wanted = 1;
+    for (int i = 0; i < 600 && join_gen == gen; i++)
+        task_sleep(50);
+    return join_gen == gen ? IWL_ERR_TIMEOUT : join_result;
+}
+
+void iwlwifi_leave(void)
+{
+    leave_wanted = 1;
+}
+
+/* On the driver's thread: a scan for the name, then the join */
+static int join_by_name(void)
+{
+    int r = iwlwifi_scan_now();
+    if (r < 0)
+        return r;
+    int best = -1;
+    for (int i = 0; i < n_bss; i++)
+        if (bss[i].ssid_len && !strcmp(bss[i].ssid, join_ssid) &&
+            (best < 0 || bss[i].rssi > bss[best].rssi))
+            best = i;
+    if (best < 0) {
+        why("no network called \"%s\" is within reach", join_ssid);
+        fmt(st.last_error, sizeof(st.last_error), "%s", reason);
+        return IWL_ERR_STATE;
+    }
+    r = iwlwifi_join_now(bss[best].bssid, join_password);
+    memset(join_password, 0, sizeof(join_password));
+    return r;
+}
+
+static void link_service(void)
+{
+    if (join_wanted) {
+        join_wanted = 0;
+        join_result = join_by_name();
+        join_gen++;
+    }
+    if (leave_wanted) {
+        leave_wanted = 0;
+        if (link.state != IWLWIFI_LINK_DOWN || link.queues_on)
+            undo_join();
+    }
+    keys_waiting();
+    if (link.state == IWLWIFI_LINK_UP)
+        send_waiting();
+    else if (link.queues_on && link.state == IWLWIFI_LINK_DOWN) {
+        link_say("the link is down", 0);
+        undo_join();
+    }
+}
+
 static void iwl_thread(void *arg)
 {
     (void)arg;
@@ -3329,6 +4357,7 @@ static void iwl_thread(void *arg)
                 scan_result = iwlwifi_scan_now();
                 scan_gen++;
             }
+
             if (st.stage == IWL_STAGE_READY) {
                 task_sleep(POLL_INTERVAL_MS);
                 continue;

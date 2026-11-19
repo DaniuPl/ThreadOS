@@ -18,8 +18,10 @@
 #include "include/virtio_net.h"
 #include "include/usbnet.h"
 #include "include/rtl8168.h"
+#include "include/iwlwifi.h"
 
-enum { NIC_NONE, NIC_E1000, NIC_VIRTIO, NIC_RTL8139, NIC_RTL8168, NIC_USB };
+enum { NIC_NONE, NIC_E1000, NIC_VIRTIO, NIC_RTL8139, NIC_RTL8168, NIC_USB,
+       NIC_WIFI };
 
 static int nic;
 
@@ -40,6 +42,10 @@ int netdev_init(void)
        the network through a docking station. */
     else if (usbnet_init())
         nic = NIC_USB;
+    /* And the radio, when there is no wire at all: it carries nothing
+       until it has joined a network (netdev_link says when) */
+    else if (iwlwifi_present())
+        nic = NIC_WIFI;
     return nic != NIC_NONE;
 }
 
@@ -56,6 +62,7 @@ const char *netdev_name(void)
     case NIC_RTL8139: return "RTL8139";
     case NIC_RTL8168: return "RTL8168";
     case NIC_USB:     return "USB (RNDIS)";
+    case NIC_WIFI:    return "Wi-Fi (Intel 3160)";
     default:            return "none";
     }
 }
@@ -69,6 +76,7 @@ const uint8_t *netdev_mac(void)
     case NIC_RTL8139: return rtl8139_mac();
     case NIC_RTL8168: return rtl8168_mac();
     case NIC_USB:     return usbnet_mac();
+    case NIC_WIFI:    return iwlwifi_mac();
     default:            return zeros;
     }
 }
@@ -81,6 +89,7 @@ int netdev_send(const void *frame, uint16_t len)
     case NIC_RTL8139: return rtl8139_send(frame, len);
     case NIC_RTL8168: return rtl8168_send(frame, len);
     case NIC_USB:     return usbnet_send(frame, len);
+    case NIC_WIFI:    return iwlwifi_send(frame, len);
     default:            return -1;
     }
 }
@@ -93,6 +102,7 @@ uint32_t netdev_rx_packets(void)
     case NIC_RTL8139: return rtl8139_rx_packets();
     case NIC_RTL8168: return rtl8168_rx_packets();
     case NIC_USB:     return usbnet_rx_packets();
+    case NIC_WIFI:    return iwlwifi_rx_packets();
     default:            return 0;
     }
 }
@@ -105,11 +115,14 @@ uint32_t netdev_tx_packets(void)
     case NIC_RTL8139: return rtl8139_tx_packets();
     case NIC_RTL8168: return rtl8168_tx_packets();
     case NIC_USB:     return usbnet_tx_packets();
+    case NIC_WIFI:    return iwlwifi_tx_packets();
     default:            return 0;
     }
 }
 
 int netdev_link(void)
 {
+    if (nic == NIC_WIFI)
+        return iwlwifi_link();
     return nic == NIC_RTL8168 ? rtl8168_link() : -1;
 }

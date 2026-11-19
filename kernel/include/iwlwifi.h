@@ -192,4 +192,40 @@ void iwlwifi_selftest(void);
 int iwl_tx_frame(int queue, const uint8_t *tx_cmd, const void *hdr,
                  uint32_t hdr_len, const void *body, uint32_t body_len);
 
+/* ===================================================================
+ * Stage 3: joining a network and carrying its traffic
+ * =================================================================== */
+
+/* Where the link is */
+#define IWLWIFI_LINK_DOWN       0       /* not joined */
+#define IWLWIFI_LINK_JOINING    1       /* authenticating, associating */
+#define IWLWIFI_LINK_KEYS       2       /* associated, the handshake runs */
+#define IWLWIFI_LINK_UP         3       /* joined: frames go through */
+
+/* A 3160 on the PCI bus (the network layer asks before the driver's
+   thread has probed it) */
+int iwlwifi_present(void);
+/* The card's address: zeros until the NVM has been read */
+const uint8_t *iwlwifi_mac(void);
+
+/* Joins the network of this name (from the last scan), with this
+   password (NULL or "" for an open network): from any thread, waits
+   for the driver's. IWL_OK, or IWL_ERR_* with the reason in
+   iwlwifi_state()->last_error */
+int iwlwifi_join(const char *ssid, const char *password);
+/* The same on the driver's thread (or a test standing in for it), by
+   the network's BSSID */
+int iwlwifi_join_now(const uint8_t bssid[6], const char *password);
+/* Leaves the network */
+void iwlwifi_leave(void);
+int iwlwifi_link_state(void);           /* IWLWIFI_LINK_* */
+
+/* For the network layer (kernel/netdev.c): an Ethernet frame out (it
+   waits for the driver's thread, which owns the card), the link, the
+   counters. What arrives goes to net_rx. */
+int iwlwifi_send(const void *eth, uint16_t len);
+int iwlwifi_link(void);                 /* 1 joined, 0 not */
+uint32_t iwlwifi_rx_packets(void);
+uint32_t iwlwifi_tx_packets(void);
+
 #endif
