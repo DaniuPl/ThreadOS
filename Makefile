@@ -242,7 +242,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/aestest.elf \
-               $(BUILD)/user64/pumarks.elf \
+               $(BUILD)/user64/pumarks.elf $(BUILD)/user64/pudemo.elf \
                $(BUILD)/user64/wpatest.elf \
                $(BUILD)/user64/nslookup.elf \
                $(BUILD)/user64/httpget.elf \
@@ -2046,7 +2046,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    cryptotest=$(BUILD)/user64/cryptotest.elf \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    aestest=$(BUILD)/user64/aestest.elf \
-	    pumarks=$(BUILD)/user64/pumarks.elf \
+	    pumarks=$(BUILD)/user64/pumarks.elf pudemo=$(BUILD)/user64/pudemo.elf \
 	    pulook=$(BUILD)/user64/pulook.elf \
 	    wpatest=$(BUILD)/user64/wpatest.elf \
 	    nslookup=$(BUILD)/user64/nslookup.elf \

@@ -11232,3 +11232,41 @@ works and is checked by `make test`.
       order; the arrows and Enter starting Term, which then has the long
       thread on the loom; Esc closing it. The other styles are drawn as
       before - every Mac and Windows group passes unchanged.
+- [x] **ProtonUI v2 stage 4: Weave's controls** (user/ugui.h,
+      user/pudemo.c, user/gsettings.c, Makefile,
+      scripts/tests/t_protonui.py, docs/protonui-plan.md)
+      The desktop was Weave's but what programs drew in their windows
+      was not: the buttons, fields and boxes were the old ones. ugui.h
+      grows ProtonUI v2's controls, as docs/weave/canvas/Components.dc.html
+      draws them, under Weave only - every other style draws exactly as
+      before, so the groups that read the Mac and Windows styles pass
+      unchanged. A button has a kind: the one thing to do (the accent),
+      another thing (a raised surface with its line), a quiet one (its
+      words), one that destroys (on madder); a v1 button gets its kind
+      from the colours it asked for, so Files and every program drawing
+      with ug_draw_button come out right without a change. A field has
+      a stitch under it, dashed at rest and the thread with the keys; a
+      box, a slider (the thread spun to the value, a knot on it), a
+      chosen list row (the accent faint, a knot) and tabs (segments) are
+      Weave's too. New: a switch, segments, progress (spun to its value
+      with a knot; a length not known, a short piece of thread running
+      along the stitch) and knots, one of a few. pu_start takes the
+      program's own array of things, so the limit of 24 goes, and turns
+      on the keys: Tab gives them to the next control and the thread is
+      drawn round it two pixels out, Space and Enter press and toggle,
+      the arrows move a choice; pu_name names a control for whoever reads
+      it aloud. v1 programs are untouched (no Tab, no ring). Settings
+      draws its rows of choices as one strip of segments, its fields,
+      boxes, buttons, volume and chosen section Weave's way.
+      user/pudemo shows every control and says on the serial port what
+      it was told. t_protonui (part 2) reads them off the screen under
+      Weave against ugui.h's and look.h's colours - the four buttons,
+      a switch on and off, the chosen segment with the thread along its
+      foot, the chosen knot filled and the others hollow, the boxes, the
+      field's stitch, progress to 62% with its knot, the chosen row -
+      then clicks each and checks what the program said and what it
+      drew, Tab and the thread round the first control, Space pressing
+      it, Tab moving the thread on, typing reaching the field and its
+      stitch becoming the thread; and under the Mac style the same
+      window drawn the old way. pudemo is started with 'runw', which
+      does not hold the shell, so the test can change the style after.

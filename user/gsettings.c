@@ -22,7 +22,7 @@
  * given back as soon as that one change is written.
  */
 
-#include "udraw.h"
+#include "ugui.h"
 #include "ulocale.h"
 #include "pciinfo.h"
 #include "ubt.h"
@@ -668,13 +668,52 @@ static void row_name(int y, const char *text)
               UD_PX);
 }
 
+/* Under Weave (ugui.h's ProtonUI v2) the controls are Weave's: a row of
+   choices one strip of segments, the chosen one raised with the thread
+   under it; a field's stitch; the boxes, the buttons and the sidebar's
+   chosen row as the design draws them. Under the other styles nothing
+   changes. */
+static int weave(void)
+{
+    return pu_weave(&l);
+}
+
+/* The strip under a row of choices w wide at x, y (Weave only) */
+static void strip(int x, int y, int w)
+{
+    if (!weave())
+        return;
+    struct pu_ink p;
+    pu_ink_of(&l, &p);
+    ud_round(win, x - 3, y - 3, w + 6, CHIP_H + 6, 9, p.field);
+    ud_ring(win, x - 3, y - 3, w + 6, CHIP_H + 6, 9, p.raised_line);
+}
+
+/* A choice w wide: lit, or under Weave raised, when it is the one in
+   force */
+static void choice(int x, int y, int w, const char *text, int on)
+{
+    if (weave()) {
+        struct pu_ink p;
+        pu_ink_of(&l, &p);
+        if (on) {
+            ud_round(win, x, y, w, CHIP_H, 6, p.seg_on);
+            ud_fill(win, x + 3, y + CHIP_H - 2, w - 6, 2, l.accent);
+        }
+        ud_text_mid_l(win, x, y, w, CHIP_H, text, on ? l.text : p.seg_ink,
+                      on ? UD_BOLD : UD_SANS, UD_PX);
+        return;
+    }
+    ud_round(win, x, y, w, CHIP_H, 8, on ? l.accent : l.row);
+    ud_text_mid_l(win, x, y, w, CHIP_H, text, on ? l.on_accent : l.text,
+                  UD_SANS, UD_PX);
+}
+
 /* One choice out of a few: lit when it is the one in force */
 static void chip(int x, int y, const char *text, int on, const char *name,
                  const char *value)
 {
-    ud_round(win, x, y, CHIP_W, CHIP_H, 8, on ? l.accent : l.row);
-    ud_text_mid_l(win, x, y, CHIP_W, CHIP_H, text,
-                  on ? l.on_accent : l.text, UD_SANS, UD_PX);
+    choice(x, y, CHIP_W, text, on);
     hot(x, y, CHIP_W, CHIP_H, A_SET, 0, name, value);
 }
 
@@ -682,6 +721,7 @@ static void chips(int y, int n, const char *const *texts,
                   const char *const *values, const char *name)
 {
     const char *now = setting(name);
+    strip(PANE_X, y, n * CHIP_W + (n - 1) * CHIP_GAP);
     for (int i = 0; i < n; i++)
         chip(PANE_X + i * (CHIP_W + CHIP_GAP), y, texts[i],
              same(now, values[i]), name, values[i]);
@@ -689,17 +729,34 @@ static void chips(int y, int n, const char *const *texts,
 
 static void button(int x, int y, int w, const char *text, int act, int arg)
 {
-    ud_round(win, x, y, w, CHIP_H, 8, l.accent);
-    ud_text_mid_l(win, x, y, w, CHIP_H, text, l.on_accent, UD_SANS, UD_PX);
+    if (weave())
+        pu_draw_button(win, &l, x, y, w, CHIP_H, text, PU_PRIMARY, PU_TR);
+    else {
+        ud_round(win, x, y, w, CHIP_H, 8, l.accent);
+        ud_text_mid_l(win, x, y, w, CHIP_H, text, l.on_accent, UD_SANS,
+                      UD_PX);
+    }
     hot(x, y, w, CHIP_H, act, arg, (const char *)0, (const char *)0);
+}
+
+/* A field's surface: its ring, or under Weave its stitch */
+static void field_ground(int x, int y, int w, int f)
+{
+    if (weave()) {
+        pu_draw_field_ground(win, &l, x, y, w, CHIP_H,
+                             focus == f ? PU_FOCUS : 0);
+        return;
+    }
+    ud_round(win, x, y, w, CHIP_H, 6, l.field);
+    ud_ring(win, x, y, w, CHIP_H, 6, focus == f ? l.accent : l.line);
 }
 
 static void field(int y, int f)
 {
     int x = PANE_X;
-    ud_round(win, x, y, FIELD_W, CHIP_H, 6, l.field);
-    ud_ring(win, x, y, FIELD_W, CHIP_H, 6, focus == f ? l.accent : l.line);
-    int end = ud_text(win, x + 8, ud_baseline(y, CHIP_H, UD_PX), fields[f],
+    field_ground(x, y, FIELD_W, f);
+    int end = ud_text(win, x + (weave() ? 10 : 8),
+                      ud_baseline(y, CHIP_H, UD_PX), fields[f],
                       l.text, UD_SANS, UD_PX);
     if (focus == f)
         ud_fill(win, end + 1, y + 5, 1, CHIP_H - 10, l.text);
@@ -707,18 +764,28 @@ static void field(int y, int f)
     button(x + FIELD_W + 8, y, SAVE_W, "Save", A_SAVE, f);
 }
 
+/* A box ticked or not, at x, by */
+static void tick_box(int x, int by, int on)
+{
+    if (weave()) {
+        pu_draw_check(win, &l, x, by, on, 0);
+        return;
+    }
+    int b = 16;
+    if (on) {
+        ud_round(win, x, by, b, b, 4, l.accent);
+        ud_line(win, x + 4, by + 8, x + 7, by + 11, 28, l.on_accent);
+        ud_line(win, x + 7, by + 11, x + 12, by + 5, 28, l.on_accent);
+    } else {
+        ud_round(win, x, by, b, b, 4, l.field);
+        ud_ring(win, x, by, b, b, 4, l.line);
+    }
+}
+
 static void check_box(int y, const char *text, int on, const char *name)
 {
     int b = 16, by = y + (CHIP_H - b) / 2;
-    if (on) {
-        ud_round(win, PANE_X, by, b, b, 4, l.accent);
-        ud_line(win, PANE_X + 4, by + 8, PANE_X + 7, by + 11, 28, l.on_accent);
-        ud_line(win, PANE_X + 7, by + 11, PANE_X + 12, by + 5, 28,
-                l.on_accent);
-    } else {
-        ud_round(win, PANE_X, by, b, b, 4, l.field);
-        ud_ring(win, PANE_X, by, b, b, 4, l.line);
-    }
+    tick_box(PANE_X, by, on);
     int end = ud_text_l(win, PANE_X + b + 8,
                         ud_baseline(y, CHIP_H, UD_PX), text, l.text, UD_SANS,
                         UD_PX);
@@ -862,13 +929,11 @@ static void draw_desk(void)
     const char *style = setting("layout");
     if (!style[0])
         style = "mac";
+    strip(PANE_X, y + CTRL_DY, 3 * LOCK_WAY_W + 2 * CHIP_GAP);
     for (int i = 0; i < 3; i++) {
         int x = PANE_X + i * (LOCK_WAY_W + CHIP_GAP);
         int on = same(style, style_values[i]);
-        ud_round(win, x, y + CTRL_DY, LOCK_WAY_W, CHIP_H, 8,
-                 on ? l.accent : l.row);
-        ud_text_mid_l(win, x, y + CTRL_DY, LOCK_WAY_W, CHIP_H, styles[i],
-                      on ? l.on_accent : l.text, UD_SANS, UD_PX);
+        choice(x, y + CTRL_DY, LOCK_WAY_W, styles[i], on);
         hot(x, y + CTRL_DY, LOCK_WAY_W, CHIP_H, A_SET, 0, "layout",
             style_values[i]);
     }
@@ -889,6 +954,7 @@ static void draw_desk(void)
     const char *now = setting("dockpos");
     if (!now[0])
         now = "bottom";
+    strip(PANE_X, y + CTRL_DY, 3 * CHIP_W + 2 * CHIP_GAP);
     for (int i = 0; i < 3; i++)
         chip(PANE_X + i * (CHIP_W + CHIP_GAP), y + CTRL_DY, sides[i],
              same(now, side_values[i]), "dockpos", side_values[i]);
@@ -939,14 +1005,28 @@ static void draw_sound(void)
     row_name(y, "Volume");
     int sy = y + CTRL_DY, knob = 18;
     int fill = (int)snd.volume * (SLIDER_W - knob) / 100;
-    ud_round(win, PANE_X, sy + CHIP_H / 2 - 3, SLIDER_W, 6, 3, l.row);
-    if (fill > 0)
-        ud_round(win, PANE_X, sy + CHIP_H / 2 - 3, fill + knob / 2, 6, 3,
-                 snd.muted ? l.dim : l.accent);
-    ud_disc(win, PANE_X + fill, sy + (CHIP_H - knob) / 2, knob,
-            l.dark ? 0xEDEDF0 : 0xFFFFFF);
-    ud_op(win, UD_OP_RING, PANE_X + fill, sy + (CHIP_H - knob) / 2, knob,
-          knob, knob / 2, l.line, 0, 0, 0, (const char *)0);
+    if (weave()) {
+        /* the thread spun as far as the volume, the knot on it */
+        struct pu_ink p;
+        pu_ink_of(&l, &p);
+        uint32_t c = snd.muted ? l.dim : l.accent;
+        int cy = sy + CHIP_H / 2;
+        ud_stitch(win, PANE_X, cy - 1, SLIDER_W, 0, p.stitch);
+        if (fill > 0)
+            ud_round(win, PANE_X, cy - 2, fill + knob / 2, 4, 2, c);
+        ud_disc(win, PANE_X + fill, cy - knob / 2, knob, c);
+        ud_disc(win, PANE_X + fill + 4, cy - knob / 2 + 4, knob - 8,
+                0xFFFFFF);
+    } else {
+        ud_round(win, PANE_X, sy + CHIP_H / 2 - 3, SLIDER_W, 6, 3, l.row);
+        if (fill > 0)
+            ud_round(win, PANE_X, sy + CHIP_H / 2 - 3, fill + knob / 2, 6, 3,
+                     snd.muted ? l.dim : l.accent);
+        ud_disc(win, PANE_X + fill, sy + (CHIP_H - knob) / 2, knob,
+                l.dark ? 0xEDEDF0 : 0xFFFFFF);
+        ud_op(win, UD_OP_RING, PANE_X + fill, sy + (CHIP_H - knob) / 2, knob,
+              knob, knob / 2, l.line, 0, 0, 0, (const char *)0);
+    }
     hot(PANE_X, sy, SLIDER_W, CHIP_H, A_VOLUME, 0, (const char *)0,
         (const char *)0);
     char pc[8];
@@ -956,15 +1036,7 @@ static void draw_sound(void)
 
     y += ROW_H;
     int b = 16, by = y + (CHIP_H - b) / 2;
-    if (snd.muted) {
-        ud_round(win, PANE_X, by, b, b, 4, l.accent);
-        ud_line(win, PANE_X + 4, by + 8, PANE_X + 7, by + 11, 28, l.on_accent);
-        ud_line(win, PANE_X + 7, by + 11, PANE_X + 12, by + 5, 28,
-                l.on_accent);
-    } else {
-        ud_round(win, PANE_X, by, b, b, 4, l.field);
-        ud_ring(win, PANE_X, by, b, b, 4, l.line);
-    }
+    tick_box(PANE_X, by, (int)snd.muted);
     int end = ud_text_l(win, PANE_X + b + 8,
                         ud_baseline(y, CHIP_H, UD_PX), "Mute", l.text,
                         UD_SANS, UD_PX);
@@ -1571,8 +1643,7 @@ static void unlock_save(void)
    for, dimmed, while it is empty */
 static void secret_field(int x, int y, int w, int f, const char *empty)
 {
-    ud_round(win, x, y, w, CHIP_H, 6, l.field);
-    ud_ring(win, x, y, w, CHIP_H, 6, focus == f ? l.accent : l.line);
+    field_ground(x, y, w, f);
     int n = len(fields[f]), cx = x + 10;
     if (!n && focus != f)
         ud_text_l(win, x + 8, ud_baseline(y, CHIP_H, UD_PX), empty, l.dim,
@@ -1610,6 +1681,7 @@ static void draw_lockscreen(void)
         now = same(setting("lockoff"), "1") ? "0" : "never";
     y += CHIP_H + 10;
     row_name(y, "Lock the screen after it turns off");
+    strip(PANE_X, y + CTRL_DY, 5 * CHIP_W + 4 * CHIP_GAP);
     for (int i = 0; i < 5; i++)
         chip(PANE_X + i * (CHIP_W + CHIP_GAP), y + CTRL_DY, after[i],
              same(now, after_values[i]), "lockafter", after_values[i]);
@@ -1618,12 +1690,10 @@ static void draw_lockscreen(void)
     static const char *const ways[3] = { "Password", "PIN", "Swipe" };
     y += ROW_H - 2;
     row_name(y, "Unlock with");
+    strip(PANE_X, y + CTRL_DY, 3 * LOCK_WAY_W + 2 * CHIP_GAP);
     for (int i = 0; i < 3; i++) {
         int x = PANE_X + i * (LOCK_WAY_W + CHIP_GAP), cy = y + CTRL_DY;
-        ud_round(win, x, cy, LOCK_WAY_W, CHIP_H, 8,
-                 unlock_pick == i ? l.accent : l.row);
-        ud_text_mid_l(win, x, cy, LOCK_WAY_W, CHIP_H, ways[i],
-                      unlock_pick == i ? l.on_accent : l.text, UD_SANS, UD_PX);
+        choice(x, cy, LOCK_WAY_W, ways[i], unlock_pick == i);
         hot(x, cy, LOCK_WAY_W, CHIP_H, A_UNLOCK_PICK, i, (const char *)0,
             (const char *)0);
     }
@@ -1726,15 +1796,22 @@ static void draw(void)
     ud_text_l(win, 16, HEAD_BASE, "Settings", l.text, UD_BOLD, 16);
     for (int i = 0; i < SEC_N; i++) {
         int y = SIDE_Y0 + i * SIDE_H;
-        if (i == section)
+        if (i == section && weave()) {
+            /* the accent faint behind it, its knot at the row's end, as
+               the design's sidebar has it */
+            ud_round(win, 6, y + 1, SIDE_W - 12, SIDE_H - 2, 6,
+                     pu_mix(l.accent, l.bg, PU_SEL_A));
+            ud_disc(win, SIDE_W - 20, y + SIDE_H / 2 - 3, 6, l.accent);
+        } else if (i == section)
             ud_round(win, 6, y + 1, SIDE_W - 12, SIDE_H - 2, 6, l.accent);
         /* The square with its picture, the way a Mac marks each one */
         int iy = y + (SIDE_H - ICON) / 2;
         ud_round(win, 12, iy, ICON, ICON, 4, section_colour[i]);
         section_icon(i, 12, iy, section_colour[i]);
         ud_text_l(win, SIDE_TEXT_X, ud_baseline(y, SIDE_H, UD_PX),
-                  sections[i], i == section ? l.on_accent : l.text, UD_SANS,
-                  UD_PX);
+                  sections[i], i == section && !weave() ? l.on_accent
+                                                        : l.text,
+                  i == section && weave() ? UD_BOLD : UD_SANS, UD_PX);
         if (group_ends(i) && i < SEC_N - 1)
             ud_fill(win, 14, y + SIDE_H, SIDE_W - 28, 1, l.line);
         hot(0, y, SIDE_W, SIDE_H, A_SECTION, i, (const char *)0,

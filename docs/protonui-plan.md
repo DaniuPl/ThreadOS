@@ -138,6 +138,14 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
   under the focused control), clicks and keys move them and the program
   prints what it was told. `t_gcode` and every group that clicks a v1
   program pass unchanged.
+- **Done** (journal: "ProtonUI v2 stage 4"), the first of the new
+  controls: buttons of four kinds, switch, segments, progress (known
+  and not), knots; the field, the box, the slider, the list and the tabs
+  drawn Weave's way under Weave and the old way under the other styles;
+  `pu_start` with the program's own array, Tab and Space, the focus as
+  the thread round the control, `pu_name`. Settings draws its controls
+  with them. Still to come: spinner, menu, card, avatar, side panel,
+  sheet - and the programs that draw their own controls moved over.
 
 ## Stage 5 - density and touch - 1.5 days
 

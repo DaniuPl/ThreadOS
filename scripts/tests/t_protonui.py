@@ -29,6 +29,24 @@ stitch's dashes and gaps, each knot's centre and the ring around it
 all of it), and the thread through the points of its Bezier curve, with
 the background a little way off it.
 
+Stage 4, the controls: user/pudemo puts every control of ProtonUI v2
+in a window with pu_start - buttons of the four kinds, two switches,
+segments, knots, two boxes, a field, a slider, a list and both kinds of
+progress - and says on the serial port what it was told. Under Weave
+each is read off the screen against the design's colours (user/ugui.h's
+numbers, look.h's): the one thing to do in the accent, another thing a
+raised surface with its line, a quiet one only its words, the
+destroying one on madder; a switch on (the accent, the white knob at
+its right) and off (the grey knob at its left); the chosen segment
+raised with the thread along its foot; the chosen knot filled and the
+others hollow; the boxes; the field's stitch, dashed at rest and the
+thread with the keys; progress spun as far as its value with its knot;
+the chosen row. Then clicks move them and the program prints the new
+values; Tab gives the keys to the first control and the thread wraps
+round it, Space presses it, Tab again moves the thread on; typing
+reaches the field. Under the Mac style the same window is drawn the
+old way: another thing is a row's grey, not Weave's raised surface.
+
 Run on its own or through scripts/run_tests.py.
 """
 
@@ -241,6 +259,253 @@ def marks():
             os.unlink(slog)
 
 
+def demo_define(name):
+    return _kernel_define("user/pudemo.c", name)
+
+
+D = {n: demo_define(n) for n in (
+    "W", "H", "BTN_Y", "BTN_H", "B0_X", "B0_W", "B1_X", "B1_W", "B2_X",
+    "B2_W", "B3_X", "B3_W", "SW_X", "SW_Y", "SW_W", "SW2_Y", "SEG_X",
+    "SEG_Y", "SEG_W", "SEG_H", "KN_X", "KN_Y", "CK_X", "CK_Y", "CK2_Y",
+    "FLD_X", "FLD_Y", "FLD_W", "LST_X", "LST_Y", "LST_W", "PR_X", "PR_Y",
+    "PR_W", "PR_VALUE")}
+
+
+def ugui_colours():
+    """user/ugui.h's colours for Weave's controls (PU_N_*: Night)"""
+    src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "..", "..", "user", "ugui.h")).read()
+    return {m.group(1): int(m.group(2), 16) for m in re.finditer(
+        r"#define\s+(PU_N_\w+)\s+0x([0-9A-Fa-f]+)", src)}
+
+
+def ugui_define(name):
+    return _kernel_define("user/ugui.h", name)
+
+
+def rgb(v):
+    return ((v >> 16) & 255, (v >> 8) & 255, v & 255)
+
+
+def mix(over, under, a):
+    return tuple((o * a + u * (255 - a) + 127) // 255
+                 for o, u in zip(rgb(over), rgb(under)))
+
+
+def wait_said(q, text, timeout=10):
+    end = time.time() + timeout
+    while time.time() < end:
+        if text in q.serial():
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def selvedge(at, sw, sh, accent):
+    """The window in front's selvedge: (x0, y0) of the run of the thread
+    colour, three rows deep, that starts it"""
+    for y in range(0, sh - 3):
+        x = 0
+        while x < sw:
+            if at(x, y) != accent:
+                x += 1
+                continue
+            x0 = x
+            while x < sw and at(x, y) == accent:
+                x += 1
+            if x - x0 >= 100 and at(x0 + 5, y + 1) == accent and \
+                    at(x0 + 5, y + 2) == accent and \
+                    at(x0 + 5, y + 3) != accent:
+                return x0, y
+    return None
+
+
+def controls():
+    """Stage 4 on the desktop, under Weave and then the Mac style"""
+    C = ugui_colours()
+    accent, bg = LOOK["NIGHT_ACCENT"], LOOK["NIGHT_WIN_BG"]
+    danger = LOOK["NIGHT_APP_DANGER"]
+    slog = tempfile.mktemp(suffix=".log")
+    q = Qemu(KERNEL, INITRD, serial=slog)
+    try:
+        check("the desktop came up", q.wait_desktop())
+        sw, sh = q.size()
+        q.click_desktop()
+        q.sudo("set layout weave", "saved")
+        check("Weave", wait_said(q, "the Weave style"))
+        q.click_desktop()
+        # 'runw': the shell does not wait for it, and takes the commands
+        # that come later
+        q.type_line("runw pudemo")
+        check("pudemo's window is drawn", wait_said(q, "[pudemo] drawn", 60))
+        q.mouse_goto(sw - 10, sh // 2)
+        found = None
+        end = time.time() + 20
+        while time.time() < end and not found:
+            time.sleep(0.5)
+            _, _, at = q.screen_raw()
+            found = selvedge(at, sw, sh, rgb(accent))
+        check("its window, found by its selvedge (%s)" % (found,), found)
+        if not found:
+            return
+        wx = found[0] - LOOK["WEAVE_WIN_R"]
+        ox, oy = wx + 1, found[1] + LOOK["WEAVE_TITLE_H"] + 1
+
+        def px(x, y):
+            return at(ox + x, oy + y)
+
+        def near(a, b, tol=6):
+            return all(abs(p - q_) <= tol for p, q_ in zip(a, b))
+
+        def shot():
+            nonlocal at
+            time.sleep(1)
+            _, _, at = q.screen_raw()
+
+        def click(x, y):
+            """a click in the window, and the pointer out of the way of
+            what is read after it"""
+            q.click(ox + x, oy + y)
+            q.mouse_goto(sw - 10, sh // 2)
+
+        my = D["BTN_Y"] + D["BTN_H"] // 2
+        got = [px(D[k] + 5, my) for k in ("B0_X", "B1_X", "B2_X", "B3_X")]
+        check("buttons: the one thing to do in the accent, another raised "
+              "with its line, a quiet one only its words, the destroying "
+              "one on madder (%s)" % got,
+              got[0] == rgb(accent) and got[1] == rgb(C["PU_N_RAISED"]) and
+              near(px(D["B1_X"], my), rgb(C["PU_N_RAISED_LINE"]), 12) and
+              got[2] == rgb(bg) and
+              got[3] == mix(danger, bg, ugui_define("PU_DANGER_A")))
+
+        sx = D["SW_X"] + D["SW_W"] - ugui_define("PU_SWITCH_W")
+        s1, s2 = D["SW_Y"] + 2, D["SW2_Y"] + 2
+        on = (px(sx + 6, s1 + 11), px(sx + 29, s1 + 11))
+        off = (px(sx + 11, s2 + 11), px(sx + 30, s2 + 11))
+        check("a switch on: the accent, the white knob at its right; off: "
+              "the grey knob at its left on a quiet pill (%s %s)" % (on, off),
+              on == (rgb(accent), (255, 255, 255)) and
+              off == (rgb(C["PU_N_KNOB_OFF"]), rgb(C["PU_N_SEG_ON"])))
+
+        seg = lambda i: D["SEG_X"] + 3 + (D["SEG_W"] - 6) * i // 3
+        foot = D["SEG_Y"] + D["SEG_H"] - 5
+        chosen = (px(seg(0) + 4, D["SEG_Y"] + 8),
+                  px((seg(0) + seg(1)) // 2, foot))
+        other = px(seg(2) + 4, D["SEG_Y"] + 8)
+        check("segments: the chosen one raised, the thread along its foot; "
+              "another not raised (%s %s)" % (chosen, other),
+              chosen == (rgb(C["PU_N_SEG_ON"]), rgb(accent)) and
+              other == rgb(C["PU_N_FIELD"]))
+
+        kc = lambda r: px(D["KN_X"] + 8, D["KN_Y"] + r * 24 + 12)
+        check("knots: the chosen one filled in the accent, the others "
+              "hollow (%s)" % [kc(r) for r in range(3)],
+              kc(1) == rgb(accent) and kc(0) == rgb(bg) and kc(2) == rgb(bg))
+
+        b1, b2 = D["CK_Y"] + 1, D["CK2_Y"] + 1
+        check("boxes: ticked, the accent's; not, empty inside a grey ring "
+              "(%s %s)" % (px(D["CK_X"] + 2, b1 + 2), px(D["CK_X"] + 8, b2 + 8)),
+              px(D["CK_X"] + 2, b1 + 2) == rgb(accent) and
+              px(D["CK_X"] + 8, b2 + 8) == rgb(bg) and
+              near(px(D["CK_X"] + 8, b2), rgb(C["PU_N_KNOT"]), 30))
+
+        fy = D["FLD_Y"] + ugui_define("UG_ROW") + 4 - 2
+        row = [px(x, fy) for x in range(D["FLD_X"], D["FLD_X"] + D["FLD_W"])]
+        st, fi = row.count(rgb(C["PU_N_STITCH"])), row.count(rgb(C["PU_N_FIELD"]))
+        check("the field at rest: its stitch dashed under it (%d stitch, %d "
+              "gap pixels)" % (st, fi), st > 60 and fi > 60)
+
+        pv = D["PR_X"] + D["PR_W"] * D["PR_VALUE"] // 100
+        tail = [px(x, D["PR_Y"] + 4) for x in range(pv + 12, pv + 60)]
+        check("progress: spun as far as %d%% (%s), its knot's white there "
+              "(%s), the stitch after it" % (D["PR_VALUE"],
+                                              px(D["PR_X"] + 10, D["PR_Y"] + 5),
+                                              px(pv, D["PR_Y"] + 5)),
+              px(D["PR_X"] + 10, D["PR_Y"] + 5) == rgb(accent) and
+              px(pv, D["PR_Y"] + 5) == (255, 255, 255) and
+              rgb(C["PU_N_STITCH"]) in tail)
+
+        lr = px(D["LST_X"] + D["LST_W"] - 12, D["LST_Y"] + 18 + 9)
+        check("the list's chosen row: the accent faint behind it (%s)" % (lr,),
+              lr == mix(accent, LOOK["NIGHT_APP_FIELD"],
+                        ugui_define("PU_SEL_A")))
+
+        # clicks
+        click(sx + 20, s2 + 11)
+        ok = wait_said(q, "[pudemo] changed Dark theme at night 1")
+        shot()
+        check("a click turns the second switch on: it says so, and its knob "
+              "is white at its right", ok and
+              px(sx + 29, s2 + 11) == (255, 255, 255))
+        click((seg(2) + seg(3)) // 2, D["SEG_Y"] + D["SEG_H"] // 2)
+        ok = wait_said(q, "[pudemo] changed View 2")
+        shot()
+        check("a click on the third segment: chosen, the thread under it",
+              ok and px((seg(2) + seg(3)) // 2, foot) == rgb(accent) and
+              px((seg(0) + seg(1)) // 2, foot) != rgb(accent))
+        click(D["KN_X"] + 8, D["KN_Y"] + 2 * 24 + 12)
+        ok = wait_said(q, "[pudemo] changed Loom size 2")
+        shot()
+        check("a click on the third knot: it is filled, the second hollow",
+              ok and kc(2) == rgb(accent) and kc(1) == rgb(bg))
+        click(D["CK_X"] + 8, D["CK2_Y"] + 9)
+        check("a click ticks the second box",
+              wait_said(q, "[pudemo] changed Send reports 1"))
+        click(D["B0_X"] + 20, my)
+        check("a click presses the button", wait_said(q, "[pudemo] pressed "
+                                                         "Install"))
+
+        # the keys
+        q.mouse_goto(sw - 10, sh // 2)
+        q.sendkey("tab")
+        ok = wait_said(q, "[pudemo] focus Install")
+        shot()
+        check("Tab gives the keys to the first control, and the thread "
+              "wraps round it two pixels out (%s)" % (px(D["B0_X"] - 3, my),),
+              ok and px(D["B0_X"] - 3, my) == rgb(accent) and
+              px(D["B0_X"] - 4, my) == rgb(accent))
+        n = q.serial().count("[pudemo] pressed Install")
+        q.sendkey("spc")
+        end = time.time() + 10
+        while time.time() < end and \
+                q.serial().count("[pudemo] pressed Install") == n:
+            time.sleep(0.3)
+        check("Space presses it",
+              q.serial().count("[pudemo] pressed Install") == n + 1)
+        q.sendkey("tab")
+        ok = wait_said(q, "[pudemo] focus Cancel")
+        shot()
+        check("Tab again: the thread moves to the next (%s, %s)"
+              % (px(D["B1_X"] - 3, my), px(D["B0_X"] - 3, my)),
+              ok and px(D["B1_X"] - 3, my) == rgb(accent) and
+              px(D["B0_X"] - 3, my) == rgb(bg))
+        click(D["FLD_X"] + 20, D["FLD_Y"] + 10)
+        q.sendkey("x")
+        ok = wait_said(q, "[pudemo] typed Computer name threados-pcx")
+        shot()
+        row = [px(x, fy) for x in range(D["FLD_X"] + 8,
+                                        D["FLD_X"] + D["FLD_W"] - 8)]
+        check("typing reaches the field, and with the keys its stitch is "
+              "the thread (%d of %d pixels)" % (row.count(rgb(accent)),
+                                                len(row)),
+              ok and row.count(rgb(accent)) == len(row))
+
+        # the Mac style: the same window, the old way
+        q.click_desktop()
+        q.sudo("set layout mac", "saved")
+        check("the Mac style", wait_said(q, "the Mac style"))
+        time.sleep(2)
+        _, _, at = q.screen_raw()
+        mox, moy = ox, found[1] + LOOK["TITLE_H"] + 1
+        v1 = at(mox + D["B1_X"] + 5, moy + my)
+        check("under the Mac style another thing is a row's grey again "
+              "(%s)" % (v1,), v1 == rgb(LOOK["DARK_APP_ROW"]))
+    finally:
+        q.close()
+        if os.path.exists(slog):
+            os.unlink(slog)
+
+
 def main():
     print("--- ProtonUI v2 ---")
     reason = no64()
@@ -260,6 +525,7 @@ def main():
         if os.path.exists(slog):
             os.unlink(slog)
     marks()
+    controls()
     return summary()
 
 

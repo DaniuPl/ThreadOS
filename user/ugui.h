@@ -54,6 +54,11 @@
 #define UG_LIST   5
 #define UG_LINE   6
 #define UG_TABS   7
+/* ProtonUI v2's (docs/protonui-plan.md stage 4) */
+#define UG_SWITCH   8            /* on or off, as a switch */
+#define UG_SEGMENTS 9            /* one of a few, side by side */
+#define UG_PROGRESS 10           /* how far: value of max, or -1 unknown */
+#define UG_KNOTS    11           /* one of a few, one under the other */
 
 /* What happened */
 #define UG_NOTHING 0
@@ -63,6 +68,7 @@
 #define UG_ENTER   4             /* Enter in a field */
 #define UG_CLOSED  5             /* the window is to go */
 #define UG_RESIZED 6
+#define UG_FOCUSED 7             /* Tab gave a thing the keys (pu_start) */
 
 struct ug_item {
     int kind;
@@ -77,16 +83,25 @@ struct ug_item {
     int buflen;
     const char *(*row)(void *ctx, int i);   /* a list's rows */
     void *ctx;
+    const char *name;            /* what it is called, for a screen reader:
+                                    its text unless pu_name says otherwise */
+    int kind2;                   /* a button's kind (PU_PRIMARY..) */
+    int phase;                   /* an unknown progress's place, of 1000 */
 };
 
 struct ug {
     int win;
     int w, h;
     struct ud_look look;         /* the theme's colours, as of the last draw */
-    struct ug_item it[UG_MAX];
+    struct ug_item own[UG_MAX];  /* the things, unless pu_start was given
+                                    room of the program's own */
+    struct ug_item *it;
+    int cap;
     int n;
     int focus;                   /* which thing has the keyboard, -1 = none */
     int top;                     /* the first visible row of a list */
+    int v2;                      /* started by pu_start: the keys move the
+                                    focus, and it is drawn */
 };
 
 /* --- rectangles and reusable layout -------------------------------- */
@@ -329,14 +344,31 @@ static inline void ug_start(struct ug *u, int win, int w, int h)
     u->win = win;
     u->w = w;
     u->h = h;
+    u->it = u->own;
+    u->cap = UG_MAX;
     u->n = 0;
     u->focus = -1;
     u->top = 0;
+    u->v2 = 0;
+}
+
+/* ProtonUI v2's start: the things in an array the program hands in (as
+   many as it likes; NULL for the 24 of its own), and Tab, Space and
+   Enter work the controls, the one with the keys wrapped in the thread */
+static inline void pu_start(struct ug *u, int win, int w, int h,
+                            struct ug_item *items, int cap)
+{
+    ug_start(u, win, w, h);
+    if (items && cap > 0) {
+        u->it = items;
+        u->cap = cap;
+    }
+    u->v2 = 1;
 }
 
 static inline int ug_add(struct ug *u, int kind, int x, int y, int w, int h)
 {
-    if (u->n >= UG_MAX)
+    if (u->n >= u->cap)
         return -1;
 
     struct ug_item *t = &u->it[u->n];
@@ -352,6 +384,9 @@ static inline int ug_add(struct ug *u, int kind, int x, int y, int w, int h)
     t->buflen = 0;
     t->row = (const char *(*)(void *, int))0;
     t->ctx = (void *)0;
+    t->name = (const char *)0;
+    t->kind2 = 0;
+    t->phase = 0;
     return u->n++;
 }
 
@@ -448,6 +483,121 @@ static inline int ug_line(struct ug *u, int x, int y, int w)
     return ug_add(u, UG_LINE, x, y, w, 1);
 }
 
+/* --- ProtonUI v2's things -------------------------------------------- */
+
+#define PU_SWITCH_W 40
+#define PU_SWITCH_H 22
+#define PU_KNOT_ROW 24           /* one choice among knots */
+
+/* A switch: on (1) or off (0), its words to the left of it at x */
+static inline int pu_switch(struct ug *u, int x, int y, int w,
+                            const char *text, int on)
+{
+    int i = ug_add(u, UG_SWITCH, x, y, w, PU_SWITCH_H + 4);
+    if (i >= 0) {
+        u->it[i].text = text;
+        u->it[i].value = on ? 1 : 0;
+    }
+    return i;
+}
+
+/* Segments: n choices side by side, 'chosen' of them */
+static inline int pu_segments(struct ug *u, int x, int y, int w, int h,
+                              const char *(*row)(void *ctx, int i), void *ctx,
+                              int n, int chosen)
+{
+    int i = ug_add(u, UG_SEGMENTS, x, y, w, h);
+    if (i >= 0) {
+        u->it[i].row = row;
+        u->it[i].ctx = ctx;
+        u->it[i].max = n;
+        u->it[i].value = chosen;
+    }
+    return i;
+}
+
+/* Progress: value of max; a value of -1 is a length not known, whose
+   piece of thread pu_set_phase moves along */
+static inline int pu_progress(struct ug *u, int x, int y, int w, int value,
+                              int max)
+{
+    int i = ug_add(u, UG_PROGRESS, x, y, w, 10);
+    if (i >= 0) {
+        u->it[i].value = value;
+        u->it[i].max = max > 0 ? max : 100;
+    }
+    return i;
+}
+
+/* Knots: n choices one under the other, 'chosen' of them */
+static inline int pu_knots(struct ug *u, int x, int y, int w,
+                           const char *(*row)(void *ctx, int i), void *ctx,
+                           int n, int chosen)
+{
+    int i = ug_add(u, UG_KNOTS, x, y, w, n * PU_KNOT_ROW);
+    if (i >= 0) {
+        u->it[i].row = row;
+        u->it[i].ctx = ctx;
+        u->it[i].max = n;
+        u->it[i].value = chosen;
+    }
+    return i;
+}
+
+/* A button's kind: the one thing to do (the accent), another thing,
+   a quiet one (words only) and one that destroys */
+#define PU_PRIMARY   0
+#define PU_SECONDARY 1
+#define PU_GHOST     2
+#define PU_DANGER    3
+
+static inline void pu_kind(struct ug *u, int id, int kind)
+{
+    if (id >= 0 && id < u->n)
+        u->it[id].kind2 = kind;
+}
+
+static inline void pu_set_phase(struct ug *u, int id, int phase)
+{
+    if (id >= 0 && id < u->n)
+        u->it[id].phase = phase;
+}
+
+static inline void pu_name(struct ug *u, int id, const char *name)
+{
+    if (id >= 0 && id < u->n)
+        u->it[id].name = name;
+}
+
+/* What a thing is called, for whoever reads the window aloud */
+static inline const char *pu_name_of(const struct ug *u, int id)
+{
+    if (id < 0 || id >= u->n)
+        return "";
+    const struct ug_item *t = &u->it[id];
+    return t->name ? t->name : t->text ? t->text : "";
+}
+
+static inline void pu_enable(struct ug *u, int id, int on)
+{
+    if (id >= 0 && id < u->n)
+        u->it[id].enabled = on ? 1 : 0;
+}
+
+/* The v1 names under v2's, so a program can be written in either */
+#define pu_label    ug_label
+#define pu_note     ug_note
+#define pu_button   ug_button
+#define pu_slider   ug_slider
+#define pu_check    ug_check
+#define pu_field    ug_field
+#define pu_list     ug_list
+#define pu_tabs     ug_tabs
+#define pu_line     ug_line
+#define pu_value    ug_value
+#define pu_set_value ug_set_value
+#define pu_set_text ug_set_text
+
 /* --- reading and setting ------------------------------------------- */
 
 static inline int ug_value(struct ug *u, int id)
@@ -534,12 +684,191 @@ static inline int ug_say_l(int win, int x, int y, int h, const char *s,
     return ud_text_l(win, x, ud_baseline(y, h, UD_PX), s, rgb, font, UD_PX);
 }
 
+/* --- ProtonUI v2: Weave's controls ------------------------------------
+ *
+ * docs/weave/canvas/Components.dc.html. Under Weave (the look's style)
+ * a control is cloth like everything else: a button a raised surface
+ * with a line round it, or the accent for the one thing to do, or
+ * madder for what destroys; a field a surface with a stitch under it
+ * that the focus pulls tight into the thread; a switch a pill with its
+ * knob; a choice among a few a knot, hollow or filled; the keyboard's
+ * focus the thread wrapped round the control two pixels out. Under the
+ * other styles everything is drawn as it always was. The colours the
+ * look does not carry are the design's, here, for Night and Linen.
+ */
+#define PU_N_RAISED      0x20232B
+#define PU_N_RAISED_LINE 0x2E323D
+#define PU_N_FIELD       0x202229   /* (a shade lighter than the design's
+                                       0x1B1D24, which sits on a darker
+                                       card there than a window is) */
+#define PU_N_FIELD_ON    0x262931
+#define PU_N_STITCH      0x3A3F4C
+#define PU_N_KNOT        0x4A4F5C
+#define PU_N_SEG_ON      0x2A2D36
+#define PU_N_SEG_INK     0xB4B9C6
+#define PU_N_LINK        0x8FA5FF
+#define PU_N_DANGER_INK  0xFF8A8D
+#define PU_N_OFF_INK     0x6A7080
+#define PU_N_PRESSED     0x4A68E0
+#define PU_N_KNOB_OFF    0x8A90A0
+#define PU_L_RAISED      0xFBF9F4
+#define PU_L_RAISED_LINE 0xCFC8BA
+#define PU_L_FIELD       0xEFEBE3
+#define PU_L_FIELD_ON    0xFFFFFF
+#define PU_L_STITCH      0xB4AEA2
+#define PU_L_KNOT        0xA39D91
+#define PU_L_SEG_ON      0xFFFFFF
+#define PU_L_SEG_INK     0x5E5A52
+#define PU_L_LINK        0x3F5EE8
+#define PU_L_DANGER_INK  0xC9302C
+#define PU_L_OFF_INK     0xA39D91
+#define PU_L_PRESSED     0x3450CC
+#define PU_L_KNOB_OFF    0x8E897F
+#define PU_BTN_R    8            /* a button's corners */
+#define PU_SEL_A    46           /* the chosen row: the accent at this, of 255 */
+#define PU_DANGER_A 26           /* a destroying button's ground ... */
+#define PU_DANGER_LINE_A 128     /* ... and its line */
+
+struct pu_ink {
+    uint32_t raised, raised_line, field, field_on, stitch, knot, seg_on,
+             seg_ink, link, danger_ink, off_ink, pressed, knob_off;
+};
+
+static inline int pu_weave(const struct ud_look *l)
+{
+    return l->style == UD_STYLE_WEAVE;
+}
+
+static inline void pu_ink_of(const struct ud_look *l, struct pu_ink *p)
+{
+    int d = (int)l->dark;
+    p->raised = d ? PU_N_RAISED : PU_L_RAISED;
+    p->raised_line = d ? PU_N_RAISED_LINE : PU_L_RAISED_LINE;
+    p->field = d ? PU_N_FIELD : PU_L_FIELD;
+    p->field_on = d ? PU_N_FIELD_ON : PU_L_FIELD_ON;
+    p->stitch = d ? PU_N_STITCH : PU_L_STITCH;
+    p->knot = d ? PU_N_KNOT : PU_L_KNOT;
+    p->seg_on = d ? PU_N_SEG_ON : PU_L_SEG_ON;
+    p->seg_ink = d ? PU_N_SEG_INK : PU_L_SEG_INK;
+    p->link = d ? PU_N_LINK : PU_L_LINK;
+    p->danger_ink = d ? PU_N_DANGER_INK : PU_L_DANGER_INK;
+    p->off_ink = d ? PU_N_OFF_INK : PU_L_OFF_INK;
+    p->pressed = d ? PU_N_PRESSED : PU_L_PRESSED;
+    p->knob_off = d ? PU_N_KNOB_OFF : PU_L_KNOB_OFF;
+}
+
+/* 'over' laid on 'under' at a of 255, as the desktop mixes */
+static inline uint32_t pu_mix(uint32_t over, uint32_t under, int a)
+{
+    uint32_t out = 0;
+    for (int sh = 0; sh <= 16; sh += 8) {
+        uint32_t o = (over >> sh) & 0xFF, u = (under >> sh) & 0xFF;
+        out |= ((o * (uint32_t)a + u * (uint32_t)(255 - a) + 127) / 255) << sh;
+    }
+    return out;
+}
+
+/* The thread wrapped round a control with the keyboard's focus, two
+   pixels out and two thick */
+static inline void pu_draw_focus(int win, const struct ud_look *l, int x,
+                                 int y, int w, int h, int r)
+{
+    ud_ring(win, x - 3, y - 3, w + 6, h + 6, r + 3, l->accent);
+    ud_ring(win, x - 4, y - 4, w + 8, h + 8, r + 4, l->accent);
+}
+
+/* States a control is drawn in */
+#define PU_FOCUS   1             /* it has the keys */
+#define PU_DOWN    2             /* pressed, while the pointer holds it */
+#define PU_OFF     4             /* not to be used now */
+#define PU_ERROR   8             /* a field whose text is wrong */
+#define PU_TR     16             /* its words are to be translated */
+
+/* A button. Under Weave by its kind; under the other styles as v1
+   drew it, the accent's or danger's face, a row's for the rest */
+static inline void pu_draw_button(int win, const struct ud_look *l, int x,
+                                  int y, int w, int h, const char *text,
+                                  int kind, int state)
+{
+    uint32_t face, ink, line = 0;
+    int font = UD_SANS;
+    if (!pu_weave(l)) {
+        face = kind == PU_DANGER ? l->danger : kind == PU_PRIMARY ? l->accent
+                                                                  : l->row;
+        ink = kind == PU_PRIMARY || kind == PU_DANGER ? l->on_accent : l->text;
+        if (state & PU_OFF) {
+            face = l->row;
+            ink = l->dim;
+        }
+        if (kind != PU_GHOST)
+            ud_round(win, x, y, w, h, UG_R, face);
+    } else {
+        struct pu_ink p;
+        pu_ink_of(l, &p);
+        int r = h / 2 < PU_BTN_R ? h / 2 : PU_BTN_R;
+        if (state & PU_OFF) {
+            ud_ring(win, x, y, w, h, r, p.stitch);
+            ink = p.off_ink;
+        } else if (kind == PU_PRIMARY) {
+            ud_round(win, x, y, w, h, r, (state & PU_DOWN) ? p.pressed
+                                                           : l->accent);
+            ink = l->on_accent;
+            font = UD_BOLD;
+        } else if (kind == PU_DANGER) {
+            face = pu_mix(l->danger, l->bg, PU_DANGER_A);
+            line = pu_mix(l->danger, l->bg, PU_DANGER_LINE_A);
+            ud_round(win, x, y, w, h, r, face);
+            ud_ring(win, x, y, w, h, r, line);
+            ink = p.danger_ink;
+            font = UD_BOLD;
+        } else if (kind == PU_GHOST) {
+            ink = p.link;
+        } else {
+            ud_round(win, x, y, w, h, r, (state & PU_DOWN) ? p.seg_on
+                                                           : p.raised);
+            ud_ring(win, x, y, w, h, r, p.raised_line);
+            ink = l->text;
+        }
+        if (state & PU_FOCUS)
+            pu_draw_focus(win, l, x, y, w, h, r);
+    }
+    if (state & PU_TR)
+        ud_text_mid_l(win, x, y, w, h, text, ink, font, UD_PX);
+    else
+        ud_text_mid(win, x, y, w, h, text, ink, font, UD_PX);
+}
+
+/* A field under Weave: its surface, a little lighter with the keys, and
+   the stitch under it - dashed at rest, the thread when it has the keys,
+   madder when what is in it is wrong */
+static inline void pu_draw_field_ground(int win, const struct ud_look *l,
+                                        int x, int y, int w, int h, int state)
+{
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+    ud_round(win, x, y, w, h, 6, (state & PU_FOCUS) ? p.field_on : p.field);
+    if (state & PU_ERROR)
+        ud_fill(win, x, y + h - 2, w, 2, l->danger);
+    else if (state & PU_FOCUS)
+        ud_fill(win, x, y + h - 2, w, 2, l->accent);
+    else
+        ud_stitch(win, x, y + h - 2, w, 0, p.stitch);
+}
+
 /* A field to type in: a white (or dark) surface, a line round it in
    the accent when it has the keys, and where the next letter goes */
 static inline void ug_draw_field(int win, const struct ud_look *l, int x,
                                  int y, int w, int h, const char *text,
                                  int focused)
 {
+    if (pu_weave(l)) {
+        pu_draw_field_ground(win, l, x, y, w, h, focused ? PU_FOCUS : 0);
+        int end = ug_say(win, x + 10, y - 1, h, text ? text : "", l->text,
+                         UD_SANS);
+        if (focused && end < x + w - 4)
+            ud_fill(win, end + 1, y + 4, 1, h - 9, l->text);
+        return;
+    }
     ud_round(win, x, y, w, h, UG_R, l->field);
     ud_ring(win, x, y, w, h, UG_R, focused ? l->accent : l->line);
     int end = ug_say(win, x + 6, y, h, text ? text : "", l->text, UD_SANS);
@@ -547,12 +876,33 @@ static inline void ug_draw_field(int win, const struct ud_look *l, int x,
         ud_fill(win, end + 1, y + 4, 1, h - 8, l->text);
 }
 
+/* Under Weave a v1 button's kind, from the colours it was asked for:
+   the accent's face is the one thing to do, danger's face or words the
+   destroying one, a quiet face with quiet words one not to be used now,
+   any other face another thing */
+static inline int pu_kind_of_face(const struct ud_look *l, uint32_t face,
+                                  uint32_t ink, int *state)
+{
+    if (face == l->accent)
+        return PU_PRIMARY;
+    if (face == l->danger || ink == l->danger)
+        return PU_DANGER;
+    if (ink == l->dim)
+        *state |= PU_OFF;
+    return PU_SECONDARY;
+}
+
 /* A button: a rounded surface with its word in the middle */
 static inline void ug_draw_button(int win, const struct ud_look *l, int x,
                                   int y, int w, int h, const char *text,
                                   uint32_t face, uint32_t ink)
 {
-    (void)l;
+    if (pu_weave(l)) {
+        int state = 0;
+        int kind = pu_kind_of_face(l, face, ink, &state);
+        pu_draw_button(win, l, x, y, w, h, text, kind, state);
+        return;
+    }
     ud_round(win, x, y, w, h, UG_R, face);
     ud_text_mid(win, x, y, w, h, text, ink, UD_SANS, UD_PX);
 }
@@ -561,9 +911,261 @@ static inline void ug_draw_button_l(int win, const struct ud_look *l, int x,
                                     int y, int w, int h, const char *text,
                                     uint32_t face, uint32_t ink)
 {
-    (void)l;
+    if (pu_weave(l)) {
+        int state = PU_TR;
+        int kind = pu_kind_of_face(l, face, ink, &state);
+        pu_draw_button(win, l, x, y, w, h, text, kind, state);
+        return;
+    }
     ud_round(win, x, y, w, h, UG_R, face);
     ud_text_mid_l(win, x, y, w, h, text, ink, UD_SANS, UD_PX);
+}
+
+/* A box ticked or not, under Weave: the accent's with its tick, or a
+   ring of the knots' grey */
+static inline void pu_draw_check(int win, const struct ud_look *l, int x,
+                                 int y, int on, int state)
+{
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+    int b = 16;
+    if (on) {
+        ud_round(win, x, y, b, b, 4, l->accent);
+        ud_line(win, x + 4, y + 8, x + 7, y + 11, 30, l->on_accent);
+        ud_line(win, x + 7, y + 11, x + 12, y + 5, 30, l->on_accent);
+    } else {
+        ud_ring(win, x, y, b, b, 4, p.knot);
+        ud_ring(win, x + 1, y + 1, b - 2, b - 2, 3, p.knot);
+    }
+    if (state & PU_FOCUS)
+        pu_draw_focus(win, l, x, y, b, b, 4);
+}
+
+/* A switch, PU_SWITCH_W by PU_SWITCH_H at x, y: on, the accent with the
+   knob at its right; off, a quiet pill with a smaller grey knob at its
+   left */
+static inline void pu_draw_switch(int win, const struct ud_look *l, int x,
+                                  int y, int on, int state)
+{
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+    int w = PU_SWITCH_W, h = PU_SWITCH_H;
+    if (!pu_weave(l)) {
+        ud_round(win, x, y, w, h, h / 2, on ? l->accent : l->row);
+        ud_disc(win, on ? x + w - h + 2 : x + 2, y + 2, h - 4,
+                l->dark ? 0xEDEDF0 : 0xFFFFFF);
+        return;
+    }
+    if (on) {
+        ud_round(win, x, y, w, h, h / 2, l->accent);
+        ud_disc(win, x + w - 3 - 16, y + 3, 16, 0xFFFFFF);
+    } else {
+        ud_round(win, x, y, w, h, h / 2, p.seg_on);
+        ud_ring(win, x, y, w, h, h / 2, p.knot);
+        ud_disc(win, x + 4, y + 4, 14, p.knob_off);
+    }
+    if (state & PU_FOCUS)
+        pu_draw_focus(win, l, x, y, w, h, h / 2);
+}
+
+/* A knot to choose with: hollow, or filled in the accent when chosen */
+static inline void pu_draw_knot(int win, const struct ud_look *l, int x,
+                                int y, int chosen, int state)
+{
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+    uint32_t c = chosen ? l->accent : (pu_weave(l) ? p.knot : l->line);
+    ud_ring(win, x, y, 16, 16, 8, c);
+    ud_ring(win, x + 1, y + 1, 14, 14, 7, c);
+    if (chosen)
+        ud_disc(win, x + 4, y + 4, 8, l->accent);
+    if (state & PU_FOCUS)
+        pu_draw_focus(win, l, x, y, 16, 16, 8);
+}
+
+/* Segments: n words side by side in one strip, the chosen one raised
+   with the thread along its foot */
+static inline void pu_draw_segments(int win, const struct ud_look *l, int x,
+                                    int y, int w, int h,
+                                    const char *(*word)(void *ctx, int i),
+                                    void *ctx, int n, int chosen, int state)
+{
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+    if (n <= 0 || w <= 6 || h <= 6)
+        return;
+    int weave = pu_weave(l);
+    ud_round(win, x, y, w, h, weave ? 9 : UG_R, weave ? p.field : l->row);
+    if (weave)
+        ud_ring(win, x, y, w, h, 9, p.raised_line);
+    for (int i = 0; i < n; i++) {
+        int sx = x + 3 + (w - 6) * i / n, ex = x + 3 + (w - 6) * (i + 1) / n;
+        const char *t = word ? word(ctx, i) : "";
+        if (i == chosen) {
+            ud_round(win, sx, y + 3, ex - sx, h - 6, weave ? 6 : UG_R - 2,
+                     weave ? p.seg_on : l->accent);
+            if (weave)
+                ud_fill(win, sx + 3, y + h - 5, ex - sx - 6, 2, l->accent);
+        }
+        uint32_t ink = i == chosen ? (weave ? l->text : l->on_accent)
+                                   : (weave ? p.seg_ink : l->text);
+        ud_text_mid_l(win, sx, y, ex - sx, h, t, ink,
+                      i == chosen && weave ? UD_BOLD : UD_SANS, UD_PX);
+    }
+    if ((state & PU_FOCUS) && weave)
+        pu_draw_focus(win, l, x, y, w, h, 9);
+}
+
+/* Progress, the thread being spun: under Weave a dashed stitch, the
+   thread along it as far as value of max and a knot where it has got
+   to; value -1, a length not known - a short piece of thread at 'phase'
+   (of 1000) along the stitch, like a shuttle */
+static inline void pu_draw_progress(int win, const struct ud_look *l, int x,
+                                    int y, int w, int value, int max,
+                                    int phase)
+{
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+    int weave = pu_weave(l);
+    if (!weave)
+        ud_round(win, x, y + 2, w, 6, 3, l->row);
+    else
+        ud_stitch(win, x, y + 4, w, 0, p.stitch);
+    if (value < 0) {
+        int run = w * 22 / 100, at = x + (w - run) * (phase % 1000) / 1000;
+        uint32_t c = weave ? l->dye[UD_WOAD] : l->accent;
+        for (int k = 0; k < 8; k++)      /* brighter towards its head */
+            ud_fill(win, at + run * k / 8, y + 3, run / 8 + 2, 4,
+                    pu_mix(c, l->bg, 32 + k * 28));
+        return;
+    }
+    if (max <= 0)
+        max = 1;
+    if (value > max)
+        value = max;
+    int fill = w * value / max;
+    if (fill > 0)
+        ud_round(win, x, y + (weave ? 3 : 2), fill, weave ? 4 : 6,
+                 weave ? 2 : 3, l->accent);
+    if (weave) {
+        int kx = x + fill - 5;
+        ud_disc(win, kx, y, 10, l->accent);
+        ud_disc(win, kx + 2, y + 2, 6, 0xFFFFFF);
+    }
+}
+
+/* A row of a list chosen, under Weave: the accent faint behind it and a
+   knot at its start */
+static inline void pu_draw_row_chosen(int win, const struct ud_look *l, int x,
+                                      int y, int w, int h)
+{
+    ud_round(win, x, y, w, h, 6, pu_mix(l->accent, l->field, PU_SEL_A));
+    ud_disc(win, x + 6, y + h / 2 - 3, 6, l->accent);
+}
+
+/* Under Weave, or any of v2's own things: drawn by ProtonUI v2. 1 when
+   it was. */
+static inline int pu_draw_one(struct ug *u, int i)
+{
+    struct ug_item *t = &u->it[i];
+    const struct ud_look *l = &u->look;
+    int win = u->win;
+    int weave = pu_weave(l);
+    int state = u->v2 && u->focus == i ? PU_FOCUS : 0;
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+
+    switch (t->kind) {
+    case UG_BUTTON: {
+        if (!weave && !u->v2)
+            return 0;
+        int kind = t->colour == UG_RED ? PU_DANGER : t->kind2;
+        pu_draw_button(win, l, t->x, t->y, t->w, t->h, t->text, kind,
+                       state | (t->enabled ? 0 : PU_OFF));
+        return 1;
+    }
+    case UG_SLIDER: {
+        if (!weave)
+            return 0;
+        /* the thread spun as far as the value, on its stitch, and the
+           knot that is pulled along it */
+        int span = t->w - 16;
+        int fill = t->max > 0 ? t->value * span / t->max : 0;
+        int cy = t->y + t->h / 2;
+        uint32_t c = t->colour ? ug_rgb(l, t->colour) : l->accent;
+        ud_stitch(win, t->x, cy - 1, t->w, 0, p.stitch);
+        if (fill > 0)
+            ud_round(win, t->x, cy - 2, fill + 8, 4, 2, c);
+        ud_disc(win, t->x + fill, cy - 8, 16, c);
+        ud_disc(win, t->x + fill + 3, cy - 5, 10, 0xFFFFFF);
+        if (state)
+            pu_draw_focus(win, l, t->x + fill, cy - 8, 16, 16, 8);
+        return 1;
+    }
+    case UG_CHECK: {
+        if (!weave)
+            return 0;
+        int by = t->y + (t->h - 16) / 2;
+        pu_draw_check(win, l, t->x, by, t->value, state);
+        ug_say(win, t->x + 16 + 10, t->y, t->h, t->text, l->text, UD_SANS);
+        return 1;
+    }
+    case UG_LIST: {
+        if (!weave)
+            return 0;
+        int rows = t->h / UG_ROW;
+        ud_round(win, t->x, t->y, t->w, t->h, UG_R, l->field);
+        for (int r = 0; r < rows && u->top + r < t->max; r++) {
+            int index = u->top + r;
+            const char *s = t->row ? t->row(t->ctx, index) : "";
+            int y = t->y + r * UG_ROW;
+            if (index == t->value) {
+                pu_draw_row_chosen(win, l, t->x + 3, y + 1, t->w - 6,
+                                   UG_ROW - 2);
+                ug_say(win, t->x + 18, y, UG_ROW, s, l->text, UD_BOLD);
+            } else {
+                ug_say(win, t->x + 18, y, UG_ROW, s, l->text, UD_SANS);
+            }
+        }
+        return 1;
+    }
+    case UG_TABS:
+        if (!weave)
+            return 0;
+        pu_draw_segments(win, l, t->x, t->y, t->w, t->h, t->row, t->ctx,
+                         t->max, t->value, state);
+        return 1;
+    case UG_SWITCH: {
+        int sx = t->w > PU_SWITCH_W ? t->x + t->w - PU_SWITCH_W
+                                    : t->x + ud_width_l(t->text, UD_SANS,
+                                                        UD_PX) + 12;
+        ug_say_l(win, t->x, t->y, t->h, t->text,
+                 t->enabled ? l->text : l->dim, UD_SANS);
+        pu_draw_switch(win, l, sx, t->y + (t->h - PU_SWITCH_H) / 2, t->value,
+                       state);
+        return 1;
+    }
+    case UG_SEGMENTS:
+        pu_draw_segments(win, l, t->x, t->y, t->w, t->h, t->row, t->ctx,
+                         t->max, t->value, state);
+        return 1;
+    case UG_PROGRESS:
+        pu_draw_progress(win, l, t->x, t->y, t->w, t->value, t->max,
+                         t->phase);
+        return 1;
+    case UG_KNOTS:
+        for (int r = 0; r < t->max; r++) {
+            int y = t->y + r * PU_KNOT_ROW;
+            pu_draw_knot(win, l, t->x, y + (PU_KNOT_ROW - 16) / 2,
+                         r == t->value, r == t->value ? state : 0);
+            ug_say_l(win, t->x + 16 + 10, y, PU_KNOT_ROW,
+                     t->row ? t->row(t->ctx, r) : "", l->text,
+                     r == t->value ? UD_BOLD : UD_SANS);
+        }
+        return 1;
+    default:
+        return 0;
+    }
 }
 
 static inline void ug_draw_one(struct ug *u, int i)
@@ -572,6 +1174,8 @@ static inline void ug_draw_one(struct ug *u, int i)
     const struct ud_look *l = &u->look;
     int win = u->win;
 
+    if (pu_draw_one(u, i))
+        return;
     switch (t->kind) {
     case UG_LABEL:
         ug_say(win, t->x, t->y, t->h, t->text,
@@ -706,10 +1310,13 @@ static inline int ug_hit(struct ug *u, int x, int y)
         struct ug_item *t = &u->it[i];
         int w = t->w ? t->w : ud_width(t->text, UD_SANS, UD_PX);
 
-        if (t->kind == UG_LABEL || t->kind == UG_LINE)
+        if (t->kind == UG_LABEL || t->kind == UG_LINE ||
+            t->kind == UG_PROGRESS)
             continue;
         if (t->kind == UG_CHECK)
             w = 22 + ud_width(t->text, UD_SANS, UD_PX);
+        if (t->kind == UG_SWITCH && t->w <= PU_SWITCH_W)
+            w = ud_width_l(t->text, UD_SANS, UD_PX) + 12 + PU_SWITCH_W;
         if (!t->enabled)
             continue;
         if (x >= t->x && x < t->x + w && y >= t->y && y < t->y + t->h)
@@ -779,6 +1386,22 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
             t->value = row;
             return UG_CHANGED;
         }
+        case UG_SWITCH:
+            u->it[id].value = !u->it[id].value;
+            if (u->v2)
+                u->focus = id;
+            return UG_CHANGED;
+        case UG_KNOTS: {
+            struct ug_item *t = &u->it[id];
+            int r = (ev->y - t->y) / PU_KNOT_ROW;
+            if (u->v2)
+                u->focus = id;
+            if (r < 0 || r >= t->max || r == t->value)
+                return UG_NOTHING;
+            t->value = r;
+            return UG_CHANGED;
+        }
+        case UG_SEGMENTS:
         case UG_TABS: {
             struct ug_item *t = &u->it[id];
             if (t->max <= 0 || t->w <= 0)
@@ -825,13 +1448,57 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
         return UG_NOTHING;
 
     case WEV_KEY: {
+        char c = (char)ev->val;
+        if (u->v2 && c == '\t') {
+            /* the next thing that takes the keys, round to the first */
+            for (int k = 1; k <= u->n; k++) {
+                int j = (u->focus + k + u->n) % u->n;
+                if (u->focus < 0)
+                    j = k - 1;
+                int kd = u->it[j].kind;
+                if (u->it[j].enabled && kd != UG_LABEL && kd != UG_LINE &&
+                    kd != UG_PROGRESS) {
+                    u->focus = j;
+                    if (which)
+                        *which = j;
+                    return UG_FOCUSED;
+                }
+            }
+            return UG_NOTHING;
+        }
         if (u->focus < 0)
             return UG_NOTHING;
         struct ug_item *t = &u->it[u->focus];
-        char c = (char)ev->val;
 
         if (which)
             *which = u->focus;
+
+        if (u->v2) {
+            int act = c == ' ' || c == '\n' || c == '\r';
+            if (t->kind == UG_BUTTON && act)
+                return UG_PRESSED;
+            if ((t->kind == UG_CHECK || t->kind == UG_SWITCH) && act) {
+                t->value = !t->value;
+                return UG_CHANGED;
+            }
+            if (t->kind == UG_SEGMENTS || t->kind == UG_KNOTS) {
+                int back = t->kind == UG_KNOTS ? KEY_UP : KEY_LEFT;
+                int on = t->kind == UG_KNOTS ? KEY_DOWN : KEY_RIGHT;
+                if (c == back && t->value > 0)
+                    t->value--;
+                else if (c == on && t->value + 1 < t->max)
+                    t->value++;
+                else
+                    return UG_NOTHING;
+                return UG_CHANGED;
+            }
+            if (t->kind == UG_SLIDER && (c == KEY_LEFT || c == KEY_RIGHT)) {
+                int v = t->value + (c == KEY_RIGHT ? 1 : -1) *
+                                   (t->max / 20 + 1);
+                t->value = v < 0 ? 0 : v > t->max ? t->max : v;
+                return UG_CHANGED;
+            }
+        }
 
         if (t->kind == UG_LIST) {
             int rows = t->h / UG_ROW;
