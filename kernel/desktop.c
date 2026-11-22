@@ -643,6 +643,9 @@ struct wevent {
    colours (UI_LOOK) draws itself again in them */
 #define WEV_LOOK    10
 #define WEV_MEDIA   11          /* play (1) or pause (2), from the island */
+/* A note the program sent (SYS64_NOTE) was answered: x its number,
+   val 0 opened, or 1 or 2 the action clicked */
+#define WEV_NOTE    12
 #define WEV_QLEN  8
 
 struct window {
@@ -3101,7 +3104,10 @@ static int search_key(char c);
 static int island_press(int mx, int my);
 static int island_wheel(int mx, int my, int notches);
 static void island_pointer(int mx, int my, int pressed);
-static void note_drop(int i);
+static int threads_open;
+static void threads_show(const char *from);
+static int threads_click(int mx, int my);
+static int threads_key(char c);
 static int desktop_spawn_app(const char *command);
 static int setup_mode;
 static int setup_focus;
@@ -3479,6 +3485,12 @@ static void handle_input(int mx, int my, int buttons)
         } else {
             context_open = 0;
         }
+        prev_pressed = pressed;
+        return;
+    }
+
+    /* Threads, when it is open, over the island and everything under */
+    if (pressed && !prev_pressed && threads_click(mx, my)) {
         prev_pressed = pressed;
         return;
     }
@@ -5327,6 +5339,12 @@ static int taskbar_tray_click(int mx, int my)
             stat_open = stat_open == STAT_NET ? STAT_NONE : STAT_NET;
             return 1;
         }
+        /* the clock and the knot of notes on it: Threads (a second
+           click finds it open, and the click outside puts it away) */
+        if (mx >= loom_clock_x() - 12 && mx < loom_right()) {
+            threads_show(0);
+            return 1;
+        }
         return mx >= loom_tray_x() && mx < loom_right();
     }
     if (mx >= tb_right() - TB_SHOW_W && mx < tb_right()) {
@@ -5362,7 +5380,7 @@ static void grain_rounded(int x, int y, int w, int h, int r)
    in front; then the desktops as knots (filled the one on screen,
    ringed one with windows, hollow an empty one), the tray, and behind a
    stitch the clock, with the count of notes waiting on it */
-static int note_n;
+static int notes_waiting(void);
 /* The loom's clock, behind its stitch: the time over the date, and the
    count of the notes waiting, when there are any */
 static void loom_clock(int y, int h)
@@ -5379,9 +5397,10 @@ static void loom_clock(int y, int h)
     ui_font_text(UI_SANS, LOOM_DATE_PX,
                  right - ui_font_width(UI_SANS, LOOM_DATE_PX, dd), y + 42, dd,
                  L.dot);
-    if (note_n > 0) {                   /* notes waiting: how many */
+    int waiting = notes_waiting();
+    if (waiting > 0) {                  /* notes waiting: how many */
         char cnt[4];
-        cnt[put_num(cnt, note_n)] = 0;
+        cnt[put_num(cnt, waiting > 99 ? 99 : waiting)] = 0;
         int bcx = cx - 3, bcy = y + 17;
         gfx_disc16(bcx * 16, bcy * 16, 9 * 16, L.accent, 255);
         int tw = ui_font_width(UI_BOLD, 10, cnt);
@@ -6163,29 +6182,49 @@ static void draw_dock(void)
 /* --- Notifications ----------------------------------------------------------
  *
  * Something happened that is worth a glance, and nobody asked: a picture
- * was saved, a program has news. The island at the top grows into the
- * newest one - who sent it, its title and a line - for five seconds; a
- * click sends it away sooner. The older ones wait behind it, the island
- * saying how many. One that was covered within two seconds of coming
- * gets its five seconds again when its turn comes - it has not been
- * read; one that had been on the screen longer goes on growing old
- * behind the newer one. At most four wait - a fifth pushes the oldest
- * out.
+ * was saved, a program has news. A note rides the island - under Weave
+ * the shuttle above the loom - for a few seconds: who sent it, its
+ * title and a line; then it ties itself on to its program's thread and
+ * waits there, in Threads, until it is read or cleared. The newest
+ * rides in front, the island saying how many more ride behind it. One
+ * that was covered within two seconds of coming gets its seconds again
+ * when its turn comes - it has not been read; one that had been on the
+ * screen longer goes on growing old behind the newer one. At most
+ * NOTE_SHOWN ride at once - a fifth sends the oldest to wait.
  *
- * desktop_notify() is called from anywhere - a system call on another
+ * Each has a weight (docs/weave/canvas/Notify.dc.html): a Quiet one
+ * never rides, it goes straight to wait; a Normal one rides a moment;
+ * an Urgent one rides until it is answered, even while Quiet is on - a
+ * call or an alarm that slid away by itself would be missed. A
+ * program's note may carry two actions, which come back to its window
+ * as WEV_NOTE with the note's number.
+ *
+ * desktop_note() is called from anywhere - a system call on another
  * core, the keyboard's interrupt - so the notes are handed over under a
  * lock and the desktop thread alone draws them.
  */
 #define NOTE_LIFE  (5 * FRAME_HZ)
+#define NOTE_LIFE_WEAVE (4 * FRAME_HZ)   /* the design's four seconds */
 
 struct note {
     char title[40];
     char body[80];
+    char act[2][NOTE_ACT_LEN];           /* "" = no such action */
+    char from[24];                       /* the thread it hangs on: its
+                                            program's name */
+    int art;                             /* that program's picture, for
+                                            the thread's dye; -1 */
+    int id, owner, win;                  /* where its answers go */
+    uint8_t weight;
+    uint8_t riding;                      /* on the island, not yet waiting */
     uint32_t shown;                      /* the frame the island first
                                             showed it on; 0 = not yet */
+    uint32_t came;                       /* the second it came, since boot */
 };
-static struct note notes[NOTE_SHOWN];    /* [0] is the newest */
+static struct note notes[NOTE_KEPT];     /* [0] is the newest */
 static int note_n;
+static int note_ids;                     /* the last number given out */
+static int quiet_on;                     /* Quiet: only Urgent rides */
 static struct spinlock note_lock = SPINLOCK_FREE;
 
 static void copy_cut(char *d, const char *s, int cap)
@@ -6196,62 +6235,361 @@ static void copy_cut(char *d, const char *s, int cap)
     d[i] = '\0';
 }
 
-void desktop_notify(const char *title, const char *body)
+static int note_life(void)
 {
+    return ui_weave ? NOTE_LIFE_WEAVE : NOTE_LIFE;
+}
+
+/* Which thread a program's note hangs on - its window's name, as the
+   bar gives it, else its program's - and the picture that dyes it.
+   The kernel's own notes hang on their titles: "Screenshot", "System". */
+static int note_window(int owner, int winid)
+{
+    if (owner < 0)
+        return -1;
+    if (winid >= 0 && winid < MAX_WIN && wins[winid].used &&
+        wins[winid].content && wins[winid].owner == owner)
+        return winid;
+    for (int i = 0; i < MAX_WIN; i++)
+        if (wins[i].used && wins[i].content && wins[i].owner == owner)
+            return i;
+    return -1;
+}
+
+int desktop_note(int owner, int winid, int weight, const char *title,
+                 const char *body, const char *act1, const char *act2)
+{
+    if (weight < NOTE_QUIET || weight > NOTE_URGENT)
+        return -1;
+    char from[24];
+    int art = -1;
+    int wi = note_window(owner, winid);
+    if (wi >= 0) {
+        app_name_of(wi, from, sizeof(from));
+        art = launch_art_of(&wins[wi]);
+    } else if (owner >= 0 && task_name_of(owner, from, sizeof(from))) {
+        art = art_of_running(owner);
+    } else {
+        copy_cut(from, title, sizeof(from));
+    }
+    if (!from[0])
+        copy_cut(from, title, sizeof(from));
+
     scene_changed();
     irqflags_t fl = spin_lock_irq(&note_lock);
-    if (note_n < NOTE_SHOWN)
+    if (note_n < NOTE_KEPT)
         note_n++;
     for (int i = note_n - 1; i > 0; i--)
         notes[i] = notes[i - 1];
-    copy_cut(notes[0].title, title, sizeof(notes[0].title));
-    copy_cut(notes[0].body, body, sizeof(notes[0].body));
-    notes[0].shown = 0;
-    /* the one it covers, if it was hardly seen, starts again when it
-       comes back */
-    if (note_n > 1 && notes[1].shown && frames - notes[1].shown < 2 * FRAME_HZ)
-        notes[1].shown = 0;
-    spin_unlock_irq(&note_lock, fl);
-}
-
-static void note_drop(int i)
-{
-    irqflags_t fl = spin_lock_irq(&note_lock);
-    if (i >= 0 && i < note_n) {
-        for (int k = i; k < note_n - 1; k++)
-            notes[k] = notes[k + 1];
-        note_n--;
+    struct note *n = &notes[0];
+    copy_cut(n->title, title, sizeof(n->title));
+    copy_cut(n->body, body, sizeof(n->body));
+    copy_cut(n->act[0], act1, sizeof(n->act[0]));
+    copy_cut(n->act[1], act2, sizeof(n->act[1]));
+    if (!n->act[0][0]) {                 /* the second alone is the first */
+        copy_cut(n->act[0], n->act[1], sizeof(n->act[0]));
+        n->act[1][0] = 0;
+    }
+    copy_cut(n->from, from, sizeof(n->from));
+    n->art = art;
+    n->id = ++note_ids;
+    if (n->id <= 0)
+        n->id = note_ids = 1;
+    n->owner = owner;
+    n->win = wi;
+    n->weight = (uint8_t)weight;
+    n->riding = weight == NOTE_URGENT || (weight == NOTE_NORMAL && !quiet_on);
+    n->shown = 0;
+    n->came = pit_ticks() / 100;
+    int id = n->id;
+    if (n->riding) {
+        /* the one it covers, if it was hardly seen, starts again when it
+           comes back; past NOTE_SHOWN riding, the oldest goes to wait */
+        int riders = 1;
+        for (int i = 1; i < note_n; i++) {
+            if (!notes[i].riding)
+                continue;
+            if (riders == 1 && notes[i].shown &&
+                frames - notes[i].shown < 2 * FRAME_HZ)
+                notes[i].shown = 0;
+            if (++riders > NOTE_SHOWN && notes[i].weight != NOTE_URGENT)
+                notes[i].riding = 0;
+        }
     }
     spin_unlock_irq(&note_lock, fl);
+    return id;
 }
 
-/* The newest note, for the island to show (0 = none); its five seconds
-   start the first frame it is on the screen */
+void desktop_notify(const char *title, const char *body)
+{
+    desktop_note(-1, -1, NOTE_NORMAL, title, body, 0, 0);
+}
+
+/* Index of a note by its number, under the lock; -1 */
+static int note_at(int id)
+{
+    for (int i = 0; i < note_n; i++)
+        if (notes[i].id == id)
+            return i;
+    return -1;
+}
+
+static void note_drop_at(int i)
+{
+    for (int k = i; k < note_n - 1; k++)
+        notes[k] = notes[k + 1];
+    note_n--;
+}
+
+/* A note taken off the island to wait in Threads (a click that opens
+   it, its time on the island run out) */
+static void note_untie(int id)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    int i = note_at(id);
+    if (i >= 0)
+        notes[i].riding = 0;
+    spin_unlock_irq(&note_lock, fl);
+}
+
+/* A note answered, read or cleared: gone. Its answer (0 opened, 1 or 2
+   an action) goes to its program's window first, when there is one.
+   -> that window, or -1 */
+static int note_answer(int id, int which, int tell)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    int i = note_at(id);
+    struct note n;
+    if (i >= 0) {
+        n = notes[i];
+        note_drop_at(i);
+    }
+    spin_unlock_irq(&note_lock, fl);
+    if (i < 0 || !tell || n.owner < 0 || n.win < 0)
+        return -1;
+    struct window *w = &wins[n.win];
+    if (!w->used || !w->content || w->owner != n.owner)
+        return -1;
+    win_enqueue(w, WEV_NOTE, n.id, 0, which);
+    return n.win;
+}
+
+/* The newest note riding, for the island to show (0 = none), and how
+   many ride behind it; its seconds start the first frame it is on the
+   screen */
 static int note_head(struct note *out, int *behind, int showing)
 {
     irqflags_t fl = spin_lock_irq(&note_lock);
-    int have = note_n > 0;
-    if (have) {
-        if (showing && !notes[0].shown)
-            notes[0].shown = frames ? frames : 1;
-        *out = notes[0];
-        *behind = note_n - 1;
+    int have = 0, riders = 0;
+    for (int i = 0; i < note_n; i++) {
+        if (!notes[i].riding)
+            continue;
+        if (!riders++) {
+            if (showing && !notes[i].shown)
+                notes[i].shown = frames ? frames : 1;
+            *out = notes[i];
+            have = 1;
+        }
     }
+    *behind = riders - 1;
     spin_unlock_irq(&note_lock, fl);
     return have;
 }
 
-/* Called every frame: the ones shown long enough go */
+static int note_riding(void)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    int r = 0;
+    for (int i = 0; i < note_n; i++)
+        r += notes[i].riding;
+    spin_unlock_irq(&note_lock, fl);
+    return r;
+}
+
+/* What waits in Threads - the count on the loom's knot by the clock */
+static int notes_waiting(void)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    int r = 0;
+    for (int i = 0; i < note_n; i++)
+        r += !notes[i].riding;
+    spin_unlock_irq(&note_lock, fl);
+    return r;
+}
+
+/* Called every frame: the ones shown long enough go to wait - all but
+   the Urgent, which ride until answered */
 static void note_age(void)
 {
-    for (int i = NOTE_SHOWN - 1; i >= 0; i--) {
-        irqflags_t fl = spin_lock_irq(&note_lock);
-        int old = i < note_n && notes[i].shown &&
-                  frames - notes[i].shown >= NOTE_LIFE;
-        spin_unlock_irq(&note_lock, fl);
-        if (old)
-            note_drop(i);
+    uint32_t life = (uint32_t)note_life();
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    for (int i = 0; i < note_n; i++)
+        if (notes[i].riding && notes[i].weight != NOTE_URGENT &&
+            notes[i].shown && frames - notes[i].shown >= life) {
+            notes[i].riding = 0;
+            scene_changed();
+        }
+    spin_unlock_irq(&note_lock, fl);
+}
+
+/* The colour of a note's thread: its program's dye */
+static uint32_t note_dye(const struct note *n)
+{
+    const char *wn = n->art >= 0 && n->art < ART_N ? weave_art[n->art] : 0;
+    return wn ? weave_icon_dye(weave_icon_find(wn))
+              : weave_letter_dye(n->from[0]);
+}
+
+/* --- Activities: what a program has going on --------------------------------
+ *
+ * A timer, a download, a call (SYS64_SHUTTLE): a title, a line, and a
+ * count-down, a per cent or the time it has run - which the desktop
+ * counts itself, so that a program need not wake every second to say
+ * one second less. One per window; the island shows the newest.
+ * It goes when the program says so, or with its window.
+ */
+struct activity {
+    int used, owner, win, kind, value, total;
+    uint32_t dye;                        /* 0 = its program's */
+    uint32_t at;                         /* frame: a timer's end, a call's
+                                            start */
+    uint32_t seq;                        /* the newest is the highest */
+    char title[40], sub[40];
+};
+static struct activity acts[ACT_MAX];
+static uint32_t act_seq;
+
+int desktop_shuttle(int owner, int winid, int kind, int value, uint32_t dye,
+                    const char *title, const char *sub)
+{
+    if (kind < SHUTTLE_END || kind > SHUTTLE_CALL ||
+        winid < 0 || winid >= MAX_WIN || !wins[winid].used ||
+        !wins[winid].content || wins[winid].owner != owner)
+        return -1;
+    scene_changed();
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    int slot = -1, oldest = 0;
+    for (int i = 0; i < ACT_MAX; i++) {
+        if (acts[i].used && acts[i].owner == owner && acts[i].win == winid) {
+            slot = i;
+            break;
+        }
+        if (acts[i].seq < acts[oldest].seq)
+            oldest = i;
     }
+    if (kind == SHUTTLE_END) {
+        if (slot >= 0)
+            acts[slot].used = 0;
+        spin_unlock_irq(&note_lock, fl);
+        return 0;
+    }
+    if (slot < 0)
+        for (int i = 0; i < ACT_MAX && slot < 0; i++)
+            if (!acts[i].used)
+                slot = i;
+    if (slot < 0)
+        slot = oldest;
+    struct activity *a = &acts[slot];
+    int again = a->used && a->kind == kind;
+    a->used = 1;
+    a->owner = owner;
+    a->win = winid;
+    a->kind = kind;
+    a->dye = dye & 0xFFFFFF;
+    copy_cut(a->title, title, sizeof(a->title));
+    copy_cut(a->sub, sub, sizeof(a->sub));
+    if (value < -1)
+        value = -1;
+    if (kind == SHUTTLE_TIMER) {
+        if (value < 0)
+            value = 0;
+        a->at = frames + (uint32_t)value * FRAME_HZ;
+        /* the ring's whole is the time it was first set for */
+        if (!again || value > a->total)
+            a->total = value;
+    } else if (kind == SHUTTLE_CALL) {
+        if (value < 0)
+            value = 0;
+        a->at = frames - (uint32_t)value * FRAME_HZ;
+    } else if (value > 100) {
+        value = 100;
+    }
+    a->value = value;
+    if (!again)
+        a->seq = ++act_seq;
+    spin_unlock_irq(&note_lock, fl);
+    return 0;
+}
+
+/* The newest activity whose window is still there; the others' go */
+static int act_head(struct activity *out)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    int best = -1;
+    for (int i = 0; i < ACT_MAX; i++) {
+        struct activity *a = &acts[i];
+        if (!a->used)
+            continue;
+        if (!wins[a->win].used || !wins[a->win].content ||
+            wins[a->win].owner != a->owner) {
+            a->used = 0;
+            continue;
+        }
+        if (best < 0 || a->seq > acts[best].seq)
+            best = i;
+    }
+    if (best >= 0)
+        *out = acts[best];
+    spin_unlock_irq(&note_lock, fl);
+    return best >= 0;
+}
+
+/* What an activity counts, as it is shown: "3:12", "41 %", "12:05" */
+static void act_count(const struct activity *a, char *out)
+{
+    int s = 0, n = 0;
+    if (a->kind == SHUTTLE_PROGRESS) {
+        if (a->value < 0) {
+            out[0] = 0;
+            return;
+        }
+        n = put_num(out, a->value);
+        out[n++] = ' ';
+        out[n++] = '%';
+        out[n] = 0;
+        return;
+    }
+    if (a->kind == SHUTTLE_TIMER)
+        s = (int32_t)(a->at - frames) > 0
+            ? (int)((a->at - frames + FRAME_HZ - 1) / FRAME_HZ) : 0;
+    else
+        s = (int)((frames - a->at) / FRAME_HZ);
+    if (s >= 3600) {                     /* H:MM:SS */
+        n = put_num(out, s / 3600);
+        int m = s % 3600 / 60;
+        out[n++] = ':';
+        out[n++] = (char)('0' + m / 10);
+        out[n++] = (char)('0' + m % 10);
+    } else {                             /* M:SS */
+        n = put_num(out, s / 60);
+    }
+    s %= 60;
+    out[n++] = ':';
+    out[n++] = (char)('0' + s / 10);
+    out[n++] = (char)('0' + s % 10);
+    out[n] = 0;
+}
+
+/* The colour of an activity: the one it asked for, else its program's */
+static uint32_t act_dye(const struct activity *a)
+{
+    if (a->dye)
+        return a->dye;
+    struct window *w = &wins[a->win];
+    int art = launch_art_of(w);
+    const char *wn = art >= 0 && art < ART_N ? weave_art[art] : 0;
+    return wn ? weave_icon_dye(weave_icon_find(wn))
+              : weave_letter_dye(w->title[0]);
 }
 
 /* --- The search -------------------------------------------------------------
@@ -7182,10 +7520,17 @@ static void session_do(int what)
  * A black capsule at the top centre that grows into whatever needs a
  * moment of attention and shrinks away after: how loud, whenever the
  * loudness changes - the keys, the wheel over it, Settings, the
- * shell's 'volume' - and what is playing, while a program streams
+ * shell's 'volume' - news, what a program has going on (a timer, a
+ * download, a call), and what is playing, while a program streams
  * sound. Passing things get one place instead of a card each in a
  * corner of their own. It is black in both themes: it belongs to the
  * edge of the screen, not to the windows.
+ *
+ * Under Weave it is the shuttle (docs/weave/canvas/Shuttle.dc.html):
+ * the same capsule, of cloth, standing on the loom's thread rather than
+ * hanging from the top of the screen - where nothing covers a window's
+ * title - joined to the loom by a short thread in the colour of whose
+ * it is: the program's dye, the accent for the loudness.
  *
  * Its size follows the target like a spring, a little past it and
  * back, so a change of what it shows reads as one thing growing, not
@@ -7199,9 +7544,9 @@ static int cat_num(char *d, int at, uint32_t v);
 #define ISL_DIM   0xB4B4B4              /* a notification's line, "+2" */
 #define ISL_SHOW  (3 * FRAME_HZ / 2)    /* how long a change of loudness stays */
 
-/* What it shows, in the order they take it: the loudness someone is
-   changing, then news, then what is playing */
-enum { ISL_NONE, ISL_PLAYING, ISL_NOTE, ISL_VOLUME };
+/* What it shows: the loudness someone is changing, then news, then
+   what a program has going on, then what is playing */
+enum { ISL_NONE, ISL_PLAYING, ISL_ACTIVITY, ISL_NOTE, ISL_VOLUME };
 
 static int isl_w16, isl_h16;            /* the size now, sixteenths */
 static int isl_vw16, isl_vh16;          /* and how fast it changes */
@@ -7211,6 +7556,12 @@ static int isl_drag;                    /* the slider held by the pointer */
 static int isl_seen_vol = -1, isl_seen_mute;
 static uint8_t isl_lev[HDA_LEVELS];
 static uint32_t isl_ticks;              /* the timer when it last moved */
+
+/* The shuttle's cloth, by theme */
+static uint32_t sht_bg(void)    { return theme_dark ? NIGHT_SHT_BG : LINEN_SHT_BG; }
+static uint32_t sht_line(void)  { return theme_dark ? NIGHT_SHT_LINE : LINEN_SHT_LINE; }
+static uint32_t sht_track(void) { return theme_dark ? NIGHT_SHT_TRACK : LINEN_SHT_TRACK; }
+static uint32_t madder(void)    { return theme_dark ? NIGHT_APP_DANGER : LINEN_APP_DANGER; }
 
 static void speaker(int cx, int cy, int muted, int v, uint32_t c)
 {
@@ -7232,12 +7583,39 @@ static void speaker(int cx, int cy, int muted, int v, uint32_t c)
     }
 }
 
+/* A timer's capsule is as wide as what it says; the count measured at
+   its widest, so that it does not breathe as the seconds go */
+static int act_timer_w(const struct activity *a)
+{
+    return 8 + SHT_RING + 12 + ui_font_width(UI_BOLD, 13, a->title) + 12 +
+           ui_font_width(UI_BOLD, 15, "00:00") + 18;
+}
+
 static void island_size(int kind, int *w, int *h)
 {
+    if (ui_weave) {
+        struct activity a;
+        switch (kind) {
+        case ISL_VOLUME:  *w = SHT_VOL_W;  *h = SHT_VOL_H;  return;
+        case ISL_NOTE:    *w = SHT_NOTE_W; *h = SHT_NOTE_H; return;
+        case ISL_PLAYING: *w = SHT_PLAY_W; *h = SHT_PLAY_H; return;
+        case ISL_ACTIVITY:
+            if (act_head(&a) && a.kind == SHUTTLE_TIMER) {
+                *w = act_timer_w(&a);
+                *h = SHT_TIMER_H;
+            } else {
+                *w = SHT_DL_W;
+                *h = SHT_DL_H;
+            }
+            return;
+        default:          *w = SHT_REST_W; *h = SHT_REST_H; return;
+        }
+    }
     switch (kind) {
     case ISL_VOLUME: *w = ISL_VOL_W;  *h = ISL_VOL_H;  break;
     case ISL_NOTE:   *w = ISL_NOTE_W; *h = ISL_NOTE_H; break;
-    case ISL_PLAYING: *w = ISL_PLAY_W; *h = ISL_PLAY_H; break;
+    case ISL_PLAYING:
+    case ISL_ACTIVITY: *w = ISL_PLAY_W; *h = ISL_PLAY_H; break;
     default:         *w = *h = ISL_PLAY_H;   /* shrinking to a dot, and gone */
     }
 }
@@ -7254,10 +7632,13 @@ static struct window *np_window(void);
 static int island_want(int *w, int *h)
 {
     int kind = ISL_NONE;
+    struct activity a;
     if ((int32_t)(vol_until - frames) > 0 || isl_drag)
         kind = ISL_VOLUME;
-    else if (note_n > 0)
+    else if (note_riding() > 0)
         kind = ISL_NOTE;
+    else if (act_head(&a))
+        kind = ISL_ACTIVITY;
     else if (hda_stream_who() >= 0 ||
              (np_window() && np_state == 2 && (int32_t)(np_until - frames) > 0))
         kind = ISL_PLAYING;        /* paused, it stays a while to play again */
@@ -7265,12 +7646,22 @@ static int island_want(int *w, int *h)
     return kind;
 }
 
+/* The top of a capsule h high: at the top of the screen, or under
+   Weave on its thread above the loom (at the foot of the screen while
+   the loom is away, over a full-screen window) */
+static int isl_top(int h)
+{
+    if (!ui_weave)
+        return ISL_TOP;
+    return (dock_shown() ? tb_top() - SHT_LIFT : video_h() - LOOM_GAP) - h;
+}
+
 static void island_rect(int *x, int *y, int *w, int *h)
 {
     *w = (isl_w16 + 8) / 16;
     *h = (isl_h16 + 8) / 16;
     *x = (video_w() - *w) / 2;
-    *y = ISL_TOP;
+    *y = isl_top(*h);
 }
 
 static int island_hit(int mx, int my)
@@ -7321,9 +7712,13 @@ static void island_step(void)
     isl_ticks = now_ticks;
     steps = steps < 1 ? 1 : steps > 25 ? 25 : steps;
 
+    /* Out of nothing: from a dot of its small height - or, as the
+       shuttle, out of its resting pill */
+    int rest_w = ui_weave ? SHT_REST_W : ISL_PLAY_H;
+    int rest_h = ui_weave ? SHT_REST_H : ISL_PLAY_H;
     if (isl_alpha == 0 && kind != ISL_NONE) {
-        /* Out of nothing: from a dot of its small height */
-        isl_w16 = isl_h16 = ISL_PLAY_H * 16;
+        isl_w16 = rest_w * 16;
+        isl_h16 = rest_h * 16;
         isl_vw16 = isl_vh16 = 0;
         steps = 1;
     }
@@ -7337,7 +7732,7 @@ static void island_step(void)
             spring(&isl_h16, &isl_vh16, th * 16);
             if (kind != ISL_NONE)
                 isl_alpha = isl_alpha + 64 > 255 ? 255 : isl_alpha + 64;
-            else if (isl_w16 <= (ISL_PLAY_H + 8) * 16)
+            else if (isl_w16 <= (rest_w + 8) * 16)
                 isl_alpha = isl_alpha - 40 < 0 ? 0 : isl_alpha - 40;
         }
     }
@@ -7352,29 +7747,269 @@ static void island_step(void)
     }
 }
 
-/* The name of what is playing: its window's title, else its program's.
-   A program may play through a helper of its own that has no window -
-   a browser's web process plays a page's sound - so the window looked
-   for is the nearest the helper's parents have: Weft's, which is named
-   after its page. */
-static void playing_name(char *out, int cap)
+/* The window whose sound plays: what the program said plays, else the
+   nearest window the playing task's parents have - a browser plays a
+   page's sound through a web process of its own, which has none; -1 */
+static int playing_win(void)
 {
     int who = hda_stream_who();
-    out[0] = 0;
     struct window *np = np_window();
-    if (who < 0 && np && np->title[0]) {       /* paused: nothing sounds */
-        copy_cut(out, np->title, cap);
-        return;
-    }
+    if (who < 0 && np && np->title[0])  /* paused: nothing sounds */
+        return (int)(np - wins);
     for (int pid = who, up = 0; pid > 0 && up < 4;
          pid = task_parent_of(pid), up++)
         for (int i = 0; i < MAX_WIN; i++)
-            if (wins[i].used && wins[i].owner == pid && wins[i].title[0]) {
-                copy_cut(out, wins[i].title, cap);
-                return;
-            }
+            if (wins[i].used && wins[i].owner == pid && wins[i].title[0])
+                return i;
+    return -1;
+}
+
+/* The name of what is playing: its window's title, else its program's
+   (Weft's window is named after its page) */
+static void playing_name(char *out, int cap)
+{
+    int who = hda_stream_who(), wi = playing_win();
+    out[0] = 0;
+    if (wi >= 0) {
+        copy_cut(out, wins[wi].title, cap);
+        return;
+    }
     if (who < 0 || task_name_of(who, out, cap) < 0)
         copy_cut(out, locale_text("Playing"), cap);
+}
+
+/* The dye of what plays: its window's program's, else the accent */
+static uint32_t playing_dye(void)
+{
+    int wi = playing_win();
+    if (wi < 0)
+        return L.accent;
+    int art = launch_art_of(&wins[wi]);
+    const char *wn = art >= 0 && art < ART_N ? weave_art[art] : 0;
+    return wn ? weave_icon_dye(weave_icon_find(wn))
+              : weave_letter_dye(wins[wi].title[0]);
+}
+
+/* A note's actions on the shuttle, from its right end: where each
+   pill is (x, w) for a capsule at x. -> how many. */
+static int sht_note_acts(const struct note *n, int x, int ax[2], int aw[2])
+{
+    int k = n->act[1][0] ? 2 : n->act[0][0] ? 1 : 0;
+    int rx = x + SHT_NOTE_W - SHT_ACT_RIGHT;
+    for (int i = k - 1; i >= 0; i--) {
+        aw[i] = ui_font_width(UI_BOLD, SHT_ACT_PX, n->act[i]) + 2 * SHT_ACT_PAD;
+        rx -= aw[i];
+        ax[i] = rx;
+        rx -= SHT_ACT_GAP;
+    }
+    return k;
+}
+
+/* The loudness' slider, where it lies along the capsule */
+static int vol_bar_x(void)
+{
+    return ui_weave ? (video_w() - SHT_VOL_W) / 2 + SHT_BAR_X
+                    : (video_w() - ISL_VOL_W) / 2 + ISL_BAR_X;
+}
+static int vol_bar_w(void) { return ui_weave ? SHT_BAR_W : ISL_BAR_W; }
+
+/* Play or pause on the shuttle: the round button at its right end */
+static int sht_btn_x(void)
+{
+    return (video_w() - SHT_PLAY_W) / 2 + SHT_PLAY_W - 8 - SHT_BTN;
+}
+
+/* The shuttle's contents, the capsule (x, y) of the size its kind
+   takes; 'n' is the note riding, 'a' the activity */
+static void draw_shuttle_in(int x, int y, int behind, const struct note *n,
+                            const struct activity *a)
+{
+    uint32_t fg = L.menu_text, dim = L.dot, track = sht_track();
+    char cut[96];
+
+    if (isl_kind == ISL_NOTE) {
+        /* who: an avatar of its program's dye with the sender's
+           initial; then who and which thread, the line, and the actions
+           at the right end, the first of them the accent's */
+        uint32_t dye = note_dye(n);
+        int ay = y + (SHT_NOTE_H - SHT_AVATAR) / 2;
+        gfx_disc16((x + 12) * 16 + SHT_AVATAR * 8, ay * 16 + SHT_AVATAR * 8,
+                   SHT_AVATAR * 8, dye, 255);
+        char first[2] = { n->title[0] ? n->title[0] : '!', 0 };
+        int fw = ui_font_width(UI_BOLD, 16, first);
+        ui_font_text(UI_BOLD, 16, x + 12 + (SHT_AVATAR - fw) / 2,
+                     ui_font_baseline_in(16, ay, SHT_AVATAR), first, 0xFFFFFF);
+        int ax[2], aw[2], k = sht_note_acts(n, x, ax, aw);
+        int ay2 = y + (SHT_NOTE_H - SHT_ACT_H) / 2;
+        for (int i = 0; i < k; i++) {
+            if (i == 0)
+                gfx_rrect(ax[i], ay2, aw[i], SHT_ACT_H, SHT_ACT_H / 2,
+                          L.accent, 255);
+            else
+                gfx_rring16(ax[i] * 16, ay2 * 16, aw[i] * 16, SHT_ACT_H * 16,
+                            SHT_ACT_H * 8, 16, track, 255);
+            ui_font_text(UI_BOLD, SHT_ACT_PX, ax[i] + SHT_ACT_PAD,
+                         ui_font_baseline_in(SHT_ACT_PX, ay2, SHT_ACT_H),
+                         n->act[i], i == 0 ? L.accent_text : fg);
+        }
+        int right = k ? ax[0] - 12 : x + SHT_NOTE_W - 18;
+        char top[80];
+        int at = 0;
+        copy_cut(top, n->title, sizeof(top));
+        while (top[at])
+            at++;
+        if (strcmp(n->title, n->from) && at < 40) {
+            copy_cut(top + at, " \xC2\xB7 ", sizeof(top) - at);
+            while (top[at])
+                at++;
+            copy_cut(top + at, n->from, sizeof(top) - at);
+        }
+        int room = right - (x + SHT_TEXT_X);
+        if (behind > 0) {                /* "+2": more riding behind it */
+            char more[8] = "+";
+            cat_num(more, 1, (uint32_t)behind);
+            int mw = ui_font_width(UI_BOLD, 12, more);
+            ui_font_text(UI_BOLD, 12, right - mw, y + SHT_LINE1_Y, more, dim);
+            room -= mw + 8;
+        }
+        ui_font_text(UI_SANS, 12, x + SHT_TEXT_X, y + SHT_LINE1_Y,
+                     fit_text(top, UI_SANS, 12, room, cut, sizeof(cut)), dim);
+        const char *line = n->body[0] ? n->body : n->title;
+        ui_font_text(UI_BOLD, 14, x + SHT_TEXT_X, y + SHT_LINE2_Y,
+                     fit_text(line, UI_BOLD, 14, right - (x + SHT_TEXT_X), cut,
+                              sizeof(cut)), fg);
+        return;
+    }
+
+    if (isl_kind == ISL_VOLUME) {
+        int muted = hda_muted(), v = hda_volume();
+        int cy = y + SHT_VOL_H / 2;
+        weave_glyph_draw(gfx_current(), weave_icon_find("g-sound"),
+                         x + SHT_VOL_PAD, cy - 9, 18, muted ? dim : fg, 40);
+        int bx = x + SHT_BAR_X;
+        gfx_stitch(bx, cy - 1, SHT_BAR_W, 2, 3, track, 255);
+        int fill = muted ? 0 : v * SHT_BAR_W / 100;
+        if (fill > 0)
+            gfx_rrect(bx, cy - 2, fill, 4, 2, L.accent, 255);
+        gfx_disc16((bx + fill) * 16, cy * 16, 7 * 16,
+                   theme_dark ? 0xFFFFFF : L.accent, 255);
+        char t[16];
+        if (muted)
+            copy_cut(t, locale_text("Off"), sizeof(t));
+        else
+            t[put_num(t, v)] = 0;
+        ui_font_text(UI_BOLD, 13,
+                     x + SHT_VOL_W - SHT_VOL_PAD - ui_font_width(UI_BOLD, 13, t),
+                     ui_font_baseline_in(13, y, SHT_VOL_H), t, fg);
+        return;
+    }
+
+    if (isl_kind == ISL_ACTIVITY) {
+        uint32_t dye = act_dye(a);
+        char count[16];
+        act_count(a, count);
+        if (a->kind == SHUTTLE_TIMER) {
+            /* a ring that empties as the time runs out, the title, and
+               what is left in the timer's colour */
+            int cx = (x + 8) * 16 + SHT_RING * 8, cy = y * 16 + SHT_TIMER_H * 8;
+            gfx_circle16(cx, cy, 11 * 16, 48, track, 255);
+            int left = (int32_t)(a->at - frames) > 0 ? (int)(a->at - frames) : 0;
+            int whole = a->total > 0 ? a->total * FRAME_HZ : 1;
+            int k1 = (left * 24 + whole - 1) / whole;
+            if (k1 > 24)
+                k1 = 24;
+            if (k1 > 0)
+                arc16(cx, cy, 11 * 16, 0, k1, 48, dye);
+            int tx = x + 8 + SHT_RING + 12;
+            int base = ui_font_baseline_in(15, y, SHT_TIMER_H);
+            ui_font_text(UI_BOLD, 13, tx, base, a->title, fg);
+            tx += ui_font_width(UI_BOLD, 13, a->title) + 12;
+            ui_font_text(UI_BOLD, 15, tx, base, count, dye);
+            return;
+        }
+        /* a download or a call: a disc of its colour, its title over a
+           bar of how far it has come (or the line), and the count */
+        int dx = x + 12, dy = y + (SHT_DL_H - 28) / 2;
+        int dcx = dx * 16 + 14 * 16, dcy = dy * 16 + 14 * 16;
+        gfx_disc16(dcx, dcy, 14 * 16, dye, 255);
+        if (a->kind == SHUTTLE_PROGRESS) {      /* an arrow down */
+            gfx_line16(dcx, dcy - 6 * 16, dcx, dcy + 5 * 16, 40, 0xFFFFFF, 255);
+            gfx_line16(dcx - 5 * 16, dcy, dcx, dcy + 5 * 16, 40, 0xFFFFFF, 255);
+            gfx_line16(dcx + 5 * 16, dcy, dcx, dcy + 5 * 16, 40, 0xFFFFFF, 255);
+        } else {
+            char first[2] = { a->title[0] ? a->title[0] : '?', 0 };
+            int fw = ui_font_width(UI_BOLD, 13, first);
+            ui_font_text(UI_BOLD, 13, dx + 14 - fw / 2,
+                         ui_font_baseline_in(13, dy, 28), first, 0xFFFFFF);
+        }
+        int tx = x + SHT_DL_X, right = x + SHT_DL_W - 18;
+        int cw = count[0] ? ui_font_width(UI_BOLD, 13, count) : 0;
+        if (a->kind == SHUTTLE_PROGRESS) {
+            ui_font_text(UI_BOLD, 12, tx, y + 20,
+                         fit_text(a->title, UI_BOLD, 12, right - tx - cw - 10,
+                                  cut, sizeof(cut)), fg);
+            if (cw)
+                ui_font_text(UI_SANS, 12, right - cw, y + 20, count, dim);
+            int bw = right - tx;
+            gfx_stitch(tx, y + 31, bw, 2, 3, track, 255);
+            if (a->value > 0)
+                gfx_rrect(tx, y + 30, bw * a->value / 100, 4, 2, dye, 255);
+        } else {
+            int room = right - tx - cw - 12;
+            ui_font_text(UI_BOLD, 13, tx, y + 21,
+                         fit_text(a->title, UI_BOLD, 13, room, cut, sizeof(cut)),
+                         fg);
+            ui_font_text(UI_SANS, 11, tx, y + 37,
+                         fit_text(a->sub, UI_SANS, 11, room, cut, sizeof(cut)),
+                         dim);
+            ui_font_text(UI_BOLD, 13, right - cw,
+                         ui_font_baseline_in(13, y, SHT_DL_H), count, dye);
+        }
+        return;
+    }
+
+    /* Playing: a disc of its program's colour, what plays over whose it
+       is, the levels in that colour and a round button to play or
+       pause it, when the program said what it plays */
+    uint32_t dye = playing_dye();
+    int cy = y + SHT_PLAY_H / 2;
+    gfx_disc16((x + 10) * 16 + SHT_ART * 8, cy * 16, SHT_ART * 8, dye, 255);
+    for (int r = -SHT_ART / 2 + 3; r < SHT_ART / 2; r += 6)
+        gfx_fill(x + 10 + 6, cy + r, SHT_ART - 12, 2, 0xFFFFFF, 50);
+    int right = x + SHT_PLAY_W - 18;
+    if (np_window()) {
+        int bx = sht_btn_x(), by = cy - SHT_BTN / 2;
+        uint32_t knob = theme_dark ? NIGHT_BAR_TEXT : LINEN_BAR_TEXT;
+        gfx_disc16(bx * 16 + SHT_BTN * 8, cy * 16, SHT_BTN * 8, knob, 255);
+        int gx = bx + SHT_BTN / 2;
+        if (np_state == 1) {
+            gfx_rrect(gx - 5, by + 11, 4, 14, 1, sht_bg(), 255);
+            gfx_rrect(gx + 1, by + 11, 4, 14, 1, sht_bg(), 255);
+        } else {
+            for (int i = 0; i <= 10; i++) {
+                int half = (7 * (10 - i) + 5) / 10;
+                gfx_fill(gx - 4 + i, cy - half, 1, 2 * half + 1, sht_bg(), 255);
+            }
+        }
+        right = bx - 12;
+    }
+    int lev_w = HDA_LEVELS * 3 + (HDA_LEVELS - 1) * 3;
+    int lx = right - lev_w;
+    for (int q = 0; q < HDA_LEVELS; q++) {
+        int bh = 6 + 12 * isl_lev[q] / 255;
+        gfx_rrect(lx + q * 6, cy + 9 - bh, 3, bh, 1, dye, 255);
+    }
+    char name[64], who[24] = "";
+    playing_name(name, sizeof(name));
+    int wi = playing_win();
+    if (wi >= 0)
+        app_name_of(wi, who, sizeof(who));
+    int tx = x + 10 + SHT_ART + 12, room = lx - 12 - tx;
+    ui_font_text(UI_BOLD, 13, tx, y + 23,
+                 fit_text(name, UI_BOLD, 13, room, cut, sizeof(cut)), fg);
+    ui_font_text(UI_SANS, 11, tx, y + 39,
+                 fit_text(who[0] ? who : locale_text("Playing"), UI_SANS, 11,
+                          room, cut, sizeof(cut)), dim);
 }
 
 static void draw_island(void)
@@ -7385,8 +8020,33 @@ static void draw_island(void)
     int x, y, w, h;
     island_rect(&x, &y, &w, &h);
     int a = isl_alpha;
-    gfx_shadow(x, y, w, h, h / 2, 12, (theme_dark ? 160 : 100) * a / 255, 3);
-    gfx_rrect(x, y, w, h, h / 2, ISL_BG, a);
+
+    struct note n;
+    struct activity act;
+    int behind = 0, have_note = 0, have_act = 0;
+    if (isl_kind == ISL_NOTE)
+        have_note = note_head(&n, &behind, 0);
+    if (isl_kind == ISL_ACTIVITY)
+        have_act = act_head(&act);
+
+    if (ui_weave) {
+        /* the thread down to the loom, in the colour of whose it is -
+           over the capsule's shadow, which would darken it */
+        uint32_t dye = have_note ? note_dye(&n) : have_act ? act_dye(&act)
+                     : isl_kind == ISL_PLAYING ? playing_dye() : L.accent;
+        int r = isl_kind == ISL_NOTE && h / 2 > SHT_NOTE_R ? SHT_NOTE_R : h / 2;
+        gfx_shadow(x, y, w, h, r, 18, (theme_dark ? 130 : 70) * a / 255, 8);
+        if (dock_shown() && y + h < tb_top())
+            gfx_fill(video_w() / 2 - 1, y + h, 2, tb_top() - (y + h), dye, a);
+        gfx_rrect(x, y, w, h, r, sht_bg(), a);
+        int urgent = have_note && n.weight == NOTE_URGENT;
+        gfx_rring16(x * 16, y * 16, w * 16, h * 16, r * 16,
+                    urgent ? SHT_URGENT_T * 16 : 16,
+                    urgent ? madder() : sht_line(), a);
+    } else {
+        gfx_shadow(x, y, w, h, h / 2, 12, (theme_dark ? 160 : 100) * a / 255, 3);
+        gfx_rrect(x, y, w, h, h / 2, ISL_BG, a);
+    }
 
     /* The contents only once the size has (nearly) come: a slider
        squeezed into a growing capsule would be drawn over its ends */
@@ -7396,12 +8056,18 @@ static void draw_island(void)
     if (dw < -2 || dw > 6 || dh < -2 || dh > 3 || a < 255)
         return;
     x = (video_w() - kw) / 2;
+    y = isl_top(kh);
+    if (isl_kind == ISL_NOTE && !note_head(&n, &behind, 1))
+        return;
+    if (isl_kind == ISL_ACTIVITY && !have_act)
+        return;
+
+    if (ui_weave) {
+        draw_shuttle_in(x, y, behind, &n, &act);
+        return;
+    }
 
     if (isl_kind == ISL_NOTE) {
-        struct note n;
-        int behind = 0;
-        if (!note_head(&n, &behind, 1))
-            return;
         /* Who it is from: the sender's initial, on the accent */
         int iy = y + (ISL_NOTE_H - ISL_NOTE_ICON) / 2;
         gfx_rrect(x + ISL_NOTE_ICON_X, iy, ISL_NOTE_ICON, ISL_NOTE_ICON, 8,
@@ -7455,6 +8121,22 @@ static void draw_island(void)
         return;
     }
 
+    if (isl_kind == ISL_ACTIVITY) {
+        /* what a program has going on: its title, and the count in the
+           accent at the right end */
+        char count[16], cut[48];
+        act_count(&act, count);
+        int cw = ui_font_width(UI_BOLD, ISL_PX, count);
+        int base = ui_font_baseline_in(ISL_PX, y, ISL_PLAY_H);
+        ui_font_text(UI_BOLD, ISL_PX, x + ISL_PLAY_W - ISL_LEV_RIGHT - cw, base,
+                     count, L.accent);
+        ui_font_text(UI_SANS, ISL_PX, x + ISL_NAME_X, base,
+                     fit_text(act.title, UI_SANS, ISL_PX,
+                              ISL_PLAY_W - ISL_NAME_X - ISL_LEV_RIGHT - cw - 12,
+                              cut, sizeof(cut)), ISL_FG);
+        return;
+    }
+
     /* Playing: its name, and how loud what it plays is - in the
        accent, a quarter of the latest block a bar */
     int lev_w = HDA_LEVELS * ISL_LEV_W + (HDA_LEVELS - 1) * ISL_LEV_GAP;
@@ -7498,8 +8180,7 @@ static void draw_island(void)
 /* The slider: the loudness where the pointer is along it */
 static void island_set_from(int mx)
 {
-    int x = (video_w() - ISL_VOL_W) / 2 + ISL_BAR_X;
-    int v = (mx - x) * 100 / ISL_BAR_W;
+    int v = (mx - vol_bar_x()) * 100 / vol_bar_w();
     v = v < 0 ? 0 : v > 100 ? 100 : v;
     if (v != hda_volume() || hda_muted()) {
         hda_set_volume(v);
@@ -7521,20 +8202,67 @@ static int island_wheel(int mx, int my, int notches)
     return 1;
 }
 
+static void threads_show(const char *from);
+
+/* A window brought to the front, from wherever it is */
+static void bring_up(int i)
+{
+    struct window *w = &wins[i];
+    if (w->desk != cur_desk)
+        desk_switch(w->desk);
+    if (w->minimized)
+        anim_start(i, ANIM_RESTORE);
+    w->minimized = 0;
+    focus_idx = i;
+    raise_win(i);
+}
+
 static int island_press(int mx, int my)
 {
     if (!island_hit(mx, my))
         return 0;
-    if (isl_kind == ISL_NOTE) {           /* read: away with it */
-        note_drop(0);
+    if (isl_kind == ISL_NOTE) {
+        struct note n;
+        int behind;
+        if (!note_head(&n, &behind, 0))
+            return 1;
+        if (ui_weave) {
+            /* an action answers it, back in its program; anywhere else
+               opens it where it now waits, in Threads */
+            int x = (video_w() - SHT_NOTE_W) / 2;
+            int ay = isl_top(SHT_NOTE_H) + (SHT_NOTE_H - SHT_ACT_H) / 2;
+            int ax[2], aw[2], k = sht_note_acts(&n, x, ax, aw);
+            for (int i = 0; i < k; i++)
+                if (in_rect(mx, my, ax[i], ay, aw[i], SHT_ACT_H)) {
+                    note_answer(n.id, i + 1, 1);
+                    return 1;
+                }
+            note_untie(n.id);
+            threads_show(n.from);
+            return 1;
+        }
+        note_untie(n.id);                /* read: away with it */
+        return 1;
+    }
+    if (isl_kind == ISL_ACTIVITY) {      /* to the program it is going on in */
+        struct activity a;
+        if (act_head(&a))
+            bring_up(a.win);
         return 1;
     }
     if (isl_kind != ISL_VOLUME) {        /* what is playing -> how loud */
         struct window *np = np_window();
-        int lev_w = HDA_LEVELS * ISL_LEV_W + (HDA_LEVELS - 1) * ISL_LEV_GAP;
-        int bx = (video_w() - ISL_PLAY_W) / 2 + ISL_PLAY_W - ISL_LEV_RIGHT -
+        int bx, bw;
+        if (ui_weave) {
+            bx = sht_btn_x();
+            bw = SHT_BTN;
+        } else {
+            int lev_w = HDA_LEVELS * ISL_LEV_W + (HDA_LEVELS - 1) * ISL_LEV_GAP;
+            bx = (video_w() - ISL_PLAY_W) / 2 + ISL_PLAY_W - ISL_LEV_RIGHT -
                  lev_w - ISL_NP_GAP - ISL_NP_W;
-        if (np && mx >= bx && mx < bx + ISL_NP_W) {
+            bw = ISL_NP_W;
+        }
+        if (np && mx >= bx && mx < bx + bw) {
             /* ... except on play or pause: that goes to the program,
                which says back what it does now */
             win_enqueue(np, WEV_MEDIA, 0, 0, np_state == 1 ? 2 : 1);
@@ -7543,8 +8271,9 @@ static int island_press(int mx, int my)
         vol_until = frames + ISL_SHOW;
         return 1;
     }
-    int x = (video_w() - ISL_VOL_W) / 2, cy = ISL_TOP + ISL_VOL_H / 2;
-    if (mx < x + ISL_BAR_X - ISL_GRAB / 2) {
+    int vh = ui_weave ? SHT_VOL_H : ISL_VOL_H;
+    int cy = isl_top(vh) + vh / 2;
+    if (mx < vol_bar_x() - ISL_GRAB / 2) {
         hda_set_mute(!hda_muted());
         hda_remember();
         vol_until = frames + ISL_SHOW;
@@ -7570,6 +8299,329 @@ static void island_pointer(int mx, int my, int pressed)
                (int32_t)(vol_until - frames) > 0) {
         vol_until = frames + ISL_SHOW;
     }
+}
+
+/* --- Threads: the notes that wait (Weave) ------------------------------------
+ *
+ * docs/weave/canvas/Notify.dc.html: a panel above the loom's right end,
+ * opened from the clock, where a note waits once it has ridden the
+ * shuttle - or at once, a Quiet one. Each program's notes hang on a
+ * thread of their own, in its dye: a card with its knot, its name and
+ * how many; opened, the notes on it, newest first, then the newest's
+ * actions and Mark read. At the top Quiet - nothing but Urgent rides
+ * the shuttle while it is on - and Clear all.
+ *
+ * What is drawn is also what is clicked: drawing a frame lists where
+ * each thing it drew can be clicked, and a click looks there.
+ */
+enum { TH_PANEL, TH_QUIET, TH_CLEAR, TH_THREAD, TH_ITEM, TH_ACTION, TH_READ };
+#define THR_HITS   48
+#define THR_GROUPS 12
+
+struct thr_hit { int kind, x, y, w, h, id, arg; };
+static struct thr_hit thr_hits[THR_HITS];
+static int thr_nhits;
+static char thr_open[24];                /* the thread opened, by its name */
+static char thr_names[THR_GROUPS][24];   /* the threads drawn, in order */
+static struct note thr_snap[NOTE_KEPT];  /* what waits, as this frame saw it */
+
+static void thr_hit(int kind, int x, int y, int w, int h, int id, int arg)
+{
+    if (thr_nhits < THR_HITS)
+        thr_hits[thr_nhits++] = (struct thr_hit){ kind, x, y, w, h, id, arg };
+}
+
+static void thr_geom(int *x, int *y, int *w, int *h)
+{
+    *w = THR_W;
+    *x = video_w() - LOOM_SIDE - THR_W;
+    *y = THR_GAP;
+    *h = (dock_shown() ? tb_top() : video_h()) - 12 - *y;
+}
+
+/* Opens Threads with one thread open - the given one, or the newest's */
+static void threads_show(const char *from)
+{
+    search_close();
+    menu_open = 0;
+    context_open = 0;
+    loom_view = 0;
+    stat_open = STAT_NONE;
+    if (from && from[0]) {
+        copy_cut(thr_open, from, sizeof(thr_open));
+    } else {
+        thr_open[0] = 0;
+        irqflags_t fl = spin_lock_irq(&note_lock);
+        for (int i = 0; i < note_n; i++)
+            if (!notes[i].riding) {
+                copy_cut(thr_open, notes[i].from, sizeof(thr_open));
+                break;
+            }
+        spin_unlock_irq(&note_lock, fl);
+    }
+    threads_open = 1;
+}
+
+/* How long ago, as a thread says it: "now", "4 min", "2 h" */
+static void thr_when(uint32_t came, char *out)
+{
+    uint32_t s = pit_ticks() / 100 - came;
+    int n;
+    if (s < 60) {
+        copy_cut(out, locale_text("now"), 12);
+        return;
+    }
+    if (s < 3600) {
+        n = put_num(out, (int)(s / 60));
+        copy_cut(out + n, " min", 8);
+    } else {
+        n = put_num(out, (int)(s / 3600));
+        copy_cut(out + n, " h", 8);
+    }
+}
+
+/* A button of the panel: a pill of the accent (first) or a line round it */
+static int thr_button(int x, int y, const char *label, int first)
+{
+    int w = ui_font_width(UI_BOLD, 12, label) + 24;
+    if (first)
+        gfx_rrect(x, y, w, THR_BTN_H, 8, L.accent, 255);
+    else
+        gfx_rring16(x * 16, y * 16, w * 16, THR_BTN_H * 16, 8 * 16, 16,
+                    L.win_line, 255);
+    ui_font_text(UI_BOLD, 12, x + 12, ui_font_baseline_in(12, y, THR_BTN_H),
+                 label, first ? L.accent_text : L.menu_text);
+    return w;
+}
+
+static void draw_threads(void)
+{
+    thr_nhits = 0;
+    if (threads_open && (!ui_weave || locked))
+        threads_open = 0;
+    if (!threads_open)
+        return;
+    int x, y, w, h;
+    thr_geom(&x, &y, &w, &h);
+    uint32_t fg = L.menu_text, dim = L.dot;
+    uint32_t card = theme_dark ? NIGHT_THR_CARD : LINEN_THR_CARD;
+    char cut[96];
+
+    gfx_shadow(x, y, w, h, THR_R, 26, L.shadow_a, 12);
+    gfx_rrect(x, y, w, h, THR_R, L.win_bg, 255);
+    gfx_rring16(x * 16, y * 16, w * 16, h * 16, THR_R * 16, 16, L.win_line, 255);
+    gfx_fill(x + THR_R, y, w - 2 * THR_R, SELVEDGE_H, L.accent, 255);
+    thr_hit(TH_PANEL, x, y, w, h, 0, 0);
+
+    /* what waits, as it is now */
+    int n = 0;
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    for (int i = 0; i < note_n; i++)
+        if (!notes[i].riding)
+            thr_snap[n++] = notes[i];
+    spin_unlock_irq(&note_lock, fl);
+
+    /* the title, Quiet and Clear all */
+    int hy = y + SELVEDGE_H + 14;
+    ui_font_text(UI_BOLD, THR_TITLE_PX, x + 16, hy + 20,
+                 locale_text("Threads"), fg);
+    int rx = x + w - 16;
+    if (n) {
+        const char *clr = locale_text("Clear all");
+        int cw = ui_font_width(UI_SANS, THR_PILL_PX, clr) + 20;
+        rx -= cw;
+        ui_font_text(UI_SANS, THR_PILL_PX, rx + 10,
+                     ui_font_baseline_in(THR_PILL_PX, hy, THR_PILL_H), clr, dim);
+        thr_hit(TH_CLEAR, rx, hy, cw, THR_PILL_H, 0, 0);
+        rx -= 8;
+    }
+    const char *qt = locale_text("Quiet");
+    int qw = 10 + 8 + 6 + ui_font_width(UI_BOLD, THR_PILL_PX, qt) + 10;
+    rx -= qw;
+    if (quiet_on)
+        gfx_rrect(rx, hy, qw, THR_PILL_H, THR_PILL_H / 2, THR_QUIET_DYE, 64);
+    gfx_rring16(rx * 16, hy * 16, qw * 16, THR_PILL_H * 16, THR_PILL_H * 8, 16,
+                quiet_on ? THR_QUIET_DYE : L.win_line, 255);
+    int dcx = (rx + 10) * 16 + 4 * 16, dcy = hy * 16 + THR_PILL_H * 8;
+    if (quiet_on)
+        gfx_disc16(dcx, dcy, 4 * 16, THR_QUIET_DYE, 255);
+    else
+        gfx_circle16(dcx, dcy, 3 * 16, 32, THR_QUIET_DYE, 255);
+    ui_font_text(UI_BOLD, THR_PILL_PX, rx + 24,
+                 ui_font_baseline_in(THR_PILL_PX, hy, THR_PILL_H), qt, fg);
+    thr_hit(TH_QUIET, rx, hy, qw, THR_PILL_H, 0, 0);
+
+    int cy = y + THR_HEAD_H;
+    if (quiet_on) {
+        gfx_rrect(x + 16, cy, w - 32, THR_BANNER_H - 8, 10, THR_QUIET_DYE, 36);
+        ui_font_text(UI_SANS, 12, x + 28,
+                     ui_font_baseline_in(12, cy, THR_BANNER_H - 8),
+                     locale_text("Quiet: only Urgent rides the shuttle."), fg);
+        cy += THR_BANNER_H;
+    }
+    if (!n) {
+        const char *none = locale_text("Nothing waits.");
+        ui_font_text(UI_SANS, 13, x + (w - ui_font_width(UI_SANS, 13, none)) / 2,
+                     cy + 30, none, dim);
+        return;
+    }
+
+    /* the threads, the one with the newest note first */
+    int groups = 0;
+    for (int i = 0; i < n && groups < THR_GROUPS; i++) {
+        int seen = 0;
+        for (int g = 0; g < groups; g++)
+            seen |= !strcmp(thr_names[g], thr_snap[i].from);
+        if (!seen)
+            copy_cut(thr_names[groups++], thr_snap[i].from,
+                     sizeof(thr_names[0]));
+    }
+    int cx = x + THR_PAD, cw = w - 2 * THR_PAD;
+    for (int g = 0; g < groups; g++) {
+        int idx[THR_ITEMS], items = 0, count = 0, with_acts = -1;
+        for (int i = 0; i < n; i++) {
+            if (strcmp(thr_snap[i].from, thr_names[g]))
+                continue;
+            count++;
+            if (items < THR_ITEMS)
+                idx[items++] = i;
+            if (with_acts < 0 && thr_snap[i].act[0][0])
+                with_acts = i;
+        }
+        int open = !strcmp(thr_names[g], thr_open);
+        int ch = THR_ROW_H + (open ? items * THR_ITEM_H + THR_FOOT_H : 0);
+        if (cy + ch > y + h - THR_PAD)
+            break;                       /* no room for the rest */
+        uint32_t dye = note_dye(&thr_snap[idx[0]]);
+        gfx_rrect(cx, cy, cw, ch, THR_CARD_R, card, 255);
+        gfx_rring16(cx * 16, cy * 16, cw * 16, ch * 16, THR_CARD_R * 16, 16,
+                    open ? dye : L.win_line, 255);
+
+        /* its line: the knot, the name, how many, which way it opens */
+        int kcx = (cx + 12) * 16 + THR_KNOT * 8, kcy = cy * 16 + THR_ROW_H * 8;
+        gfx_disc16(kcx, kcy, THR_KNOT * 8, dye, 255);
+        if (!open)
+            gfx_disc16(kcx, kcy, (THR_KNOT - 4) * 8, card, 255);
+        int nb = ui_font_baseline_in(THR_NAME_PX, cy, THR_ROW_H);
+        char cnt[16];
+        int k = put_num(cnt, count);
+        copy_cut(cnt + k, count == 1 ? " note" : " notes", 8);
+        int cntw = ui_font_width(UI_BOLD, 11, cnt);
+        int chx = cx + cw - 12 - 10;
+        ui_font_text(UI_BOLD, 11, chx - 10 - cntw, nb, cnt, dim);
+        ui_font_text(UI_BOLD, THR_NAME_PX, cx + 12 + THR_KNOT + 10, nb,
+                     fit_text(thr_names[g], UI_BOLD, THR_NAME_PX,
+                              chx - 20 - cntw - (cx + 36), cut, sizeof(cut)),
+                     fg);
+        int vy = cy + THR_ROW_H / 2, up = open ? -1 : 1;
+        gfx_line16(chx * 16, (vy - 2 * up) * 16, (chx + 5) * 16,
+                   (vy + 3 * up) * 16, 32, dim, 255);
+        gfx_line16((chx + 5) * 16, (vy + 3 * up) * 16, (chx + 10) * 16,
+                   (vy - 2 * up) * 16, 32, dim, 255);
+        thr_hit(TH_THREAD, cx, cy, cw, THR_ROW_H, g, 0);
+
+        if (open) {
+            /* the notes on its thread, each tied on with a knot */
+            gfx_fill(cx + 18, cy + THR_ROW_H, 2, items * THR_ITEM_H - 10, dye,
+                     230);
+            for (int i = 0; i < items; i++) {
+                const struct note *t = &thr_snap[idx[i]];
+                int iy = cy + THR_ROW_H + i * THR_ITEM_H;
+                gfx_disc16((cx + 19) * 16, (iy + 10) * 16, 5 * 16, dye, 255);
+                gfx_disc16((cx + 19) * 16, (iy + 10) * 16, 3 * 16, card, 255);
+                char when[16];
+                thr_when(t->came, when);
+                int ww = ui_font_width(UI_SANS, 12, when);
+                int tx = cx + THR_ITEM_X, right = cx + cw - 12;
+                ui_font_text(UI_SANS, 12, right - ww, iy + 15, when, dim);
+                ui_font_text(UI_SANS, 12, tx, iy + 15,
+                             fit_text(t->title, UI_SANS, 12,
+                                      right - ww - 10 - tx, cut, sizeof(cut)),
+                             dim);
+                ui_font_text(UI_BOLD, 13, tx, iy + 34,
+                             fit_text(t->body[0] ? t->body : t->title, UI_BOLD,
+                                      13, right - tx, cut, sizeof(cut)), fg);
+                thr_hit(TH_ITEM, cx, iy, cw, THR_ITEM_H, t->id, 0);
+            }
+            /* the newest's actions, and Mark read at the right */
+            int fy = cy + THR_ROW_H + items * THR_ITEM_H;
+            int bx = cx + THR_ITEM_X;
+            if (with_acts >= 0)
+                for (int a = 0; a < 2 && thr_snap[with_acts].act[a][0]; a++) {
+                    int bw = thr_button(bx, fy, thr_snap[with_acts].act[a], a == 0);
+                    thr_hit(TH_ACTION, bx, fy, bw, THR_BTN_H,
+                            thr_snap[with_acts].id, a + 1);
+                    bx += bw + 8;
+                }
+            const char *mr = locale_text("Mark read");
+            int mw = ui_font_width(UI_BOLD, 12, mr) + 24;
+            thr_button(cx + cw - 12 - mw, fy, mr, 0);
+            thr_hit(TH_READ, cx + cw - 12 - mw, fy, mw, THR_BTN_H, g, 0);
+        }
+        cy += ch + THR_CARD_GAP;
+    }
+}
+
+/* Every note waiting on a thread (or on all of them, from = 0) gone */
+static void notes_clear(const char *from)
+{
+    irqflags_t fl = spin_lock_irq(&note_lock);
+    for (int i = note_n - 1; i >= 0; i--)
+        if (!notes[i].riding && (!from || !strcmp(notes[i].from, from)))
+            note_drop_at(i);
+    spin_unlock_irq(&note_lock, fl);
+}
+
+/* A press while Threads is open: on it, what it was on; anywhere else
+   puts it away. 1 = the press was the panel's. */
+static int threads_click(int mx, int my)
+{
+    if (!threads_open)
+        return 0;
+    for (int i = thr_nhits - 1; i >= 0; i--) {
+        struct thr_hit *t = &thr_hits[i];
+        if (!in_rect(mx, my, t->x, t->y, t->w, t->h))
+            continue;
+        switch (t->kind) {
+        case TH_QUIET:
+            quiet_on = !quiet_on;
+            break;
+        case TH_CLEAR:
+            notes_clear(0);
+            break;
+        case TH_THREAD:
+            if (!strcmp(thr_open, thr_names[t->id]))
+                thr_open[0] = 0;
+            else
+                copy_cut(thr_open, thr_names[t->id], sizeof(thr_open));
+            break;
+        case TH_ITEM: {                  /* opened: its program comes up */
+            int wi = note_answer(t->id, 0, 1);
+            if (wi >= 0) {
+                threads_open = 0;
+                bring_up(wi);
+            }
+            break;
+        }
+        case TH_ACTION:
+            note_answer(t->id, t->arg, 1);
+            break;
+        case TH_READ:
+            notes_clear(thr_names[t->id]);
+            break;
+        }
+        return 1;
+    }
+    threads_open = 0;
+    return 1;
+}
+
+static int threads_key(char c)
+{
+    if (!threads_open || c != 27)
+        return 0;
+    threads_open = 0;
+    return 1;
 }
 
 /* --- About ThreadOS: what this machine is, on a card ------------------- */
@@ -8133,6 +9185,8 @@ static void desktop_on_key(char c)
         return;
     }
     if (loom_view_key(c))
+        return;
+    if (threads_key(c))
         return;
     if (c == KEY_MENU && ui_weave) {    /* the Windows key: loom view */
         context_open = 0;
@@ -9517,6 +10571,7 @@ static void desktop_thread(void *arg)
         if (dock_shown())
             draw_dock();
         draw_island();             /* passing things, under what is asked for */
+        draw_threads();
         draw_tmenu();
         draw_menu();
         draw_context_menu();

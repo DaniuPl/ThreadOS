@@ -77,6 +77,8 @@
                                     show */
 #define UG_ACTION  11            /* one of them tapped: pu_action, and the
                                     row is the list's value */
+#define UG_NOTE    12            /* a note sent with pu_notify was answered:
+                                    pu_note_id, pu_note_answer */
 
 struct ug_item {
     int kind;
@@ -120,6 +122,9 @@ struct ug {
     const char *const *menu_items;
     /* a finger or the pointer going down, and a row swiped aside */
     int press_x, press_y, press_id, swipe_id, swipe_row, action;
+    /* the note answered last (UG_NOTE): its number, and 0 opened or the
+       action, 1 or 2 */
+    int note_id, note_answer;
 };
 
 /* --- rectangles and reusable layout -------------------------------- */
@@ -653,6 +658,43 @@ static inline void pu_menu(struct ug *u, int which, int x, int y,
 static inline int pu_menu_open(const struct ug *u) { return u->menu_n > 0; }
 static inline int pu_menu_choice(const struct ug *u) { return u->menu_pick; }
 static inline int pu_action(const struct ug *u) { return u->action; }
+
+/* --- the shell: notes and what is going on (stage 6) -------------------
+ * A note in one of three weights - PU_QUIET straight to Threads,
+ * PU_NORMAL on the shuttle a moment first, PU_URGENT on it until it is
+ * answered - with up to two actions (0 for none), which come back as
+ * UG_NOTE. -> the note's number, or -1. */
+#define PU_QUIET  NOTE_QUIET
+#define PU_NORMAL NOTE_NORMAL
+#define PU_URGENT NOTE_URGENT
+static inline int pu_notify(struct ug *u, int weight, const char *title,
+                            const char *text, const char *act1,
+                            const char *act2)
+{
+    return (int)note_send(u->win, weight, title, text, act1, act2);
+}
+static inline int pu_note_id(const struct ug *u) { return u->note_id; }
+static inline int pu_note_answer(const struct ug *u) { return u->note_answer; }
+
+/* An activity on the shuttle: a timer counting down from 'value'
+   seconds, a download at 'value' per cent (-1 unknown), a call that has
+   gone on 'value' seconds - in the program's colour unless 'dye' says
+   another. PU_END takes it away. */
+#define PU_END      SHUTTLE_END
+#define PU_TIMER    SHUTTLE_TIMER
+#define PU_DOWNLOAD SHUTTLE_PROGRESS
+#define PU_CALL     SHUTTLE_CALL
+struct pu_activity {
+    int kind;                    /* PU_TIMER, PU_DOWNLOAD, PU_CALL, PU_END */
+    int value;
+    unsigned dye;                /* 0x00RRGGBB, or 0 */
+    const char *title, *sub;
+};
+static inline int pu_shuttle(struct ug *u, const struct pu_activity *a)
+{
+    return (int)shuttle_set(u->win, a->kind, a->value, a->dye, a->title,
+                            a->sub);
+}
 
 static inline void pu_set_phase(struct ug *u, int id, int phase)
 {
@@ -1484,6 +1526,13 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
 
     if (which)
         *which = -1;
+
+    /* A note it sent, answered on the shuttle or in Threads */
+    if (ev->type == WEV_NOTE) {
+        u->note_id = ev->x;
+        u->note_answer = ev->val;
+        return UG_NOTE;
+    }
 
     /* The menu has everything while it is open: a line of it chosen, or
        anything else closes it */

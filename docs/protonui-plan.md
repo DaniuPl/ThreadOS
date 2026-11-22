@@ -182,6 +182,16 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
   screen shows Normal on the shuttle and then in Threads, Urgent stays
   until answered, Quiet goes straight to Threads; a click on an action
   comes back to the program as its event.
+- **Done** (journal: "ProtonUI v2 stage 6"). `SYS64_NOTIFY` keeps its
+  shape - programs built before it pass anything in the third register,
+  so it could not grow there - and the new call beside it is
+  `SYS64_NOTE` (a weight, the window, two actions; `WEV_NOTE` back),
+  with `pu_notify` over it. `SYS64_SHUTTLE` and `pu_shuttle` carry a
+  timer, a download or a call, which the desktop counts itself. Under
+  Weave the island is the shuttle above the loom on a thread of the
+  program's dye; Threads opens from the clock. Not yet: two activities
+  side by side on the shuttle (the newest shows), a swipe down to put
+  it away, the chime, and the phone's side of the new calls (stage 7).
 
 ## Stage 7 - the phone's thread - 1.5 days
 

@@ -11301,3 +11301,54 @@ works and is checked by `make test`.
       is the program's choice; a row swiped aside shows Rename and
       Delete, and a tap on Delete is told for that row. t_protonui's PC
       part follows the pointer's new sizes.
+- [x] **ProtonUI v2 stage 6: the shell - notes in three weights, the
+      shuttle, Threads** (kernel/desktop.c, kernel/include/desktop.h,
+      kernel/include/look.h, kernel64/syscall64.c, kernel64/syscall64.h,
+      user64/usys64.h, user/ugui.h, libc/tests/shuttledemo.c, Makefile,
+      scripts/tests/t_threads.py, scripts/run_tests.py,
+      docs/protonui-plan.md)
+      A note used to be a passing thing: five seconds in the island, and
+      gone, read or not. Now it waits. It rides the island - under Weave
+      the shuttle, a capsule standing on a short thread above the loom
+      (docs/weave/canvas/Shuttle.dc.html), where nothing covers a
+      window's title - for a moment, then ties itself on to its
+      program's thread in Threads, the panel the loom's clock opens
+      (Notify.dc.html): one card a program, in its dye, its notes on
+      it newest first, the newest's actions and Mark read under them,
+      Quiet and Clear all at the top; the knot at the clock counts what
+      waits. A note has a weight: Quiet never rides, Normal rides four
+      seconds, Urgent rides until it is answered, even while Quiet is
+      on. A program sends one with SYS64_NOTE (pu_notify): the weight,
+      its window and up to two actions, which come back to the window
+      as WEV_NOTE with the note's number. SYS64_NOTIFY could not grow
+      in place - programs built before pass whatever was in the third
+      register - so it stays a Normal note, now on its program's thread
+      rather than one named after its title. What a program has going
+      on rides the shuttle too (SYS64_SHUTTLE, pu_shuttle): a timer
+      whose ring empties, a download with its per cent and bar, a call
+      counting up - the desktop counts the seconds itself, so a program
+      does not wake every second to say one second less - in the
+      program's dye or one it asks for, until it says the end or its
+      window goes. The volume and what plays take the shuttle's shapes
+      under Weave; the other styles keep the black island at the top,
+      which shows activities as a title and a count. Not yet: two
+      activities side by side, the swipe that puts the shuttle away,
+      the chime, and the phone's side of the new calls.
+      t_threads (new): shuttledemo sends each through ProtonUI v2, a key
+      each, and the test reads the screen in Inter at look.h's places -
+      the Normal note on the shuttle (who, whose thread, its line, Reply
+      on the accent) on a thread and an avatar of the program's dye
+      (kernel/weave.c's letter dyes), gone after a few seconds and
+      waiting, the knot saying 1; Threads with the thread, "1 note" and
+      the note; a Quiet note never on the shuttle in three seconds of
+      looking, the knot saying 2, both notes on the thread newest first;
+      an Urgent note with a madder edge still riding after eight seconds,
+      its first action clicked coming back to the program as action 1
+      of that note, and it not waiting after; the Normal note's action
+      clicked in Threads coming back as its action 1; Mark read leaving
+      "Nothing waits." and no knot; Quiet turned on in Threads keeping a
+      Normal note off the shuttle but not an Urgent one, whose second
+      action comes back as 2; a timer counting down by itself, a
+      download's "41 %" and a bar 41 % long, a call counting up in its
+      own colour, and the end taking it away; and, under the Mac style,
+      the timer on the black island at the top, its title and its count.

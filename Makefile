@@ -553,6 +553,14 @@ $(BUILD)/user64/pudemo.elf: libc/tests/pudemo.c user/ugui.h user/udraw.h \
 	    -c $< -o $(BUILD)/libc64/pudemo.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/pudemo.o) -o $@
 
+# shuttledemo: notes of the three weights and activities on the shuttle,
+# through user/ugui.h (ProtonUI v2 stage 6)
+$(BUILD)/user64/shuttledemo.elf: libc/tests/shuttledemo.c user/ugui.h user/udraw.h \
+                                 $(LIBC64) libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -DTHREADOS_LIBC -Iuser -Iuser64 -Wall -Wextra \
+	    -c $< -o $(BUILD)/libc64/shuttledemo.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/shuttledemo.o) -o $@
+
 # Signals: handlers with siginfo_t and the interrupted registers, masks,
 # sigsuspend, waits that go on, WebKit's way of stopping a thread - the
 # same program the ARM64 kernel runs, and the tests compare both with
@@ -803,6 +811,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/bigmap.elf \
                $(BUILD)/user64/ipctest.elf $(BUILD)/user64/sigtest.elf \
                $(BUILD)/user64/pulook.elf $(BUILD)/user64/pudemo.elf \
+               $(BUILD)/user64/shuttledemo.elf \
                $(BUILD)/user64/bigram.elf \
                $(BUILD)/user64/glibtest.elf \
                $(BUILD)/user64/imgtest.elf $(BUILD)/user64/xmltest.elf \
@@ -2055,6 +2064,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    certtest=$(BUILD)/user64/certtest.elf \
 	    aestest=$(BUILD)/user64/aestest.elf \
 	    pumarks=$(BUILD)/user64/pumarks.elf pudemo=$(BUILD)/user64/pudemo.elf \
+	    shuttledemo=$(BUILD)/user64/shuttledemo.elf \
 	    pulook=$(BUILD)/user64/pulook.elf \
 	    wpatest=$(BUILD)/user64/wpatest.elf \
 	    nslookup=$(BUILD)/user64/nslookup.elf \

@@ -95,6 +95,13 @@
    NOW_NONE says nothing plays any more. The system's play and pause
    come back to the window as WEV_MEDIA. -> 0, or -1 */
 #define SYS64_NOW_PLAYING 115
+/* A notification with a weight and up to two actions: a1=&struct
+   note64. The actions come back to the window as WEV_NOTE. -> the
+   note's number (> 0), or -1 */
+#define SYS64_NOTE     131
+/* What the program has going on, on the shuttle: a1=&struct shuttle64
+   -> 0, or -1 */
+#define SYS64_SHUTTLE  132
 #define SYS64_UI_LOOK  69
 #define SYS64_NOTIFY   70
 #define SYS64_BG_PREVIEW 71
@@ -690,6 +697,11 @@ struct win_text_cmd {
 #define WEV_MEDIA   11
 #define WEV_MEDIA_PLAY  1
 #define WEV_MEDIA_PAUSE 2
+/* A note the program sent (SYS64_NOTE) was answered: x is its number,
+   val WEV_NOTE_OPENED (clicked where it waits, in Threads - its window
+   is brought up) or 1 or 2, the action clicked */
+#define WEV_NOTE    12
+#define WEV_NOTE_OPENED 0
 /* What a WEV_CLICK's val holds above its buttons: the modifiers held
    with the click */
 #define WEV_MOD_SHIFT 0x100
@@ -924,6 +936,75 @@ static inline int64_t now_playing(int win, int state, const char *title)
         np.title[i] = title[i];
     np.title[i] = 0;
     return syscall64(SYS64_NOW_PLAYING, (int64_t)(uintptr_t)&np, 0);
+}
+
+/* A notification (SYS64_NOTE). Quiet goes straight to Threads, where
+   notes wait; Normal rides the shuttle - the island - a few seconds
+   first; Urgent rides until it is answered, even while Quiet is on.
+   An action's label is at most 15 bytes; "" or 0 for none. */
+#define NOTE_QUIET   0
+#define NOTE_NORMAL  1
+#define NOTE_URGENT  2
+struct note64 {
+    int32_t win;                /* where its answers go (WEV_NOTE) */
+    int32_t weight;             /* NOTE_* */
+    char title[40];             /* who or what it is from */
+    char body[80];              /* its line */
+    char act[2][16];
+};
+
+static inline void note_copy(char *d, const char *s, int cap)
+{
+    int i = 0;
+    for (; s && s[i] && i < cap - 1; i++)
+        d[i] = s[i];
+    for (; i < cap; i++)
+        d[i] = 0;
+}
+
+static inline int64_t note_send(int win, int weight, const char *title,
+                                const char *body, const char *act1,
+                                const char *act2)
+{
+    struct note64 n;
+    n.win = win;
+    n.weight = weight;
+    note_copy(n.title, title, sizeof(n.title));
+    note_copy(n.body, body, sizeof(n.body));
+    note_copy(n.act[0], act1, sizeof(n.act[0]));
+    note_copy(n.act[1], act2, sizeof(n.act[1]));
+    return syscall64(SYS64_NOTE, (int64_t)(uintptr_t)&n, 0);
+}
+
+/* An activity on the shuttle (SYS64_SHUTTLE), one per window: a timer
+   counts down from 'value' seconds, a download shows 'value' per cent
+   (-1 not known), a call counts up from 'value' seconds - the desktop
+   counts the seconds itself; call again to change it, SHUTTLE_END to
+   take it away. dye 0x00RRGGBB, 0 = the program's own colour. */
+#define SHUTTLE_END      0
+#define SHUTTLE_TIMER    1
+#define SHUTTLE_PROGRESS 2
+#define SHUTTLE_CALL     3
+struct shuttle64 {
+    int32_t win;
+    int32_t kind;               /* SHUTTLE_* */
+    int32_t value;
+    uint32_t dye;
+    char title[40];
+    char sub[40];               /* a call's second line */
+};
+
+static inline int64_t shuttle_set(int win, int kind, int value, uint32_t dye,
+                                  const char *title, const char *sub)
+{
+    struct shuttle64 a;
+    a.win = win;
+    a.kind = kind;
+    a.value = value;
+    a.dye = dye;
+    note_copy(a.title, title, sizeof(a.title));
+    note_copy(a.sub, sub, sizeof(a.sub));
+    return syscall64(SYS64_SHUTTLE, (int64_t)(uintptr_t)&a, 0);
 }
 
 /* The window to the whole screen and back (SYS64_WIN_FULL); the new
