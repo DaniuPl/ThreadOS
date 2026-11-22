@@ -289,6 +289,18 @@ static int in_device(uint32_t lba, uint32_t count)
     return n && lba < n && count <= n - lba;
 }
 
+/* An ATA sector that failed is asked for twice more: a drive still
+   busy with the last flush, or a bus that hiccupped, answers the second
+   time - and a sector written again is the same sector */
+static int ata_sector(uint32_t lba, void *buf, int write)
+{
+    for (int tries = 0; tries < 3; tries++)
+        if ((write ? ata_write_sector(lba, buf) : ata_read_sector(lba, buf))
+            == 0)
+            return 0;
+    return -1;
+}
+
 static int read_near(uint32_t lba, uint32_t count, void *buf)
 {
     if (cur < 0 || devs[cur].gone || !in_device(lba, count))
@@ -302,7 +314,7 @@ static int read_near(uint32_t lba, uint32_t count, void *buf)
         return usbmass_read(devs[cur].unit, lba, count, buf);
     uint8_t *p = buf;
     for (uint32_t i = 0; i < count; i++)
-        if (ata_read_sector(lba + i, p + i * ATA_SECTOR_SIZE) < 0)
+        if (ata_sector(lba + i, p + i * ATA_SECTOR_SIZE, 0) < 0)
             return -1;
     return 0;
 }
@@ -322,7 +334,7 @@ static int write_near(uint32_t lba, uint32_t count, const void *buf)
         return usbmass_write(devs[cur].unit, lba, count, buf);
     const uint8_t *p = buf;
     for (uint32_t i = 0; i < count; i++)
-        if (ata_write_sector(lba + i, p + i * ATA_SECTOR_SIZE) < 0)
+        if (ata_sector(lba + i, (void *)(p + i * ATA_SECTOR_SIZE), 1) < 0)
             return -1;
     return 0;
 }

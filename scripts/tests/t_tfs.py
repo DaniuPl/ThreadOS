@@ -7,6 +7,8 @@ restart of the machine. That last part matters most here: everything
 else can be faked with a cache, and a SECOND BOOT on the same disk image
 cannot. After the second boot the disk image is also read on the host,
 by Linux's e2fsprogs (TFS4 is the ext2 format), not the kernel's code.
+A file is also written while QEMU holds the disk to four operations a
+second, and it has to arrive whole.
 
 Everything is read from the serial port: GRUB gives the kernel a
 framebuffer, so the VGA character memory says nothing.
@@ -27,6 +29,7 @@ from ptest import check, summary, Ext2Image
 PROMPT = "64>"
 RING3 = "ThreadOS 64: a file written from ring 3"   # user64/fileio64.c
 TEXT = "hello-from-the-tfs-disk"
+SLOW = "the disk was slow, and this is here whole"
 
 
 def main():
@@ -122,6 +125,25 @@ def main():
         out = q2.command("cat zring3", PROMPT)
         check("and the file whose name was asked for is untouched",
               RING3 in out)
+
+        # --- a slow disk ------------------------------------------------
+        # QEMU's throttling holds the disk to four operations a second,
+        # and a sector's flush keeps it busy for a quarter of one: the
+        # driver used to give up after a number of looks at its status,
+        # which a busy host's disk outlasted, and a write that had worked
+        # came back as failed - the file system then lost what it wrote
+        # beside it (t_tfs3migrate's swap file, one block short)
+        q2.cmd({"execute": "block_set_io_throttle", "arguments": {
+            "device": "ide0-hd0", "bps": 0, "bps_rd": 0, "bps_wr": 0,
+            "iops": 4, "iops_rd": 0, "iops_wr": 0}})
+        out = q2.command("write slow.txt " + SLOW, PROMPT, timeout=600)
+        check("on a disk held to four operations a second, a file written "
+              "from the shell is written",
+              "write: 'slow.txt' written" in out and
+              "could not" not in out)
+        q2.cmd({"execute": "block_set_io_throttle", "arguments": {
+            "device": "ide0-hd0", "bps": 0, "bps_rd": 0, "bps_wr": 0,
+            "iops": 0, "iops_rd": 0, "iops_wr": 0}})
     finally:
         q2.close()
 
@@ -141,6 +163,10 @@ def main():
               .strip() == RING3)
         check("on the disk image: the old name is gone",
               not img.exists("/greeting"))
+        check("on the disk image: the file written while the disk was "
+              "slow holds what was written",
+              (img.read("/slow.txt") or b"").decode(errors="replace")
+              .strip() == SLOW)
         clean, problems = img.fsck()
         check(f"on the disk image: every block taken belongs to a file, "
               f"none past a file's end - e2fsck -fn finds nothing to fix "

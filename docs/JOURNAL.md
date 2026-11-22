@@ -11739,3 +11739,29 @@ works and is checked by `make test`.
       now hands debugfs a path in quotes: a name with a space in it was
       two arguments, and a note named "For the market" could not be read
       back.
+- [x] **A slow disk no longer loses what the file system wrote**
+      (kernel/ata.c, kernel/blk.c, kernel/tfs4.c, scripts/tests/t_tfs.py)
+      t_tfs3migrate began to fail now and then: after the move to TFS4,
+      e2fsck found the swap file's block count one block short, its
+      blocks themselves all in place. The kernel from before the latest
+      programs failed the same way, so it was not them. A kernel that
+      said why showed it: the ATA driver waited for the drive by a count
+      of looks at its status - a million - and after every sector it
+      asks the drive to flush, which in QEMU is the host syncing the
+      image file. On a busy host that outlasted the million looks, so a
+      write that had worked came back as failed. TFS4 had written the
+      pointer to a new block of the swap file, then failed to write the
+      inode that counts it, and went on from the cached inode without
+      that count. The ATA waits are now a time, ATA's 30 seconds, kept
+      on the time stamp counter (it runs with interrupts off, as the
+      file system calls in), measured against the timer once at the
+      first look at the bus; the block layer asks for a failed ATA
+      sector twice more; and a block for swap whose inode could not be
+      written is refused, so swap stops there instead of building on a
+      count the disk does not have.
+      t_tfs: QEMU's throttling holds the disk to four operations a
+      second (block_set_io_throttle) while the shell writes a file; it
+      is written, and read back from the disk image it holds what was
+      written. With the old driver the shell said "could not write" and
+      the file was not there. t_tfs3migrate passes three times running
+      side by side, as it did not before.

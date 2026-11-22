@@ -9,6 +9,7 @@
 
 #include "include/ata.h"
 #include "include/io.h"
+#include "include/pit.h"
 
 #define ATA_DATA      0x1F0
 #define ATA_FEATURES  0x1F1
@@ -31,10 +32,74 @@
 #define CMD_FLUSH    0xE7
 #define CMD_IDENTIFY 0xEC
 
+/* How long the drive may stay busy is a time, not a number of looks at
+   its status. Each look is a trip out of a virtual machine, and a flush
+   there lasts as long as the host's disk takes to sync its file: on a
+   loaded host that ran past a million looks, the write that had worked
+   came back as failed, and the file system lost what it wrote next to
+   it. ATA allows a drive 30 seconds (to spin up); so do we, measured on
+   the time stamp counter, which runs with interrupts off - the file
+   system calls in with them off. It is measured against the timer once,
+   at the first look at the bus, while the timer still ticks. */
+#define ATA_WAIT_MS 30000
+
+static uint64_t tsc_per_ms;
+
+static uint64_t rdtsc(void)
+{
+    uint32_t lo, hi;
+    __asm__ volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return (uint64_t)hi << 32 | lo;
+}
+
+static void ata_calibrate(void)
+{
+    if (tsc_per_ms)
+        return;
+    /* the edge of a tick first, then two whole ticks (20 ms); a timer
+       that does not tick leaves the old count of looks in charge */
+    uint32_t t = pit_ticks();
+    for (uint32_t i = 0; pit_ticks() == t; i++) {
+        if (i > 200000000u)
+            return;
+        __asm__ volatile("pause");
+    }
+    t = pit_ticks();
+    uint64_t c0 = rdtsc();
+    for (uint32_t i = 0; pit_ticks() - t < 2; i++) {
+        if (i > 400000000u)
+            return;
+        __asm__ volatile("pause");
+    }
+    tsc_per_ms = (rdtsc() - c0) / 20;
+}
+
+/* A wait's clock: started, and asked whether it ran out */
+struct ata_wait {
+    uint64_t start;
+    uint32_t looks;
+};
+
+static void wait_start(struct ata_wait *w)
+{
+    w->start = tsc_per_ms ? rdtsc() : 0;
+    w->looks = 0;
+}
+
+static int wait_over(struct ata_wait *w)
+{
+    if (tsc_per_ms)
+        return rdtsc() - w->start > (uint64_t)ATA_WAIT_MS * tsc_per_ms;
+    return ++w->looks > 1000000;
+}
+
 int ata_present(void)
 {
     /* An empty bus returns 0xFF (the lines held high) */
-    return inb(ATA_STATUS) != 0xFF;
+    if (inb(ATA_STATUS) == 0xFF)
+        return 0;
+    ata_calibrate();
+    return 1;
 }
 
 /* Which of the two drives on the bus the commands are for. One bit in
@@ -98,21 +163,26 @@ static void ata_delay(void)
    reports an error */
 static int ata_wait_drq(void)
 {
-    for (int i = 0; i < 1000000; i++) {
+    struct ata_wait w;
+    wait_start(&w);
+    do {
         uint8_t st = inb(ATA_STATUS);
         if (st & (ST_ERR | 0x20))   /* ERR or DF (device fault) */
             return -1;
         if (!(st & ST_BSY) && (st & ST_DRQ))
             return 0;
-    }
+    } while (!wait_over(&w));
     return -1;
 }
 
 static int ata_wait_not_busy(void)
 {
-    for (int i = 0; i < 1000000; i++)
+    struct ata_wait w;
+    wait_start(&w);
+    do {
         if (!(inb(ATA_STATUS) & ST_BSY))
             return 0;
+    } while (!wait_over(&w));
     return -1;
 }
 

@@ -2009,7 +2009,12 @@ static uint32_t t4_file_block(int slot, uint32_t index, int alloc)
             b = bmap_alloc(&in, index, &fresh);
             if (b && fresh && zero_block(b) < 0)
                 b = 0;
-            write_inode(&in, 0);
+            /* an inode that could not be written does not count the
+               block: swap is not to take it, and stops there rather
+               than build on a count the disk does not have (the cached
+               inode stays the one on the disk) */
+            if (write_inode(&in, 0) < 0)
+                b = 0;
             meta_flush();
         }
     }
