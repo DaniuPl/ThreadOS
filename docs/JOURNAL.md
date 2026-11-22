@@ -11335,4 +11335,10 @@ works and is checked by `make test`.
       Built with the old shims, which drop the clock, 16 of its checks
       fail: every timed mutex and rwlock wait gives up in 0 ms, the
       worker wakes some 400,000 times in its second, and each predicate
-      is looked at 66,000 to 210,000 times.
+      is looked at 66,000 to 210,000 times. Built for aarch64 and run on
+      the ARM64 kernel by hand, clockwait gives glibc's outcomes there
+      too, and the old shims fail the same way. It is not an ARM64
+      group yet: for aarch64, libstdc++'s thread.o pulls in
+      system_error.o, whose std::__throw_system_error clashes with
+      cxxrt's, so a program with std::thread does not link (on the PC
+      std::future does the same).
