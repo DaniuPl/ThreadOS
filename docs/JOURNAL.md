@@ -11612,3 +11612,24 @@ works and is checked by `make test`.
       chooses; and the project's run line. t_threads finds
       shuttledemo's window by polling until its selvedge holds still,
       instead of reading the screen once a second after it was drawn.
+- [x] **Swatch's templates build with clang on ThreadOS and run**
+      (apps/clang/threados.cfg, Makefile, user64/gswatch.c,
+      user64/gcode.c, scripts/tests/t_swatchbuild.py)
+      A project made from one of Swatch's four templates is a ProtonUI v2
+      program, and the clang SDK carried musl's headers but none of
+      ThreadOS's, so Run in Code had nothing that could build it. `make
+      clang` now lays out user/ugui.h, udraw.h, uapi.h and userctl.h with
+      usys64.h and compat64.h under usr/include/threados, as they lie in
+      the tree (uapi.h reaches usys64.h by "../user64/"), and threados.cfg
+      puts that user/ on clang's search path and defines THREADOS_LIBC -
+      every program clang builds there has musl. A template's Run is two
+      steps, clang on src/main.c and then what it built; the list
+      template's empty `if` became a block, which -Wextra had pointed at.
+      t_swatchbuild (new; skipped without BUILD/clang-sdk, as t_clang is)
+      boots with clang's files on the disk as on an installed system and,
+      under Weave, makes a project from each template in Swatch: Code
+      comes up, Ctrl+R's first step is clang and its second starts the
+      program, whose window comes up with the project's name in its
+      title bar, read in Inter's bold; Alt+F4 ends it with code 0, as
+      Code reports, and Code is closed with Swatch in front again. t_clang
+      passes with the new configuration.
