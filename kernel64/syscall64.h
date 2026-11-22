@@ -225,12 +225,12 @@
    download, a call - on the shuttle; kind SHUTTLE_END takes it away
    -> 0, or -1 */
 #define SYS64_SHUTTLE  132
-/* a1=win, a2=words between '|' ("Night|Linen", at most 63 bytes, four
-   words of 15), a3=the one chosen: a choice in the window's title bar,
-   which comes back as WEV_TITLE with the word clicked; "" takes it away
-   -> 0, or -1 (and where windows have no title bar, as on the phone: the
-   program shows the choice itself) */
-#define SYS64_WIN_SEGMENTS 133
+/* a1=win, a2=the theme chosen (0 dark, 1 light) or -1 for none: the
+   theme bar in the window's title bar, for a program started with
+   --theme-bar; a click comes back as WEV_THEME -> 0, or -1 (and where
+   windows have no title bar, as on the phone: the program shows the
+   choice itself) */
+#define SYS64_WIN_THEMEBAR 133
 
 /* --- Files with no 63-byte or 4 GiB ceilings (docs/tfs4-plan.md) ---
  * The calls before these keep their shapes for programs already built;

@@ -17,11 +17,15 @@ and the serial port:
   the one to try, clicked, says PU_CHANGED 0 and is off on the screen
   pu_button: pressed in ugui.h's pressed indigo; pu_field: wrong, its
   stitch madder and why under it; pu_card, pu_avatar, pu_side drawn
-  Night | Linen in the title bar, as the design has it, beside the
-  title's two parts, and not on the preview; Linen clicked there is
-  filled, and the preview's ground is Linen's, the window's still Night's;
-  in the Windows style's lower bar the same choice, smaller, and a click
-  there chooses too
+  the theme bar: started from the menu, the desktop gives Swatch
+  --theme-bar and its window has the system's two themes in the title
+  bar (Dark | Light in the Mac style); started by name without the flag
+  it has none and Night | Linen stays on the preview, where it works;
+  with the flag, under Weave, Night | Linen in the title bar as the
+  design has it, beside the title's two parts, and not on the preview;
+  Linen clicked there is filled, and the preview's ground is Linen's,
+  the window's still Night's; in the Windows style's lower bar Dark |
+  Light, smaller, and a click there chooses too
   pu_menu: a right click on the one to try opens the toolkit's menu,
   and its second line comes back as PU_CHOSEN 1
   pu_sheet: the question over the window with a madder selvedge and
@@ -110,36 +114,160 @@ def main():
 def run(q):
     check("the desktop came up", q.wait_desktop())
     W, H = q.size()
+    away = (W - 4, H // 2)
     q.click_desktop()
+
+    def drawn_after(seen, timeout=60):
+        end = time.time() + timeout
+        while time.time() < end:
+            m = re.search(r"\[swatch\] drawn (\d+) (\d+)",
+                          q.serial()[seen:])
+            if m:
+                return int(m.group(1)), int(m.group(2))
+            time.sleep(0.3)
+        return 0, 0
+
+    def find_bar(words, px, face, h, pad, side, timeout=10):
+        """The theme bar wherever it is on the screen: a well h high whose
+        line runs along its top and its foot, as wide as the words in
+        that face make it. Its parts and the words read in them, or
+        None."""
+        font = UiFont.shared(px, face)
+        parts = [((sum(font.glyph(c)[0] for c in t) + 63) >> 6) + 2 * side
+                 for t in words]
+        gw = sum(parts) + 2 * pad
+        line = rgb(L["NIGHT_TSEG_LINE"])
+        end = time.time() + timeout
+        while True:
+            q.mouse_goto(*away)
+            scr = q.screen_raw()
+            _, _, at = scr
+            for y in range(0, H // 2):
+                run, best = 0, None
+                for x in range(W):
+                    if near(at(x, y), line, 3) and \
+                            near(at(x, y + h - 1), line, 3):
+                        run += 1
+                        if run >= gw - 2 * L["TSEG_R"] and \
+                                (best is None or run > best[1] - best[0] + 1):
+                            best = (x - run + 1, x)
+                    else:
+                        run = 0
+                if best and best[1] - best[0] + 1 < gw:
+                    gx = round((best[0] + best[1]) / 2 - (gw - 1) / 2)
+                    xs = [gx + pad, gx + pad + parts[0], gx + gw - pad]
+                    base = ui_font_baseline_in(px, y, h)
+                    read = [q.find_ui(xs[k], xs[k + 1], base, px=px,
+                                      face=face, screen=scr)
+                            for k in range(2)]
+                    fill = [at(xs[k] + 3, y + pad + 2) for k in range(2)]
+                    return {"x": gx, "y": y, "w": gw, "xs": xs,
+                            "parts": parts, "read": read, "fill": fill}
+            if time.time() > end:
+                return None
+            time.sleep(0.5)
+
+    def gone(look, timeout=15):
+        end = time.time() + timeout
+        while time.time() < end:
+            if not look():
+                return True
+            time.sleep(0.5)
+        return False
+
+    # From the menu, as a person starts it: the desktop gives it
+    # --theme-bar, and its window has the system's theme bar - in the
+    # Mac style the themes are called Dark and Light
+    seen = len(q.serial())
+    q.launch_menu("gswatch")
+    drawn_after(seen)
+    small = dict(px=L["TSEG_PX_SMALL"], face="bold", h=L["TSEG_H_SMALL"],
+                 pad=L["TSEG_PAD_SMALL"], side=L["TSEG_WORD_SMALL"])
+    bar = find_bar(("Dark", "Light"), **small)
+    check(f"started from the menu, its window has the theme bar: Dark | "
+          f"Light, Dark chosen ({bar and bar['read']}, "
+          f"{bar and bar['fill']})",
+          bar and bar["read"] == ["Dark", "Light"] and
+          near(bar["fill"][0], rgb(L["NIGHT_TSEG_ON"]), 4) and
+          near(bar["fill"][1], rgb(L["NIGHT_TSEG_BG"]), 4))
+    q.sendkey("alt-f4")
+    check("and Alt+F4 closes it",
+          gone(lambda: find_bar(("Dark", "Light"), timeout=0, **small)))
+
     check("'layout weave'", "saved" in q.sudo("set layout weave", "saved"))
     end = time.time() + 10
     while time.time() < end and "the Weave style" not in q.serial():
         time.sleep(0.3)
+    acc = N["accent"]
+
+    def selvedge(timeout=15):
+        """Where the selvedge of the window in front begins, once it
+        holds still (a window still opening is a picture growing)"""
+        last = None
+        end = time.time() + timeout
+        while time.time() < end:
+            q.mouse_goto(*away)
+            _, _, at = q.screen_raw()
+            got = None
+            for y in range(0, 200):
+                for x in range(0, W - 100, 2):
+                    if at(x, y) == acc and at(x + 99, y) == acc and \
+                            at(x, y + 2) == acc and at(x, y + 3) != acc:
+                        got = (x, y)
+                        break
+                if got:
+                    break
+            if got and got == last:
+                return got
+            last = got
+            time.sleep(0.5)
+        return None
+
+    # Started by name without the flag: no theme bar, and Night | Linen
+    # stays on the preview, where it works as well
+    seen = len(q.serial())
     q.type_line("runw gswatch")
-    out = q.wait_serial("[swatch] drawn", timeout=60)
-    m = re.search(r"\[swatch\] drawn (\d+) (\d+)", out)
-    cw, ch = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    cw, ch = drawn_after(seen)
+    sel = selvedge()
+    check(f"without --theme-bar ({sel})", sel)
+    if not sel:
+        return
+    ox = sel[0] - L["WEAVE_WIN_R"] + 1
+    oy = sel[1] + L["WEAVE_TITLE_H"] + 1
+    big = dict(px=L["TSEG_PX"], face="interb", h=L["TSEG_H"],
+               pad=L["TSEG_PAD"], side=L["TSEG_WORD_PAD"])
+    px0 = d("SIDE_X") + d("SIDE_W") + d("GAP")
+    pw0 = cw - d("RIGHT_W") - d("GAP") - d("GAP") - px0
+    tx0 = px0 + pw0 - d("THEME_W") - 8
+    _, _, at = q.screen_raw()
+    well = at(ox + tx0 + d("THEME_W") * 3 // 4, oy + 8 + 2)
+    nobar = find_bar(("Night", "Linen"), timeout=0, **big)
+    check(f"no theme bar in its title bar, Night | Linen on the preview "
+          f"instead ({nobar and nobar['read']}, {well})",
+          nobar is None and near(well, hexdef("PU_N_FIELD"), 4))
+    seen = len(q.serial())
+    q.click(ox + tx0 + d("THEME_W") * 3 // 4, oy + 8 + d("THEME_H") // 2)
+    q.mouse_goto(*away)
+    end = time.time() + 10
+    while time.time() < end and \
+            "[swatch] theme Linen" not in q.serial()[seen:]:
+        time.sleep(0.3)
+    check("and Linen clicked there is chosen",
+          "[swatch] theme Linen" in q.serial()[seen:])
+    q.sendkey("alt-f4")
+    check("Alt+F4 closes it", gone(lambda: selvedge(2) is not None))
+
+    # With --theme-bar, from the shell as from the desktop
+    seen = len(q.serial())
+    q.type_line("runw gswatch " + "--theme-bar")
+    cw, ch = drawn_after(seen)
     check(f"Swatch opens at its smaller size on this screen ({cw}x{ch})",
           (cw, ch) == (d("W0"), d("H0")))
-    time.sleep(1.5)
-    away = (W - 4, H // 2)
-    q.mouse_goto(*away)
-
-    # its content's corner: under the selvedge, the window's thread colour
-    _, _, at = q.screen_raw()
-    acc = N["accent"]
-    sel = None
-    for y in range(0, 200):
-        for x in range(0, W - 100, 2):
-            if at(x, y) == acc and at(x + 99, y) == acc and \
-                    at(x, y + 2) == acc and at(x, y + 3) != acc:
-                sel = (x, y)
-                break
-        if sel:
-            break
+    sel = selvedge()
     check(f"its window, with the selvedge ({sel})", sel)
     if not sel:
         return
+    _, _, at = q.screen_raw()
     ox = sel[0] - L["WEAVE_WIN_R"] + 1
     oy = sel[1] + L["WEAVE_TITLE_H"] + 1
     side_x, side_y, side_w = d("SIDE_X"), d("SIDE_Y"), d("SIDE_W")
@@ -265,7 +393,7 @@ def run(q):
           f"{mid})", near(ring_, (0xD1, 0x52, 0xA6), 30) and
           near(mid, (0xD1, 0x52, 0xA6), 6) and not near(gap, mid, 30))
 
-    # Night | Linen in the title bar (win_segments), where
+    # Night | Linen in the theme bar (win_theme_bar), where
     # Swatch.dc.html has it: placed from look.h's numbers and Inter
     # Bold's advances, its words read off the bar
     bold = UiFont.shared(L["TSEG_PX"], "interb")
@@ -386,9 +514,9 @@ def run(q):
           near(yes, N["app_danger"], 10) and
           "[swatch] sent PU_PRESSED 1" in q.serial()[seen:])
 
-    # The other styles' lower bar: the choice smaller, left of the
-    # Windows style's three buttons, the words in DejaVu Sans Bold - and
-    # a click there chooses as in Weave's. (The Mac style's bar along
+    # The other styles' lower bar: the theme bar smaller, left of the
+    # Windows style's three buttons, the themes by that style's names in
+    # DejaVu Sans Bold - and a click there chooses as in Weave's. (The Mac style's bar along
     # the top would lie over this window's title bar, at the screen's
     # top.)
     q.click(12, H // 2)
@@ -398,7 +526,8 @@ def run(q):
 
     def swidth(t):
         return (sum(small.glyph(c)[0] for c in t) + 63) >> 6
-    sparts = [swidth(t) + 2 * L["TSEG_WORD_SMALL"] for t in words]
+    wwords = ("Dark", "Light")       # the themes by the style's names
+    sparts = [swidth(t) + 2 * L["TSEG_WORD_SMALL"] for t in wwords]
     sgw = sum(sparts) + 2 * L["TSEG_PAD_SMALL"]
     sgx = wx + ww - 3 * L["WB_W"] - L["TSEG_GAP"] - sgw
     sxs = [sgx + L["TSEG_PAD_SMALL"], sgx + L["TSEG_PAD_SMALL"] + sparts[0]]
@@ -418,12 +547,12 @@ def run(q):
         sbase = ui_font_baseline_in(L["TSEG_PX_SMALL"], sgy, L["TSEG_H_SMALL"])
         sread = [q.read_ui(sxs[k] + (sparts[k] - swidth(t)) // 2, sbase,
                            sparts[k], px=L["TSEG_PX_SMALL"], face="bold",
-                           screen=scr) for k, t in enumerate(words)]
+                           screen=scr) for k, t in enumerate(wwords)]
         sfill = [at(sxs[k] + 3, sgy + L["TSEG_PAD_SMALL"] + 2)
                  for k in range(2)]
-    check(f"in the Windows style's bar: the same choice, smaller, by its "
-          f"buttons "
-          f"({sread}, {sfill})", sread == list(words) and
+    check(f"in the Windows style's bar: the themes by its names, Dark | "
+          f"Light, smaller, by its buttons ({sread}, {sfill})",
+          sread == list(wwords) and
           near(sfill[0], rgb(L["NIGHT_TSEG_ON"]), 4) and
           near(sfill[1], rgb(L["NIGHT_TSEG_BG"]), 4))
     if sgy is not None:

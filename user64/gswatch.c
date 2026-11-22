@@ -5,8 +5,10 @@
  * the one chosen in each of its states, drawn by the toolkit itself
  * (not a picture of it), and under them one to try - what it sends when
  * it is used is said beside the lines of C that make it, which are the
- * real calls, to copy. Night or Linen in the title bar shows the controls in
- * either theme, whichever the desktop is in. On the right, Start a
+ * real calls, to copy. Night or Linen - in the title bar's theme bar
+ * when started with --theme-bar, as the desktop starts it, otherwise on
+ * the preview - shows the controls in either theme, whichever the
+ * desktop is in. On the right, Start a
  * program: four templates, a name, and a project in ~/Projects that
  * Code opens and its Run builds with clang on ThreadOS and starts - a
  * window that is a ProtonUI v2 program to grow from.
@@ -54,8 +56,8 @@
 #define TRY_DY 56             /* "Try it" above the bottom of the preview */
 #define CODE_PX 12
 #define CODE_LINE 17
-#define THEME_W 128           /* Night | Linen on the preview, where no
-                                 title bar has it (the phone) */
+#define THEME_W 128           /* Night | Linen on the preview, when
+                                 started without --theme-bar */
 #define THEME_H 26
 #define TPL_Y 76              /* the first template's top, in the right column */
 #define TPL_H 50
@@ -68,7 +70,7 @@ static struct ug_modal ask;
 static struct ud_look plook;          /* the preview's theme */
 static int sel = 2, linen, tpl, phase;
 static int side_id, theme_id, name_id, make_id;
-static int in_bar;                    /* Night | Linen in the title bar */
+static int in_bar;                    /* Night | Linen in the theme bar */
 static char name[48] = "backup-check";
 static char field_buf[64] = "threados-pc";
 static char last[48] = "";            /* what the live one sent last */
@@ -433,9 +435,9 @@ static void build(void)
     side_id = pu_side(&ui, SIDE_X, SIDE_Y, SIDE_W, side_of, 0, CAT_N, sel);
     pu_kind(&ui, side_id, PU_SIDE_MONO);
     pu_name(&ui, side_id, "Controls");
-    /* Night | Linen is the window's, and in its title bar where there
-       is one (win_segments); only where there is none - the phone -
-       does it stand on the preview */
+    /* Night | Linen is the window's: in its title bar, the system's
+       theme bar, when Swatch was started with --theme-bar (as the
+       desktop starts it); otherwise on the preview */
     theme_id = -1;
     if (!in_bar) {
         theme_id = pu_segments(&ui, prev_x() + prev_w() - THEME_W - 8, 8,
@@ -673,8 +675,12 @@ static int in_preview(int x, int y)
     return x >= prev_x() && x < prev_x() + prev_w() && y < prev_h();
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
+    int want_bar = 0;
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], THEME_BAR_FLAG))
+            want_bar = 1;
     static const int sz[2][2] = { { W1, H1 }, { W0, H0 } };
     for (int i = 0; i < 2 && win < 0; i++) {
         win = (int)win_create(sz[i][0], sz[i][1],
@@ -685,7 +691,7 @@ int main(void)
     if (win < 0)
         return 1;
     win_truecolour(win);
-    in_bar = win_segments(win, "Night|Linen", linen) == 0;
+    in_bar = want_bar && win_theme_bar(win, linen) == 0;
     build();
     draw();
     printf("[swatch] drawn %d %d\n", cw, ch);
@@ -701,7 +707,7 @@ int main(void)
                 look_now();
                 continue;
             }
-            if (ev.type == WEV_TITLE && ev.val >= 0 && ev.val < 2) {
+            if (ev.type == WEV_THEME && ev.val >= 0 && ev.val < 2) {
                 linen = ev.val;
                 say("theme", themes[linen]);
                 build();

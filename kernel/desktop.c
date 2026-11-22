@@ -648,9 +648,9 @@ struct wevent {
 /* A note the program sent (SYS64_NOTE) was answered: x its number,
    val 0 opened, or 1 or 2 the action clicked */
 #define WEV_NOTE    12
-/* A word the program put in its title bar (SYS64_WIN_SEGMENTS) was
-   chosen: val is which, from 0 */
-#define WEV_TITLE   13
+/* The window's theme bar (SYS64_WIN_THEMEBAR) was clicked: val 0 the
+   dark theme (Night), 1 the light one (Linen) */
+#define WEV_THEME   13
 #define WEV_QLEN  8
 
 struct window {
@@ -718,11 +718,11 @@ struct window {
        program was not started from the dock or the menu, which would
        otherwise wear a letter. -1 = none known. */
     int art;
-    /* A choice the program put in its title bar (SYS64_WIN_SEGMENTS):
-       nseg words, seg_on the one chosen. The desktop draws it and
-       moves it when clicked, so the program need only hear which. */
-    char seg[TSEG_MAX][16];
-    int nseg, seg_on;
+    /* The theme bar (SYS64_WIN_THEMEBAR): the system's two themes in
+       the title bar, for a program started with --theme-bar to show
+       itself in either; theme_on 0 dark, 1 light. The desktop draws it
+       and moves it when clicked, so the program need only hear which. */
+    int theme_bar, theme_on;
     struct wevent evq[WEV_QLEN];  /* the event queue for the application */
     int ev_head, ev_tail;
 };
@@ -2520,17 +2520,27 @@ static void draw_lights(const struct window *win, int focused)
    at rest to the pixel */
 static int grain_ox, grain_oy;
 
-/* The choice a program put in its title bar (SYS64_WIN_SEGMENTS), laid
-   out: the group, the size of its words, and where each word's part
-   begins - xs[k] to xs[k + 1] is word k. 0 when there is none, or when
-   the window is too narrow to have it beside its name: the program
-   then hears no choices, rather than choices drawn over its name. */
+/* The theme bar's words: the themes by their names in the style the
+   desktop is in - Weave's two are Night and Linen */
+static const char *tseg_word(int k)
+{
+    if (ui_weave)
+        return k ? "Linen" : "Night";
+    return k ? "Light" : "Dark";
+}
+
+/* The theme bar (SYS64_WIN_THEMEBAR), laid out: the group, the size of
+   its words, and where each word's part begins - xs[k] to xs[k + 1] is
+   word k. 0 when there is none, or when the window is too narrow to
+   have it beside its name: the program then hears no choice, rather
+   than one drawn over its name. */
+#define TSEG_N 2
 struct tseg_at {
-    int x, y, w, h, px, xs[TSEG_MAX + 1];
+    int x, y, w, h, px, xs[TSEG_N + 1];
 };
 static int tseg_layout(const struct window *win, struct tseg_at *g)
 {
-    if (win->nseg <= 0 || kiosk)
+    if (!win->theme_bar || kiosk)
         return 0;
     int pad = ui_weave ? TSEG_PAD : TSEG_PAD_SMALL;
     int side = ui_weave ? TSEG_WORD_PAD : TSEG_WORD_SMALL;
@@ -2541,9 +2551,9 @@ static int tseg_layout(const struct window *win, struct tseg_at *g)
     int right = ui_weave ? light_x(win, 1) - WEAVE_CAP_PAD - TSEG_GAP
               : ui_win  ? light_x(win, 1) - TSEG_GAP
                         : win->x + win->w - 8;
-    int part[TSEG_MAX], sum = 0;
-    for (int k = 0; k < win->nseg; k++) {
-        part[k] = ui_font_width(UI_BOLD, g->px, win->seg[k]) + 2 * side;
+    int part[TSEG_N], sum = 0;
+    for (int k = 0; k < TSEG_N; k++) {
+        part[k] = ui_font_width(UI_BOLD, g->px, tseg_word(k)) + 2 * side;
         sum += part[k];
     }
     g->w = sum + 2 * pad;
@@ -2554,18 +2564,18 @@ static int tseg_layout(const struct window *win, struct tseg_at *g)
     if (g->x < left)
         return 0;
     g->xs[0] = g->x + pad;
-    for (int k = 0; k < win->nseg; k++)
+    for (int k = 0; k < TSEG_N; k++)
         g->xs[k + 1] = g->xs[k] + part[k];
     return 1;
 }
 
-/* Which of the title bar's words is under the point, or -1 */
+/* Which of the theme bar's words is under the point, or -1 */
 static int tseg_hit(const struct window *win, int mx, int my)
 {
     struct tseg_at g;
     if (!tseg_layout(win, &g) || my < g.y || my >= g.y + g.h)
         return -1;
-    for (int k = 0; k < win->nseg; k++)
+    for (int k = 0; k < TSEG_N; k++)
         if (mx >= g.xs[k] && mx < g.xs[k + 1])
             return k;
     return -1;
@@ -2586,8 +2596,8 @@ static void draw_tseg(const struct window *win, const struct tseg_at *g,
     gfx_rring16(g->x * 16, g->y * 16, g->w * 16, g->h * 16, r * 16, 16,
                 night ? NIGHT_TSEG_LINE : LINEN_TSEG_LINE, 255);
     int base = ui_font_baseline_in(g->px, g->y, g->h);
-    for (int k = 0; k < win->nseg; k++) {
-        int on = k == win->seg_on;
+    for (int k = 0; k < TSEG_N; k++) {
+        int on = k == win->theme_on;
         if (on)
             gfx_rrect(g->xs[k], g->y + pad, g->xs[k + 1] - g->xs[k],
                       g->h - 2 * pad, ui_weave ? TSEG_ON_R : r - pad,
@@ -2595,10 +2605,10 @@ static void draw_tseg(const struct window *win, const struct tseg_at *g,
         uint32_t ink = !focused ? L.title_dim
                      : on ? (night ? NIGHT_TSEG_ON_INK : LINEN_TSEG_ON_INK)
                           : (night ? NIGHT_TSEG_INK : LINEN_TSEG_INK);
-        int tw = ui_font_width(UI_BOLD, g->px, win->seg[k]);
+        int tw = ui_font_width(UI_BOLD, g->px, tseg_word(k));
         ui_font_text(UI_BOLD, g->px,
                      g->xs[k] + (g->xs[k + 1] - g->xs[k] - tw) / 2, base,
-                     win->seg[k], ink);
+                     tseg_word(k), ink);
     }
 }
 
@@ -3274,8 +3284,29 @@ static void desktop_launch_files(const char *command)
                     from >= 0 ? icons[from].art : art_of_app("gfiles"));
 }
 
+/* Programs the desktop starts with a flag of their own. --theme-bar
+   gives the window the system's theme bar (SYS64_WIN_THEMEBAR): Swatch
+   shows ProtonUI v2's controls in either theme, and a person who
+   started it from the loom or the menu should find the two themes in
+   its title bar. */
+static const struct { const char *app, *flags; } launch_flags[] = {
+    { "gswatch", "--theme-bar" },
+};
+#define LAUNCH_FLAGS_N ((int)(sizeof(launch_flags) / sizeof(launch_flags[0])))
+
 static int desktop_spawn_app(const char *command)
 {
+    for (int k = 0; k < LAUNCH_FLAGS_N; k++) {
+        if (strcmp(command, launch_flags[k].app))
+            continue;
+        char line[64];
+        int n = 0;
+        line[0] = '\0';
+        command_append(line, sizeof(line), &n, command);
+        command_append(line, sizeof(line), &n, " ");
+        command_append(line, sizeof(line), &n, launch_flags[k].flags);
+        return exec_spawn(line);
+    }
     if (!strcmp(command, "gfiles")) {
         char home[64], line[96];
         if (!desktop_home_path(home, sizeof(home)))
@@ -3845,14 +3876,13 @@ static void handle_input(int mx, int my, int buttons)
                 hit = 1;
                 break;
             }
-            /* a word of the program's choice in the bar: chosen here,
-               and the program told which - one already chosen is no
-               news to it */
+            /* a theme in the window's theme bar: chosen here, and the
+               program told which - the one it has is no news to it */
             int seg = tseg_hit(w, mx, my);
             if (seg >= 0) {
-                if (seg != w->seg_on) {
-                    w->seg_on = seg;
-                    win_enqueue(w, WEV_TITLE, 0, 0, seg);
+                if (seg != w->theme_on) {
+                    w->theme_on = seg;
+                    win_enqueue(w, WEV_THEME, 0, 0, seg);
                     scene_changed();
                 }
                 focus_idx = i;
@@ -9453,7 +9483,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->maxed = 0;
         w->full = 0;
         w->minimized = 0;
-        w->nseg = 0;
+        w->theme_bar = 0;
         w->used = 1;
         w->desk = cur_desk;        /* where the person is looking */
         raise_win(i);              /* a new window on top */
@@ -9483,39 +9513,26 @@ int desktop_win_title(int winid, int owner, const char *title)
     return 0;
 }
 
-/* A choice in the window's title bar, from the program that owns it:
- * 'words' are up to TSEG_MAX of them between '|' ("Night|Linen"), each
- * cut to 15 letters, 'chosen' the one filled. An empty string takes
- * the choice away. Night or Linen for what Swatch shows is a choice
- * about the whole window, and the design puts it where the window's
- * own name is - beside the name, not in what the program draws. The
- * desktop moves the choice itself when a word is clicked and tells
- * the program (WEV_TITLE), so calling again is only for a choice the
- * program changed some other way. */
-int desktop_win_segments(int winid, int owner, const char *words, int chosen)
+/* The theme bar, for the program that owns the window: the system's
+ * two themes in the title bar, beside the name - Night | Linen under
+ * Weave, Dark | Light in the other styles - 'light' the one chosen, or
+ * -1 to take the bar away. A program asks for it when it was started
+ * with --theme-bar, which the desktop gives the programs it knows to
+ * want it (desktop_spawn_app): a theme is a choice about the whole
+ * window, and the place for that is the window's own bar, drawn the
+ * same for every program that has one. The desktop moves the choice
+ * when a theme is clicked and tells the program (WEV_THEME); what it
+ * shows in that theme is the program's. */
+int desktop_win_theme_bar(int winid, int owner, int light)
 {
     scene_changed();
-    if (winid < 0 || winid >= MAX_WIN || !words)
+    if (winid < 0 || winid >= MAX_WIN)
         return -1;
     struct window *w = &wins[winid];
     if (!w->used || !w->content || w->owner != owner)
         return -1;
-    int n = 0, len = 0;
-    for (const char *s = words; *s && n < TSEG_MAX; s++) {
-        if (*s == '|') {
-            w->seg[n][len] = 0;
-            n++;
-            len = 0;
-        } else if (len < (int)sizeof(w->seg[0]) - 1) {
-            w->seg[n][len++] = *s;
-        }
-    }
-    if (n < TSEG_MAX && (len || n)) {
-        w->seg[n][len] = 0;
-        n++;
-    }
-    w->nseg = n;
-    w->seg_on = chosen >= 0 && chosen < n ? chosen : 0;
+    w->theme_bar = light >= 0;
+    w->theme_on = light > 0;
     return 0;
 }
 

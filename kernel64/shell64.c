@@ -135,7 +135,7 @@ static void cmd_help(void)
     printk("          ifconfig, arp, netstat, ping <address>, dns <ip>,\n");
     printk("          gfx, desktop,\n");
     printk("          reboot, poweroff, smp, smpmem, smpthreads\n");
-    printk("          runw <prog> - a program on any core\n");
+    printk("          runw <prog> [args] - a program on any core\n");
     printk("          whoami, sudo <command>, logout, passwd\n");
     printk("          kill <pid> - end a program (its number from ps)\n");
     printk("          login <account>\n");
@@ -1597,7 +1597,27 @@ static void execute(const char *line)
             printk("runw: there is no program '%s'\n", progw);
             return;
         }
-        if (proc64_spawn_anycore(progw, 0, 1) < 0)
+        /* The words after the name are the program's, as with 'run':
+           a flag a program is started with (Swatch's --theme-bar)
+           reaches it from here as from the desktop */
+        struct args64 *wargs = args64_new(LINE_MAX);
+        if (!wargs) {
+            printk("runw: no memory for the arguments\n");
+            return;
+        }
+        for (int i = 5; line[i]; ) {
+            while (line[i] == ' ')
+                i++;
+            if (!line[i])
+                break;
+            int start = i;
+            while (line[i] && line[i] != ' ')
+                i++;
+            args64_add(wargs, line + start, (uint32_t)(i - start));
+        }
+        int started = proc64_spawn_anycore(progw, wargs->argc ? wargs : 0, 1);
+        args64_free(wargs);
+        if (started < 0)
             printk("runw: could not start '%s'\n", progw);
     } else if (!strcmp(line, "lock")) {
         if (desktop_lock() < 0)

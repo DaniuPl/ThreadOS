@@ -2405,16 +2405,10 @@ static void handle(struct regs *r)
             (int)a1, task64_current_id(), title);
         return;
     }
-    case SYS64_WIN_SEGMENTS: {
-        char words[64];
-        if (text_from_ring3(a2, words, sizeof(words)) < 0) {
-            r->rax = (uint64_t)-1;
-            return;
-        }
-        r->rax = (uint64_t)(int64_t)desktop_win_segments(
-            (int)a1, task64_current_id(), words, (int)a3);
+    case SYS64_WIN_THEMEBAR:
+        r->rax = (uint64_t)(int64_t)desktop_win_theme_bar(
+            (int)a1, task64_current_id(), (int)a2);
         return;
-    }
     case SYS64_WIN_KEEP:
         r->rax = (uint64_t)(int64_t)desktop_win_keep((int)a1,
                                                      task64_current_id());

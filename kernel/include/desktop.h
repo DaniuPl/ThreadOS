@@ -33,9 +33,9 @@ int desktop_win_poll(int winid, int owner, void *out);
 int desktop_win_keep(int winid, int owner);
 /* The window's name, as the program that owns it wants it read. */
 int desktop_win_title(int winid, int owner, const char *title);
-/* Words to choose from in the window's title bar, '|' between them
-   (SYS64_WIN_SEGMENTS); a click comes back as WEV_TITLE */
-int desktop_win_segments(int winid, int owner, const char *words, int chosen);
+/* The window's theme bar (SYS64_WIN_THEMEBAR): light 0 or 1 the theme
+   chosen, -1 none; a click comes back as WEV_THEME */
+int desktop_win_theme_bar(int winid, int owner, int light);
 /* A block of palette indices copied into the window's content - the
    only way to draw a picture without a syscall per pixel. */
 int desktop_win_blit(int winid, int owner, int x, int y, int w, int h,

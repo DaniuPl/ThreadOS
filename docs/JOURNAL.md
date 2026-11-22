@@ -11633,3 +11633,26 @@ works and is checked by `make test`.
       title bar, read in Inter's bold; Alt+F4 ends it with code 0, as
       Code reports, and Code is closed with Swatch in front again. t_clang
       passes with the new configuration.
+- [x] **The theme bar: the system's themes in a window started with
+      --theme-bar** (kernel/desktop.c, kernel64/syscall64.c,
+      kernel64/shell64.c, user64/usys64.h, user64/gswatch.c)
+      The title-bar choice of the entry before let a program put any
+      words there; what belongs in a window's bar is the system's own
+      themes, the same in every program that has them, switched on by
+      how the program is started. SYS64_WIN_THEMEBAR (win_theme_bar)
+      takes only the theme chosen, or -1 for none: the desktop draws the
+      themes by their names in the style it is in - Night | Linen under
+      Weave, Dark | Light in the others - and a click comes back as
+      WEV_THEME, 0 dark or 1 light; what the program shows in it is its
+      own. A program asks for the bar when it was started with
+      --theme-bar (THEME_BAR_FLAG). The desktop starts the programs it
+      knows to want it with that flag (launch_flags[]: Swatch), from the
+      dock, the loom, the menu and the search alike, and the shell's
+      `runw` now hands a program the words after its name, as `run`
+      does. Swatch without the flag keeps Night | Linen on its preview.
+      t_swatch: Swatch started from the menu has Dark | Light in the Mac
+      style's bar, Dark chosen, and Alt+F4 closes it; `runw gswatch`
+      has no theme bar and Night | Linen on the preview, where Linen
+      clicked is chosen; `runw gswatch --theme-bar` under Weave has
+      Night | Linen in the bar as before; and the Windows style's bar
+      reads Dark | Light.

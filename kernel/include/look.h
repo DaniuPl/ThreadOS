@@ -497,13 +497,12 @@
 #define WEAVE_CLOSE_INK    0xFF6B6F   /* close's, on its madder ground */
 #define WEAVE_SHADOW_S     26      /* the shadow of the window in front ... */
 #define WEAVE_SHADOW_DY    12      /* ... and how far it falls */
-/* A choice a program puts in its title bar (SYS64_WIN_SEGMENTS - the
-   Night | Linen of docs/weave/canvas/Swatch.dc.html): TSEG_GAP left of
+/* A window's theme bar (SYS64_WIN_THEMEBAR - the Night | Linen of
+   docs/weave/canvas/Swatch.dc.html): TSEG_GAP left of
    the buttons (of the bar's end, where they are on the left), a group
    TSEG_H high, TSEG_PAD inside its edge, each word TSEG_WORD_PAD to
    either side, the chosen one filled. The other styles' bars are lower:
    TSEG_H_SMALL high, its words a size smaller and closer. */
-#define TSEG_MAX           4
 #define TSEG_H             34
 #define TSEG_PAD           4
 #define TSEG_R             9

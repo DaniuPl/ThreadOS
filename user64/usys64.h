@@ -102,7 +102,7 @@
 /* What the program has going on, on the shuttle: a1=&struct shuttle64
    -> 0, or -1 */
 #define SYS64_SHUTTLE  132
-#define SYS64_WIN_SEGMENTS 133
+#define SYS64_WIN_THEMEBAR 133
 #define SYS64_UI_LOOK  69
 #define SYS64_NOTIFY   70
 #define SYS64_BG_PREVIEW 71
@@ -703,10 +703,10 @@ struct win_text_cmd {
    is brought up) or 1 or 2, the action clicked */
 #define WEV_NOTE    12
 #define WEV_NOTE_OPENED 0
-/* A word of the choice the program put in its title bar (win_segments)
-   was clicked: val is which, from 0. The desktop has already moved the
-   choice there. */
-#define WEV_TITLE   13
+/* A theme was clicked in the window's theme bar (win_theme_bar): val
+   0 the dark one (Night), 1 the light one (Linen). The desktop has
+   already moved the choice there. */
+#define WEV_THEME   13
 /* What a WEV_CLICK's val holds above its buttons: the modifiers held
    with the click */
 #define WEV_MOD_SHIFT 0x100
@@ -1029,15 +1029,17 @@ static inline int64_t win_title(int win, const char *title)
     return syscall64(SYS64_WIN_TITLE, win, (int64_t)(uintptr_t)title);
 }
 
-/* A choice in the window's title bar, beside its name: 'words' between
-   '|' ("Night|Linen" - four at most, 15 letters each), 'chosen' the one
-   filled; a click on another comes as WEV_TITLE. "" takes it away. -1
-   where windows have no title bar (the phone): the program then offers
-   the choice in its own window. */
-static inline int64_t win_segments(int win, const char *words, int chosen)
+/* The theme bar: the system's two themes in the window's title bar,
+   beside its name - Night | Linen under Weave, Dark | Light in the
+   other styles - 'light' the one chosen (0 dark, 1 light), -1 none. A
+   program asks for it when it was started with THEME_BAR_FLAG, as the
+   desktop starts the programs it knows to want it; a click comes as
+   WEV_THEME. -1 where windows have no title bar (the phone): the
+   program then offers the choice in its own window. */
+#define THEME_BAR_FLAG "--theme-bar"
+static inline int64_t win_theme_bar(int win, int light)
 {
-    return syscall64_3(SYS64_WIN_SEGMENTS, win, (int64_t)(uintptr_t)words,
-                       chosen);
+    return syscall64(SYS64_WIN_THEMEBAR, win, light);
 }
 
 static inline int64_t win_keep(int win)
