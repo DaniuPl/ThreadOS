@@ -226,6 +226,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gterm.elf $(BUILD)/user64/core.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gcode.elf \
+               $(BUILD)/user64/gswatch.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
@@ -427,6 +428,16 @@ $(BUILD)/user64/grecord.elf: user64/grecord.c user/uapi.h user/udraw.h \
 	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
 	    -Wall -Wextra -c $< -o $(BUILD)/libc64/grecord.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/grecord.o) -o $@
+
+# Swatch: every control of ProtonUI v2, live, and new programs from a
+# template - musl, as Code, for files at any path
+$(BUILD)/user64/gswatch.elf: user64/gswatch.c user/uapi.h user/udraw.h \
+                             user/ugui.h user64/usys64.h user64/compat64.h \
+                             $(LIBC64) libc/libc64.ld \
+                             | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
+	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gswatch.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gswatch.o) -o $@
 
 # Code, the development environment: files of any length and a tree of
 # any size, so built against musl
@@ -2046,6 +2057,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gterm=$(BUILD)/user64/gterm.elf core=$(BUILD)/user64/core.elf \
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gcode=$(BUILD)/user64/gcode.elf \
+	    gswatch=$(BUILD)/user64/gswatch.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \

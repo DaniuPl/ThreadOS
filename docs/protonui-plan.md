@@ -227,4 +227,15 @@ Mend, Swatch, Notes, and the existing programs redrawn in Weave. Swatch
 comes first of them - every control, live, with the line of C that
 makes it - because it is ProtonUI v2's own catalogue.
 
+- **Swatch: done** (journal: "Swatch, and the rest of ProtonUI v2's
+  controls"). user64/gswatch.c, in the menu and on loom view's Work
+  thread. ProtonUI v2 grew what it lacked for a whole catalogue -
+  `pu_spinner`, `pu_card`, `pu_avatar`, `pu_side`, `pu_field_error` and
+  `pu_sheet` (Weave's question: a card for a pointer, a sheet for a
+  finger) - and ProtonUI's names for the events (`PU_CHANGED`...).
+  Start a program writes a project of four templates into ~/Projects
+  and opens it in Code. Not like the design yet: the code is lettered in
+  DejaVu's mono, not JetBrains Mono, and Night | Linen stands in the
+  preview's corner rather than in the title bar.
+
 **In all: about 13 to 15 working days** for stages 1-7.

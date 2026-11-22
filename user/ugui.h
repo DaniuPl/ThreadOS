@@ -59,6 +59,10 @@
 #define UG_SEGMENTS 9            /* one of a few, side by side */
 #define UG_PROGRESS 10           /* how far: value of max, or -1 unknown */
 #define UG_KNOTS    11           /* one of a few, one under the other */
+#define UG_SPINNER  12           /* something going on, its length unknown */
+#define UG_CARD     13           /* a surface that groups, with a heading */
+#define UG_AVATAR   14           /* a person: an initial on their colour */
+#define UG_SIDE     15           /* sections down the side, one chosen */
 
 /* What happened */
 #define UG_NOTHING 0
@@ -79,6 +83,13 @@
                                     row is the list's value */
 #define UG_NOTE    12            /* a note sent with pu_notify was answered:
                                     pu_note_id, pu_note_answer */
+/* ProtonUI v2's names for them (docs/weave/canvas/Swatch.dc.html) */
+#define PU_PRESSED UG_PRESSED
+#define PU_CHANGED UG_CHANGED
+#define PU_TYPED   UG_TYPED
+#define PU_ENTER   UG_ENTER
+#define PU_CHOSEN  UG_CHOSEN
+#define PU_MENU    UG_MENU
 
 struct ug_item {
     int kind;
@@ -99,6 +110,8 @@ struct ug_item {
     int phase;                   /* an unknown progress's place, of 1000 */
     const char *const *acts;     /* a list row's actions, swiped out */
     int nacts;
+    const char *err;             /* a field's text wrong: why (pu_field_error) */
+    uint32_t rgb;                /* an avatar's colour, 0 = the person's */
 };
 
 struct ug {
@@ -610,6 +623,72 @@ static inline int pu_knots(struct ug *u, int x, int y, int w,
     return i;
 }
 
+/* A spinner (docs/weave/canvas/Components.dc.html): the thread winding
+   onto a dashed spool - one arc, one colour, moved by pu_set_phase */
+#define PU_SPINNER 20
+static inline int pu_spinner(struct ug *u, int x, int y)
+{
+    return ug_add(u, UG_SPINNER, x, y, PU_SPINNER, PU_SPINNER);
+}
+
+/* A card: a surface that groups what is put on it after it, with a
+   heading in small capitals at its top (0: none) */
+#define PU_CARD_R   14
+#define PU_CARD_PAD 24
+static inline int pu_card(struct ug *u, int x, int y, int w, int h,
+                          const char *heading)
+{
+    int i = ug_add(u, UG_CARD, x, y, w, h);
+    if (i >= 0)
+        u->it[i].text = heading;
+    return i;
+}
+
+/* An avatar: a person's initial on their colour, ringed in it with a
+   gap - 0 for the person's own thread colour */
+static inline int pu_avatar(struct ug *u, int x, int y, int d,
+                            const char *name, uint32_t rgb)
+{
+    int i = ug_add(u, UG_AVATAR, x, y, d, d);
+    if (i >= 0) {
+        u->it[i].text = name;
+        u->it[i].rgb = rgb;
+    }
+    return i;
+}
+
+/* Down the side: n sections, 'chosen' of them - a window's own places,
+   Settings' pages. PU_SIDE_MONO as its kind letters them in the mono
+   face, for names that are code. */
+#define PU_SIDE_ROW  34
+#define PU_SIDE_MONO 1
+static inline int pu_side_row(const struct ug *u)
+{
+    return u->target > PU_SIDE_ROW ? u->target : PU_SIDE_ROW;
+}
+
+static inline int pu_side(struct ug *u, int x, int y, int w,
+                          const char *(*row)(void *ctx, int i), void *ctx,
+                          int n, int chosen)
+{
+    int i = ug_add(u, UG_SIDE, x, y, w, n * pu_side_row(u));
+    if (i >= 0) {
+        u->it[i].row = row;
+        u->it[i].ctx = ctx;
+        u->it[i].max = n;
+        u->it[i].value = chosen;
+    }
+    return i;
+}
+
+/* A field's text is wrong: its stitch madder and why, under it (0: it
+   is right again). Leave a line of room below the field for it. */
+static inline void pu_field_error(struct ug *u, int id, const char *why)
+{
+    if (id >= 0 && id < u->n)
+        u->it[id].err = why;
+}
+
 /* A button's kind: the one thing to do (the accent), another thing,
    a quiet one (words only) and one that destroys */
 #define PU_PRIMARY   0
@@ -863,6 +942,14 @@ static inline int ug_say_l(int win, int x, int y, int h, const char *s,
 #define PU_L_OFF_INK     0xA39D91
 #define PU_L_PRESSED     0x3450CC
 #define PU_L_KNOB_OFF    0x8E897F
+#define PU_N_CARD        0x14161B   /* a card (Components.dc.html) */
+#define PU_N_CARD_LINE   0x262A33
+#define PU_L_CARD        0xFCFBF8
+#define PU_L_CARD_LINE   0xE3DDD1
+#define PU_N_SHEET       0x1A1C23   /* a question's card, a sheet */
+#define PU_N_SHEET_LINE  0x2E323D
+#define PU_L_SHEET       0xFCFBF8
+#define PU_L_SHEET_LINE  0xE3DDD1
 #define PU_BTN_R    8            /* a button's corners */
 #define PU_SEL_A    46           /* the chosen row: the accent at this, of 255 */
 #define PU_DANGER_A 26           /* a destroying button's ground ... */
@@ -1015,6 +1102,31 @@ static inline void ug_draw_field(int win, const struct ud_look *l, int x,
         ud_fill(win, end + 1, y + 4, 1, h - 8, l->text);
 }
 
+/* A field whose text may be wrong: its stitch (or line) madder, and
+   why under it, in madder */
+static inline void pu_draw_field(int win, const struct ud_look *l, int x,
+                                 int y, int w, int h, const char *text,
+                                 int focused, const char *err)
+{
+    if (!err) {
+        ug_draw_field(win, l, x, y, w, h, text, focused);
+        return;
+    }
+    if (pu_weave(l)) {
+        pu_draw_field_ground(win, l, x, y, w, h,
+                             PU_ERROR | (focused ? PU_FOCUS : 0));
+        int end = ug_say(win, x + 10, y - 1, h, text ? text : "", l->text,
+                         UD_SANS);
+        if (focused && end < x + w - 4)
+            ud_fill(win, end + 1, y + 4, 1, h - 9, l->text);
+    } else {
+        ud_round(win, x, y, w, h, UG_R, l->field);
+        ud_ring(win, x, y, w, h, UG_R, l->danger);
+        ug_say(win, x + 6, y, h, text ? text : "", l->text, UD_SANS);
+    }
+    ud_text_l(win, x, y + h + 15, err, l->danger, UD_SANS, UD_PX);
+}
+
 /* Under Weave a v1 button's kind, from the colours it was asked for:
    the accent's face is the one thing to do, danger's face or words the
    destroying one, a quiet face with quiet words one not to be used now,
@@ -1095,13 +1207,16 @@ static inline void pu_draw_switch(int win, const struct ud_look *l, int x,
                 l->dark ? 0xEDEDF0 : 0xFFFFFF);
         return;
     }
+    /* not to be used now: the whole of it at two fifths, as the design
+       has it */
+    int a = (state & PU_OFF) ? 102 : 255;
     if (on) {
-        ud_round(win, x, y, w, h, h / 2, l->accent);
-        ud_disc(win, x + w - 3 - 16, y + 3, 16, 0xFFFFFF);
+        ud_round(win, x, y, w, h, h / 2, pu_mix(l->accent, l->bg, a));
+        ud_disc(win, x + w - 3 - 16, y + 3, 16, pu_mix(0xFFFFFF, l->bg, a));
     } else {
-        ud_round(win, x, y, w, h, h / 2, p.seg_on);
-        ud_ring(win, x, y, w, h, h / 2, p.knot);
-        ud_disc(win, x + 4, y + 4, 14, p.knob_off);
+        ud_round(win, x, y, w, h, h / 2, pu_mix(p.seg_on, l->bg, a));
+        ud_ring(win, x, y, w, h, h / 2, pu_mix(p.knot, l->bg, a));
+        ud_disc(win, x + 4, y + 4, 14, pu_mix(p.knob_off, l->bg, a));
     }
     if (state & PU_FOCUS)
         pu_draw_focus(win, l, x, y, w, h, h / 2);
@@ -1316,13 +1431,15 @@ static inline int pu_draw_one(struct ug *u, int i)
                          t->max, t->value, state);
         return 1;
     case UG_SWITCH: {
+        /* a switch with no words of its own stands where it was put */
+        int words = t->text && t->text[0];
         int sx = t->w > PU_SWITCH_W ? t->x + t->w - PU_SWITCH_W
-                                    : t->x + ud_width_l(t->text, UD_SANS,
-                                                        UD_PX) + 12;
+                 : words ? t->x + ud_width_l(t->text, UD_SANS, UD_PX) + 12
+                         : t->x;
         ug_say_l(win, t->x, t->y, t->h, t->text,
                  t->enabled ? l->text : l->dim, UD_SANS);
         pu_draw_switch(win, l, sx, t->y + (t->h - PU_SWITCH_H) / 2, t->value,
-                       state);
+                       state | (t->enabled ? 0 : PU_OFF));
         return 1;
     }
     case UG_SEGMENTS:
@@ -1333,6 +1450,75 @@ static inline int pu_draw_one(struct ug *u, int i)
         pu_draw_progress(win, l, t->x, t->y, t->w, t->value, t->max,
                          t->phase);
         return 1;
+    case UG_SPINNER: {
+        /* sin(15 k degrees) * 1024: the spool's dashes and the arc */
+        static const short sn[24] = { 0, 265, 512, 724, 887, 989, 1024, 989,
+            887, 724, 512, 265, 0, -265, -512, -724, -887, -989, -1024, -989,
+            -887, -724, -512, -265 };
+        int cx = t->x + PU_SPINNER / 2, cy = t->y + PU_SPINNER / 2, r = 8;
+        for (int k = 0; k < 24; k += 2)
+            ud_disc(win, cx + sn[k] * r / 1024 - 1,
+                    cy - sn[(k + 6) % 24] * r / 1024 - 1, 2, p.stitch);
+        int k0 = (t->phase % 1000) * 24 / 1000;
+        for (int k = k0; k < k0 + 6; k++) {
+            int a = k % 24, b = (k + 1) % 24;
+            ud_line(win, cx + sn[a] * r / 1024, cy - sn[(a + 6) % 24] * r / 1024,
+                    cx + sn[b] * r / 1024, cy - sn[(b + 6) % 24] * r / 1024, 32,
+                    l->accent);
+        }
+        return 1;
+    }
+    case UG_CARD: {
+        uint32_t bg = weave ? (l->dark ? PU_N_CARD : PU_L_CARD) : l->field;
+        uint32_t line = weave ? (l->dark ? PU_N_CARD_LINE : PU_L_CARD_LINE)
+                              : l->line;
+        ud_round(win, t->x, t->y, t->w, t->h, PU_CARD_R, bg);
+        ud_ring(win, t->x, t->y, t->w, t->h, PU_CARD_R, line);
+        if (t->text && t->text[0]) {
+            char caps[48];
+            int k = 0;
+            for (; t->text[k] && k < (int)sizeof(caps) - 1; k++)
+                caps[k] = t->text[k] >= 'a' && t->text[k] <= 'z'
+                          ? (char)(t->text[k] - 32) : t->text[k];
+            caps[k] = 0;
+            ud_text(win, t->x + PU_CARD_PAD, t->y + PU_CARD_PAD + 9, caps,
+                    l->dim, UD_BOLD, UD_PX);
+        }
+        return 1;
+    }
+    case UG_AVATAR: {
+        uint32_t c = t->rgb ? t->rgb : l->thread ? l->thread : l->accent;
+        int d = t->w;
+        char ini[2] = { t->text && t->text[0] ? t->text[0] : '?', 0 };
+        if (ini[0] >= 'a' && ini[0] <= 'z')
+            ini[0] = (char)(ini[0] - 32);
+        ud_disc(win, t->x, t->y, d, c);
+        ud_disc(win, t->x + 3, t->y + 3, d - 6, l->bg);
+        ud_disc(win, t->x + 6, t->y + 6, d - 12, c);
+        ud_text_mid(win, t->x, t->y, d, d, ini, 0xFFFFFF, UD_BOLD,
+                    d * 36 / 100);
+        return 1;
+    }
+    case UG_SIDE: {
+        int rh = pu_side_row(u), mono = t->kind2 == PU_SIDE_MONO;
+        for (int r = 0; r < t->max; r++) {
+            int y = t->y + r * rh;
+            const char *row = t->row ? t->row(t->ctx, r) : "";
+            if (r == t->value) {
+                ud_round(win, t->x, y + 2, t->w, rh - 4, 8,
+                         pu_mix(l->accent, l->bg, PU_SEL_A));
+                ud_disc(win, t->x + 10, y + rh / 2 - 3, 6, l->accent);
+                if (state)
+                    pu_draw_focus(win, l, t->x, y + 2, t->w, rh - 4, 8);
+            }
+            if (mono)
+                ug_say(win, t->x + 26, y, rh, row, l->text, UD_MONO);
+            else
+                ug_say_l(win, t->x + 26, y, rh, row, l->text,
+                         r == t->value ? UD_BOLD : UD_SANS);
+        }
+        return 1;
+    }
     case UG_KNOTS:
         for (int r = 0; r < t->max; r++) {
             int y = t->y + r * pu_knot_row(u);
@@ -1409,7 +1595,16 @@ static inline void ug_draw_one(struct ug *u, int i)
     }
 
     case UG_FIELD:
-        ug_draw_field(win, l, t->x, t->y, t->w, t->h, t->buf, u->focus == i);
+        if (!t->enabled && pu_weave(l)) {   /* not to be typed in now */
+            struct pu_ink p;
+            pu_ink_of(l, &p);
+            ud_stitch(win, t->x, t->y + t->h - 2, t->w, 0, p.stitch);
+            ug_say(win, t->x + 10, t->y - 1, t->h, t->buf ? t->buf : "",
+                   p.off_ink, UD_SANS);
+            break;
+        }
+        pu_draw_field(win, l, t->x, t->y, t->w, t->h, t->buf, u->focus == i,
+                      t->err);
         break;
 
     case UG_LIST: {
@@ -1494,12 +1689,14 @@ static inline int ug_hit(struct ug *u, int x, int y)
         int w = t->w ? t->w : ud_width(t->text, UD_SANS, UD_PX);
 
         if (t->kind == UG_LABEL || t->kind == UG_LINE ||
-            t->kind == UG_PROGRESS)
+            t->kind == UG_PROGRESS || t->kind == UG_SPINNER ||
+            t->kind == UG_CARD || t->kind == UG_AVATAR)
             continue;
         if (t->kind == UG_CHECK)
             w = 22 + ud_width(t->text, UD_SANS, UD_PX);
         if (t->kind == UG_SWITCH && t->w <= PU_SWITCH_W)
-            w = ud_width_l(t->text, UD_SANS, UD_PX) + 12 + PU_SWITCH_W;
+            w = (t->text && t->text[0]
+                 ? ud_width_l(t->text, UD_SANS, UD_PX) + 12 : 0) + PU_SWITCH_W;
         if (!t->enabled)
             continue;
         int x0 = t->x, y0 = t->y, h = t->h;
@@ -1676,6 +1873,16 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
             if (u->v2)
                 u->focus = id;
             return UG_CHANGED;
+        case UG_SIDE: {
+            struct ug_item *t = &u->it[id];
+            int r = (ev->y - t->y) / pu_side_row(u);
+            if (u->v2)
+                u->focus = id;
+            if (r < 0 || r >= t->max || r == t->value)
+                return UG_NOTHING;
+            t->value = r;
+            return UG_CHANGED;
+        }
         case UG_KNOTS: {
             struct ug_item *t = &u->it[id];
             int r = (ev->y - t->y) / pu_knot_row(u);
@@ -1742,7 +1949,8 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
                     j = k - 1;
                 int kd = u->it[j].kind;
                 if (u->it[j].enabled && kd != UG_LABEL && kd != UG_LINE &&
-                    kd != UG_PROGRESS) {
+                    kd != UG_PROGRESS && kd != UG_SPINNER && kd != UG_CARD &&
+                    kd != UG_AVATAR) {
                     u->focus = j;
                     if (which)
                         *which = j;
@@ -1766,9 +1974,11 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
                 t->value = !t->value;
                 return UG_CHANGED;
             }
-            if (t->kind == UG_SEGMENTS || t->kind == UG_KNOTS) {
-                int back = t->kind == UG_KNOTS ? KEY_UP : KEY_LEFT;
-                int on = t->kind == UG_KNOTS ? KEY_DOWN : KEY_RIGHT;
+            if (t->kind == UG_SEGMENTS || t->kind == UG_KNOTS ||
+                t->kind == UG_SIDE) {
+                int down = t->kind != UG_SEGMENTS;
+                int back = down ? KEY_UP : KEY_LEFT;
+                int on = down ? KEY_DOWN : KEY_RIGHT;
                 if (c == back && t->value > 0)
                     t->value--;
                 else if (c == on && t->value + 1 < t->max)
@@ -1857,6 +2067,8 @@ struct ug_modal {
     const char *yes, *no;
     int answer;                  /* 1 = yes, 0 = no, -1 = still asking */
     int list;                    /* a list widget to show inside, or -1 */
+    int danger;                  /* yes destroys: under Weave its selvedge
+                                    and its button madder (pu_sheet) */
 };
 
 #define UG_MODAL_H 116
@@ -1867,6 +2079,7 @@ static inline void ug_ask(struct ug_modal *m, const char *title,
                           const char *note, const char *yes, const char *no)
 {
     m->on = 1;
+    m->danger = 0;
     m->title = title;
     m->note = note ? note : "";
     m->buf = (char *)0;
@@ -1875,6 +2088,20 @@ static inline void ug_ask(struct ug_modal *m, const char *title,
     m->no = no;
     m->answer = -1;
     m->list = -1;
+}
+
+/* ProtonUI v2's question (docs/weave/canvas/Components.dc.html): under
+   Weave a card in the middle of the window for a pointer, a sheet up
+   from its foot for a finger - the title, what will happen, and the two
+   answers, yes on the right; one that destroys (danger) says so with a
+   madder selvedge and a madder yes. ug_modal_draw and ug_modal_event
+   do the rest, as for ug_ask. */
+static inline void pu_sheet(struct ug_modal *m, const char *title,
+                            const char *note, const char *yes,
+                            const char *no, int danger)
+{
+    ug_ask(m, title, note, yes, no);
+    m->danger = danger;
 }
 
 static inline void ug_ask_text(struct ug_modal *m, const char *title,
@@ -1919,10 +2146,131 @@ static inline void ug_answers(struct ug *u, int by, const char *yes,
                      l->text);
 }
 
+/* Where a question's panel and its two answers are - one place, for
+   the drawing and the clicking alike: v1's band across the middle, or
+   Weave's card (a pointer) or sheet (a finger) */
+struct ug_modal_at {
+    int x, y, w, h, r, by, bw, bh, yes_x, no_x, finger;
+};
+
+#define PU_SHEET_W   320
+#define PU_SHEET_H   170
+#define PU_SHEET_UP  210         /* a finger's sheet, from the window's foot */
+#define PU_SHEET_PAD 20
+
+static inline void ug_modal_at(struct ug *u, struct ug_modal_at *g)
+{
+    if (!pu_weave(&u->look)) {
+        g->x = 10;
+        g->w = u->w - 20;
+        g->y = ug_modal_y(u);
+        g->h = UG_MODAL_H;
+        g->r = 10;
+        g->bw = UG_BTN_W;
+        g->bh = UG_BTN_H;
+        g->by = g->y + UG_MODAL_H - UG_BTN_H - 12;
+        g->yes_x = ug_yes_x();
+        g->no_x = ug_no_x();
+        g->finger = 0;
+        return;
+    }
+    g->finger = u->look.density == UD_FINGER;
+    if (g->finger) {
+        g->x = 0;
+        g->w = u->w;
+        g->h = PU_SHEET_UP < u->h ? PU_SHEET_UP : u->h;
+        g->y = u->h - g->h;
+        g->r = 20;
+        g->bh = 44;
+    } else {
+        g->w = u->w - 40 < PU_SHEET_W ? u->w - 40 : PU_SHEET_W;
+        g->h = PU_SHEET_H;
+        g->x = (u->w - g->w) / 2;
+        g->y = (u->h - g->h) / 2;
+        g->r = 14;
+        g->bh = 32;
+    }
+    g->by = g->y + g->h - g->bh - 16;
+    g->bw = (g->w - 2 * PU_SHEET_PAD - 10) / 2;
+    g->no_x = g->x + PU_SHEET_PAD;
+    g->yes_x = g->no_x + g->bw + 10;
+}
+
+/* Words wrapped into lines w wide, lh apart, at most 'lines' of them */
+static inline void pu_wrap(int win, int x, int y, int w, int lh, int lines,
+                           const char *s, uint32_t c, int font, int px)
+{
+    char line[160];
+    int n = 0, k = 0, done = 0;
+    while (s && s[k] && done < lines) {
+        int e = k;
+        while (s[e] && s[e] != ' ')
+            e++;
+        char save[160];
+        int m = 0;
+        for (; m < n && m < (int)sizeof(save) - 1; m++)
+            save[m] = line[m];
+        int add = n ? 1 : 0;
+        if (n + add + (e - k) >= (int)sizeof(line) - 1)
+            break;
+        if (add)
+            line[n++] = ' ';
+        for (int q = k; q < e; q++)
+            line[n++] = s[q];
+        line[n] = 0;
+        if (ud_width(line, font, px) > w && m) {
+            save[m] = 0;
+            ud_text(win, x, y + done * lh, save, c, font, px);
+            done++;
+            n = 0;
+            for (int q = k; q < e; q++)
+                line[n++] = s[q];
+            line[n] = 0;
+        }
+        k = s[e] ? e + 1 : e;
+    }
+    if (n && done < lines)
+        ud_text(win, x, y + done * lh, line, c, font, px);
+}
+
 static inline void ug_modal_draw(struct ug *u, struct ug_modal *m)
 {
     if (!m->on)
         return;
+    if (pu_weave(&u->look)) {
+        const struct ud_look *l = &u->look;
+        struct ug_modal_at g;
+        ug_modal_at(u, &g);
+        ud_fill_a(u->win, 0, 0, u->w, u->h, 0x000000, l->dark ? 110 : 70);
+        uint32_t card = l->dark ? PU_N_SHEET : PU_L_SHEET;
+        uint32_t line = l->dark ? PU_N_SHEET_LINE : PU_L_SHEET_LINE;
+        /* a finger's sheet runs off the foot: its lower corners unseen */
+        int h = g.finger ? g.h + g.r : g.h;
+        ud_round(u->win, g.x, g.y, g.w, h, g.r, card);
+        ud_ring(u->win, g.x, g.y, g.w, h, g.r, line);
+        ud_fill(u->win, g.x + g.r, g.y, g.w - 2 * g.r, 3,
+                m->danger ? l->danger : l->accent);
+        int ty = g.y + 36;
+        if (g.finger) {
+            ud_round(u->win, g.x + g.w / 2 - 18, g.y + 8, 36, 5, 2, line);
+            ty += 8;
+        }
+        ud_text_l(u->win, g.x + PU_SHEET_PAD, ty, m->title, l->text, UD_BOLD,
+                  15);
+        pu_wrap(u->win, g.x + PU_SHEET_PAD, ty + 24, g.w - 2 * PU_SHEET_PAD,
+                18, 3, m->note, l->dim, UD_SANS, 13);
+        pu_draw_button(u->win, l, g.no_x, g.by, g.bw, g.bh, m->no,
+                       PU_SECONDARY, PU_TR);
+        if (m->danger) {
+            ud_round(u->win, g.yes_x, g.by, g.bw, g.bh, PU_BTN_R, l->danger);
+            ud_text_mid_l(u->win, g.yes_x, g.by, g.bw, g.bh, m->yes,
+                          0xFFFFFF, UD_BOLD, UD_PX);
+        } else {
+            pu_draw_button(u->win, l, g.yes_x, g.by, g.bw, g.bh, m->yes,
+                           PU_PRIMARY, PU_TR);
+        }
+        return;
+    }
 
     int x = 10, w = u->w - 20;
     int y = ug_modal_y(u);
@@ -1944,8 +2292,8 @@ static inline void ug_modal_draw(struct ug *u, struct ug_modal *m)
 static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
                                  const struct win_event *ev)
 {
-    int y = ug_modal_y(u);
-    int by = y + UG_MODAL_H - UG_BTN_H - 12;
+    struct ug_modal_at g;
+    ug_modal_at(u, &g);
 
     if (!m->on)
         return UG_NOTHING;
@@ -1956,13 +2304,13 @@ static inline int ug_modal_event(struct ug *u, struct ug_modal *m,
         return UG_CLOSED;
     }
     if (ev->type == WEV_CLICK) {
-        if (ev->y >= by && ev->y < by + UG_BTN_H) {
-            if (ev->x >= ug_yes_x() && ev->x < ug_yes_x() + UG_BTN_W) {
+        if (ev->y >= g.by && ev->y < g.by + g.bh) {
+            if (ev->x >= g.yes_x && ev->x < g.yes_x + g.bw) {
                 m->on = 0;
                 m->answer = 1;
                 return UG_PRESSED;
             }
-            if (ev->x >= ug_no_x() && ev->x < ug_no_x() + UG_BTN_W) {
+            if (ev->x >= g.no_x && ev->x < g.no_x + g.bw) {
                 m->on = 0;
                 m->answer = 0;
                 return UG_PRESSED;

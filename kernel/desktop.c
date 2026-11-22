@@ -282,6 +282,8 @@ static const struct { const char *app, *label; int art; } known_apps[] = {
     { "ggallery", "Gallery", ART_GALLERY },
     { "gcamera", "Camera", ART_CAMERA },
     { "grecord", "Recorder", ART_RECORDER },
+    /* ProtonUI v2's catalogue: the palette is the Weave design's swatch */
+    { "gswatch", "Swatch", 10 },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -815,7 +817,7 @@ static const char *const context_items[] = {
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_APP,
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint", "ggallery",
-                                  "gcamera", "grecord", "gcode"};
+                                  "gcamera", "grecord", "gcode", "gswatch"};
 
 /* Under a line at the bottom of the same menu: not programs but what is
    done to the session and to the machine. The three that end something
@@ -5571,7 +5573,8 @@ static const struct {
     const char *apps[8];
 } lv_threads[LV_ROWS] = {
     { "Work", DYE_INDIGO_N, DYE_INDIGO_L, 0xB7C5FF,
-      { "gfiles", "gedit", "gcode", "gterm", "gtasks", "gcal", "gcalc", 0 } },
+      { "gfiles", "gedit", "gcode", "gswatch", "gterm", "gtasks", "gcal",
+        0 } },
     { "Web and people", DYE_WOAD_N, DYE_WOAD_L, 0x9FECEC,
       { WEB_APP, 0 } },
     { "Pictures and sound", DYE_COCHINEAL_N, DYE_COCHINEAL_L, 0xF2A6D6,

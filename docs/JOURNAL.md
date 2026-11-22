@@ -11435,3 +11435,47 @@ works and is checked by `make test`.
       still goes home; with the switch off the thread is drawn over it,
       the design's line, the window's knot in the middle in Weld,
       ringed in white; held again it leaves the whole screen.
+- [x] **Swatch, and the rest of ProtonUI v2's controls** (user64/gswatch.c,
+      user/ugui.h, kernel/desktop.c, Makefile, scripts/tests/t_swatch.py,
+      scripts/run_tests.py, docs/protonui-plan.md)
+      The plan's next program after stage 7 (docs/weave/canvas/
+      Swatch.dc.html): ProtonUI v2's own catalogue, for someone writing a
+      program for ThreadOS. Down the left every control user/ugui.h has,
+      in the mono face; in the middle the chosen one in each of its
+      states - drawn by the toolkit itself, on a ground of the theme
+      chosen at the preview's corner, Night or Linen, whatever the
+      desktop is in - and one to try; under them the real calls that
+      make it, to copy, and what it sends, the one to try saying what it
+      sent last. On the right, Start a program: four templates (a window
+      with a list, Settings-like, a phone program, a game), a name, and
+      Make it - a project in ~/Projects with a ProtonUI v2 main.c, first
+      among the projects Code opened lately, and Code started on it.
+      For a whole catalogue the toolkit grew what Components.dc.html has
+      and it did not: pu_spinner (the thread winding onto a dashed
+      spool), pu_card (a surface with a heading in capitals),
+      pu_avatar (an initial on the person's colour, ringed with a gap),
+      pu_side (sections down the side, PU_SIDE_MONO for code names),
+      pu_field_error (the stitch madder and why, under the field), and
+      pu_sheet - Weave's question, a card in the middle for a pointer
+      and a sheet up from the foot for a finger, with a madder selvedge
+      and yes when it destroys - and ProtonUI's names for the events
+      (PU_CHANGED and the rest). An unavailable switch and field are
+      drawn at two fifths, as the design has it, and a switch with no
+      words no longer stands twelve pixels off for words it does not
+      have.
+      t_swatch (new): under Weave, Swatch opens at its smaller size; the
+      list reads as gswatch.c's catalogue in the mono face, pu_switch's
+      knot in the accent; its heading, its four states (off, on in the
+      accent, focused with the thread round it, unavailable at two
+      fifths of ugui.h's off knob over the ground) and its first line
+      of C as gswatch.c writes it; the one to try clicked says
+      PU_CHANGED 0 and is off; pu_button pressed in ugui.h's pressed
+      indigo; pu_field wrong, its stitch madder and why under it;
+      pu_card's ground and its heading in capitals; pu_avatar in
+      Cochineal ringed with a gap; Linen's ground in the preview while
+      the window stays Night's; a right click on pu_menu's one to try
+      opens the toolkit's menu and its second line comes back as
+      PU_CHOSEN 1; pu_sheet's question with a madder selvedge and its
+      title, its madder yes coming back as PU_PRESSED 1; and Make it
+      with the Settings-like template - its main.c named and from the
+      template, the project first in ~/.code-projects, Code running.
