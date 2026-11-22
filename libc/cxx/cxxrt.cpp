@@ -169,7 +169,9 @@ size_t __mbsnrtowcs_chk(wchar_t *d, const char **s, size_t nms, size_t n,
     return mbsnrtowcs(d, s, nms, n, ps);
 }
 // The large-file names: off_t is 64 bits here already (std::fstream's
-// members call the descriptor ones)
+// members call the descriptor ones, and std::filebuf opens with
+// fopen64 - clang's driver opens files through it)
+FILE *fopen64(const char *path, const char *mode) { return fopen(path, mode); }
 off_t ftello64(FILE *f) { return ftello(f); }
 int fseeko64(FILE *f, off_t off, int whence) { return fseeko(f, off, whence); }
 off_t lseek64(int fd, off_t off, int whence) { return lseek(fd, off, whence); }
