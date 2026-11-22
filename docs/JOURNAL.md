@@ -11352,3 +11352,36 @@ works and is checked by `make test`.
       download's "41 %" and a bar 41 % long, a call counting up in its
       own colour, and the end taking it away; and, under the Mac style,
       the timer on the black island at the top, its title and its count.
+- [x] **Long command lines, and programs named by their path**
+      (kernel64/proc64.c, kernel64/proc64.h, kernel64/elf64.c,
+      kernel/prog.c, kernel64/shell64.c, kernel64/compat64.c,
+      kernel64/kmain64.c, kernelarm64/proc.c, libc/overlay/crt/crt1.c,
+      libc/overlay/src/threados/syscall.c, libc/tests/argtest.c,
+      scripts/tests/t_args.py)
+      Found on the way to a compiler: clang hands its linker some thirty
+      paths and finds that linker by a path of its own, /usr/bin/ld.lld,
+      beside itself. Neither got through. A program was given at most
+      sixteen arguments of 255 characters and the rest were dropped
+      without a word - a program told half of what it was asked does the
+      wrong thing quietly - and execve passed on only the last part of a
+      path, which the kernel looked for in the initrd and where the task
+      stood. A program's arguments are now copied packed, one string
+      after another, in a block on the heap as large as they are (a
+      table of slots big enough would not fit the 16 KiB kernel stack it
+      was copied on): up to 64 KiB, half of what clang lets a command
+      line grow to before it moves it into a response file, and more is
+      refused with E2BIG. The pages the arguments go into are mapped
+      before the kernel writes them. execve's path reaches the kernel
+      whole: a path is the file it names, then the initrd's program of
+      its last part (execvp's "sh" goes on finding the initrd's), then
+      that part where the task stands, where it was looked for before; a
+      bare name is the initrd's and then the working directory's, as it
+      was. The ARM64 kernel, whose programs are its initrd's, takes the
+      path's last part. crt1 sizes its block to argc instead of cutting
+      at 64. t_args makes a disk with argtest at its root and a copy of
+      it at /usr/libexec/threados/argecho, a name in neither of the old
+      places: argtest starts the copy by that path with 301 arguments,
+      11 KB of them, one 3000 characters long, and the copy's count,
+      byte total and FNV-1a hash are held to what the test works out
+      from the same rule; 70 KB of arguments are refused with E2BIG and
+      argtest goes on; the kernel's shell hands a program 27 words.
