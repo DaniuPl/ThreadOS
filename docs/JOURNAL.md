@@ -11301,3 +11301,31 @@ works and is checked by `make test`.
       is the program's choice; a row swiped aside shows Rename and
       Delete, and a tap on Delete is told for that row. t_protonui's PC
       part follows the pointer's new sizes.
+- [x] **C++'s timed waits wait** (libc/cxx/compat.h,
+      libc/tests/clockwait.cpp, Makefile, scripts/tests/t_clockwait.py,
+      scripts/run_tests.py)
+      libstdc++ was configured for glibc, and every wait_for, every
+      try_lock_for and every wait_until on steady_clock reaches glibc's
+      clock-taking waits - pthread_cond_clockwait,
+      pthread_mutex_clocklock, pthread_rwlock_clockrdlock and
+      clockwrlock - with CLOCK_MONOTONIC and a steady_clock deadline.
+      compat.h answered the first two with musl's timed calls and threw
+      the clock away, and musl reads those deadlines on CLOCK_REALTIME.
+      On ThreadOS CLOCK_REALTIME is seconds since 1970 and
+      CLOCK_MONOTONIC ticks since boot, so the deadline had gone decades
+      before the wait began: every such wait timed out at once, and a
+      worker sleeping in cv.wait_for(lk, 100ms) spun. compat.h now moves
+      a deadline onto CLOCK_REALTIME first - now on the wall clock plus
+      what is left of it on its own clock, the nanoseconds carried, a
+      deadline at either end of time_t kept there and one musl would
+      refuse left for it to refuse - in one helper the four calls share;
+      CLOCK_REALTIME passes through. The rwlock pair is new:
+      std::shared_timed_mutex's try_lock_for and try_lock_shared_for
+      did not link before. libc/tests/clockwait.cpp waits every way
+      libstdc++ does and calls the four straight, each wait timed on
+      steady_clock. t_clockwait (new) fetches it onto the disk and runs
+      it, and builds the same file against glibc on the host: each
+      outcome (timeout, woken, taken, ETIMEDOUT, EINVAL) is glibc's, and
+      each time within bounds of glibc's - a 300 ms wait at least 250 ms
+      and short of 1250, a worker in 100 ms steps wakes 5 to 15 times a
+      second.

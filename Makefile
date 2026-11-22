@@ -1717,8 +1717,18 @@ $(BUILD)/user64/bigprog.elf: libc/tests/bigprog.c $(BUILD)/gen/bigprog-ro.bin \
 	$(TOS_CC) -O2 -Wall -Wextra -Wa,-I$(BUILD)/gen -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs libcrypto)
 
+# clockwait: C++'s timed waits - condition variables, timed and shared
+# timed mutexes - timed on steady_clock, which libc/cxx/compat.h has to
+# move onto musl's clock (t_clockwait). Only a test needs it, so it
+# goes to the disk and leaves the initrd the size it was.
+$(BUILD)/user64/clockwait.elf: libc/tests/clockwait.cpp libc/cxx/compat.h \
+                               $(BUILD)/libc64/cxxrt.o libc/libc64.ld \
+                               | $(BUILD)/user64 $(BUILD)/libc64
+	$(CXX) $(CXX64_FLAGS) -Wall -Wextra -c $< -o $(BUILD)/libc64/clockwait.o
+	$(call CXX64_LINK,$(BUILD)/libc64/clockwait.o) -o $@
+
 # Programs built for the disk rather than the initrd
-DISK64_ELFS := $(BUILD)/user64/bigprog.elf
+DISK64_ELFS := $(BUILD)/user64/bigprog.elf $(BUILD)/user64/clockwait.elf
 
 # --- WebKit: JavaScriptCore -------------------------------------------
 # WPE WebKit's release (third_party/README.md), built by its own CMake
