@@ -11385,3 +11385,54 @@ works and is checked by `make test`.
       byte total and FNV-1a hash are held to what the test works out
       from the same rule; 70 KB of arguments are refused with E2BIG and
       argtest goes on; the kernel's shell hands a program 27 words.
+- [x] **clang on ThreadOS: C compiled and linked on the system itself**
+      (third_party/llvm/, Makefile, apps/clang/threados.cfg,
+      apps/webkit/threados.cmake, libc/cxx/compat.h, libc/cxx/cxxrt.cpp,
+      scripts/mknotices.py, third_party/README.md,
+      scripts/tests/t_clang.py, scripts/tests/clang/)
+      The first step to programming in C and C++ on ThreadOS rather than
+      for it. LLVM rather than GCC: Apache-2.0, one compiler for the PC
+      and the phone, and the same LLVM can later carry Rust's compiler.
+      LLVM 23.1.6's release archive is in third_party/llvm in four parts
+      (no file on GitHub may be over 100 MB), and the Makefile checks
+      the SHA-256 of the whole before it unpacks it, leaving out LLDB,
+      Flang, MLIR and the test suites; mknotices.py reads an archive in
+      parts, and now every archive in one pass rather than one per
+      licence file. LLVM's own CMake builds clang, lld and seven binary
+      tools as one static program, `llvm` (107 MB, the X86 and AArch64
+      back ends), through WebKit's toolchain file, with ThreadOS's
+      defaults compiled in (lld, compiler-rt, no unwinder, no PIE);
+      compiler-rt's builtins and crtbegin/crtend come from the same
+      archive, without the frame registry, since programs carry no
+      unwind tables. `make clang` (hours; not in the default build)
+      lays out BUILD/clang-sdk as it lies on a disk: /usr/bin/llvm with
+      a symbolic link for each name, clang's headers and the builtins
+      under /usr/lib/clang/23, musl's headers and libraries, the linker
+      script, and apps/clang/threados.cfg beside the compiler saying
+      what a ThreadOS program is: static, not position-independent,
+      linked by libc/libc64.ld, no RELRO (lld will not have .tdata,
+      after .data in the script, among read-only-after-start sections).
+      What it took besides: the kernel taking long command lines and
+      paths (the entry before); two more glibc names for libstdc++'s
+      <shared_mutex> in compat.h and fopen64 in cxxrt.cpp; symbolic
+      rather than hard links, because a compile that also links runs
+      the compiler proper as a second process, started as the program
+      clang's own path resolves to with the tool's name first (`llvm
+      clang -cc1`) - through a hard link the path stays clang, which
+      read "clang" as a file; and -fno-color-diagnostics said to -cc1
+      directly, since its formatted_raw_ostream colours on any terminal
+      and ThreadOS's consoles print the escape sequences as text.
+      t_clang boots on a disk holding the tree and, typed into the
+      shell: clang --version names 23.1.6 and its target; a hello world
+      is built and runs with its arguments; scripts/tests/clang/ccprog.c
+      - 128-bit division and conversions from compiler-rt, the x87's
+      long double, floating point to the digit, threads with
+      thread-local storage, qsort, switch tables, files - prints line
+      for line what the same source built by the host's gcc against
+      glibc prints; two sources become one program in one command; a
+      mistake is pointed at as "ccbad.c:6:20: error: use of undeclared
+      identifier" and clang ends with 1; and the program it wrote, read
+      off the disk, is an executable at 0x40000000 without relocation
+      sections. 82 s under QEMU without KVM. Next: the tree on an
+      installed system, Code's C template building with it, C++'s
+      library, and a shell and make.

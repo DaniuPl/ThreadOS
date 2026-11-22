@@ -187,7 +187,9 @@ def main():
                   want_two, in_order(want_two, out) is None)
 
             out = compile_on(q, "ccbad.c")
-            check("a mistake is pointed at by file, line and column",
+            said = [l for l in out.split("\n") if "error" in l][:2]
+            check("a mistake is pointed at by file, line and column (%r)" %
+                  said,
                   re.search(r"ccbad\.c:6:\d+: error: use of undeclared "
                             r"identifier 'undeclared_name'", out) is not None)
             check("and clang ends with code 1", code_of(out, CLANG) == 1)
