@@ -11270,3 +11270,34 @@ works and is checked by `make test`.
       stitch becoming the thread; and under the Mac style the same
       window drawn the old way. pudemo is started with 'runw', which
       does not hold the shell, so the test can change the style after.
+- [x] **ProtonUI v2 stage 5: density and touch** (user/ugui.h,
+      kernelarm64/mobile.c, kernelarm64/winmob.h, libc/tests/pudemo.c
+      (from user/), Makefile, scripts/ptest.py,
+      scripts/tests/t_arm64win.py, scripts/tests/t_protonui.py,
+      docs/protonui-plan.md)
+      A finger is fatter than a pointer, and the phone's look has said
+      so since stage 1 (its density word) without anything listening.
+      Under pu_start the toolkit now does: a list's rows are 28 for a
+      pointer and 48 for a finger, a box's row and a field as tall as a
+      target (24 or 44), knots one target apart, and a thing smaller
+      than a target still takes a tap that lands within a target round
+      its middle. A finger held still for half a second on a program's
+      window is told to it as a right click (WEV_ALTCLICK, the phone's
+      kernelarm64/mobile.c), which ugui answers as UG_MENU over the
+      thing under it - a list's row chosen first; pu_menu opens a menu
+      there, drawn over everything, a line of it coming back as
+      UG_CHOSEN. A list's row swiped left shows its actions at its end
+      (pu_list_actions; UG_SWIPED, and a tap on one UG_ACTION, the last
+      drawn as the one that destroys); swiped right it goes back. v1
+      windows keep their rows of 18 and see none of it. pudemo moved to
+      libc/tests/ as a musl program for both machines, laid out for the
+      density it is told - for a finger one column as wide as the
+      phone's screen - and saying where its controls are.
+      t_arm64win (new part): on the phone pudemo says a finger, rows of
+      48 and targets of 44; its chosen row is 46 of 48 pixels filled on
+      the screen (92 panel pixels at 200%); a tap six pixels above the
+      switch's row - outside it, inside the target round it - turns the
+      switch; a finger held on a row opens its menu and a tap on a line
+      is the program's choice; a row swiped aside shows Rename and
+      Delete, and a tap on Delete is told for that row. t_protonui's PC
+      part follows the pointer's new sizes.

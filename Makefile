@@ -242,7 +242,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/cryptotest.elf \
                $(BUILD)/user64/certtest.elf \
                $(BUILD)/user64/aestest.elf \
-               $(BUILD)/user64/pumarks.elf $(BUILD)/user64/pudemo.elf \
+               $(BUILD)/user64/pumarks.elf \
                $(BUILD)/user64/wpatest.elf \
                $(BUILD)/user64/nslookup.elf \
                $(BUILD)/user64/httpget.elf \
@@ -545,6 +545,14 @@ $(BUILD)/user64/pulook.elf: libc/tests/pulook.c $(LIBC64) libc/libc64.ld \
 	$(CC) $(LIBC64_CFLAGS) -Iuser64 -Wall -Wextra -c $< -o $(BUILD)/libc64/pulook.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/pulook.o) -o $@
 
+# pudemo: ProtonUI v2's controls, laid out for a pointer or a finger -
+# musl, for both machines, drawing through user/ugui.h
+$(BUILD)/user64/pudemo.elf: libc/tests/pudemo.c user/ugui.h user/udraw.h \
+                            $(LIBC64) libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -DTHREADOS_LIBC -Iuser -Iuser64 -Wall -Wextra \
+	    -c $< -o $(BUILD)/libc64/pudemo.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/pudemo.o) -o $@
+
 # Signals: handlers with siginfo_t and the interrupted registers, masks,
 # sigsuspend, waits that go on, WebKit's way of stopping a thread - the
 # same program the ARM64 kernel runs, and the tests compare both with
@@ -794,7 +802,7 @@ USER64_ELFS += $(BUILD)/user64/libctest.elf $(BUILD)/user64/js.elf \
                $(BUILD)/user64/fswrite.elf $(BUILD)/user64/permtest.elf \
                $(BUILD)/user64/bigmap.elf \
                $(BUILD)/user64/ipctest.elf $(BUILD)/user64/sigtest.elf \
-               $(BUILD)/user64/pulook.elf \
+               $(BUILD)/user64/pulook.elf $(BUILD)/user64/pudemo.elf \
                $(BUILD)/user64/bigram.elf \
                $(BUILD)/user64/glibtest.elf \
                $(BUILD)/user64/imgtest.elf $(BUILD)/user64/xmltest.elf \
@@ -2425,7 +2433,7 @@ libcarm64: $(LIBCARM)
 # kernel's program address. The test programs of libc/tests are the
 # PC's, unchanged - the point of them is that they print the same.
 MUSLARM_PROGS := libctest pthreadtest ipctest nettest wintest randtest \
-                 sigtest notetest sndtest pulook
+                 sigtest notetest sndtest pulook pudemo
 MUSLARM_ELFS  := $(patsubst %,$(BUILD)/arm64/libc/%.elf,$(MUSLARM_PROGS))
 LIBCARM_CFLAGS := -std=gnu11 -O2 -march=armv8-a -mno-outline-atomics \
                   -fno-stack-protector -fno-pic \
@@ -2442,9 +2450,11 @@ $(BUILD)/arm64/libc:
 
 # ThreadOS's own calls, the PC's library of them (its AArch64 branch)
 USYSARM_ELFS := $(patsubst %,$(BUILD)/arm64/libc/%.elf,wintest notetest sndtest \
-                  pulook)
+                  pulook pudemo)
 $(USYSARM_ELFS): LIBCARM_CFLAGS += -Iuser64
 $(USYSARM_ELFS): user64/usys64.h
+$(BUILD)/arm64/libc/pudemo.elf: LIBCARM_CFLAGS += -Iuser -DTHREADOS_LIBC
+$(BUILD)/arm64/libc/pudemo.elf: user/ugui.h user/udraw.h
 
 $(BUILD)/arm64/libc/%.elf: libc/tests/%.c $(MUSLARM_STAMP) libc/libcarm64.ld \
                            | $(BUILD)/arm64/libc

@@ -156,6 +156,16 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
   actions out.
 - **Test:** `pudemo` on the phone (`t_arm64win`): the rows are 48 px,
   a tap on a 44 px target lands, a long press opens the menu.
+- **Done** (journal: "ProtonUI v2 stage 5"). `pu_density`, `pu_row` and
+  `pu_target` from the look; under `pu_start` a list's rows, a box's
+  and a field's height and the least of what is aimed at follow it,
+  and a thing smaller than a target takes a tap within one round it.
+  The phone tells a finger held still for half a second to the program
+  as a right click (`WEV_ALTCLICK`), which `ugui` answers with
+  `UG_MENU`; `pu_menu` is the menu, its line `UG_CHOSEN`. A list row
+  swiped left shows its actions (`pu_list_actions`, `UG_SWIPED`, a tap
+  on one `UG_ACTION`). `pudemo` moved to `libc/tests/`, musl for both
+  machines, laid out for the density it is told.
 
 ## Stage 6 - the shell - 2 days
 

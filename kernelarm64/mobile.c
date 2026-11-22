@@ -46,6 +46,7 @@
 
 #include <stdint.h>
 #include "mobile.h"
+#include "arm64.h"
 #include "rtc.h"
 #include "thread.h"
 #include "touch.h"
@@ -91,6 +92,9 @@
                                    a tap there is the program's */
 #define MOB_SAFE_UP    20       /* below programs' windows: the home
                                    indicator's own strip */
+#define MOB_LONG_MS    500      /* a finger held this long, still, on a
+                                   program's window is a right click */
+#define MOB_STILL      10       /* ... moved no further than this */
 #define MOB_TITLE_PX   22
 #define MOB_TITLE_Y    68
 #define MOB_ROW_PX     15
@@ -2153,7 +2157,12 @@ static void tap(int x, int y)
     }
 }
 
-static struct { int on, x0, y0, program, edge; } finger;
+static struct {
+    int on, x0, y0, program, edge;
+    uint64_t at;                 /* when it went down (the counter) */
+    int moved, longed;           /* it went further than MOB_STILL; it was
+                                    told to the program as a long press */
+} finger;
 
 /* Where the phone's own bottom begins: the home gesture's edge, or
    the bar of Android's buttons */
@@ -2177,6 +2186,8 @@ static void touch(const struct touch_event *e)
         finger.on = 1;
         finger.x0 = e->x;
         finger.y0 = e->y;
+        finger.at = counter_now();
+        finger.moved = finger.longed = 0;
         last_x = e->x;
         last_y = e->y;
         printk("[touch] down %d,%d\n", e->x, e->y);
@@ -2200,6 +2211,9 @@ static void touch(const struct touch_event *e)
     }
     if (!finger.on)
         return;
+    if (e->x - finger.x0 > MOB_STILL || finger.x0 - e->x > MOB_STILL ||
+        e->y - finger.y0 > MOB_STILL || finger.y0 - e->y > MOB_STILL)
+        finger.moved = 1;
     if (finger.program)
         to_program(e->kind == TOUCH_UP ? WEV_RELEASE : WEV_DRAG, e->x, e->y);
     if (!shade && screen == APP_DRAW && finger.y0 > MOB_TITLE_Y + 12 &&
@@ -2396,6 +2410,14 @@ void mobile_main(void *arg)
         struct touch_event e;
         while (touch_next(&e))
             touch(&e);
+        /* A finger held still on a program's window: what a right click
+           is to the mouse - the program's menu, ProtonUI's UG_MENU */
+        if (finger.on && finger.program && !finger.moved && !finger.longed &&
+            counter_now() - finger.at >= timer_freq() * MOB_LONG_MS / 1000) {
+            finger.longed = 1;
+            printk("[touch] long press %d,%d\n", finger.x0, finger.y0);
+            to_program(WEV_ALTCLICK, finger.x0, finger.y0);
+        }
         /* Programs: a window made is shown (once the phone is open), one
            drawn into is drawn again, one whose program ended is left */
         int fresh = winmob_take_new();

@@ -29,7 +29,7 @@ stitch's dashes and gaps, each knot's centre and the ring around it
 all of it), and the thread through the points of its Bezier curve, with
 the background a little way off it.
 
-Stage 4, the controls: user/pudemo puts every control of ProtonUI v2
+Stage 4, the controls: libc/tests/pudemo puts every control of ProtonUI v2
 in a window with pu_start - buttons of the four kinds, two switches,
 segments, knots, two boxes, a field, a slider, a list and both kinds of
 progress - and says on the serial port what it was told. Under Weave
@@ -260,7 +260,7 @@ def marks():
 
 
 def demo_define(name):
-    return _kernel_define("user/pudemo.c", name)
+    return _kernel_define("libc/tests/pudemo.c", name)
 
 
 D = {n: demo_define(n) for n in (
@@ -402,14 +402,18 @@ def controls():
               "hollow (%s)" % [kc(r) for r in range(3)],
               kc(1) == rgb(accent) and kc(0) == rgb(bg) and kc(2) == rgb(bg))
 
-        b1, b2 = D["CK_Y"] + 1, D["CK2_Y"] + 1
+        # a box's row, and a field, are as tall as a pointer's target
+        target = ugui_define("PU_TARGET_POINTER")
+        box_h = max(ugui_define("UG_ROW"), target)
+        b1 = D["CK_Y"] + (box_h - 16) // 2
+        b2 = D["CK2_Y"] + (box_h - 16) // 2
         check("boxes: ticked, the accent's; not, empty inside a grey ring "
               "(%s %s)" % (px(D["CK_X"] + 2, b1 + 2), px(D["CK_X"] + 8, b2 + 8)),
               px(D["CK_X"] + 2, b1 + 2) == rgb(accent) and
               px(D["CK_X"] + 8, b2 + 8) == rgb(bg) and
               near(px(D["CK_X"] + 8, b2), rgb(C["PU_N_KNOT"]), 30))
 
-        fy = D["FLD_Y"] + ugui_define("UG_ROW") + 4 - 2
+        fy = D["FLD_Y"] + max(ugui_define("UG_ROW") + 4, target) - 2
         row = [px(x, fy) for x in range(D["FLD_X"], D["FLD_X"] + D["FLD_W"])]
         st, fi = row.count(rgb(C["PU_N_STITCH"])), row.count(rgb(C["PU_N_FIELD"]))
         check("the field at rest: its stitch dashed under it (%d stitch, %d "
@@ -425,7 +429,8 @@ def controls():
               px(pv, D["PR_Y"] + 5) == (255, 255, 255) and
               rgb(C["PU_N_STITCH"]) in tail)
 
-        lr = px(D["LST_X"] + D["LST_W"] - 12, D["LST_Y"] + 18 + 9)
+        row = ugui_define("PU_ROW_POINTER")
+        lr = px(D["LST_X"] + D["LST_W"] - 12, D["LST_Y"] + row + row // 2)
         check("the list's chosen row: the accent faint behind it (%s)" % (lr,),
               lr == mix(accent, LOOK["NIGHT_APP_FIELD"],
                         ugui_define("PU_SEL_A")))
@@ -448,7 +453,7 @@ def controls():
         shot()
         check("a click on the third knot: it is filled, the second hollow",
               ok and kc(2) == rgb(accent) and kc(1) == rgb(bg))
-        click(D["CK_X"] + 8, D["CK2_Y"] + 9)
+        click(D["CK_X"] + 8, b2 + 8)
         check("a click ticks the second box",
               wait_said(q, "[pudemo] changed Send reports 1"))
         click(D["B0_X"] + 20, my)
