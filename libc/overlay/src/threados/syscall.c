@@ -1486,13 +1486,12 @@ static long do_execve(const char *path, char *const argv[])
 	int e = path_ok(path);
 	if (e)
 		return e;
-	/* ThreadOS runs programs by their name in the initrd */
-	const char *name = path;
-	for (const char *p = path; *p; p++)
-		if (*p == '/')
-			name = p + 1;
-	long r = tos(T_EXEC, (long)name, slen(name), (long)argv, 0);
-	return r < 0 ? -ENOENT : r;
+	/* The path goes whole: the kernel looks a program up by it, and by
+	   its last part in the initrd (kernel/prog.c) */
+	char t[T_PATH];
+	path = tidy(path, t);
+	long r = tos(T_EXEC, (long)path, slen(path), (long)argv, 0);
+	return r == -2 ? -E2BIG : r < 0 ? -ENOENT : r;
 }
 
 /* One kernel handler for the process, one entry per signal here */

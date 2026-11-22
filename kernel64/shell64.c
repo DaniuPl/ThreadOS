@@ -65,8 +65,8 @@
 #include "../kernel/include/vga.h"
 #include "../kernel/include/mouse.h"
 
-/* As long as a program's whole argument may be (ARG_LEN): a URL with a
-   query, handed to curl, is past eighty characters soon enough */
+/* A URL with a query, handed to curl, is past eighty characters soon
+   enough, and a compiler's command line names a few paths */
 #define LINE_MAX 256
 
 static int sudo_one_shot;
@@ -1630,27 +1630,22 @@ static void execute(const char *line)
         }
         /* The rest of the line is the program's arguments - the shell
            only splits it into words, and what comes of them is the
-           program's business. Four kilobytes are too many for the
-           shell's stack, so they are borrowed from the heap; the spawn
-           copies them before it returns. */
-        struct args64 *args = kmalloc(sizeof(*args));
+           program's business. The line is the most they can take; the
+           spawn copies them before it returns. */
+        struct args64 *args = args64_new(LINE_MAX);
         if (!args) {
             printk("run: no memory for the arguments\n");
             return;
         }
-        args->argc = 0;
-        for (int i = 4; line[i] && args->argc < ARG_MAX; ) {
+        for (int i = 4; line[i]; ) {
             while (line[i] == ' ')
                 i++;
             if (!line[i])
                 break;
-            int k = 0;
-            while (line[i] && line[i] != ' ' && k < ARG_LEN - 1)
-                args->v[args->argc][k++] = line[i++];
-            args->v[args->argc][k] = '\0';
-            args->argc++;
+            int start = i;
             while (line[i] && line[i] != ' ')
                 i++;
+            args64_add(args, line + start, (uint32_t)(i - start));
         }
 
         uint32_t frames_before = pmm_used_frames();
@@ -1658,7 +1653,7 @@ static void execute(const char *line)
         uint32_t stack_before = isr64_stack_pages();
         uint32_t files_before = isr64_mmap_pages();
         int id = proc64_spawn(name, args->argc ? args : 0, 0);
-        kfree(args);
+        args64_free(args);
         if (id < 0) {
             printk("run: could not start '%s'\n", name);
             return;

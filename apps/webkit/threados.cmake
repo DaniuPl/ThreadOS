@@ -3,8 +3,9 @@
 # ThreadOS programs are built by the host's compilers against musl
 # (libc/): musl's headers and the host libstdc++'s in front of the
 # host's own, everything static, and musl's start files around the
-# objects. WebKit's build is CMake's, so this says the same to it. The
-# Makefile passes the paths:
+# objects. WebKit's build is CMake's, so this says the same to it -
+# and to LLVM's, whose clang runs on ThreadOS (the Makefile's clang
+# rules). The Makefile passes the paths:
 #
 #   THREADOS_MUSL   the musl install (include/, lib/)
 #   THREADOS_REPO   the repository (libc/cxx/compat.h, libc/libc64.ld)

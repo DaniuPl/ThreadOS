@@ -18,6 +18,7 @@
 #include "keyboard64.h"
 #include "signal64.h"
 #include "../kernel/include/printk.h"
+#include "../kernel/include/string.h"
 #include "../kernel/include/keyboard.h"
 
 struct task;
@@ -102,11 +103,23 @@ int task_reclaim_page(void)
  */
 int exec_spawn(const char *cmdline)
 {
-    struct args64 args = { 0 };
     int i = 0;
 
     if (!cmdline) {
         printk("[desktop] no command to start\n");
+        return -1;
+    }
+    uint32_t len = 0;
+    while (cmdline[len])
+        len++;
+    if (len >= ARG_BYTES) {
+        printk("[desktop] the command is too long\n");
+        return -1;
+    }
+    /* No more than the command itself: its words and their zeros */
+    struct args64 *args = args64_new(len + 1);
+    if (!args) {
+        printk("[desktop] no memory for the command\n");
         return -1;
     }
     while (cmdline[i]) {
@@ -114,33 +127,21 @@ int exec_spawn(const char *cmdline)
             i++;
         if (!cmdline[i])
             break;
-        if (args.argc == ARG_MAX) {
-            printk("[desktop] too many command arguments\n");
-            return -1;
-        }
-        int n = 0;
-        while (cmdline[i] && cmdline[i] != ' ') {
-            if (n == ARG_LEN - 1) {
-                printk("[desktop] command argument is too long\n");
-                return -1;
-            }
-            args.v[args.argc][n++] = cmdline[i++];
-        }
-        args.v[args.argc][n] = '\0';
-        args.argc++;
+        int start = i;
+        while (cmdline[i] && cmdline[i] != ' ')
+            i++;
+        args64_add(args, cmdline + start, (uint32_t)(i - start));
     }
-    if (!args.argc) {
+    /* argv[0] is the program: the first word, at the start of buf */
+    const char *prog = args->buf;
+    int id = -1;
+    if (!args->argc)
         printk("[desktop] empty command\n");
-        return -1;
-    }
-    for (int n = 0; args.v[0][n]; n++)
-        if (n >= 15) {
-            printk("[desktop] program name is too long\n");
-            return -1;
-        }
-    int id = proc64_spawn(args.v[0], &args, 1);
-    if (id < 0)
-        printk("[desktop] could not start '%s'\n", args.v[0]);
+    else if (strlen(prog) >= 15)
+        printk("[desktop] program name is too long\n");
+    else if ((id = proc64_spawn(prog, args, 1)) < 0)
+        printk("[desktop] could not start '%s'\n", prog);
+    args64_free(args);
     return id;
 }
 

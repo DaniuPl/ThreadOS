@@ -44,6 +44,7 @@ as code of our own around it (`apps/js`).
 | `gstreamer/` | GStreamer, the media framework WebKit plays pages' video and audio with: the core (`gstreamer-1.28.9.tar.xz`), gst-plugins-base, -good and -bad, and gst-libav (FFmpeg's decoders as GStreamer elements) | 1.28.9 | LGPL-2.1-or-later (`COPYING` in each archive; -bad's few GPL plugins are not built, `-Dgpl=disabled`) | https://gstreamer.freedesktop.org/src/ (SHA-256 as each archive's .sha256sum lists it: core `6dbf744f583131a34845cc641e803843766a9ba80ce00378a9043fd6d8d5fb38`, base `c1fda668b520e6aef763c0eb962c032c9fe52bce322e8b00c69b4e9e847bddc1`, good `e518cd97483706a252e95e60312a22d23dec6f5e7673af6f5bde719c3a9ca7f4`, bad `4a4e0b7bf84f868378c48f143a7ac3a98923b488a5b74f1a35ba46bc3c43f6b1`, libav `4b3df21fa70972a80891d2298cf32c14a62c3db4483d545c7ac018230399186b`) |
 | `opus/` | libopus, Opus's reference library: GStreamer's `opusparse` frames Opus packets with it (Media Source Extensions take Opus only through that parser); the decoding is FFmpeg's | 1.5.2 | BSD-3-Clause (`COPYING`) | https://downloads.xiph.org/releases/opus/opus-1.5.2.tar.gz (SHA-256 `65c1d2f78b9f2fb20082c38cbe47c951ad5839345876e46941612ee87f9a7ce1`, as xiph.org's SHA256SUMS.txt lists it); built without its programs, tests, documentation and ARM assembly, and without the neural features 1.5 adds (off by default: deep PLC, DRED, OSCE) |
 | `brotli-rfc7932/` | Brotli's fixed data - the static dictionary, the word transforms and the context tables of RFC 7932 - for ThreadOS's own WOFF2 decoder (`user/ubrotli.h`) | libbrotlicommon 1.1.0 | MIT (`README.md`) | Debian's libbrotli1 1.1.0, dumped unchanged (the static dictionary's SHA-256 in `README.md`) |
+| `llvm/` | The LLVM project: clang, a C and C++ compiler, lld, a linker, the binary tools beside them (`llvm-ar`, `nm`, `objdump`, `objcopy`, `size`, `readelf`) and compiler-rt's builtins - a compiler that runs on ThreadOS (`llvm-project-23.1.6.src.tar.xz`, in four parts `.0` to `.3`) | 23.1.6 | Apache-2.0 with LLVM Exceptions (`llvm/LICENSE.TXT`; the regular expressions in `llvm/lib/Support/` BSD-style, `COPYRIGHT.regex`; BLAKE3 CC0-1.0 or Apache-2.0, `llvm/lib/Support/BLAKE3/LICENSE`) | https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.6/llvm-project-23.1.6.src.tar.xz (SHA-256 `d3b86ab29cfb4445a6652e5c2642ccc75e04e38084dde3701d323320f35a31da` of the whole, computed on download; its signature, `llvm-project-23.1.6.src.tar.xz.sig` on the release page, checked against LLVM's release keys, https://releases.llvm.org/release-keys.asc: a good signature by Tobias Hieta, key `D574BD5D1D0E98895E3BF90044F2485E45D59042`) |
 
 Trimmed, not modified:
 
@@ -231,6 +232,15 @@ Trimmed, not modified:
   `harfbuzz-icu` with ICU, with the `hb-features.h` and pkg-config
   files meson would write; ICU gets `icu-uc.pc` and `icu-i18n.pc` the
   same way.
+
+- **LLVM**: the archive is kept intact - cut with `split -b 45M` into
+  four parts, as no file on GitHub may be over 100 MB; `cat` puts them
+  together again and the Makefile checks the SHA-256 of the whole
+  before it unpacks it. What a compiler does not need is not unpacked:
+  LLDB, Flang, MLIR, BOLT, Polly, OpenMP, the offloading runtimes, the
+  extra clang tools and every test suite. clang and lld are built by
+  LLVM's own CMake, static, as one program (`llvm`) with the X86 and
+  AArch64 back ends only, without zlib, zstd, libxml2 or plugins.
 
 ## Fonts, outside this directory
 

@@ -34,7 +34,9 @@ TP = os.path.join(ROOT, "third_party")
 # directory in the README table with its version taken off (stem());
 # each source is (where, pattern, how):
 #   where   - an archive or a directory under third_party/; a pattern
-#             with * picks several archives (gstreamer/*.tar.xz);
+#             with * picks several archives (gstreamer/*.tar.xz); an
+#             archive kept in parts (llvm/...tar.xz.0, .1 ...) is
+#             named as the archive they make;
 #   pattern - a path inside it, below the archive's top directory;
 #             fnmatch's * crosses '/', so Source/WTF/*LICENSE* finds
 #             them all;
@@ -105,6 +107,10 @@ SOURCES = {
     "gstreamer": [("gstreamer/*.tar.xz", "COPYING", "file")],
     "opus": [("opus/opus-*.tar.gz", "COPYING", "file")],
     "brotli-rfc7932": [("brotli-rfc7932", "README.md", "file")],
+    "llvm": [("llvm/llvm-project-*.src.tar.xz", p, "file") for p in (
+        "llvm/LICENSE.TXT",
+        "llvm/lib/Support/COPYRIGHT.regex",
+        "llvm/lib/Support/BLAKE3/LICENSE")],
 }
 
 # Not under third_party/, so not in its table, but handed out all the same
@@ -194,14 +200,72 @@ def shape(text, how, where):
     return got + "\n"
 
 
-def from_archive(path, pattern):
+class _Parts:
+    """An archive kept in parts (third_party/llvm: no file on GitHub may
+    be over 100 MB), read as the one stream they were cut from"""
+
+    def __init__(self, paths):
+        self.paths = list(paths)
+        self.fh = None
+
+    def read(self, n=-1):
+        out = b""
+        while n < 0 or len(out) < n:
+            if self.fh is None:
+                if not self.paths:
+                    break
+                self.fh = open(self.paths.pop(0), "rb")
+            got = self.fh.read(-1 if n < 0 else n - len(out))
+            if not got:
+                self.fh.close()
+                self.fh = None
+                continue
+            out += got
+        return out
+
+    def close(self):
+        if self.fh:
+            self.fh.close()
+
+
+def _parts(path):
+    """The parts of an archive cut into path.0, path.1 ..., in order"""
+    import glob
+    found = glob.glob(glob.escape(path) + ".[0-9]*")
+    return sorted(found, key=lambda p: int(p.rsplit(".", 1)[1]))
+
+
+_read = {}
+
+
+def from_archive(path, pattern, patterns=None):
     """(name, text) of the members matching the pattern, below the
-    archive's top directory - in one pass, the archives being large"""
+    archive's top directory. The archives are large, LLVM's above all,
+    so one pass reads every member any of patterns (all a component's
+    patterns for this archive) asks for, and the rest are answered from
+    what it kept."""
+    patterns = tuple(patterns or (pattern,))
+    key = (path, patterns)
+    if key not in _read:
+        _read[key] = _from_archive(path, patterns)
+    return [(n, d) for n, d, inner in _read[key]
+            if fnmatch.fnmatch(inner, pattern)]
+
+
+def _from_archive(path, patterns):
     found = []
 
+    def inner_of(name):
+        return name.split("/", 1)[1] if "/" in name else ""
+
     def want(name):
-        inner = name.split("/", 1)[1] if "/" in name else ""
-        return inner and fnmatch.fnmatch(inner, pattern)
+        inner = inner_of(name)
+        return inner and any(fnmatch.fnmatch(inner, p) for p in patterns)
+
+    def stream():
+        if os.path.exists(path):
+            return tarfile.open(path, "r|*")
+        return tarfile.open(fileobj=_Parts(_parts(path)), mode="r|*")
 
     if path.endswith(".zip"):
         with zipfile.ZipFile(path) as z:
@@ -212,7 +276,7 @@ def from_archive(path, pattern):
         # A licence can be a link to the file that holds it (GLib's
         # COPYING points into LICENSES/): those are read in a second pass
         links = {}
-        with tarfile.open(path, "r|*") as t:
+        with stream() as t:
             for m in t:
                 if m.isfile() and want(m.name):
                     found.append((m.name, t.extractfile(m).read()))
@@ -221,16 +285,20 @@ def from_archive(path, pattern):
                         os.path.dirname(m.name), m.linkname))
                     links[target] = m.name
         if links:
-            with tarfile.open(path, "r|*") as t:
+            with stream() as t:
                 for m in t:
                     if m.isfile() and m.name in links:
                         found.append((links[m.name],
                                       t.extractfile(m).read()))
-    return found
+    return [(n, d, inner_of(n)) for n, d in found]
 
 
 def gather(component, sources):
     texts = []
+    asked = {}
+    for where, pattern, how in sources:
+        if how != "note":
+            asked.setdefault(where, []).append(pattern)
     for where, pattern, how in sources:
         if how == "note":
             texts.append(("note", pattern + "\n"))
@@ -253,7 +321,8 @@ def gather(component, sources):
                                               fh.read()))
             else:
                 found = [(rel + ": " + n, d)
-                         for n, d in from_archive(place, pattern)]
+                         for n, d in from_archive(place, pattern,
+                                                  asked[where])]
             if not found:
                 sys.exit("mknotices: %s: %s has no %s" % (component, rel,
                                                           pattern))
@@ -264,8 +333,13 @@ def gather(component, sources):
 
 
 def _glob(where):
+    """What where names: the files and directories its pattern matches,
+    and an archive kept in parts (name.0, name.1 ...) as its name"""
     import glob
-    return glob.glob(os.path.join(TP, where))
+    found = glob.glob(os.path.join(TP, where))
+    for first in glob.glob(os.path.join(TP, where) + ".0"):
+        found.append(first[:-2])
+    return found
 
 
 def main():

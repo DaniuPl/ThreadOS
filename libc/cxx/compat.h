@@ -23,6 +23,20 @@ static inline int pthread_mutex_clocklock(pthread_mutex_t *m, clockid_t clk,
     (void)clk;
     return pthread_mutex_timedlock(m, t);
 }
+/* <shared_mutex> names these two in std::shared_timed_mutex, which
+   LLVM's RWMutex header brings in with the untimed std::shared_mutex */
+static inline int pthread_rwlock_clockrdlock(pthread_rwlock_t *l, clockid_t clk,
+                                             const struct timespec *t)
+{
+    (void)clk;
+    return pthread_rwlock_timedrdlock(l, t);
+}
+static inline int pthread_rwlock_clockwrlock(pthread_rwlock_t *l, clockid_t clk,
+                                             const struct timespec *t)
+{
+    (void)clk;
+    return pthread_rwlock_timedwrlock(l, t);
+}
 /* The bits of glibc's character table, which libstdc++'s ctype<char>
    names its masks after (bits/ctype_base.h, pulled in by <locale>,
    <complex> and the streams). Only the values are needed to compile:
