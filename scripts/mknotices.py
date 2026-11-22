@@ -127,6 +127,10 @@ EXTRA = [
      "SIL Open Font Licence 1.1",
      "https://github.com/JetBrains/JetBrainsMono",
      [os.path.join(ROOT, "fonts", "LICENSE-JetBrainsMono.txt")]),
+    ("Source Serif 4, cut as ThreadOS Serif (fonts/serif.ttf, serifb.ttf)",
+     "4.005", "SIL Open Font Licence 1.1",
+     "https://github.com/adobe-fonts/source-serif",
+     [os.path.join(ROOT, "fonts", "LICENSE-SourceSerif4.txt")]),
 ]
 
 SOURCE_NOTE = """\

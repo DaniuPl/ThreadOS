@@ -5,8 +5,10 @@
  * for anything that wants columns; and two cut out of Inter, inter.ttf
  * and interb.ttf, which take the place of the first two while the
  * desktop is in Weave (docs/WEAVE.md draws its text in Inter), and
- * jbmono.ttf out of JetBrains Mono, which takes mono.ttf's. They are
- * read where they lie in the initrd - kernel/ttf.c copies nothing.
+ * jbmono.ttf out of JetBrains Mono, which takes mono.ttf's; and
+ * serif.ttf and serifb.ttf out of Source Serif 4, the serif Notes
+ * writes a note in, in every style. They are read where they lie in the
+ * initrd - kernel/ttf.c copies nothing.
  *
  * 'font' on its own says what was found. 'font sheet NAME PX FIRST
  * LAST' draws every character in the range and prints each glyph as
@@ -20,13 +22,16 @@
 #include "include/initrd.h"
 #include "include/printk.h"
 
-static struct ttf_font sans, bold, mono, inter, interb, jbmono;
+static struct ttf_font sans, bold, mono, inter, interb, jbmono, serif,
+                       serifb;
 static int have_sans, have_bold, have_mono, have_inter, have_interb,
-           have_jbmono;
+           have_jbmono, have_serif, have_serifb;
 static const char *why_sans = "not looked for", *why_bold = "not looked for",
                   *why_mono = "not looked for", *why_inter = "not looked for",
                   *why_interb = "not looked for",
-                  *why_jbmono = "not looked for";
+                  *why_jbmono = "not looked for",
+                  *why_serif = "not looked for",
+                  *why_serifb = "not looked for";
 static volatile int use_inter;
 
 static int open_one(struct ttf_font *f, const char *name, const char **why)
@@ -48,6 +53,8 @@ void fonts_init(void)
     have_inter = open_one(&inter, "inter.ttf", &why_inter);
     have_interb = open_one(&interb, "interb.ttf", &why_interb);
     have_jbmono = open_one(&jbmono, "jbmono.ttf", &why_jbmono);
+    have_serif = open_one(&serif, "serif.ttf", &why_serif);
+    have_serifb = open_one(&serifb, "serifb.ttf", &why_serifb);
 }
 
 void fonts_use_inter(int on)
@@ -73,6 +80,16 @@ const struct ttf_font *font_inter_bold(void)
 const struct ttf_font *font_jbmono(void)
 {
     return have_jbmono ? &jbmono : (const struct ttf_font *)0;
+}
+
+const struct ttf_font *font_serif(void)
+{
+    return have_serif ? &serif : (const struct ttf_font *)0;
+}
+
+const struct ttf_font *font_serif_bold(void)
+{
+    return have_serifb ? &serifb : (const struct ttf_font *)0;
 }
 
 const struct ttf_font *font_sans(void)
@@ -189,6 +206,8 @@ void fonts_command(const char *arg)
         describe("inter.ttf", &inter, have_inter, why_inter);
         describe("interb.ttf", &interb, have_interb, why_interb);
         describe("jbmono.ttf", &jbmono, have_jbmono, why_jbmono);
+        describe("serif.ttf", &serif, have_serif, why_serif);
+        describe("serifb.ttf", &serifb, have_serifb, why_serifb);
         return;
     }
     if (take(&p, "sheet")) {
@@ -205,15 +224,19 @@ void fonts_command(const char *arg)
             f = font_inter_bold();
         else if (take(&p, "jbmono"))
             f = font_jbmono();
+        else if (take(&p, "serifbold"))
+            f = font_serif_bold();
+        else if (take(&p, "serif"))
+            f = font_serif();
         uint32_t px = number(&p), first = number(&p), last = number(&p);
         if (!f || px < 1 || px > 255 || last < first) {
-            printk("usage: font sheet sans|bold|mono|inter|interbold|jbmono "
-                   "<px> <first> <last>\n");
+            printk("usage: font sheet sans|bold|mono|inter|interbold|jbmono|"
+                   "serif|serifbold <px> <first> <last>\n");
             return;
         }
         sheet(f, (int)px, first, last);
         return;
     }
-    printk("usage: font  |  font sheet sans|bold|mono|inter|interbold|jbmono "
-           "<px> <first> <last>\n");
+    printk("usage: font  |  font sheet sans|bold|mono|inter|interbold|jbmono|"
+           "serif|serifbold <px> <first> <last>\n");
 }

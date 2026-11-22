@@ -307,7 +307,8 @@ int64_t winmob_draw_cmd(int win, int owner, const struct win_draw *d,
                         const char *s)
 {
     int px = d->px > 0 && d->px <= 64 ? d->px : UI_PX;
-    int font = d->font == UI_BOLD || d->font == UI_MONO ? d->font : UI_SANS;
+    int font = d->font >= UI_BOLD && d->font <= UI_SERIF_BOLD ? d->font
+                                                                : UI_SANS;
     if (d->op == WD_MEASURE || d->op == WD_LMEASURE)
         return s ? ui_font_width(font, px,
                                  d->op == WD_LMEASURE ? locale_text(s) : s)

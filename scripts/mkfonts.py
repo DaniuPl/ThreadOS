@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Cuts the fonts ThreadOS carries out of DejaVu, Inter and JetBrains Mono.
+"""Cuts the fonts ThreadOS carries out of DejaVu, Inter, JetBrains Mono
+and Source Serif 4.
 
     python3 scripts/mkfonts.py [directory with DejaVuSans.ttf]
                                [directory with Inter-Regular.ttf]
                                [directory with JetBrainsMono-Regular.ttf]
+                               [directory with SourceSerif4-Regular.ttf]
 
 The second directory is extras/ttf/ of Inter's release archive
 (Inter-4.1.zip, https://github.com/rsms/inter/releases): the TrueType
@@ -12,7 +14,11 @@ CFF. Without it the Inter files in fonts/ are left as they are. The
 third is fonts/ttf/ of JetBrains Mono's (JetBrainsMono-2.304.zip,
 https://github.com/JetBrains/JetBrainsMono/releases): the monospaced
 letters Weave writes code and the terminal in; without it fonts/jbmono.ttf
-is left as it is.
+is left as it is. The fourth is TTF/ of Source Serif 4's
+(source-serif-4.005_Desktop.zip, https://github.com/adobe-fonts/
+source-serif/releases): the serif Notes writes a note in, regular and
+bold; without it fonts/serif.ttf and serifb.ttf are left as they are.
+An empty argument skips one, "-" the DejaVu ones.
 
 needs fonttools (pip install fonttools). The results are committed to
 fonts/, so building the system does not need this script or fonttools -
@@ -59,7 +65,8 @@ from fontTools.ttLib import TTFont
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu"
 INTER = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
-JBMONO = sys.argv[3] if len(sys.argv) > 3 else None
+JBMONO = sys.argv[3] if len(sys.argv) > 3 and sys.argv[3] else None
+SERIF = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None
 
 CHARS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) +
          list(range(0x100, 0x180)) +
@@ -73,6 +80,11 @@ INTER_FONTS = [("Inter-Regular.ttf", "inter.ttf", "Inter ThreadOS"),
                ("Inter-Bold.ttf", "interb.ttf", "Inter Bold ThreadOS")]
 JBMONO_FONTS = [("JetBrainsMono-Regular.ttf", "jbmono.ttf",
                  "JetBrains Mono ThreadOS")]
+# Source Serif's licence reserves the name "Source" (its Reserved Font
+# Name): a cut of it is a modified version, and goes by another
+SERIF_FONTS = [("SourceSerif4-Regular.ttf", "serif.ttf", "ThreadOS Serif"),
+               ("SourceSerif4-Bold.ttf", "serifb.ttf",
+                "ThreadOS Serif Bold")]
 
 
 def make(src, dst, name):
@@ -105,6 +117,8 @@ def main():
         todo += [(INTER, f) for f in INTER_FONTS]
     if JBMONO:
         todo += [(JBMONO, f) for f in JBMONO_FONTS]
+    if SERIF:
+        todo += [(SERIF, f) for f in SERIF_FONTS]
     for where, (src, dst, name) in todo:
         out = os.path.join(HERE, "fonts", dst)
         size = make(os.path.join(where, src), out, name)

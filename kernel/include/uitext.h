@@ -18,6 +18,9 @@
 #define UI_SANS 0
 #define UI_BOLD 1
 #define UI_MONO 2
+/* the serif, in every style (fonts/serif.ttf, serifb.ttf) */
+#define UI_SERIF 3
+#define UI_SERIF_BOLD 4
 
 /* How far above and below the baseline the text reaches, whole pixels */
 int ui_ascent(void);

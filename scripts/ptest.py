@@ -3820,6 +3820,12 @@ def e2fsprogs_missing():
     return None
 
 
+def _dq(path):
+    """A path as one of debugfs's arguments: in quotes, which its parser
+    takes, so that a name with spaces in it stays one name"""
+    return '"%s"' % path.replace('"', '\\"')
+
+
 class Ext2Image:
     """The TFS4 file system in an image: the whole of it (base 0), or
     'sectors' long from sector 'base' (a partition, copied out to a file
@@ -3859,7 +3865,7 @@ class Ext2Image:
         """What debugfs says of a name (not following a link): type,
         mode, uid, gid, size, links, mtime, dtime - or None when there
         is no such name"""
-        out, err = self.debugfs("stat " + path)
+        out, err = self.debugfs("stat " + _dq(path))
         if "Inode:" not in out:
             return None
         m = {}
@@ -3888,7 +3894,7 @@ class Ext2Image:
         fd, out = tempfile.mkstemp(suffix=".dump")
         os.close(fd)
         try:
-            self.debugfs("dump %s %s" % (path, out))
+            self.debugfs("dump %s %s" % (_dq(path), out))
             with open(out, "rb") as fh:
                 return fh.read()
         finally:
@@ -3896,7 +3902,7 @@ class Ext2Image:
 
     def names(self, path):
         """The names in a directory, "." and ".." left out"""
-        out, _ = self.debugfs("ls -p " + path)
+        out, _ = self.debugfs("ls -p " + _dq(path))
         names = []
         for line in out.splitlines():
             # /ino/mode/uid/gid/name/size/
@@ -3933,7 +3939,7 @@ class Ext2Image:
         found, todo = [], [top.rstrip("/") or "/"]
         while todo and len(found) < 100000:
             d = todo.pop()
-            out, _ = self.debugfs("ls -p " + d)
+            out, _ = self.debugfs("ls -p " + _dq(d))
             for line in out.splitlines():
                 parts = line.split("/")        # /ino/mode/uid/gid/name/size/
                 if len(parts) < 7 or parts[5] in (".", "..", "") or \

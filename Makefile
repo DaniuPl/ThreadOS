@@ -23,7 +23,7 @@ BUILD   := build
 # scripts/mkfonts.py and committed, so building needs neither fonttools
 # nor the fonts themselves
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf fonts/inter.ttf \
-           fonts/interb.ttf fonts/jbmono.ttf
+           fonts/interb.ttf fonts/jbmono.ttf fonts/serif.ttf fonts/serifb.ttf
 
 .PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone webkit \
@@ -228,6 +228,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gcode.elf \
                $(BUILD)/user64/gswatch.elf \
                $(BUILD)/user64/gfind.elf \
+               $(BUILD)/user64/gnotes.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
@@ -449,6 +450,16 @@ $(BUILD)/user64/gfind.elf: user64/gfind.c user/uapi.h user/udraw.h \
 	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
 	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gfind.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/gfind.o) -o $@
+
+# Notes: notes and lists in ~/Notes, in the serif - musl, for notes of
+# any length
+$(BUILD)/user64/gnotes.elf: user64/gnotes.c user/uapi.h user/udraw.h \
+                            user/ugui.h user64/usys64.h user64/compat64.h \
+                            $(LIBC64) libc/libc64.ld \
+                            | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
+	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gnotes.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gnotes.o) -o $@
 
 # Code, the development environment: files of any length and a tree of
 # any size, so built against musl
@@ -2199,6 +2210,7 @@ LICENSES_TXT := $(BUILD)/LICENSES.txt
 $(LICENSES_TXT): scripts/mknotices.py third_party/README.md LICENSE \
                  fonts/LICENSE-DejaVu.txt fonts/LICENSE-Inter.txt \
                  fonts/LICENSE-JetBrainsMono.txt \
+                 fonts/LICENSE-SourceSerif4.txt \
                  $(wildcard third_party/* third_party/*/*)
 	@mkdir -p $(BUILD)
 	python3 scripts/mknotices.py $@
@@ -2212,6 +2224,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
 	    inter.ttf=fonts/inter.ttf interb.ttf=fonts/interb.ttf \
 	    jbmono.ttf=fonts/jbmono.ttf \
+	    serif.ttf=fonts/serif.ttf serifb.ttf=fonts/serifb.ttf \
 	    hello64=$(BUILD)/user64/hello64.elf \
 	    nx64=$(BUILD)/user64/nx64.elf \
 	    wild64=$(BUILD)/user64/wild64.elf \
@@ -2246,6 +2259,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gcode=$(BUILD)/user64/gcode.elf \
 	    gswatch=$(BUILD)/user64/gswatch.elf \
 	    gfind=$(BUILD)/user64/gfind.elf \
+	    gnotes=$(BUILD)/user64/gnotes.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \

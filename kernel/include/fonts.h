@@ -20,6 +20,9 @@ const struct ttf_font *font_inter_bold(void);
 /* JetBrains Mono: Weave's columns - code, the terminal - in place of
    mono.ttf while fonts_inter() says Weave */
 const struct ttf_font *font_jbmono(void);
+/* Source Serif 4's cut, regular and bold: Notes' letters, in any style */
+const struct ttf_font *font_serif(void);
+const struct ttf_font *font_serif_bold(void);
 void fonts_use_inter(int on);
 int fonts_inter(void);
 

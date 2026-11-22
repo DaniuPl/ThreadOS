@@ -118,7 +118,7 @@ struct icon {
    browser instead (desktop_spawn_app). */
 #define WEB_APP "web"
 #define WEBKIT_APP "weft"
-#define ART_N      23
+#define ART_N      24
 #define ART_LETTER 14
 #define ART_TRASH  15
 /* Pictures drawn later than the letter and the waste bin come after
@@ -131,6 +131,7 @@ struct icon {
 #define ART_CAMERA 20
 #define ART_RECORDER 21
 #define ART_FIND   22
+#define ART_NOTES  23
 /* The time is on the bar, so the clock is not in the dock; it and the
    demonstration program stay in the menu, with everything else */
 static struct icon icons[ICON_MAX] = {
@@ -287,6 +288,7 @@ static const struct { const char *app, *label; int art; } known_apps[] = {
     { "gswatch", "Swatch", 10 },
     /* one field for everything on the machine */
     { "gfind", "Find", ART_FIND },
+    { "gnotes", "Notes", ART_NOTES },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -829,7 +831,7 @@ static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_A
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint", "ggallery",
                                   "gcamera", "grecord", "gcode", "gswatch",
-                                  "gfind"};
+                                  "gfind", "gnotes"};
 
 /* Under a line at the bottom of the same menu: not programs but what is
    done to the session and to the machine. The three that end something
@@ -1882,7 +1884,7 @@ static const char *const weave_art[ART_N] = {
     0, "clock", "files", "monitor", "term", "weft", "settings", "editor",
     "tasks", "mixer", "swatch", "calculator", "calendar", "paint", 0,
     "trash", "code", "accounts", "gallery", "gallery", "camera", "recorder",
-    "find",
+    "find", "notes",
 };
 
 static void draw_art(int art, int x, int y, int s, char letter)
@@ -1921,6 +1923,7 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0x8E8E93, 0x3A3A3C },   /* Camera */
         { 0x3A3A3C, 0x1C1C1E },   /* Recorder */
         { 0x6E8BFF, 0x3F5EE8 },   /* Find */
+        { 0xFFC14D, 0xD9860B },   /* Notes */
     };
     if (art < 0 || art >= ART_N)
         art = ART_LETTER;
@@ -2040,6 +2043,12 @@ static void draw_art(int art, int x, int y, int s, char letter)
         for (int k = 0; k < 3; k++)
             gfx_line16(PX(125 + 35 * k), PY(116), PX(125 + 35 * k),
                        PY(225), D(8), 0x77777D, 200);
+        break;
+    case ART_NOTES:                               /* a page and its lines */
+        gfx_rrect16(PX(80), PY(60), D(160), D(200), D(18), 0xFFFFFF, 245);
+        for (int k = 0; k < 4; k++)
+            gfx_line16(PX(108), PY(112 + 34 * k), PX(212 - (k == 3) * 40),
+                       PY(112 + 34 * k), D(10), 0xD9A441, 255);
         break;
     case ART_FIND:                                /* a magnifying glass */
         gfx_circle16(PX(142), PY(142), D(66), D(22), 0xFFFFFF, 255);
@@ -5728,11 +5737,11 @@ static void draw_loom(void)
 static const struct {
     const char *name;
     uint32_t dye_n, dye_l, label_n;
-    const char *apps[8];
+    const char *apps[10];
 } lv_threads[LV_ROWS] = {
     { "Work", DYE_INDIGO_N, DYE_INDIGO_L, 0xB7C5FF,
-      { "gfiles", "gedit", "gcode", "gswatch", "gterm", "gtasks", "gcal",
-        0 } },
+      { "gfiles", "gedit", "gnotes", "gcode", "gswatch", "gterm", "gtasks",
+        "gcal", 0 } },
     { "Web and people", DYE_WOAD_N, DYE_WOAD_L, 0x9FECEC,
       { WEB_APP, 0 } },
     { "Pictures and sound", DYE_COCHINEAL_N, DYE_COCHINEAL_L, 0xF2A6D6,
@@ -5747,7 +5756,7 @@ static const struct {
 static int lv_apps(int r, const char **out)
 {
     int n = 0;
-    for (int i = 0; i < 8 && lv_threads[r].apps[i]; i++)
+    for (int i = 0; i < 10 && lv_threads[r].apps[i]; i++)
         out[n++] = lv_threads[r].apps[i];
     if (r == 1)
         for (int i = 0; i < package_count() && n < LV_APPS; i++)
@@ -9827,7 +9836,8 @@ int desktop_win_draw(int winid, int owner, const struct win_draw *d,
 {
     scene_changed();
     int px = d->px > 0 && d->px <= 64 ? d->px : UI_PX;
-    int font = d->font == UI_BOLD || d->font == UI_MONO ? d->font : UI_SANS;
+    int font = d->font >= UI_BOLD && d->font <= UI_SERIF_BOLD ? d->font
+                                                                : UI_SANS;
     if (d->op == WD_MEASURE || d->op == WD_LMEASURE)
         return s ? ui_font_width(font, px,
                                  d->op == WD_LMEASURE ? locale_text(s) : s)

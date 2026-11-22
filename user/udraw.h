@@ -26,6 +26,9 @@
 #define UD_SANS 0
 #define UD_BOLD 1
 #define UD_MONO 2
+/* the serif, in every style: Notes writes a note in it */
+#define UD_SERIF 3
+#define UD_SERIF_BOLD 4
 
 #define UD_PX   12            /* the size programs write in */
 

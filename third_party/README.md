@@ -267,9 +267,18 @@ lists them in EXTRA, since they are not here):
   (SHA-256 `6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf`,
   computed on download), its `fonts/ttf/JetBrainsMono-Regular.ttf` -
   TrueType outlines.
+- **Source Serif 4** 4.005 - `fonts/serif.ttf`, `serifb.ttf` (Regular,
+  Bold), which Notes writes a note in: SIL Open Font Licence 1.1
+  (`fonts/LICENSE-SourceSerif4.txt`, the release's LICENSE.md) with the
+  Reserved Font Name "Source", so the cut goes by "ThreadOS Serif";
+  https://github.com/adobe-fonts/source-serif/releases/download/4.005R/source-serif-4.005_Desktop.zip
+  (SHA-256 `549fdb8f9a682bd06944298621404969f6de77c2e422ff3b8244a1dcd6a0c425`,
+  computed on download), its `TTF/SourceSerif4-Regular.ttf` and
+  `TTF/SourceSerif4-Bold.ttf` - TrueType outlines.
 - **What was trimmed**, from each: every character but ASCII, Latin-1,
   Latin Extended-A and a handful of typographic marks; the hinting
   instructions (`prep`, `fpgm`, `cvt `), which kernel/ttf.c does not
   run; and the layout tables (`GSUB`, `GPOS`, `GDEF`, `kern`), which it
   does not read. The outlines and the metrics are untouched, and the
-  cut fonts are renamed ("... ThreadOS").
+  cut fonts are renamed ("... ThreadOS", and Source Serif's "ThreadOS
+  Serif", without the name its licence reserves).

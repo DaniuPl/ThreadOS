@@ -173,6 +173,9 @@ def main():
             ("JetBrains Mono's licence",
              open(os.path.join(ROOT, "fonts", "LICENSE-JetBrainsMono.txt"),
                   encoding="utf-8", errors="replace").read().rstrip()),
+            ("Source Serif 4's licence, its reserved name with it",
+             open(os.path.join(ROOT, "fonts", "LICENSE-SourceSerif4.txt"),
+                  encoding="utf-8", errors="replace").read().rstrip()),
             ("where the source of the release is",
              "https://github.com/DaniuPl/ThreadOS/releases")):
         check("it holds %s" % what, needle in text)

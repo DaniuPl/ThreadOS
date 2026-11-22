@@ -120,7 +120,15 @@ static const struct ttf_font *font_of_k(int font, int *key)
 {
     const struct ttf_font *f = (const struct ttf_font *)0;
     int k = font;
-    if (font != UI_MONO && fonts_inter()) {
+    if (font == UI_SERIF || font == UI_SERIF_BOLD) {
+        /* the same in every style; the plain serif for a missing bold,
+           and the sans for a missing serif */
+        f = font == UI_SERIF_BOLD ? font_serif_bold() : 0;
+        if (!f)
+            f = font_serif();
+        if (!f)
+            k = UI_SANS;
+    } else if (font != UI_MONO && fonts_inter()) {
         f = font == UI_BOLD ? font_inter_bold() : font_inter();
         if (!f)
             f = font_inter();

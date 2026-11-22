@@ -11698,3 +11698,44 @@ works and is checked by `make test`.
       Settings row and opens Settings at Mouse; "calc" is the Calculator
       and starts it. And every row of the index is a label in its section
       of gsettings.c, every program it lists in the initrd.
+- [x] **Notes, and a serif for it** (user64/gnotes.c, fonts/serif.ttf,
+      fonts/serifb.ttf, kernel/fonts.c, kernel/uitext.c, user/udraw.h,
+      kernel/desktop.c, scripts/ptest.py)
+      The next of WEAVE.md's programs, as NotesMend.dc.html draws it:
+      the notes down the left, each with its dye and its first words,
+      the chosen one on the right - its day, its title large, a list's
+      items each with a knot to tick off (the ticked ones struck through
+      and greyed), what is written under them - and "Saved" at its foot.
+      A note is a plain text file in ~/Notes that any editor opens and
+      Find searches: its first line is the title, "[ ] " and "[x] " lines
+      are items, the rest is written text. It is named after its title,
+      kept a moment and a half after the typing stops, at once when an
+      item is ticked, and when another note is chosen or Notes closes.
+      Ctrl+N begins one, Ctrl+L makes the line an item or not, Enter in
+      an item begins the next and in an empty one ends the list, Ctrl+D
+      deletes after asking (Weave's question, its yes madder). The
+      design writes a note in Source Serif 4, which the system did not
+      have: version 4.005 (SIL OFL 1.1) is cut by mkfonts.py like the
+      other faces, regular and bold, and named ThreadOS Serif - its
+      licence reserves the name "Source" for the original. Programs ask
+      for it as UD_SERIF and UD_SERIF_BOLD (UI_SERIF... in the kernel),
+      the same in every style; `font sheet serif|serifbold` draws it.
+      Notes is in the menu and on loom view's Work thread, with the
+      design's icon (or a page with its lines). The phone's Notes keeps
+      its one note in memory, as before. Sharing a note waits for
+      people to share it with.
+      t_notes (new) boots from a disk with three notes, each changed at
+      a time of its own: the list is the three newest first, read off
+      the screen; the newest's day is worked out from its file's time;
+      its title is read in the serif's bold and its items in the serif,
+      with FreeType from the committed fonts; the ticked one's knot is
+      filled and it is struck through in the ink for what is done; a
+      click on a knot ticks it; typing at the end of what is written,
+      Ctrl+N with an item made by Ctrl+L, Ctrl+D asked and answered -
+      and afterwards, read from the disk image itself, each file holds
+      exactly what was done to it. t_ttf compares the serif's glyphs
+      with FreeType's at 17 and 30 px and the hard ones at 48 and 100;
+      t_licences finds its licence in LICENSES.txt. ptest's Ext2Image
+      now hands debugfs a path in quotes: a name with a space in it was
+      two arguments, and a note named "For the market" could not be read
+      back.

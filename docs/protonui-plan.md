@@ -243,5 +243,12 @@ makes it - because it is ProtonUI v2's own catalogue.
   the pills, the groups and the chosen file's lines as the design has
   them; Code opens a file at a line (`gcode FILE LINE`), Settings at a
   section (`gsettings --section NAME`).
+- **Notes: done** (journal: "Notes"). user64/gnotes.c: notes as plain
+  text files in ~/Notes, the list with each note's dye, the note in
+  Source Serif 4 (cut as ThreadOS Serif), items ticked off with a knot.
+  Not like the design yet: no sharing ("Shared with Ania" needs people
+  and a server).
+- **Mend** is next: it needs programs to reach a USB stick first - the
+  FAT on it is only the kernel shell's today (fat, fatls, fatput).
 
 **In all: about 13 to 15 working days** for stages 1-7.

@@ -153,7 +153,7 @@ def compare(label, ours, ref, px, chars):
           n > 0 and worst <= MAX_DIFF and mean <= MEAN_DIFF)
 
 
-def sheets(q, sans, mono, inter, interb, jbmono):
+def sheets(q, sans, mono, inter, interb, jbmono, serif, serifb):
     all_sans = sorted(sans.cmap)
     all_mono = sorted(mono.cmap)
     all_inter = sorted(inter.cmap)
@@ -162,7 +162,7 @@ def sheets(q, sans, mono, inter, interb, jbmono):
     # than tall, and one with holes
     hard = [ord(c) for c in "Ag@&%WQé£ąęłśżŻ€"]
 
-    out = q.command("font", "jbmono.ttf", timeout=20)
+    out = q.command("font", "serifb.ttf", timeout=20)
     m = re.search(r"sans\.ttf - (\d+) glyphs, (\d+) units per em", out)
     check("the kernel reads the font's own numbers (%s glyphs, %s units "
           "per em; fontTools: %d, %d)"
@@ -185,6 +185,14 @@ def sheets(q, sans, mono, inter, interb, jbmono):
           m is not None and int(m.group(1)) == jbmono.glyphs and
           int(m.group(2)) == jbmono.upem)
 
+    m = re.search(r"serif\.ttf - (\d+) glyphs, (\d+) units per em", out)
+    check("and the serif's, Source Serif 4's cut (%s glyphs, %s units per "
+          "em; fontTools: %d, %d)" % (m.group(1) if m else "?",
+                                     m.group(2) if m else "?",
+                                     serif.glyphs, serif.upem),
+          m is not None and int(m.group(1)) == serif.glyphs and
+          int(m.group(2)) == serif.upem)
+
     plan = [("sans", sans, 12, all_sans), ("sans", sans, 16, all_sans),
             ("mono", mono, 13, all_mono), ("sans", sans, 48, hard),
             ("sans", sans, 100, hard[:6]),
@@ -192,7 +200,10 @@ def sheets(q, sans, mono, inter, interb, jbmono):
             ("interbold", interb, 15, sorted(interb.cmap)),
             ("inter", inter, 48, hard), ("interbold", interb, 100, hard[:6]),
             ("jbmono", jbmono, 12, sorted(jbmono.cmap)),
-            ("jbmono", jbmono, 48, hard)]
+            ("jbmono", jbmono, 48, hard),
+            ("serif", serif, 17, sorted(serif.cmap)),
+            ("serifbold", serifb, 30, sorted(serifb.cmap)),
+            ("serif", serif, 48, hard), ("serifbold", serifb, 100, hard[:6])]
     for name, ref, px, chars in plan:
         text = ""
         # One command per run of characters: a sheet of every character
@@ -228,6 +239,8 @@ def main():
     inter = Reference(os.path.join(FONTS, "inter.ttf"))
     interb = Reference(os.path.join(FONTS, "interb.ttf"))
     jbmono = Reference(os.path.join(FONTS, "jbmono.ttf"))
+    serif = Reference(os.path.join(FONTS, "serif.ttf"))
+    serifb = Reference(os.path.join(FONTS, "serifb.ttf"))
 
     reason = no64()
     if reason:
@@ -244,7 +257,7 @@ def main():
              qemu="qemu-system-x86_64")
     try:
         q.wait_serial("thread64>", timeout=120)
-        sheets(q, sans, mono, inter, interb, jbmono)
+        sheets(q, sans, mono, inter, interb, jbmono, serif, serifb)
     finally:
         q.close()
         for f in (iso, slog):
