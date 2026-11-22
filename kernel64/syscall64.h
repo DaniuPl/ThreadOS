@@ -231,6 +231,19 @@
    windows have no title bar, as on the phone: the program shows the
    choice itself) */
 #define SYS64_WIN_THEMEBAR 133
+/* A volume other than the system's - a stick's FAT (kernel/vol.c): a1 =
+   VOL64_*, the rest as each says (user64/usys64.h's vol_* wrappers).
+   Paths on the volume are absolute ("/MEND/days"), at most 255 bytes. */
+#define SYS64_VOLUME 134
+#define VOL64_LIST   0   /* a2=&struct vol_info[], a3=max -> how many */
+#define VOL64_MOUNT  1   /* a2=disk, a3=lba -> 0/-1 */
+#define VOL64_UMOUNT 2
+#define VOL64_STAT   3   /* a2=path, a3=&struct vol_entry -> 1/0/-1 */
+#define VOL64_DIR    4   /* a2=path, a3=index, a4=&struct vol_entry -> 1/0/-1 */
+#define VOL64_READ   5   /* a2=path, a3=&{off, buf, len} -> bytes/-1 */
+#define VOL64_WRITE  6   /* a2=path, a3=buf, a4=len -> 0/-1 (a whole file) */
+#define VOL64_MKDIR  7   /* a2=path -> 0/-1 */
+#define VOL64_UNLINK 8   /* a2=path -> 0/-1 */
 
 /* --- Files with no 63-byte or 4 GiB ceilings (docs/tfs4-plan.md) ---
  * The calls before these keep their shapes for programs already built;

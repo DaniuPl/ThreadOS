@@ -103,6 +103,7 @@
    -> 0, or -1 */
 #define SYS64_SHUTTLE  132
 #define SYS64_WIN_THEMEBAR 133
+#define SYS64_VOLUME 134
 #define SYS64_UI_LOOK  69
 #define SYS64_NOTIFY   70
 #define SYS64_BG_PREVIEW 71
@@ -1040,6 +1041,75 @@ static inline int64_t win_title(int win, const char *title)
 static inline int64_t win_theme_bar(int win, int light)
 {
     return syscall64(SYS64_WIN_THEMEBAR, win, light);
+}
+
+/* --- Volumes other than the system's: a stick's FAT -------------------
+ *
+ * SYS64_VOLUME (kernel/vol.c): the FAT volumes on disks other than the
+ * system's, one of them mounted, and on it a name looked up, a folder
+ * listed, a file read a piece at a time or written whole, a folder made
+ * (with the ones missing on the way), a file taken away. Paths on the
+ * volume are absolute: "/MEND/days/2030-06-13.txt".
+ */
+struct vol_info {
+    int32_t disk;              /* which disk, from 0 */
+    uint32_t lba;              /* where the volume starts on it */
+    uint32_t kib_total, kib_free;
+    char label[16];            /* the volume's label, or "" */
+    char kind[8];              /* "FAT32", "FAT16", "FAT12" */
+    char where[24];            /* the driver behind the disk: "USB", ... */
+};
+struct vol_entry {
+    uint32_t size;
+    int32_t is_dir;
+    char name[64];
+};
+
+static inline int vol_list(struct vol_info *out, int max)
+{
+    return (int)syscall64_4(SYS64_VOLUME, 0, (int64_t)(uintptr_t)out, max, 0);
+}
+static inline int vol_mount(int disk, uint32_t lba)
+{
+    return (int)syscall64_4(SYS64_VOLUME, 1, disk, lba, 0);
+}
+static inline void vol_umount(void)
+{
+    syscall64_4(SYS64_VOLUME, 2, 0, 0, 0);
+}
+/* 1 there, 0 not there, -1 nothing mounted */
+static inline int vol_stat(const char *path, struct vol_entry *out)
+{
+    return (int)syscall64_4(SYS64_VOLUME, 3, (int64_t)(uintptr_t)path,
+                            (int64_t)(uintptr_t)out, 0);
+}
+/* the index-th entry of a folder: 1 one, 0 the end, -1 no such folder */
+static inline int vol_dir(const char *path, int index, struct vol_entry *out)
+{
+    return (int)syscall64_4(SYS64_VOLUME, 4, (int64_t)(uintptr_t)path, index,
+                            (int64_t)(uintptr_t)out);
+}
+static inline int vol_read(const char *path, uint32_t off, void *buf,
+                           uint32_t len)
+{
+    struct { uint32_t off, len; uint64_t buf; } rq = { off, len,
+        (uint64_t)(uintptr_t)buf };
+    return (int)syscall64_4(SYS64_VOLUME, 5, (int64_t)(uintptr_t)path,
+                            (int64_t)(uintptr_t)&rq, 0);
+}
+/* a whole file, made or replaced */
+static inline int vol_write(const char *path, const void *data, uint32_t len)
+{
+    return (int)syscall64_4(SYS64_VOLUME, 6, (int64_t)(uintptr_t)path,
+                            (int64_t)(uintptr_t)data, len);
+}
+static inline int vol_mkdir(const char *path)
+{
+    return (int)syscall64_4(SYS64_VOLUME, 7, (int64_t)(uintptr_t)path, 0, 0);
+}
+static inline int vol_unlink(const char *path)
+{
+    return (int)syscall64_4(SYS64_VOLUME, 8, (int64_t)(uintptr_t)path, 0, 0);
 }
 
 static inline int64_t win_keep(int win)

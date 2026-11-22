@@ -11765,3 +11765,41 @@ works and is checked by `make test`.
       written. With the old driver the shell said "could not write" and
       the file was not there. t_tfs3migrate passes three times running
       side by side, as it did not before.
+- [x] **Mend, and a stick's FAT for programs** (user64/gmend.c,
+      kernel/vol.c, kernel/include/vol.h, kernel64/syscall64.c,
+      user64/usys64.h, kernel/desktop.c, user64/gfind.c)
+      The backup of WEAVE.md, as NotesMend.dc.html draws it: whether the
+      files are copied, when and to what; the days there are copies of,
+      knots on a thread, the chosen one larger and filled; a folder as
+      it was that day, each file the same, changed since or deleted
+      since; Bring back and Copy now. A backup belongs on a stick, which
+      the machine's own disk going wrong does not take with it - and the
+      kernel could read and write a stick's FAT, but only for its shell.
+      SYS64_VOLUME (vol_* in usys64.h) now gives a program the FAT
+      volumes on disks other than the system's (a stick with a table or
+      without one), one mounted, and on it a name looked up, a folder
+      listed, a file read a piece at a time or written whole, a folder
+      made, a file removed; the system's own disk is never one of them.
+      On the stick, /MEND/days/DAY.txt lists what the home held that day
+      - every file, its size and time, and the day whose folder in
+      /MEND/store holds its bytes - so a copy writes only what is new or
+      changed since the one before, and any day can be brought back
+      whole. A file brought back never goes over the one there is: it
+      comes back beside it, "notes (Tuesday).txt". The home is copied
+      but for what begins with a dot, files up to 16 MiB each. Mend is in
+      the menu and on loom view's "This computer" thread, with the
+      design's icon (or a needle and its thread); Find now finds Notes
+      and Mend among the programs. Copying at night by itself waits for
+      something that starts programs on a schedule.
+      t_mend (new) boots from an ext2 disk with a home and a USB stick
+      that mtools gave a copy made two days before: Mend finds the stick
+      by its label and the day on it, and says the note changed since,
+      the list the same and the budget deleted since - what the copy's
+      list and the home give; the screen says the files are copied and
+      names them; the note, brought back, comes back beside the one
+      there is; Copy now adds a day called Today. Afterwards, from the
+      disk image, the note brought back holds the old words and the
+      note itself is untouched; and from the stick, read with mtools,
+      the day's list names every file of the home with its size, the
+      bytes of what changed are the disk's, and the list that did not
+      change is pointed at the earlier day rather than copied again.

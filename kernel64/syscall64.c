@@ -58,6 +58,7 @@
 #include "../kernel/include/mic_info.h"
 #include "../kernel/include/rtc.h"
 #include "../kernel/include/random.h"
+#include "../kernel/include/vol.h"
 
 #define USER_AUTH_WINDOW_TICKS 30000u
 static int auth_pid = -1;
@@ -284,6 +285,59 @@ static char *path_from_ring3(uint64_t ptr, uint64_t len)
    separately: the string may reach the last byte of a mapping and not
    one further. Returns 0, or -1 when the string runs past the
    program's memory or does not fit in the buffer. */
+static int text_from_ring3(uint64_t ptr, char *out, int max);
+
+/* SYS64_VOLUME: a stick's FAT for a program (kernel/vol.c). Every path
+   is copied in first; every buffer is the program's own, checked, before
+   FAT reads into it or writes from it */
+static int64_t volume_call(uint64_t op, uint64_t a2, uint64_t a3, uint64_t a4)
+{
+    char path[256];
+    if (op == VOL64_LIST) {
+        int max = (int)a3;
+        if (max <= 0 || max > 16 ||
+            !paging64_user_writable(a2, (uint64_t)max * sizeof(struct vol_info)))
+            return -1;
+        return vol_list((struct vol_info *)(uintptr_t)a2, max);
+    }
+    if (op == VOL64_MOUNT)
+        return vol_mount((int)a2, (uint32_t)a3);
+    if (op == VOL64_UMOUNT) {
+        vol_umount();
+        return 0;
+    }
+    if (op > VOL64_UNLINK || text_from_ring3(a2, path, sizeof(path)) < 0)
+        return -1;
+    switch (op) {
+    case VOL64_STAT:
+        if (!paging64_user_writable(a3, sizeof(struct vol_entry)))
+            return -1;
+        return vol_stat(path, (struct vol_entry *)(uintptr_t)a3);
+    case VOL64_DIR:
+        if (!paging64_user_writable(a4, sizeof(struct vol_entry)))
+            return -1;
+        return vol_dir(path, (int)a3, (struct vol_entry *)(uintptr_t)a4);
+    case VOL64_READ: {
+        struct { uint32_t off, len; uint64_t buf; } rq;
+        if (!paging64_user_range(a3, sizeof(rq)))
+            return -1;
+        rq = *(const typeof(rq) *)(uintptr_t)a3;
+        if (rq.len > (16u << 20) || !paging64_user_writable(rq.buf, rq.len))
+            return -1;
+        return vol_read(path, rq.off, (void *)(uintptr_t)rq.buf, rq.len);
+    }
+    case VOL64_WRITE:
+        if (a4 > (64u << 20) || !paging64_user_range(a3, a4))
+            return -1;
+        return vol_write(path, (const void *)(uintptr_t)a3, (uint32_t)a4);
+    case VOL64_MKDIR:
+        return vol_mkdir(path);
+    case VOL64_UNLINK:
+        return vol_unlink(path);
+    }
+    return -1;
+}
+
 static int text_from_ring3(uint64_t ptr, char *out, int max)
 {
     for (int i = 0; i < max - 1; i++) {
@@ -2405,6 +2459,9 @@ static void handle(struct regs *r)
             (int)a1, task64_current_id(), title);
         return;
     }
+    case SYS64_VOLUME:
+        r->rax = (uint64_t)(int64_t)volume_call(a1, a2, a3, a4);
+        return;
     case SYS64_WIN_THEMEBAR:
         r->rax = (uint64_t)(int64_t)desktop_win_theme_bar(
             (int)a1, task64_current_id(), (int)a2);

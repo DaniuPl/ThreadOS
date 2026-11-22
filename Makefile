@@ -157,7 +157,7 @@ SHARED64 := string serial printk locale bootsplash mark mb2 fbcon vga pic pit pm
             mouse desktop acpi uhci ehci xhci usbhc ttf fonts uitext gfx aurora weave usbkbd usbmouse usbmass bt usbnet part fat gpt fatcmd install hwinfo hda swap prog shm sem rtc \
             dynlink smpmem smpthreads biglock tlb config user clip \
             e1000 rtl8168 virtio_net netdev smp random hid iwlwifi acpios power \
-            devices uvc ipc wpa wlan
+            devices uvc ipc wpa wlan vol
 OBJS64 := $(BUILD)/64/boot64.o $(BUILD)/64/isr64_stubs.o \
           $(BUILD)/64/switch64.o \
           $(BUILD)/64/kmain64.o $(BUILD)/64/idt64.o $(BUILD)/64/isr64.o \
@@ -229,6 +229,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gswatch.elf \
                $(BUILD)/user64/gfind.elf \
                $(BUILD)/user64/gnotes.elf \
+               $(BUILD)/user64/gmend.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
@@ -460,6 +461,15 @@ $(BUILD)/user64/gnotes.elf: user64/gnotes.c user/uapi.h user/udraw.h \
 	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
 	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gnotes.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/gnotes.o) -o $@
+
+# Mend: the backup, on a stick - musl, for a home of any size
+$(BUILD)/user64/gmend.elf: user64/gmend.c user/uapi.h user/udraw.h \
+                           user/ugui.h user64/usys64.h user64/compat64.h \
+                           $(LIBC64) libc/libc64.ld \
+                           | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
+	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gmend.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gmend.o) -o $@
 
 # Code, the development environment: files of any length and a tree of
 # any size, so built against musl
@@ -2260,6 +2270,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gswatch=$(BUILD)/user64/gswatch.elf \
 	    gfind=$(BUILD)/user64/gfind.elf \
 	    gnotes=$(BUILD)/user64/gnotes.elf \
+	    gmend=$(BUILD)/user64/gmend.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \

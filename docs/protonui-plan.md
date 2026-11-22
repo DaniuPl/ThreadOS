@@ -248,7 +248,12 @@ makes it - because it is ProtonUI v2's own catalogue.
   Source Serif 4 (cut as ThreadOS Serif), items ticked off with a knot.
   Not like the design yet: no sharing ("Shared with Ania" needs people
   and a server).
-- **Mend** is next: it needs programs to reach a USB stick first - the
-  FAT on it is only the kernel shell's today (fat, fatls, fatput).
+- **Mend: done** (journal: "Mend"). user64/gmend.c, on a FAT stick that
+  programs now reach (SYS64_VOLUME, kernel/vol.c): copies of the home a
+  day at a time, only what changed copied again; the days as knots on a
+  thread; a folder as it was, each file the same, changed since or
+  deleted since; a file brought back beside the one there is. Not like
+  the design yet: no copy at night by itself ("next tonight") - nothing
+  starts a program on a schedule.
 
 **In all: about 13 to 15 working days** for stages 1-7.
