@@ -40,7 +40,7 @@
 
 struct mob_prefs mob_prefs = {
     .dark = 1, .brightness = 100, .volume = 70, .banners = 1,
-    .lock_notes = 1, .show_pct = 1, .clock24 = 1,
+    .lock_notes = 1, .show_pct = 1, .clock24 = 1, .thread_dyes = 1,
 };
 
 static const uint32_t accents[MOB_ACCENTS] = {
@@ -778,9 +778,9 @@ int calc_tap(int x, int y)
 #define SET_DOT_STEP   38
 
 enum { P_MAIN, P_NETWORK, P_DISPLAY, P_SOUND, P_BATTERY, P_NAV, P_TIME,
-       P_SIZE, P_WALLPAPER, P_LOOK, PAGES };
+       P_SIZE, P_WALLPAPER, P_LOOK, P_LOCK, PAGES };
 enum { R_LINK, R_SWITCH, R_SLIDER, R_CHOICE, R_VALUE, R_ACCENTS, R_ABOUT,
-       R_NOTE };
+       R_NOTE, R_ACTION };
 enum { V_ADDRESS, V_STATE, V_BATTERY, V_POWER, V_SPEAKER, V_ZONE, V_CARD };
 
 struct srow {
@@ -815,6 +815,14 @@ static const struct srow display_rows[] = {
     { "Display size", R_LINK, 0, P_SIZE },
     { "Portrait", R_CHOICE, P(landscape), 0 },
     { "Landscape", R_CHOICE, P(landscape), 1 },
+    { "Screen lock", R_LINK, 0, P_LOCK },
+};
+/* The PIN itself is mobile.c's: choosing one opens its keys */
+static const struct srow lock_rows[] = {
+    { "Swipe up", R_CHOICE, P(pin_on), 0 },
+    { "PIN, six digits", R_CHOICE, P(pin_on), 1 },
+    { "Lock now", R_ACTION, 0, SETTINGS_LOCK },
+    { "With a PIN, the swipe up asks for it.", R_NOTE, 0, 0 },
 };
 static const struct srow look_rows[] = {
     { "Matte", R_CHOICE, P(theme), MOB_THEME_MATTE },
@@ -854,10 +862,15 @@ static const struct srow battery_rows[] = {
     { "Percentage in the bar", R_SWITCH, P(show_pct), 0 },
 };
 static const struct srow nav_rows[] = {
-    { "Gestures, as an iPhone", R_CHOICE, P(nav_buttons), 0 },
-    { "Three buttons, as Android", R_CHOICE, P(nav_buttons), 1 },
+    { "Gestures, as an iPhone", R_CHOICE, P(nav), MOB_NAV_GESTURES },
+    { "Three buttons, as Android", R_CHOICE, P(nav), MOB_NAV_BUTTONS },
+    { "The thread, ThreadOS's own", R_CHOICE, P(nav), MOB_NAV_THREAD },
+    { "Knots in programs' colours", R_SWITCH, P(thread_dyes), 0 },
     { "Gestures: up from the bottom edge for home.", R_NOTE, 0, 0 },
     { "Buttons: back, home and recent apps.", R_NOTE, 0, 0 },
+    { "The thread: a knot a program - tap one, or slide", R_NOTE, 0, 0 },
+    { "along it; up for home, up and hold for recent apps;", R_NOTE, 0, 0 },
+    { "in from the left edge for back.", R_NOTE, 0, 0 },
 };
 static const struct srow time_rows[] = {
     { "24-hour clock", R_SWITCH, P(clock24), 0 },
@@ -885,6 +898,7 @@ static const struct spage {
     { "Display size", ROWS(size_rows), P_DISPLAY },
     { "Wallpaper", ROWS(wallpaper_rows), P_LOOK },
     { "Appearance", ROWS(look_rows), P_MAIN },
+    { "Screen lock", ROWS(lock_rows), P_DISPLAY },
 };
 
 static int page;
@@ -892,6 +906,11 @@ static int page;
 void settings_reset(void)
 {
     page = P_MAIN;
+}
+
+void settings_lock_page(void)
+{
+    page = P_LOCK;
 }
 
 int settings_back(void)
@@ -1015,7 +1034,8 @@ void settings_draw(void)
         if (k)
             gfx_fill(28, top, lw - 40, 1, t.line, 255);
         k++;
-        ui_font_text(UI_SANS, SET_PX, 28, base, r->label, t.fg);
+        if (r->kind != R_ACTION)
+            ui_font_text(UI_SANS, SET_PX, 28, base, r->label, t.fg);
         char s[40];
         switch (r->kind) {
         case R_LINK:
@@ -1047,6 +1067,9 @@ void settings_draw(void)
         case R_VALUE:
             value_text(r->arg, s);
             value_right(base, s, t.muted);
+            break;
+        case R_ACTION:                  /* the label is the button */
+            ui_font_text(UI_SANS, SET_PX, 28, base, r->label, mob_accent());
             break;
         case R_ACCENTS:
             for (int a = 0; a < MOB_ACCENTS; a++) {
@@ -1080,7 +1103,7 @@ static void changed(const struct srow *r, int value)
         mob_wallpaper_changed();
     if (r->pref == P(size))
         mob_set_size(value);
-    if (r->pref == P(nav_buttons))
+    if (r->pref == P(nav))
         mob_windows_fit();
     if (r->pref == P(landscape))
         mob_set_orientation(value);
@@ -1133,8 +1156,14 @@ int settings_tap(int x, int y)
             return 1;
         }
         case R_CHOICE:
+            /* a PIN is chosen on its own keys first; the swipe alone
+               stops asking for it */
+            if (r->pref == P(pin_on) && r->arg)
+                return SETTINGS_PIN;
             changed(r, r->arg);
             return 1;
+        case R_ACTION:
+            return r->arg;
         case R_ACCENTS:
             for (int a = 0; a < MOB_ACCENTS; a++) {
                 int dx = SET_DOT_X + a * SET_DOT_STEP;

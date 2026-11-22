@@ -11352,3 +11352,49 @@ works and is checked by `make test`.
       download's "41 %" and a bar 41 % long, a call counting up in its
       own colour, and the end taking it away; and, under the Mac style,
       the timer on the black island at the top, its title and its count.
+- [x] **ProtonUI v2 stage 7: the phone's thread, and the PIN as knots**
+      (kernelarm64/mobile.c, kernelarm64/mobapps.c,
+      kernelarm64/mobapps.h, scripts/ptest.py,
+      scripts/tests/t_arm64apps.py, docs/protonui-plan.md)
+      The phone had two ways to get around, both borrowed - the
+      iPhone's gestures and Android's three buttons. The third is
+      ThreadOS's own (docs/weave/canvas/NavStyles.dc.html): the loom's
+      thread laid along the bottom of the phone, a dark line with a
+      knot on it for each program opened, in the order they were, 16
+      apart edge to edge - the one in front larger, ringed in white and
+      in the middle of the screen, on a band of its colour, the others
+      either side of it. A knot's colour is one of docs/WEAVE.md's six
+      dyes by what the program is for (Night's on a dark screen,
+      Linen's on a light one), the phone's own Settings and About grey.
+      A tap on a knot brings that program to the middle; a finger slid
+      along the thread moves the knots under the middle, one each 24
+      pixels, and brings the one there when it lifts; up from the
+      thread goes home, up and held opens recent apps; in from the left
+      edge is back. The strip it stands on is
+      the phone's, and programs' windows end above it. Settings >
+      Navigation chooses it, and can make the knots all one colour (the
+      one in front the accent). A locked phone shows the line alone: it
+      does not say what runs.
+      The phone also had no PIN at all - the lock screen opened with a
+      swipe. Display > Screen lock now chooses one: six digits on round
+      keys, typed twice, each digit tying a knot of six on a thread in
+      the accent (PhoneUnlock.dc.html); with it set, the swipe up asks
+      for it, a wrong one is refused and cleared, and the right one
+      opens the phone (or the window a program made while it was
+      locked). Lock now locks it from Settings; "Swipe up" goes back to
+      the swipe alone.
+      t_arm64apps (new parts): with the thread chosen, the knots the
+      shell says are the programs opened, in order; on the screen the
+      line is NavStyles.dc.html's colour, Settings' knot stands in the
+      middle, grey, ringed in white, on its grey along the line, Notes
+      and Calculator are WEAVE.md's Saffron and Weld; a tap on Notes'
+      knot brings Notes and moves it to the middle, a finger slid one
+      step brings Calculator, up goes home, up and held opens recent
+      apps, in from the left edge is a page back; with the colours off
+      the knots are all the grey. A PIN chosen: two
+      digits tie two knots in the accent with the thread that far in
+      it, the next ringed in white, the rest dark; a different second
+      six is refused; the same twice sets it; locked, the swipe asks
+      for it, a wrong one is refused and the right one opens home;
+      with the swipe alone again it opens without one. ptest's
+      Phone.touch can hold the finger still before it lifts.

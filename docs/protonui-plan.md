@@ -202,6 +202,17 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
 - The PIN as six knots on a thread.
 - **Test (`t_arm64mobile`):** with the thread chosen, a tap on a knot
   brings that program to the front; a swipe up goes home.
+- **Done** (journal: "ProtonUI v2 stage 7"). The test is in
+  `t_arm64apps`, beside the other two ways of getting around and with
+  its helpers for Settings and the dock. The phone had no PIN at all
+  before: Display > Screen lock chooses one (twice) and has Lock now.
+  The knots are the design's to the pixel: 16 apart edge to edge, the
+  one in front in the middle of the screen on a band of its dye, the
+  dyes docs/WEAVE.md's six (Night's or Linen's by what is under them),
+  the system's own grey.
+  Not yet: hiding the thread over a full-screen video as a switch (a
+  full-screen window covers it anyway), and Settings' Navigation page
+  drawn as the design's three pictures rather than a list.
 
 ## After that
 

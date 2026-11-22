@@ -20,8 +20,10 @@ struct mob_prefs {
     int lock_notes;             /* the latest on the lock screen */
     int saver;                  /* battery saver */
     int show_pct;               /* the battery's per cent in the bar */
-    int nav_buttons;            /* Android's three buttons, not the
-                                   iPhone's gestures */
+    int nav;                    /* how to get around: MOB_NAV_* */
+    int thread_dyes;            /* the thread's knots in their programs'
+                                   colours, not all one */
+    int pin_on;                 /* the lock screen asks for the PIN */
     int clock24;                /* 13:05, not 1:05 PM */
     int size;                   /* the display size: MOB_SIZES, 0 the
                                    largest */
@@ -34,6 +36,12 @@ struct mob_prefs {
                                    from the start, a phone's when
                                    turned */
 };
+
+#define MOB_NAV_GESTURES 0      /* the iPhone's: up from the bottom edge */
+#define MOB_NAV_BUTTONS  1      /* Android's three buttons */
+#define MOB_NAV_THREAD   2      /* ThreadOS's own: a knot a program along
+                                   the bottom (docs/weave/canvas/
+                                   NavStyles.dc.html) */
 
 #define MOB_THEME_MATTE  0      /* a tint over what is under them */
 #define MOB_THEME_GLASS  1      /* Liquid Glass */
@@ -89,7 +97,11 @@ void calc_draw(void);
 int calc_tap(int x, int y);
 void settings_draw(void);
 #define SETTINGS_ABOUT 2         /* settings_tap: open About */
+#define SETTINGS_PIN   3         /* ... choose a PIN */
+#define SETTINGS_LOCK  4         /* ... lock the phone now */
 int settings_tap(int x, int y);
+/* Settings at its Screen lock page again, after choosing a PIN */
+void settings_lock_page(void);
 /* Settings' pages: back to the one above (Android's back button) - 0
    when it is on its first already; and to the first, as it opens */
 int settings_back(void);
