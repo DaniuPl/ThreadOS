@@ -2113,13 +2113,18 @@ $(LLVM_RT_LIB): $(LLVM_RT)/build.ninja $(MUSL_HEADERS)
 	    { tail -40 $(LLVM_RT)/ninja.log; exit 1; }
 
 # What clang runs with, laid out as it lies on a ThreadOS disk: the
-# program under every name it answers to - hard links, one copy on the
-# disk - with its configuration file; clang's own headers and the
+# program, `llvm`, with a symbolic link to it for every name it answers
+# to, and its configuration file; clang's own headers and the
 # builtins where clang looks for them, beside the program
 # (../lib/clang/<version>); musl's headers, start files and libraries,
 # and the linker script, where a C library's are on any system. The
 # compiler finds its linker beside itself, by the path - which is why
-# the kernel takes a program's path whole (kernel/prog.c).
+# the kernel takes a program's path whole (kernel/prog.c). The links
+# are symbolic, not hard: a compile that also links runs the compiler
+# proper as a second process, and clang starts it as the program its
+# own path resolves to (realpath, there being no /proc/self/exe) with
+# the tool's name first - `llvm clang -cc1 ...`; a hard link would
+# resolve to clang itself, which takes that name for a file.
 CLANG_SDK    := $(BUILD)/clang-sdk
 CLANG_NAMES  := clang clang++ ld.lld llvm-ar llvm-ranlib llvm-nm \
                 llvm-objdump llvm-objcopy llvm-strip llvm-size llvm-readelf
@@ -2129,8 +2134,7 @@ $(CLANG_SDK)/done.stamp: $(LLVM_OBJ)/bin/llvm.stripped $(LLVM_RT_LIB) \
 	rm -rf $(CLANG_SDK)
 	mkdir -p $(CLANG_SDK)/usr/bin $(CLANG_SDK)/usr/lib $(CLANG_RES)/lib/linux
 	cp $(LLVM_OBJ)/bin/llvm.stripped $(CLANG_SDK)/usr/bin/llvm
-	for n in $(CLANG_NAMES); do \
-	    ln $(CLANG_SDK)/usr/bin/llvm $(CLANG_SDK)/usr/bin/$$n; done
+	for n in $(CLANG_NAMES); do ln -s llvm $(CLANG_SDK)/usr/bin/$$n; done
 	cp apps/clang/threados.cfg $(CLANG_SDK)/usr/bin/$(TCPU)-unknown-linux-musl.cfg
 	cp -r $(LLVM_OBJ)/lib/clang/$(LLVM_MAJOR)/include $(CLANG_RES)/
 	cp $(LLVM_RT)/lib/linux/*.a $(LLVM_RT)/lib/linux/*.o $(CLANG_RES)/lib/linux/

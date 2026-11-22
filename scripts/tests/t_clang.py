@@ -67,7 +67,7 @@ def host_run(sources, work):
 def make_disk(work):
     tree = os.path.join(work, "tree")
     os.mkdir(tree)
-    # cp -a keeps the hard links: the compiler is on the disk once,
+    # cp -a keeps the symbolic links: the compiler is on the disk once,
     # under every name it answers to
     subprocess.run(["cp", "-a", os.path.join(SDK, "usr"), tree], check=True)
     for d in ("tmp", "w"):
