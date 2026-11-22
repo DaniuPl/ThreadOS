@@ -2140,8 +2140,13 @@ CLANG_SDK    := $(BUILD)/clang-sdk
 CLANG_NAMES  := clang clang++ ld.lld llvm-ar llvm-ranlib llvm-nm \
                 llvm-objdump llvm-objcopy llvm-strip llvm-size llvm-readelf
 CLANG_RES    := $(CLANG_SDK)/usr/lib/clang/$(LLVM_MAJOR)
+# ThreadOS's headers for programs, under usr/include/threados as they
+# lie in the tree (threados.cfg puts its user/ on the search path)
+CLANG_UHDRS  := user/ugui.h user/udraw.h user/uapi.h user/userctl.h
+CLANG_U64HDRS := user64/usys64.h user64/compat64.h
 $(CLANG_SDK)/done.stamp: $(LLVM_OBJ)/bin/llvm.stripped $(LLVM_RT_LIB) \
-                         apps/clang/threados.cfg $(LIBC64) $(MUSL_HEADERS) $(TLD)
+                         apps/clang/threados.cfg $(LIBC64) $(MUSL_HEADERS) $(TLD) \
+                         $(CLANG_UHDRS) $(CLANG_U64HDRS)
 	rm -rf $(CLANG_SDK)
 	mkdir -p $(CLANG_SDK)/usr/bin $(CLANG_SDK)/usr/lib $(CLANG_RES)/lib/linux
 	cp $(LLVM_OBJ)/bin/llvm.stripped $(CLANG_SDK)/usr/bin/llvm
@@ -2150,6 +2155,10 @@ $(CLANG_SDK)/done.stamp: $(LLVM_OBJ)/bin/llvm.stripped $(LLVM_RT_LIB) \
 	cp -r $(LLVM_OBJ)/lib/clang/$(LLVM_MAJOR)/include $(CLANG_RES)/
 	cp $(LLVM_RT)/lib/linux/*.a $(LLVM_RT)/lib/linux/*.o $(CLANG_RES)/lib/linux/
 	cp -r $(MUSL_ROOT)/include $(CLANG_SDK)/usr/
+	mkdir -p $(CLANG_SDK)/usr/include/threados/user \
+	    $(CLANG_SDK)/usr/include/threados/user64
+	cp $(CLANG_UHDRS) $(CLANG_SDK)/usr/include/threados/user/
+	cp $(CLANG_U64HDRS) $(CLANG_SDK)/usr/include/threados/user64/
 	cp $(MUSL_ROOT)/lib/*.o $(MUSL_ROOT)/lib/*.a $(CLANG_SDK)/usr/lib/
 	cp $(TLD) $(CLANG_SDK)/usr/lib/threados.ld
 	touch $@
