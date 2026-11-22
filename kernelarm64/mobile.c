@@ -32,6 +32,15 @@
  *   what fw_cfg's opt/threados/battery says ("73 discharging"), or
  *   mains power where there is no battery, as on QEMU's virt
  *
+ *   the bottom: the iPhone's home indicator, Android's three buttons,
+ *   or the thread - a knot for each program opened, the one in front
+ *   ringed: a tap on a knot or a finger slid along it brings that
+ *   program, up goes home, up and held opens recent apps, in from the
+ *   left edge is back (Settings, Navigation)
+ *
+ *   the lock screen's PIN, when Settings set one: six knots on a
+ *   thread over round keys, asked for after the swipe up
+ *
  *   the shade, pulled down from the status bar (from anywhere on home):
  *   the time, quick settings - the network, airplane mode, the dark
  *   look, do not disturb - the brightness, and the notifications: the
@@ -144,6 +153,50 @@
 #define MOB_RECENT_STEP 76
 #define MOB_RECENTS    6
 #define MOB_LOCK_NOTE_Y 236     /* the lock screen's first notification */
+/* The thread (docs/weave/canvas/NavStyles.dc.html): a line along the
+   bottom, MOB_THREAD_SIDE from the sides with its top MOB_THREAD_LINE
+   from the foot, a knot on it for each program running - MOB_KNOT
+   across, MOB_KNOT_GAP apart edge to edge - and the one in front in the
+   middle of the screen, MOB_KNOT_FRONT across and ringed in white, on
+   MOB_KNOT_BAND of its colour along the line. A finger sliding along it
+   moves the knots under the middle, one each MOB_KNOT_STEP. Its strip,
+   MOB_THREAD_UP from the foot, is the phone's, not a window's. */
+#define MOB_THREAD_UP   30
+#define MOB_THREAD_LINE 18
+#define MOB_THREAD_SIDE 16
+#define MOB_KNOT        8
+#define MOB_KNOT_FRONT  14
+#define MOB_KNOT_GAP    16
+#define MOB_KNOT_STEP   24
+#define MOB_KNOT_BAND   56
+#define NIGHT_THREAD    0x3A3F4C  /* the line, on Night's dark */
+#define LINEN_THREAD    0xCFC8BA  /* ... and on Linen's light */
+#define MOB_KNOTS       8
+#define MOB_BACK_EDGE   14      /* in from this near the left edge: back */
+#define MOB_HOLD_MS     450     /* up from the thread and held: recent apps */
+/* The PIN's keys (docs/weave/canvas/PhoneUnlock.dc.html): six knots on
+   a thread PIN_KNOTS_W wide, each digit tying one, over a pad of round
+   keys PIN_KEY across, PIN_KEY_STEP apart */
+#define PIN_LEN         6
+#define PIN_AVATAR_Y    70      /* the disc's top */
+#define PIN_AVATAR      60
+#define PIN_TITLE_Y     158     /* baselines */
+#define PIN_HINT_Y      180
+#define PIN_KNOTS_W     230
+#define PIN_KNOTS_Y     212     /* the knots' middle */
+#define PIN_KNOT        16
+#define PIN_KEY         64
+#define PIN_KEY_STEP    96
+#define PIN_KEYS_Y      246     /* the first row's top */
+#define PIN_ROW_STEP    76
+#define PIN_CANCEL_Y    578     /* "Cancel"'s baseline */
+#define PIN_BG          0x0D0F15
+#define PIN_KEY_BG      0x1A1C23
+#define PIN_KEY_LINE    0x2E323D
+#define PIN_TRACK       0x2E323D
+#define PIN_RING_OFF    0x4A4F5C
+#define PIN_DIM         0x9AA0AE
+#define PIN_LINK        0x8FA5FF  /* "Cancel", the design's link colour */
 
 #define WHITE   0xFFFFFF
 #define MUTED   0xAEB6CC
@@ -152,7 +205,7 @@
                                    (mobapps.c's first) */
 
 enum { LOCK, HOME, APP_ABOUT, APP_CLOCK, APP_DRAW, APP_WINDOW, APP_NOTES,
-       APP_CALC, APP_SETTINGS, APP_RECENTS, APP_RECORDER };
+       APP_CALC, APP_SETTINGS, APP_RECENTS, APP_RECORDER, PIN_PAD };
 
 static const struct app {
     const char *name;
@@ -209,6 +262,20 @@ static int np_win = -1, np_state;
 static char np_title[64];
 static int recent[MOB_RECENTS], recent_count;  /* screens, newest first */
 static int about_from_settings;
+/* The thread's knots: the programs opened, in the order they were - the
+   phone's apps by their screens, programs' windows by theirs */
+static struct knot { int screen, win; } knots[MOB_KNOTS];
+static int knot_n, knot_pick = -1;   /* where a finger slides to */
+/* What is on the screen, and the program that was before it - the
+   gestures' swipe along the bar goes back to that one */
+static int cur_s = LOCK, cur_w = -1, before_s = -1, before_w = -1;
+/* The PIN: what it is (when mob_prefs.pin_on), what is being typed, and
+   what the keys are for - opening the phone, or choosing one in
+   Settings and then typing it again */
+enum { PIN_UNLOCK, PIN_CHOOSE, PIN_AGAIN };
+static int pin_mode, pin_n;
+static char pin[PIN_LEN + 1], pin_typed[PIN_LEN + 1], pin_first[PIN_LEN + 1];
+static const char *pin_hint = "";
 static int battery = -1, charging;  /* -1: mains power, no battery */
 
 /* Notifications, newest first: any thread may add one */
@@ -301,11 +368,17 @@ static void centred(int font, int px, int cx, int baseline, const char *s,
 
 /* --- pieces ------------------------------------------------------------ */
 
-/* The bottom of every screen: the iPhone's home indicator, or
-   Android's back, home and recent apps */
+static void draw_thread(uint32_t c);
+
+/* The bottom of every screen: the iPhone's home indicator, Android's
+   back, home and recent apps, or the thread */
 static void pill(uint32_t c)
 {
-    if (!mob_prefs.nav_buttons) {
+    if (mob_prefs.nav == MOB_NAV_THREAD) {
+        draw_thread(c);
+        return;
+    }
+    if (mob_prefs.nav != MOB_NAV_BUTTONS) {
         gfx_rrect((lw - MOB_PILL_W) / 2, MOB_PILL_Y, MOB_PILL_W, 5, 2, c,
                   230);
         return;
@@ -416,7 +489,8 @@ void mob_windows_fit(void)
 {
     if (full_win >= 0)
         return;                      /* the whole screen, its foot too */
-    int up = mob_prefs.nav_buttons ? MOB_NAV_UP : MOB_SAFE_UP;
+    int up = mob_prefs.nav == MOB_NAV_BUTTONS ? MOB_NAV_UP :
+             mob_prefs.nav == MOB_NAV_THREAD ? MOB_THREAD_UP : MOB_SAFE_UP;
     winmob_set_bottom(video_ph() - up * video_k() / 16);
 }
 
@@ -1209,7 +1283,7 @@ static void draw_lock(void)
     }
     centred(UI_SANS, MOB_HINT_PX, lw / 2, MOB_HINT_Y, "Swipe up to open",
             MUTED);
-    if (mob_prefs.nav_buttons)
+    if (mob_prefs.nav == MOB_NAV_BUTTONS)
         return;                 /* no bar of buttons on a locked phone */
     pill(WHITE);
 }
@@ -1341,6 +1415,10 @@ static void draw_window(void)
         winmob_draw(shown);
         if (winmob_keyboard(shown))
             mob_kb_draw();
+        /* the thread over it, unless it hides while a video fills the
+           screen (its strip is the phone's either way) */
+        if (mob_prefs.nav == MOB_NAV_THREAD && mob_prefs.thread_over_full)
+            draw_thread(WHITE);
         return;
     }
     uint32_t top = winmob_edge_colour(shown, 0);
@@ -1385,6 +1463,292 @@ static void draw_recents(void)
         gfx_rrect(24, y + 12, 40, 40, tile_r(40), app_colour(recent[i]), 255);
         ui_font_text(UI_BOLD, 17, 80, y + 39, screen_name(recent[i]), WHITE);
     }
+    pill(WHITE);
+}
+
+/* --- the thread --------------------------------------------------------- */
+
+/* What is on the screen is still the locked phone's: the lock screen,
+   or the keys for its PIN */
+static int is_locked(void)
+{
+    return screen == LOCK || (screen == PIN_PAD && pin_mode == PIN_UNLOCK);
+}
+
+/* The thread as it is now, on the serial port - which knot stands
+   where, for t_arm64apps */
+static void knots_said(void)
+{
+    char line[160], *p = put(line, "[mobile] thread:");
+    for (int i = 0; i < knot_n; i++) {
+        p = put(p, i ? ", " : " ");
+        p = put(p, screen_name(knots[i].screen));
+    }
+    printk("%s\n", line);
+}
+
+/* A program opened: a knot on the thread, after the others (the oldest
+   gives way when there is no room). Programs' windows that have gone
+   are untied. */
+static void knots_prune(void)
+{
+    int gone = 0;
+    for (int i = 0; i < knot_n; )
+        if (knots[i].screen == APP_WINDOW && !winmob_exists(knots[i].win)) {
+            for (int k = i; k < knot_n - 1; k++)
+                knots[k] = knots[k + 1];
+            knot_n--;
+            gone = 1;
+        } else {
+            i++;
+        }
+    if (gone)
+        knots_said();
+}
+
+static void knot_add(int s, int win)
+{
+    knots_prune();
+    for (int i = 0; i < knot_n; i++)
+        if (knots[i].screen == s && (s != APP_WINDOW || knots[i].win == win))
+            return;
+    if (knot_n == MOB_KNOTS) {
+        for (int k = 0; k < knot_n - 1; k++)
+            knots[k] = knots[k + 1];
+        knot_n--;
+    }
+    knots[knot_n].screen = s;
+    knots[knot_n++].win = win;
+    knots_said();
+}
+
+/* The knot of what is on the screen, -1 at home */
+static int knot_front(void)
+{
+    for (int i = 0; i < knot_n; i++)
+        if (knots[i].screen == screen &&
+            (screen != APP_WINDOW || knots[i].win == shown))
+            return i;
+    return -1;
+}
+
+/* The knot shown in front: the one a finger slides to, else what is on
+   the screen */
+static int knot_shown(void)
+{
+    return knot_pick >= 0 ? knot_pick : knot_front();
+}
+
+/* A knot's middle along the thread: the knots in a row MOB_KNOT_GAP
+   apart, the one in front (larger) in the middle of the screen - or
+   the row centred, at home, where none is */
+static int knot_x(int i)
+{
+    int front = knot_shown(), at = 0, mid_i = 0, mid_f = 0;
+    for (int k = 0; k < knot_n; k++) {
+        int d = k == front ? MOB_KNOT_FRONT : MOB_KNOT;
+        if (k == i)
+            mid_i = at + d / 2;
+        if (k == front)
+            mid_f = at + d / 2;
+        at += d + MOB_KNOT_GAP;
+    }
+    at -= MOB_KNOT_GAP;
+    return front >= 0 ? lw / 2 + mid_i - mid_f : (lw - at) / 2 + mid_i;
+}
+
+/* The knot a tap on the thread is for: the nearest, within half the
+   way to its neighbours */
+static int knot_near(int x)
+{
+    int best = -1, bd = MOB_KNOT_STEP / 2 + 1;
+    for (int i = 0; i < knot_n; i++) {
+        int d = x - knot_x(i);
+        d = d < 0 ? -d : d;
+        if (d < bd) {
+            bd = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+/* Which dye a program's knot is: by what it is for, as the dyes' jobs
+   go - pictures and sound Cochineal, Weft Woad - the phone's own
+   Settings and About grey, a program's window by its name's letter */
+static int knot_dye_of(int i)
+{
+    switch (knots[i].screen) {
+    case APP_NOTES:    return DYE_SAFFRON;
+    case APP_CALC:     return DYE_WELD;
+    case APP_CLOCK:    return DYE_WOAD;
+    case APP_DRAW:     return DYE_INDIGO;
+    case APP_RECORDER: return DYE_COCHINEAL;
+    case APP_WINDOW: {
+        char name[32];
+        winmob_name(knots[i].win, name, sizeof(name));
+        if (name[0] == 'W' && name[1] == 'e' && name[2] == 'f' &&
+            name[3] == 't')
+            return DYE_WOAD;
+        return (uint8_t)name[0] % DYE_GREY;
+    }
+    default:           return DYE_GREY;
+    }
+}
+
+static uint32_t knot_dye(int i, int front, int night)
+{
+    if (mob_prefs.thread_dyes)
+        return mob_dyes[!night][knot_dye_of(i)];
+    return i == front ? mob_accent() : mob_dyes[!night][DYE_GREY];
+}
+
+/* The thread in the colours of what is under it: c is what is written
+   there - light on a dark screen, Night's; dark on a light one, Linen's */
+static void draw_thread(uint32_t c)
+{
+    int night = ((c >> 16 & 255) + (c >> 8 & 255) + (c & 255)) > 384;
+    int y = lh - MOB_THREAD_LINE;
+    gfx_fill(MOB_THREAD_SIDE, y, lw - 2 * MOB_THREAD_SIDE, 2,
+             night ? NIGHT_THREAD : LINEN_THREAD, 255);
+    if (is_locked())
+        return;                 /* a locked phone does not say what runs */
+    knots_prune();
+    int front = knot_shown();
+    if (front >= 0)
+        gfx_rrect(lw / 2 - MOB_KNOT_BAND / 2, y - 1, MOB_KNOT_BAND, 4, 2,
+                  knot_dye(front, front, night), 255);
+    for (int i = 0; i < knot_n; i++) {
+        int cx = knot_x(i) * 16, cy = (y + 1) * 16;
+        uint32_t dye = knot_dye(i, front, night);
+        if (i == front) {
+            gfx_disc16(cx, cy, MOB_KNOT_FRONT * 8, WHITE, 255);
+            gfx_disc16(cx, cy, (MOB_KNOT_FRONT - 4) * 8, dye, 255);
+        } else {
+            gfx_disc16(cx, cy, MOB_KNOT * 8, dye, 255);
+        }
+    }
+}
+
+/* --- the PIN ----------------------------------------------------------- */
+
+static void go(int s, const char *why);
+
+static void pin_start(int mode, const char *why)
+{
+    pin_mode = mode;
+    pin_n = 0;
+    pin_hint = mode == PIN_UNLOCK ? "Your PIN" : "Choose a PIN";
+    go(PIN_PAD, why);
+}
+
+/* A knot of the PIN's thread: its middle */
+static int pin_knot_x(int i)
+{
+    return (lw - PIN_KNOTS_W) / 2 + PIN_KNOT / 2 +
+           i * (PIN_KNOTS_W - PIN_KNOT) / (PIN_LEN - 1);
+}
+
+/* A key's middle: three columns, four rows - 1 to 9, then 0 in the
+   middle and backspace at the right */
+static void pin_key_xy(int r, int c, int *x, int *y)
+{
+    *x = lw / 2 + (c - 1) * PIN_KEY_STEP;
+    *y = PIN_KEYS_Y + r * PIN_ROW_STEP + PIN_KEY / 2;
+}
+
+#define PIN_BACKSPACE 10
+#define PIN_CANCEL    11
+
+static int pin_key_at(int x, int y)
+{
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 3; c++) {
+            int kx, ky;
+            pin_key_xy(r, c, &kx, &ky);
+            int dx = x - kx, dy = y - ky, rr = PIN_KEY / 2 + 6;
+            if (dx * dx + dy * dy > rr * rr)
+                continue;
+            if (r < 3)
+                return r * 3 + c + 1;
+            return c == 1 ? 0 : c == 2 ? PIN_BACKSPACE : -1;
+        }
+    if (y >= PIN_CANCEL_Y - 24 && y < PIN_CANCEL_Y + 12 &&
+        x >= lw / 2 - 60 && x < lw / 2 + 60)
+        return PIN_CANCEL;
+    return -1;
+}
+
+static void draw_pin(void)
+{
+    static const char *const letters[10] = { "", "", "ABC", "DEF", "GHI",
+        "JKL", "MNO", "PQRS", "TUV", "WXYZ" };
+    struct rtc_time t;
+    char s[16];
+    uint32_t acc = mob_dyes[0][DYE_INDIGO];   /* the design's: Night's */
+    gfx_fill(0, 0, lw, lh, PIN_BG, 255);
+    rtc_split(rtc_seconds(), &t);
+    clock_text(s, &t, 0);
+    centred(UI_BOLD, 14, lw / 2, 30, s, WHITE);
+
+    /* the phone's mark on a disc of the accent, ringed */
+    int cx = lw / 2, cy = PIN_AVATAR_Y + PIN_AVATAR / 2;
+    gfx_circle16(cx * 16, cy * 16, (PIN_AVATAR / 2 - 1) * 16, 48, acc, 255);
+    gfx_disc16(cx * 16, cy * 16, (PIN_AVATAR / 2 - 6) * 16, acc, 255);
+    mark_draw((const struct gfx_surface *)0, cx - 14, cy - 14, 28, WHITE,
+              255);
+    centred(UI_BOLD, 17, lw / 2, PIN_TITLE_Y,
+            pin_mode == PIN_UNLOCK ? "Locked" : "Screen lock", WHITE);
+    centred(UI_SANS, 13, lw / 2, PIN_HINT_Y, pin_hint, PIN_DIM);
+
+    /* six knots on a thread: the typed ones tied in the accent, the
+       thread drawn in it as far as the last of them, the next ringed */
+    int ky = PIN_KNOTS_Y, x0 = pin_knot_x(0), x5 = pin_knot_x(PIN_LEN - 1);
+    gfx_fill(x0, ky - 1, x5 - x0, 2, PIN_TRACK, 255);
+    if (pin_n > 1)
+        gfx_fill(x0, ky - 1, pin_knot_x(pin_n - 1) - x0, 2, acc, 255);
+    for (int i = 0; i < PIN_LEN; i++) {
+        int kx = pin_knot_x(i) * 16;
+        uint32_t ring = i < pin_n ? acc : i == pin_n ? WHITE : PIN_RING_OFF;
+        gfx_disc16(kx, ky * 16, PIN_KNOT * 8, ring, 255);
+        if (i >= pin_n)
+            gfx_disc16(kx, ky * 16, (PIN_KNOT - 4) * 8, PIN_BG, 255);
+    }
+
+    /* the keys */
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 3; c++) {
+            int x, y;
+            pin_key_xy(r, c, &x, &y);
+            if (r == 3 && c == 0)
+                continue;
+            if (r == 3 && c == 2) {      /* backspace: a tag with an x */
+                gfx_line16((x - 12) * 16, y * 16, (x - 5) * 16, (y - 8) * 16,
+                           32, WHITE, 255);
+                gfx_line16((x - 12) * 16, y * 16, (x - 5) * 16, (y + 8) * 16,
+                           32, WHITE, 255);
+                gfx_line16((x - 5) * 16, (y - 8) * 16, (x + 12) * 16,
+                           (y - 8) * 16, 32, WHITE, 255);
+                gfx_line16((x - 5) * 16, (y + 8) * 16, (x + 12) * 16,
+                           (y + 8) * 16, 32, WHITE, 255);
+                gfx_line16((x + 12) * 16, (y - 8) * 16, (x + 12) * 16,
+                           (y + 8) * 16, 32, WHITE, 255);
+                gfx_line16((x - 1) * 16, (y - 4) * 16, (x + 7) * 16,
+                           (y + 4) * 16, 32, WHITE, 255);
+                gfx_line16((x - 1) * 16, (y + 4) * 16, (x + 7) * 16,
+                           (y - 4) * 16, 32, WHITE, 255);
+                continue;
+            }
+            int d = r < 3 ? r * 3 + c + 1 : 0;
+            gfx_disc16(x * 16, y * 16, PIN_KEY * 8, PIN_KEY_LINE, 255);
+            gfx_disc16(x * 16, y * 16, (PIN_KEY - 2) * 8, PIN_KEY_BG, 255);
+            char digit[2] = { (char)('0' + d), 0 };
+            centred(UI_BOLD, 26, x, y + (letters[d][0] ? 6 : 10), digit,
+                    WHITE);
+            if (letters[d][0])
+                centred(UI_BOLD, 9, x, y + 20, letters[d], PIN_DIM);
+        }
+    centred(UI_SANS, 15, lw / 2, PIN_CANCEL_Y, "Cancel", PIN_LINK);
     pill(WHITE);
 }
 
@@ -1860,6 +2224,7 @@ static void draw(void)
     case APP_SETTINGS: settings_draw(); break;
     case APP_RECENTS:  draw_recents(); break;
     case APP_RECORDER: recorder_draw(); break;
+    case PIN_PAD:      draw_pin(); break;
     }
     if (shade)
         draw_shade();
@@ -1883,18 +2248,30 @@ static const char *screen_name(int s)
     case APP_SETTINGS: return "Settings";
     case APP_RECENTS: return "recent apps";
     case APP_RECORDER: return "Recorder";
+    case PIN_PAD:    return "PIN";
     default:         return "Draw";
     }
 }
 
 static void go(int s, const char *why)
 {
+    int app = cur_s >= APP_ABOUT && cur_s != APP_RECENTS && cur_s != PIN_PAD;
+    if (app && (cur_s != s || (s == APP_WINDOW && cur_w != shown))) {
+        before_s = cur_s;
+        before_w = cur_w;
+    }
+    cur_s = s;
+    cur_w = s == APP_WINDOW ? shown : -1;
     screen = s;
     dirty = 1;
     if (s == APP_SETTINGS)
         settings_reset();
     /* The phone's own apps, newest first, for Android's recent apps */
-    if (s >= APP_ABOUT && s != APP_WINDOW && s != APP_RECENTS) {
+    /* ... and on the thread, in the order they were opened */
+    if (s >= APP_ABOUT && s != APP_RECENTS && s != PIN_PAD)
+        knot_add(s, s == APP_WINDOW ? shown : -1);
+    if (s >= APP_ABOUT && s != APP_WINDOW && s != APP_RECENTS &&
+        s != PIN_PAD) {
         int k = 0;
         while (k < recent_count && recent[k] != s)
             k++;
@@ -2037,23 +2414,111 @@ static void open_app(int s, const char *name)
     go(s, name);
 }
 
+/* Out of choosing a PIN: back to Settings' Screen lock page */
+static void pin_leave(const char *why)
+{
+    go(APP_SETTINGS, why);
+    settings_lock_page();
+}
+
+/* Back: Android's button, or in from the left edge with the thread */
+static void go_back(const char *why)
+{
+    printk("[mobile] back (%s)\n", why);
+    if (shade) {
+        shade = 0;
+        dirty = 1;
+    } else if (screen == PIN_PAD) {
+        pin_leave("back");
+    } else if (screen == APP_SETTINGS && settings_back()) {
+        dirty = 1;
+    } else if (screen == APP_ABOUT && about_from_settings) {
+        about_from_settings = 0;
+        go(APP_SETTINGS, "back");
+    } else if (screen >= APP_ABOUT) {
+        go(HOME, "back");
+    }
+}
+
+/* The phone opened: the window a program made while it was locked, or
+   home */
+static void unlock(const char *why)
+{
+    if (winmob_exists(pending))
+        show(pending, "opened while locked");
+    else
+        go(HOME, why);
+    pending = -1;
+}
+
+/* A digit, backspace or Cancel on the PIN's keys */
+static void pin_tap(int x, int y)
+{
+    int k = pin_key_at(x, y);
+    if (k < 0)
+        return;
+    dirty = 1;
+    if (k == PIN_CANCEL) {
+        if (pin_mode == PIN_UNLOCK)
+            go(LOCK, "cancel");
+        else
+            pin_leave("cancel");
+        return;
+    }
+    if (k == PIN_BACKSPACE) {
+        if (pin_n)
+            pin_n--;
+        printk("[mobile] PIN %d of %d\n", pin_n, PIN_LEN);
+        return;
+    }
+    pin_typed[pin_n++] = (char)('0' + k);
+    printk("[mobile] PIN %d of %d\n", pin_n, PIN_LEN);
+    if (pin_n < PIN_LEN)
+        return;
+    pin_typed[PIN_LEN] = 0;
+    pin_n = 0;
+    if (pin_mode == PIN_UNLOCK) {
+        if (!strcmp(pin_typed, pin)) {
+            printk("[mobile] PIN right\n");
+            unlock("the PIN");
+        } else {
+            printk("[mobile] PIN wrong\n");
+            pin_hint = "Wrong PIN - again";
+        }
+    } else if (pin_mode == PIN_CHOOSE) {
+        memcpy(pin_first, pin_typed, sizeof(pin_first));
+        pin_mode = PIN_AGAIN;
+        pin_hint = "Again, to be sure";
+    } else if (!strcmp(pin_typed, pin_first)) {
+        memcpy(pin, pin_typed, sizeof(pin));
+        mob_prefs.pin_on = 1;
+        printk("[settings] PIN set\n");
+        pin_leave("the PIN chosen");
+    } else {
+        printk("[mobile] the PINs differ\n");
+        pin_mode = PIN_CHOOSE;
+        pin_hint = "Not the same - choose again";
+    }
+    memset(pin_typed, 0, sizeof(pin_typed));
+}
+
+/* A program's knot, tapped or slid to: it comes to the front */
+static void knot_open(int k, const char *why)
+{
+    if (knots[k].screen == APP_WINDOW) {
+        if (winmob_exists(knots[k].win))
+            show(knots[k].win, why);
+    } else {
+        open_app(knots[k].screen, why);
+    }
+}
+
 /* Android's three buttons, at the bottom of every screen but the lock
    screen's */
 static void nav_press(int x)
 {
     if (x < (MOB_NAV_BACK_X + MOB_NAV_HOME_X) / 2) {
-        printk("[mobile] back\n");
-        if (shade) {
-            shade = 0;
-            dirty = 1;
-        } else if (screen == APP_SETTINGS && settings_back()) {
-            dirty = 1;
-        } else if (screen == APP_ABOUT && about_from_settings) {
-            about_from_settings = 0;
-            go(APP_SETTINGS, "back");
-        } else if (screen >= APP_ABOUT) {
-            go(HOME, "back");
-        }
+        go_back("the back button");
         return;
     }
     shade = 0;
@@ -2067,6 +2532,10 @@ static void tap(int x, int y)
 {
     if (shade) {
         shade_tap(x, y);
+        return;
+    }
+    if (screen == PIN_PAD) {
+        pin_tap(x, y);
         return;
     }
     if (screen == HOME && y >= MOB_DOCK_Y && y < MOB_DOCK_Y + MOB_DOCK_H) {
@@ -2105,6 +2574,10 @@ static void tap(int x, int y)
         if (r == SETTINGS_ABOUT) {
             about_from_settings = 1;
             go(APP_ABOUT, "Settings");
+        } else if (r == SETTINGS_PIN) {
+            pin_start(PIN_CHOOSE, "Settings");
+        } else if (r == SETTINGS_LOCK) {
+            go(LOCK, "Lock now");
         } else {
             dirty |= r;
         }
@@ -2159,7 +2632,11 @@ static void tap(int x, int y)
 
 static struct {
     int on, x0, y0, program, edge;
+    int thread, left;            /* it went down on the thread's strip, or
+                                    in its left edge (back) */
+    int from;                    /* the knot in front when it went down */
     uint64_t at;                 /* when it went down (the counter) */
+    uint64_t still;              /* ... and when it last moved */
     int moved, longed;           /* it went further than MOB_STILL; it was
                                     told to the program as a long press */
 } finger;
@@ -2168,7 +2645,9 @@ static struct {
    the bar of Android's buttons */
 static int bottom_edge(void)
 {
-    return mob_prefs.nav_buttons ? MOB_NAV_Y : lh - MOB_EDGE;
+    return mob_prefs.nav == MOB_NAV_BUTTONS ? MOB_NAV_Y :
+           mob_prefs.nav == MOB_NAV_THREAD ? lh - MOB_THREAD_UP :
+           lh - MOB_EDGE;
 }
 
 /* A finger in a program's window, in the window's own pixels: the
@@ -2186,8 +2665,17 @@ static void touch(const struct touch_event *e)
         finger.on = 1;
         finger.x0 = e->x;
         finger.y0 = e->y;
-        finger.at = counter_now();
+        finger.at = finger.still = counter_now();
         finger.moved = finger.longed = 0;
+        /* With the thread its strip is the phone's; with it or the
+           gestures, the left edge (back) */
+        int own = mob_prefs.nav != MOB_NAV_BUTTONS && !shade && !is_locked();
+        finger.thread = own && mob_prefs.nav == MOB_NAV_THREAD &&
+                        e->y >= lh - MOB_THREAD_UP;
+        finger.left = own && !finger.thread && e->x < MOB_BACK_EDGE;
+        finger.from = knot_front();
+        if (finger.thread && finger.from < 0)
+            finger.from = knot_near(e->x);
         last_x = e->x;
         last_y = e->y;
         printk("[touch] down %d,%d\n", e->x, e->y);
@@ -2196,15 +2684,20 @@ static void touch(const struct touch_event *e)
         finger.program = !shade && screen == APP_WINDOW &&
                          e->y * video_k() / 16 >=
                              (shown == full_win ? 0 : win_top) &&
-                         e->y < bottom_edge() &&
+                         e->y < bottom_edge() && !finger.left &&
                          !(winmob_keyboard(shown) && e->y >= mob_kb_top());
         /* In the home gesture's edge a swipe up is the phone's, but a
            tap is still the program's: it is told once the finger lifts
            where it went down */
         finger.edge = !shade && screen == APP_WINDOW && !finger.program &&
-                      !mob_prefs.nav_buttons && e->y >= bottom_edge() &&
-                      e->y < lh - MOB_SAFE_UP &&
+                      mob_prefs.nav == MOB_NAV_GESTURES &&
+                      e->y >= bottom_edge() && e->y < lh - MOB_SAFE_UP &&
                       !(winmob_keyboard(shown) && e->y >= mob_kb_top());
+        /* ... and so in the left edge, where a swipe is back */
+        if (finger.left && screen == APP_WINDOW &&
+            e->y * video_k() / 16 >= (shown == full_win ? 0 : win_top) &&
+            e->y < bottom_edge())
+            finger.edge = 1;
         if (finger.program)
             to_program(WEV_PRESS, e->x, e->y);
         return;
@@ -2214,6 +2707,25 @@ static void touch(const struct touch_event *e)
     if (e->x - finger.x0 > MOB_STILL || finger.x0 - e->x > MOB_STILL ||
         e->y - finger.y0 > MOB_STILL || finger.y0 - e->y > MOB_STILL)
         finger.moved = 1;
+    if (e->x - last_x > 3 || last_x - e->x > 3 || e->y - last_y > 3 ||
+        last_y - e->y > 3)
+        finger.still = counter_now();
+    /* Sliding along the thread: a knot each MOB_KNOT_STEP the finger
+       goes, the knots moving under the middle until it lifts */
+    if (finger.thread && e->kind != TOUCH_UP && finger.from >= 0) {
+        int sx = e->x - finger.x0, sy = e->y - finger.y0;
+        int ax = sx < 0 ? -sx : sx, ay = sy < 0 ? -sy : sy;
+        int k = -1;
+        if (ax > MOB_KNOT_STEP / 2 && ax > ay) {
+            k = finger.from + (sx + (sx < 0 ? -MOB_KNOT_STEP / 2 :
+                                     MOB_KNOT_STEP / 2)) / MOB_KNOT_STEP;
+            k = k < 0 ? 0 : k >= knot_n ? knot_n - 1 : k;
+        }
+        if (k != knot_pick) {
+            knot_pick = k;
+            dirty = 1;
+        }
+    }
     if (finger.program)
         to_program(e->kind == TOUCH_UP ? WEV_RELEASE : WEV_DRAG, e->x, e->y);
     if (!shade && screen == APP_DRAW && finger.y0 > MOB_TITLE_Y + 12 &&
@@ -2236,9 +2748,43 @@ static void touch(const struct touch_event *e)
     int dx = e->x - finger.x0, dy = e->y - finger.y0;
     printk("[touch] up %d,%d\n", e->x, e->y);
     int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
-    if (mob_prefs.nav_buttons && screen != LOCK && finger.y0 >= MOB_NAV_Y &&
-        adx <= 12 && ady <= 12) {
+    if (mob_prefs.nav == MOB_NAV_BUTTONS && !is_locked() &&
+        finger.y0 >= MOB_NAV_Y && adx <= 12 && ady <= 12) {
         nav_press(finger.x0);
+        return;
+    }
+    if (finger.thread) {
+        /* the thread: up for home, up and held for recent apps; a knot
+           tapped, or the one slid to, to the front */
+        int pick = knot_pick;
+        knot_pick = -1;
+        dirty = 1;
+        if (dy < -50 && ady > adx) {
+            if (counter_now() - finger.still >=
+                timer_freq() * MOB_HOLD_MS / 1000)
+                go(APP_RECENTS, "up and held on the thread");
+            else
+                go(HOME, "up from the thread");
+        } else if (adx <= 12 && ady <= 12) {
+            int k = knot_near(finger.x0);
+            if (k >= 0)
+                knot_open(k, "its knot");
+        } else if (pick >= 0) {
+            knot_open(pick, "along the thread");
+        }
+        return;
+    }
+    if (finger.left && dx > 60 && adx > ady) {
+        go_back("the left edge");
+        return;
+    }
+    /* The gestures: along the bar at the bottom, the program before */
+    if (mob_prefs.nav == MOB_NAV_GESTURES && !shade && !is_locked() &&
+        finger.y0 >= lh - MOB_EDGE && adx > 60 && adx > ady) {
+        if (before_s == APP_WINDOW && winmob_exists(before_w))
+            show(before_w, "along the bar");
+        else if (before_s >= APP_ABOUT && before_s != APP_WINDOW)
+            open_app(before_s, "along the bar");
         return;
     }
     if (shade) {
@@ -2254,7 +2800,7 @@ static void touch(const struct touch_event *e)
         }
         return;
     }
-    if (dy > 80 && adx < ady && screen != LOCK &&
+    if (dy > 80 && adx < ady && !is_locked() &&
         (finger.y0 < MOB_BAR_H ||
          (screen == HOME && finger.y0 < MOB_DOCK_Y))) {
         /* Down from the status bar - from anywhere on home */
@@ -2267,15 +2813,21 @@ static void touch(const struct touch_event *e)
         /* Up: on the lock screen from anywhere in its lower half, in an
            app only from the bottom edge, as a phone's home gesture */
         if (screen == LOCK && finger.y0 > lh / 2) {
-            if (winmob_exists(pending))
-                show(pending, "opened while locked");
+            if (mob_prefs.pin_on)
+                pin_start(PIN_UNLOCK, "swipe up");
             else
-                go(HOME, "swipe up");
-            pending = -1;
+                unlock("swipe up");
         }
-        else if (screen >= APP_ABOUT && !mob_prefs.nav_buttons &&
-                 finger.y0 >= lh - MOB_EDGE)
-            go(HOME, "swipe up from the edge");
+        else if (screen >= APP_ABOUT && screen != PIN_PAD &&
+                 mob_prefs.nav == MOB_NAV_GESTURES &&
+                 finger.y0 >= lh - MOB_EDGE) {
+            /* up and held there: recent apps */
+            if (counter_now() - finger.still >=
+                timer_freq() * MOB_HOLD_MS / 1000)
+                go(APP_RECENTS, "up and held from the edge");
+            else
+                go(HOME, "swipe up from the edge");
+        }
     } else if (adx <= 12 && ady <= 12 && finger.edge) {
         to_program(WEV_PRESS, finger.x0, finger.y0);
         to_program(WEV_RELEASE, finger.x0, finger.y0);
@@ -2422,7 +2974,7 @@ void mobile_main(void *arg)
            drawn into is drawn again, one whose program ended is left */
         int fresh = winmob_take_new();
         if (fresh >= 0) {
-            if (screen == LOCK)
+            if (is_locked())
                 pending = fresh;
             else
                 show(fresh, "opened");

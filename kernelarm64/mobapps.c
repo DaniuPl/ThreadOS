@@ -27,6 +27,7 @@
 #include "mobapps.h"
 #include "vsnd.h"
 #include "../kernel/include/gfx.h"
+#include "../kernel/include/look.h"
 #include "../kernel/include/printk.h"
 #include "../kernel/include/string.h"
 #include "../kernel/include/uitext.h"
@@ -40,7 +41,14 @@
 
 struct mob_prefs mob_prefs = {
     .dark = 1, .brightness = 100, .volume = 70, .banners = 1,
-    .lock_notes = 1, .show_pct = 1, .clock24 = 1,
+    .lock_notes = 1, .show_pct = 1, .clock24 = 1, .thread_dyes = 1,
+};
+
+const uint32_t mob_dyes[2][DYES] = {
+    { 0x5B7CFA, 0xE5484D, 0xF5A524, 0x46C27A, 0x2EC4C4, 0xD152A6,
+      NIGHT_APP_DIM },
+    { 0x3F5EE8, 0xC9302C, 0xB86E00, 0x1E8A4C, 0x1E7F86, 0xC2366F,
+      0x6B675F },
 };
 
 static const uint32_t accents[MOB_ACCENTS] = {
@@ -778,9 +786,9 @@ int calc_tap(int x, int y)
 #define SET_DOT_STEP   38
 
 enum { P_MAIN, P_NETWORK, P_DISPLAY, P_SOUND, P_BATTERY, P_NAV, P_TIME,
-       P_SIZE, P_WALLPAPER, P_LOOK, PAGES };
+       P_SIZE, P_WALLPAPER, P_LOOK, P_LOCK, PAGES };
 enum { R_LINK, R_SWITCH, R_SLIDER, R_CHOICE, R_VALUE, R_ACCENTS, R_ABOUT,
-       R_NOTE };
+       R_NOTE, R_ACTION };
 enum { V_ADDRESS, V_STATE, V_BATTERY, V_POWER, V_SPEAKER, V_ZONE, V_CARD };
 
 struct srow {
@@ -815,6 +823,14 @@ static const struct srow display_rows[] = {
     { "Display size", R_LINK, 0, P_SIZE },
     { "Portrait", R_CHOICE, P(landscape), 0 },
     { "Landscape", R_CHOICE, P(landscape), 1 },
+    { "Screen lock", R_LINK, 0, P_LOCK },
+};
+/* The PIN itself is mobile.c's: choosing one opens its keys */
+static const struct srow lock_rows[] = {
+    { "Swipe up", R_CHOICE, P(pin_on), 0 },
+    { "PIN, six digits", R_CHOICE, P(pin_on), 1 },
+    { "Lock now", R_ACTION, 0, SETTINGS_LOCK },
+    { "With a PIN, the swipe up asks for it.", R_NOTE, 0, 0 },
 };
 static const struct srow look_rows[] = {
     { "Matte", R_CHOICE, P(theme), MOB_THEME_MATTE },
@@ -853,11 +869,9 @@ static const struct srow battery_rows[] = {
     { "Battery saver", R_SWITCH, P(saver), 0 },
     { "Percentage in the bar", R_SWITCH, P(show_pct), 0 },
 };
+/* drawn by nav_page_draw, as its design */
 static const struct srow nav_rows[] = {
-    { "Gestures, as an iPhone", R_CHOICE, P(nav_buttons), 0 },
-    { "Three buttons, as Android", R_CHOICE, P(nav_buttons), 1 },
-    { "Gestures: up from the bottom edge for home.", R_NOTE, 0, 0 },
-    { "Buttons: back, home and recent apps.", R_NOTE, 0, 0 },
+    { "", R_NOTE, 0, 0 },
 };
 static const struct srow time_rows[] = {
     { "24-hour clock", R_SWITCH, P(clock24), 0 },
@@ -885,6 +899,7 @@ static const struct spage {
     { "Display size", ROWS(size_rows), P_DISPLAY },
     { "Wallpaper", ROWS(wallpaper_rows), P_LOOK },
     { "Appearance", ROWS(look_rows), P_MAIN },
+    { "Screen lock", ROWS(lock_rows), P_DISPLAY },
 };
 
 static int page;
@@ -892,6 +907,11 @@ static int page;
 void settings_reset(void)
 {
     page = P_MAIN;
+}
+
+void settings_lock_page(void)
+{
+    page = P_LOCK;
 }
 
 int settings_back(void)
@@ -961,6 +981,227 @@ static void value_text(int which, char *s)
     }
 }
 
+/* --- Navigation, as its design draws it --------------------------------
+ *
+ * docs/weave/canvas/PhoneNavSettings.dc.html: the three ways side by
+ * side as cards, each a little phone showing its bottom - the home
+ * indicator, the three buttons, the thread with its knots - the one
+ * chosen edged in Indigo; under them what the chosen one's moves do;
+ * for the thread, its two switches. In Night's colours on the dark
+ * look, Linen's on the light.
+ */
+#define NAV_BACK_Y     66       /* "Settings", the way back: its baseline */
+#define NAV_TITLE_Y    110      /* "Navigation" */
+#define NAV_TITLE_PX   30
+#define NAV_SIDE       16       /* the cards from the screen's sides */
+#define NAV_CARDS_Y    126
+#define NAV_CARD_H     160
+#define NAV_CARD_GAP   10
+#define NAV_PIC_W      64       /* the little phone */
+#define NAV_PIC_H      112
+#define NAV_NAME_Y     140      /* the card's name, its baseline from the top:
+                                   above the curve of its corners */
+#define NAV_HELP_Y     298      /* the moves' card */
+#define NAV_HELP_ROW   38
+#define NAV_SW_Y       470      /* the switches' card */
+#define NAV_SW_ROW     46
+#define NAV_SW_W       44       /* a switch, the design's */
+#define NAV_SW_H       26
+#define NAV_PAD        16       /* inside the cards */
+#define NAV_NAME_PX    12       /* a card's name (the design's 12.5) */
+#define NAV_HELP_PX    14       /* a move and what it does */
+#define NAV_SW_PX      13       /* a switch's label */
+
+static const char *const nav_names[3] = { "Gestures", "Three buttons",
+                                          "The thread" };
+/* What each one's moves do (the design's, as this phone does them) */
+static const char *const nav_help[3][4][2] = {
+    { { "Swipe up", "Home" }, { "Up and hold", "Recent apps" },
+      { "Along the bar", "The one before" }, { "Left edge", "Back" } },
+    { { "Triangle", "Back" }, { "Circle", "Home" },
+      { "Square", "Recent apps" }, { "Space", "36 px kept at the bottom" } },
+    { { "Tap a knot", "That program" }, { "Slide along it",
+      "One knot at a time" }, { "Swipe up", "Home; hold for recent apps" },
+      { "Left edge", "Back" } },
+};
+static const char *const nav_switches[2] = {
+    "Knots in their programs' colours",
+    "Hide it while a video fills the screen",
+};
+
+struct nav_look {
+    uint32_t bg, card, line, fg, dim, frame, frame_bg, block, accent;
+    int night;
+};
+
+static void nav_look(struct nav_look *k, const struct mob_theme *t, int glass)
+{
+    k->night = mob_prefs.dark || glass;
+    k->bg = t->bg;
+    k->card = t->card;
+    k->line = t->line;
+    k->fg = t->fg;
+    k->dim = t->muted;
+    k->frame = k->night ? 0x3A3F4C : 0xCFC8BA;
+    k->frame_bg = k->night ? 0x1A1C23 : 0xEFEBE3;
+    k->block = k->night ? 0x2E323D : 0xDDD6C9;
+    k->accent = mob_dyes[!k->night][DYE_INDIGO];
+}
+
+static int nav_card_w(void)
+{
+    return (MOB_LW - 2 * NAV_SIDE - 2 * NAV_CARD_GAP) / 3;
+}
+
+static int nav_card_x(int i)
+{
+    return NAV_SIDE + i * (nav_card_w() + NAV_CARD_GAP);
+}
+
+/* A card's ground: glass under Liquid Glass, the theme's card otherwise */
+static void nav_ground(int x, int y, int w, int h, int r,
+                       const struct nav_look *k, int glass)
+{
+    if (glass)
+        mob_glass_card(x, y, w, h, r);
+    else
+        gfx_rrect(x, y, w, h, r, k->card, 255);
+}
+
+/* The little phone: a frame, a picture and two lines of text in it, and
+   at its foot the way it is got around */
+static void nav_picture(int which, int x, int y, const struct nav_look *k)
+{
+    int w = NAV_PIC_W, h = NAV_PIC_H;
+    gfx_rrect(x, y, w, h, 12, k->frame, 255);
+    gfx_rrect(x + 2, y + 2, w - 4, h - 4, 10, k->frame_bg, 255);
+    gfx_rrect(x + 8, y + 12, w - 16, 26, 5, k->block, 255);
+    gfx_rrect(x + 8, y + 46, w - 22, 5, 2, k->block, 255);
+    gfx_rrect(x + 8, y + 55, w - 28, 5, 2, k->block, 255);
+    int foot = y + h - 2;
+    if (which == MOB_NAV_GESTURES) {
+        gfx_rrect(x + 18, foot - 7, w - 36, 3, 1, k->fg, 255);
+    } else if (which == MOB_NAV_BUTTONS) {
+        gfx_fill(x + 2, foot - 14, w - 4, 14, k->block, 255);
+        int cy = foot - 7, step = (w - 4) / 4;
+        int bx = x + 2 + step, hx = bx + step, rx = hx + step;
+        stroke(bx + 2, cy - 3, bx - 2, cy, 20, k->fg);
+        stroke(bx - 2, cy, bx + 2, cy + 3, 20, k->fg);
+        stroke(bx + 2, cy - 3, bx + 2, cy + 3, 20, k->fg);
+        gfx_circle16(hx * 16, cy * 16, 3 * 16, 20, k->fg, 255);
+        gfx_rring16((rx - 3) * 16, (cy - 3) * 16, 6 * 16, 6 * 16, 16, 20,
+                    k->fg, 255);
+    } else {
+        /* the thread: its line and three knots, the middle one in front */
+        int ly = foot - 7, cx = x + w / 2;
+        gfx_fill(x + 6, ly, w - 12, 1, k->night ? 0x5F6573 : 0xB3AC9F, 255);
+        gfx_disc16((cx - 10) * 16, ly * 16 + 8, 2 * 16,
+                   mob_dyes[!k->night][DYE_INDIGO], 255);
+        gfx_disc16(cx * 16, ly * 16 + 8, 7 * 8,
+                   mob_dyes[!k->night][DYE_WOAD], 255);
+        gfx_disc16((cx + 10) * 16, ly * 16 + 8, 2 * 16,
+                   mob_dyes[!k->night][DYE_SAFFRON], 255);
+    }
+}
+
+/* The design's switch: a pill of Indigo when on, the knob at its end */
+static void nav_switch(int x, int y, int on, const struct nav_look *k)
+{
+    gfx_rrect(x, y, NAV_SW_W, NAV_SW_H, NAV_SW_H / 2,
+              on ? k->accent : k->frame, 255);
+    int kx = on ? x + NAV_SW_W - 3 - 10 : x + 3 + 10;
+    gfx_disc16(kx * 16, (y + NAV_SW_H / 2) * 16, 10 * 16, 0xFFFFFF, 255);
+}
+
+static void nav_page_draw(const struct mob_theme *t, int glass)
+{
+    struct nav_look k;
+    nav_look(&k, t, glass);
+    int lw = MOB_LW, nav = mob_prefs.nav;
+
+    /* the way back, and the title */
+    chevron(24, NAV_BACK_Y - 5, 1, k.accent);
+    ui_font_text(UI_BOLD, 15, 34, NAV_BACK_Y, "Settings", k.accent);
+    ui_font_text(UI_BOLD, NAV_TITLE_PX, 22, NAV_TITLE_Y, "Navigation", k.fg);
+
+    /* the three, the chosen one edged in Indigo */
+    int cw = nav_card_w();
+    for (int i = 0; i < 3; i++) {
+        int x = nav_card_x(i), y = NAV_CARDS_Y;
+        nav_ground(x, y, cw, NAV_CARD_H, 16, &k, glass);
+        gfx_rring16(x * 16, y * 16, cw * 16, NAV_CARD_H * 16, 16 * 16, 32,
+                    i == nav ? k.accent : k.line, 255);
+        nav_picture(i, x + (cw - NAV_PIC_W) / 2, y + 10, &k);
+        ui_font_text(UI_BOLD, NAV_NAME_PX, x + (cw - ui_font_width(UI_BOLD,
+                     NAV_NAME_PX, nav_names[i])) / 2,
+                     y + NAV_NAME_Y, nav_names[i], k.fg);
+    }
+
+    /* what the chosen one's moves do, a dashed line between them */
+    int hx = NAV_SIDE, hw = lw - 2 * NAV_SIDE;
+    int hh = 4 * NAV_HELP_ROW + 8;
+    nav_ground(hx, NAV_HELP_Y, hw, hh, 16, &k, glass);
+    gfx_rring16(hx * 16, NAV_HELP_Y * 16, hw * 16, hh * 16, 16 * 16, 16,
+                k.line, 255);
+    for (int r = 0; r < 4; r++) {
+        int top = NAV_HELP_Y + 4 + r * NAV_HELP_ROW;
+        int base = top + NAV_HELP_ROW / 2 + 5;
+        const char *a = nav_help[nav][r][0], *b = nav_help[nav][r][1];
+        ui_font_text(UI_BOLD, NAV_HELP_PX, hx + NAV_PAD, base, a, k.fg);
+        ui_font_text(UI_SANS, NAV_HELP_PX, hx + hw - NAV_PAD -
+                     ui_font_width(UI_SANS, NAV_HELP_PX, b), base, b, k.dim);
+        if (r < 3)
+            gfx_stitch(hx + NAV_PAD, top + NAV_HELP_ROW, hw - 2 * NAV_PAD, 1,
+                       3, k.line, 255);
+    }
+
+    /* the thread's switches */
+    if (nav != MOB_NAV_THREAD)
+        return;
+    int sh = 2 * NAV_SW_ROW + 8;
+    nav_ground(hx, NAV_SW_Y, hw, sh, 16, &k, glass);
+    gfx_rring16(hx * 16, NAV_SW_Y * 16, hw * 16, sh * 16, 16 * 16, 16,
+                k.line, 255);
+    const int on[2] = { mob_prefs.thread_dyes, !mob_prefs.thread_over_full };
+    for (int r = 0; r < 2; r++) {
+        int top = NAV_SW_Y + 4 + r * NAV_SW_ROW;
+        ui_font_text(UI_SANS, NAV_SW_PX, hx + NAV_PAD,
+                     top + NAV_SW_ROW / 2 + 5, nav_switches[r], k.fg);
+        nav_switch(hx + hw - NAV_PAD - NAV_SW_W,
+                   top + (NAV_SW_ROW - NAV_SW_H) / 2, on[r], &k);
+        if (r == 0)
+            gfx_stitch(hx + NAV_PAD, top + NAV_SW_ROW, hw - 2 * NAV_PAD, 1,
+                       3, k.line, 255);
+    }
+}
+
+static int nav_page_tap(int x, int y)
+{
+    if (y >= NAV_BACK_Y - 26 && y < NAV_BACK_Y + 12 && x < SET_BACK_W)
+        return settings_back();
+    if (y >= NAV_CARDS_Y && y < NAV_CARDS_Y + NAV_CARD_H) {
+        for (int i = 0; i < 3; i++)
+            if (x >= nav_card_x(i) && x < nav_card_x(i) + nav_card_w()) {
+                mob_prefs.nav = i;
+                mob_windows_fit();
+                printk("[settings] %s\n", nav_names[i]);
+                return 1;
+            }
+        return 0;
+    }
+    if (mob_prefs.nav == MOB_NAV_THREAD && y >= NAV_SW_Y + 4 &&
+        y < NAV_SW_Y + 4 + 2 * NAV_SW_ROW) {
+        int r = (y - NAV_SW_Y - 4) / NAV_SW_ROW, v;
+        if (r == 0)
+            v = mob_prefs.thread_dyes = !mob_prefs.thread_dyes;
+        else
+            v = !(mob_prefs.thread_over_full = !mob_prefs.thread_over_full);
+        printk("[settings] %s %s\n", nav_switches[r], v ? "on" : "off");
+        return 1;
+    }
+    return 0;
+}
+
 void settings_draw(void)
 {
     struct mob_theme t;
@@ -979,6 +1220,11 @@ void settings_draw(void)
         gfx_fill(0, 0, lw, lh, t.bg, 255);
     }
     mob_status_bar(t.fg);
+    if (page == P_NAV) {
+        nav_page_draw(&t, glass);
+        mob_pill(t.fg);
+        return;
+    }
     if (page == P_MAIN) {
         mob_title(pg->title, t.fg);
     } else {
@@ -1015,7 +1261,8 @@ void settings_draw(void)
         if (k)
             gfx_fill(28, top, lw - 40, 1, t.line, 255);
         k++;
-        ui_font_text(UI_SANS, SET_PX, 28, base, r->label, t.fg);
+        if (r->kind != R_ACTION)
+            ui_font_text(UI_SANS, SET_PX, 28, base, r->label, t.fg);
         char s[40];
         switch (r->kind) {
         case R_LINK:
@@ -1047,6 +1294,9 @@ void settings_draw(void)
         case R_VALUE:
             value_text(r->arg, s);
             value_right(base, s, t.muted);
+            break;
+        case R_ACTION:                  /* the label is the button */
+            ui_font_text(UI_SANS, SET_PX, 28, base, r->label, mob_accent());
             break;
         case R_ACCENTS:
             for (int a = 0; a < MOB_ACCENTS; a++) {
@@ -1080,7 +1330,7 @@ static void changed(const struct srow *r, int value)
         mob_wallpaper_changed();
     if (r->pref == P(size))
         mob_set_size(value);
-    if (r->pref == P(nav_buttons))
+    if (r->pref == P(nav))
         mob_windows_fit();
     if (r->pref == P(landscape))
         mob_set_orientation(value);
@@ -1103,6 +1353,8 @@ static void changed(const struct srow *r, int value)
 int settings_tap(int x, int y)
 {
     const struct spage *pg = &pages[page];
+    if (page == P_NAV)
+        return nav_page_tap(x, y);
     if (page != P_MAIN && y >= APP_TITLE_Y - 30 && y < APP_TITLE_Y + 10 &&
         x < SET_BACK_W)
         return settings_back();
@@ -1133,8 +1385,14 @@ int settings_tap(int x, int y)
             return 1;
         }
         case R_CHOICE:
+            /* a PIN is chosen on its own keys first; the swipe alone
+               stops asking for it */
+            if (r->pref == P(pin_on) && r->arg)
+                return SETTINGS_PIN;
             changed(r, r->arg);
             return 1;
+        case R_ACTION:
+            return r->arg;
         case R_ACCENTS:
             for (int a = 0; a < MOB_ACCENTS; a++) {
                 int dx = SET_DOT_X + a * SET_DOT_STEP;

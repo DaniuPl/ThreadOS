@@ -11352,6 +11352,89 @@ works and is checked by `make test`.
       download's "41 %" and a bar 41 % long, a call counting up in its
       own colour, and the end taking it away; and, under the Mac style,
       the timer on the black island at the top, its title and its count.
+- [x] **ProtonUI v2 stage 7: the phone's thread, and the PIN as knots**
+      (kernelarm64/mobile.c, kernelarm64/mobapps.c,
+      kernelarm64/mobapps.h, scripts/ptest.py,
+      scripts/tests/t_arm64apps.py, docs/protonui-plan.md)
+      The phone had two ways to get around, both borrowed - the
+      iPhone's gestures and Android's three buttons. The third is
+      ThreadOS's own (docs/weave/canvas/NavStyles.dc.html): the loom's
+      thread laid along the bottom of the phone, a dark line with a
+      knot on it for each program opened, in the order they were, 16
+      apart edge to edge - the one in front larger, ringed in white and
+      in the middle of the screen, on a band of its colour, the others
+      either side of it. A knot's colour is one of docs/WEAVE.md's six
+      dyes by what the program is for (Night's on a dark screen,
+      Linen's on a light one), the phone's own Settings and About grey.
+      A tap on a knot brings that program to the middle; a finger slid
+      along the thread moves the knots under the middle, one each 24
+      pixels, and brings the one there when it lifts; up from the
+      thread goes home, up and held opens recent apps; in from the left
+      edge is back. The strip it stands on is
+      the phone's, and programs' windows end above it. Settings >
+      Navigation chooses it, and can make the knots all one colour (the
+      one in front the accent). A locked phone shows the line alone: it
+      does not say what runs.
+      The phone also had no PIN at all - the lock screen opened with a
+      swipe. Display > Screen lock now chooses one: six digits on round
+      keys, typed twice, each digit tying a knot of six on a thread in
+      the accent (PhoneUnlock.dc.html); with it set, the swipe up asks
+      for it, a wrong one is refused and cleared, and the right one
+      opens the phone (or the window a program made while it was
+      locked). Lock now locks it from Settings; "Swipe up" goes back to
+      the swipe alone.
+      t_arm64apps (new parts): with the thread chosen, the knots the
+      shell says are the programs opened, in order; on the screen the
+      line is NavStyles.dc.html's colour, Settings' knot stands in the
+      middle, grey, ringed in white, on its grey along the line, Notes
+      and Calculator are WEAVE.md's Saffron and Weld; a tap on Notes'
+      knot brings Notes and moves it to the middle, a finger slid one
+      step brings Calculator, up goes home, up and held opens recent
+      apps, in from the left edge is a page back; with the colours off
+      the knots are all the grey. A PIN chosen: two
+      digits tie two knots in the accent with the thread that far in
+      it, the next ringed in white, the rest dark; a different second
+      six is refused; the same twice sets it; locked, the swipe asks
+      for it, a wrong one is refused and the right one opens home;
+      with the swipe alone again it opens without one. ptest's
+      Phone.touch can hold the finger still before it lifts.
+- [x] **The phone's Navigation page, the PIN and the gestures as their
+      designs** (kernelarm64/mobapps.c, kernelarm64/mobapps.h,
+      kernelarm64/mobile.c, libc/tests/wintest.c,
+      scripts/tests/t_arm64apps.py, scripts/tests/t_arm64win.py,
+      docs/protonui-plan.md)
+      Stage 7 left three things short of PhoneNavSettings.dc.html and
+      PhoneUnlock.dc.html. Navigation was a list of rows; it is now the
+      design's page: the three ways as cards side by side, each with a
+      little phone showing its bottom (the home indicator, the three
+      buttons, the thread with three knots), the chosen one edged in
+      Indigo, under them a card of what the chosen way's moves do with
+      dashed lines between, and for the thread a card of its two
+      switches - in Night's colours on the dark look, Linen's on the
+      light. The second switch is new: "Hide it while a video fills
+      the screen", on by default; off, the thread is drawn over a
+      window that fills the screen (its strip stays the phone's either
+      way, so up still goes home). The PIN's knots and thread are the
+      design's Indigo rather than the phone's accent, and Cancel its
+      link colour. And the design lists moves for the gestures that the
+      phone did not have: up from the edge and held now opens recent
+      apps, a swipe along the bar brings the program before, and in
+      from the left edge is back, as with the thread. The dyes are one
+      table (mob_dyes) both files use.
+      wintest (libc/tests/) puts its window on the whole screen when a
+      finger is held on it and back again, and draws itself at the new
+      size. t_arm64apps: the page's title, its three cards by name, the
+      gestures' edged in WEAVE.md's Indigo and the others not, their
+      four moves read off the card, the thread's moves and its two
+      switches; up and held, along the bar (Notes, the one before
+      Calculator) and the left edge with the gestures; the PIN's knots
+      in Indigo. t_arm64win (new part): wintest held into full screen
+      draws at 360x640 with nothing of the phone's over its foot; with
+      the thread chosen it comes back by its knot and the thread hides
+      over it - its foot the program's blue - while up from the strip
+      still goes home; with the switch off the thread is drawn over it,
+      the design's line, the window's knot in the middle in Weld,
+      ringed in white; held again it leaves the whole screen.
 - [x] **Long command lines, and programs named by their path**
       (kernel64/proc64.c, kernel64/proc64.h, kernel64/elf64.c,
       kernel/prog.c, kernel64/shell64.c, kernel64/compat64.c,

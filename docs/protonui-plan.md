@@ -202,6 +202,22 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
 - The PIN as six knots on a thread.
 - **Test (`t_arm64mobile`):** with the thread chosen, a tap on a knot
   brings that program to the front; a swipe up goes home.
+- **Done** (journal: "ProtonUI v2 stage 7"). The test is in
+  `t_arm64apps`, beside the other two ways of getting around and with
+  its helpers for Settings and the dock. The phone had no PIN at all
+  before: Display > Screen lock chooses one (twice) and has Lock now.
+  The knots are the design's to the pixel: 16 apart edge to edge, the
+  one in front in the middle of the screen on a band of its dye, the
+  dyes docs/WEAVE.md's six (Night's or Linen's by what is under them),
+  the system's own grey.
+  Settings' Navigation page is the design's: the three ways as cards
+  with a little phone each, the chosen one edged in Indigo, the moves
+  under them and the thread's two switches - knots in their colours,
+  and hidden (or not) over a window that fills the screen. The PIN's
+  knots are the design's Indigo. The gestures do what the page says of
+  them: up and held for recent apps, along the bar for the program
+  before, the left edge for back. The phone still letters in DejaVu,
+  not Inter.
 
 ## After that
 

@@ -4081,9 +4081,10 @@ class Phone(Qemu):
                 {"type": "abs", "data": {"axis": "y",
                  "value": round(y * self.RANGE / (h - 1))}}]
 
-    def touch(self, points, settle=0.6):
+    def touch(self, points, settle=0.6, hold=0):
         """A finger down at the first point, through the others and up at
-        the last - logical pixels of the phone's screen"""
+        the last - logical pixels of the phone's screen - held still there
+        'hold' seconds before it lifts"""
         self.cmd({"execute": "input-send-event", "arguments": {"events":
                   self._abs(*points[0]) + [{"type": "btn", "data": {
                       "down": True, "button": "left"}}]}})
@@ -4092,6 +4093,7 @@ class Phone(Qemu):
             self.cmd({"execute": "input-send-event",
                       "arguments": {"events": self._abs(*p)}})
             time.sleep(0.05)
+        time.sleep(hold)
         self.cmd({"execute": "input-send-event", "arguments": {"events": [
             {"type": "btn", "data": {"down": False, "button": "left"}}]}})
         time.sleep(settle)

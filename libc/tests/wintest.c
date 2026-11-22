@@ -16,6 +16,10 @@
  *
  *   a tap in the middle square turns it yellow, and green again; a tap
  *   in the corner ends the program
+ *
+ *   a finger held still (WEV_ALTCLICK) puts the window on the whole
+ *   screen, as a video's player does (SYS64_WIN_FULL), and back; at the
+ *   new size it draws itself again
  */
 
 #include <stdint.h>
@@ -69,8 +73,25 @@ static const char *kind(int type)
     case WEV_DRAG:    return "drag";
     case WEV_RELEASE: return "release";
     case WEV_SIZE:    return "size";
+    case WEV_ALTCLICK: return "held";
     }
     return "other";
+}
+
+/* Everything, at the window's size now: red over blue, the square, the
+   corner, the text */
+static long draw_all(int yellow)
+{
+    free(row);
+    row = malloc((size_t)w * 4);
+    fill(0, 0, w, h / 2, RED);
+    fill(0, h / 2, w, h - h / 2, BLUE);
+    fill((w - SQUARE) / 2, (h - SQUARE) / 2, SQUARE, SQUARE,
+         yellow ? YELLOW : GREEN);
+    fill(0, 0, CORNER, CORNER, BLACK);
+    struct draw text = { 7, TEXT_X, TEXT_Y, 0, 0, 0, WHITE, 0, 255, 1,
+                         TEXT_PX, "Hello phone" };
+    return syscall64(SYS64_WIN_DRAW, win, (int64_t)(uintptr_t)&text);
 }
 
 int main(void)
@@ -87,25 +108,28 @@ int main(void)
     w = ev.x;
     h = ev.y;
     int k = (ev.val >> 8) & 0xFF;
-    row = malloc((size_t)w * 4);
-    fill(0, 0, w, h / 2, RED);
-    fill(0, h / 2, w, h - h / 2, BLUE);
-    fill((w - SQUARE) / 2, (h - SQUARE) / 2, SQUARE, SQUARE, GREEN);
-    fill(0, 0, CORNER, CORNER, BLACK);
-    struct draw text = { 7, TEXT_X, TEXT_Y, 0, 0, 0, WHITE, 0, 255, 1,
-                         TEXT_PX, "Hello phone" };
-    long end = syscall64(SYS64_WIN_DRAW, win, (int64_t)(uintptr_t)&text);
+    int yellow = 0, full = 0;
+    long end = draw_all(yellow);
     printf("[wintest] window %d, %dx%d at %d/16, text to %ld, drawn\n", win,
            w, h, k ? k : 16, end);
     fflush(stdout);
 
-    int yellow = 0;
     for (;;) {
         if (win_poll(win, &ev) != 1) {
             usleep(10000);
             continue;
         }
         printf("[wintest] %s %d,%d\n", kind(ev.type), ev.x, ev.y);
+        if (ev.type == WEV_ALTCLICK) {
+            full = !full;
+            printf("[wintest] full %s: %ld\n", full ? "on" : "off",
+                   (long)win_full(win, full));
+        } else if (ev.type == WEV_SIZE && (ev.x != w || ev.y != h)) {
+            w = ev.x;
+            h = ev.y;
+            draw_all(yellow);
+            printf("[wintest] %dx%d, drawn again\n", w, h);
+        }
         if (ev.type == WEV_RELEASE && in_square(ev.x, ev.y)) {
             yellow = !yellow;
             fill((w - SQUARE) / 2, (h - SQUARE) / 2, SQUARE, SQUARE,
