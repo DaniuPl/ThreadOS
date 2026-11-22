@@ -11607,6 +11607,8 @@ works and is checked by `make test`.
       beside them the title's name and the rest with its middle dot;
       nothing left on the preview's corner; Linen clicked in the bar
       moves the piece there and turns the preview Linen while the window
-      stays Night; and the project's run line. t_threads finds
+      stays Night; in the Windows style's lower bar the same two words,
+      smaller and in DejaVu Sans Bold, by its buttons, and a click there
+      chooses; and the project's run line. t_threads finds
       shuttledemo's window by polling until its selvedge holds still,
       instead of reading the screen once a second after it was drawn.

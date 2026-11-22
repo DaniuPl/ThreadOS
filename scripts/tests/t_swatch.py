@@ -19,7 +19,9 @@ and the serial port:
   stitch madder and why under it; pu_card, pu_avatar, pu_side drawn
   Night | Linen in the title bar, as the design has it, beside the
   title's two parts, and not on the preview; Linen clicked there is
-  filled, and the preview's ground is Linen's, the window's still Night's
+  filled, and the preview's ground is Linen's, the window's still Night's;
+  in the Windows style's lower bar the same choice, smaller, and a click
+  there chooses too
   pu_menu: a right click on the one to try opens the toolkit's menu,
   and its second line comes back as PU_CHOSEN 1
   pu_sheet: the question over the window with a madder selvedge and
@@ -383,6 +385,68 @@ def run(q):
     check(f"its yes is madder ({yes}) and comes back as PU_PRESSED 1",
           near(yes, N["app_danger"], 10) and
           "[swatch] sent PU_PRESSED 1" in q.serial()[seen:])
+
+    # The other styles' lower bar: the choice smaller, left of the
+    # Windows style's three buttons, the words in DejaVu Sans Bold - and
+    # a click there chooses as in Weave's. (The Mac style's bar along
+    # the top would lie over this window's title bar, at the screen's
+    # top.)
+    q.click(12, H // 2)
+    time.sleep(0.5)
+    check("'layout windows'", "saved" in q.sudo("set layout windows", "saved"))
+    small = UiFont.shared(L["TSEG_PX_SMALL"], "bold")
+
+    def swidth(t):
+        return (sum(small.glyph(c)[0] for c in t) + 63) >> 6
+    sparts = [swidth(t) + 2 * L["TSEG_WORD_SMALL"] for t in words]
+    sgw = sum(sparts) + 2 * L["TSEG_PAD_SMALL"]
+    sgx = wx + ww - 3 * L["WB_W"] - L["TSEG_GAP"] - sgw
+    sxs = [sgx + L["TSEG_PAD_SMALL"], sgx + L["TSEG_PAD_SMALL"] + sparts[0]]
+    line = rgb(L["NIGHT_TSEG_LINE"])
+    sgy = None
+    end = time.time() + 10
+    while time.time() < end and sgy is None:
+        time.sleep(0.5)
+        scr = q.screen_raw()
+        _, _, at = scr
+        sgy = next((y for y in range(0, H // 2)
+                    if at(sgx + sgw // 2, y) == line and
+                    at(sgx + sgw // 2, y + L["TSEG_H_SMALL"] - 1) == line),
+                   None)
+    sread, sfill = [], []
+    if sgy is not None:
+        sbase = ui_font_baseline_in(L["TSEG_PX_SMALL"], sgy, L["TSEG_H_SMALL"])
+        sread = [q.read_ui(sxs[k] + (sparts[k] - swidth(t)) // 2, sbase,
+                           sparts[k], px=L["TSEG_PX_SMALL"], face="bold",
+                           screen=scr) for k, t in enumerate(words)]
+        sfill = [at(sxs[k] + 3, sgy + L["TSEG_PAD_SMALL"] + 2)
+                 for k in range(2)]
+    check(f"in the Windows style's bar: the same choice, smaller, by its "
+          f"buttons "
+          f"({sread}, {sfill})", sread == list(words) and
+          near(sfill[0], rgb(L["NIGHT_TSEG_ON"]), 4) and
+          near(sfill[1], rgb(L["NIGHT_TSEG_BG"]), 4))
+    if sgy is not None:
+        seen = len(q.serial())
+        q.click(sxs[1] + sparts[1] // 2, sgy + L["TSEG_H_SMALL"] // 2)
+        q.mouse_goto(*away)
+        end = time.time() + 10
+        while time.time() < end and \
+                "[swatch] theme Linen" not in q.serial()[seen:]:
+            time.sleep(0.3)
+        check("and Linen clicked there is chosen",
+              "[swatch] theme Linen" in q.serial()[seen:])
+        q.click(sxs[0] + sparts[0] // 2, sgy + L["TSEG_H_SMALL"] // 2)
+        q.mouse_goto(*away)
+        q.wait_serial("[swatch] theme Night", timeout=10)
+    q.click(12, H // 2)
+    time.sleep(0.5)
+    q.sudo("set layout weave", "saved")
+    end = time.time() + 10
+    while time.time() < end and \
+            q.serial().count("the Weave style") < 2:
+        time.sleep(0.3)
+    time.sleep(1)
 
     # Start a program
     seen = len(q.serial())
