@@ -430,9 +430,17 @@ int elf64_load_file(const struct elf64_file *f, uint64_t *entry,
     return 0;
 }
 
-uint64_t elf64_make_stack(void)
+/* The pages the kernel writes the program's arguments into are mapped
+   here, before it writes them: a page fault the kernel takes in its
+   own code is not the stack growing under a program's fingers. */
+uint64_t elf64_make_stack(uint64_t room)
 {
-    for (int i = 1; i <= USER64_STACK_PAGES; i++) {
+    uint64_t pages = (room + 16 + PAGE_SIZE - 1) / PAGE_SIZE;
+    if (pages < USER64_STACK_PAGES)
+        pages = USER64_STACK_PAGES;
+    if (pages * PAGE_SIZE > USER64_STACK_MAX)
+        return 0;
+    for (uint64_t i = 1; i <= pages; i++) {
         uint64_t va = USER64_STACK_TOP - (uint64_t)i * PAGE_SIZE;
         /* The stack is writable but never executable */
         if (!page_frame_for(va, PG_USER | PG_WRITE | PG_NX))

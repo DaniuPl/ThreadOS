@@ -1168,9 +1168,20 @@ static int64_t sys_exec(struct uproc *p, uint64_t uname, uint64_t len,
                         uint64_t uargv)
 {
     char name[16];
-    if (!len || len > 15 || !user_range(p, uname, len, 0) || p->live > 1)
+    if (!len || len >= 1024 || !user_range(p, uname, len, 0) || p->live > 1)
         return -1;
-    memcpy(name, (const void *)(uintptr_t)uname, len);
+    /* The C library hands execve's path over whole (libc/overlay); the
+       programs here are the initrd's, found by name - the path's last
+       part */
+    const char *path = (const char *)(uintptr_t)uname;
+    uint64_t start = 0;
+    for (uint64_t i = 0; i < len; i++)
+        if (path[i] == '/')
+            start = i + 1;
+    len -= start;
+    if (!len || len > 15)
+        return -1;
+    memcpy(name, path + start, len);
     name[len] = 0;
     char *buf = kmalloc(4096);
     if (!buf)

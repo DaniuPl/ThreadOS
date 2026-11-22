@@ -36,13 +36,19 @@ extern char __tls_image[], __tls_filesz[], __tls_memsz[], __tls_align[];
 #define LINKED(sym) ((unsigned long)sym)
 #endif
 
-#define ARGS_MAX 64
+/* The kernel takes at most 64 KiB of arguments (kernel64/proc64.h), so
+   at most half as many of them: each is a byte and its zero */
+#define ARGS_MAX (64 * 1024 / 2)
 
 __attribute__((__used__))
 void _start_c(long argc, char **argv)
 {
+	if (argc < 0 || !argv)
+		argc = 0;
+	if (argc > ARGS_MAX)
+		argc = ARGS_MAX;
 	/* argv, its NULL, an empty environment, then the auxiliary vector */
-	char *block[ARGS_MAX + 1 + 1 + 12];
+	char *block[argc + 1 + 1 + 12];
 	Elf64_Phdr tls = {
 		.p_type = PT_TLS,
 		.p_vaddr = (unsigned long)__tls_image,
@@ -53,10 +59,6 @@ void _start_c(long argc, char **argv)
 	unsigned char random[16];
 	int n = 0;
 
-	if (argc < 0 || !argv)
-		argc = 0;
-	if (argc > ARGS_MAX)
-		argc = ARGS_MAX;
 	for (long i = 0; i < argc; i++)
 		block[n++] = argv[i];
 	block[n++] = 0;                  /* the end of argv */

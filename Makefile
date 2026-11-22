@@ -1709,8 +1709,15 @@ $(BUILD)/user64/bigprog.elf: libc/tests/bigprog.c $(BUILD)/gen/bigprog-ro.bin \
 	$(TOS_CC) -O2 -Wall -Wextra -Wa,-I$(BUILD)/gen -s -o $@ $< \
 	    $$($(LIBS64_PC) pkg-config --cflags --static --libs libcrypto)
 
+# argtest: three hundred arguments, eleven kilobytes of them, handed to
+# a copy of itself that t_args puts deep in the disk and argtest starts
+# by its path. On the disk, as t_args needs it there anyway.
+$(BUILD)/user64/argtest.elf: libc/tests/argtest.c $(TOS_CC) $(LIBC64) \
+                             | $(BUILD)/user64
+	$(TOS_CC) -O2 -Wall -Wextra -s -o $@ $<
+
 # Programs built for the disk rather than the initrd
-DISK64_ELFS := $(BUILD)/user64/bigprog.elf
+DISK64_ELFS := $(BUILD)/user64/bigprog.elf $(BUILD)/user64/argtest.elf
 
 # --- WebKit: JavaScriptCore -------------------------------------------
 # WPE WebKit's release (third_party/README.md), built by its own CMake

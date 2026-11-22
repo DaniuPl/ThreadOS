@@ -44,4 +44,7 @@ int prog_exists(const char *name);
 /* Where the last image found came from - for messages */
 const char *prog_source(void);
 
+/* What follows the last '/' of a path - the whole of a bare name */
+const char *prog_last_part(const char *path);
+
 #endif

@@ -57,27 +57,25 @@ uint32_t proc64_last_fork_cost(void)
 static uint64_t build_args(uint64_t rsp, const struct args64 *args,
                            uint64_t *argv_va)
 {
-    uint64_t ptrs[ARG_MAX];
     int argc = args ? args->argc : 0;
+    uint32_t used = args ? args->used : 0;
 
-    if (argc > ARG_MAX)
-        argc = ARG_MAX;
-
-    for (int i = 0; i < argc; i++) {
-        uint32_t len = 0;
-        while (args->v[i][len])
-            len++;
-        rsp -= len + 1;
-        for (uint32_t j = 0; j <= len; j++)
-            ((char *)(uintptr_t)rsp)[j] = args->v[i][j];
-        ptrs[i] = rsp;
-    }
+    /* The strings go as they are packed: one block */
+    rsp -= used;
+    char *strs = (char *)(uintptr_t)rsp;
+    for (uint32_t j = 0; j < used; j++)
+        strs[j] = args->buf[j];
 
     rsp &= ~0xFULL;
     rsp -= (uint64_t)(argc + 1) * 8;
     uint64_t *tab = (uint64_t *)(uintptr_t)rsp;
-    for (int i = 0; i < argc; i++)
-        tab[i] = ptrs[i];
+    uint32_t at = 0;
+    for (int i = 0; i < argc; i++) {
+        tab[i] = (uint64_t)(uintptr_t)(strs + at);
+        while (strs[at])
+            at++;
+        at++;
+    }
     tab[argc] = 0;                   /* the array ends with a zero */
 
     *argv_va = rsp;
@@ -113,22 +111,110 @@ static int copy_user_string(uint64_t ptr, char *dst, int max)
     return max - 1;
 }
 
-/* Gathers the argv given by the program. Returns the argument count. */
-int proc64_copy_args(uint64_t argv_ptr, struct args64 *out)
+struct args64 *args64_new(uint32_t cap)
 {
-    out->argc = 0;
-    if (!argv_ptr)
-        return 0;
-    if (!paging64_user_range(argv_ptr, (uint64_t)(ARG_MAX + 1) * 8))
-        return 0;
-
-    const uint64_t *tab = (const uint64_t *)(uintptr_t)argv_ptr;
-    for (int i = 0; i < ARG_MAX && tab[i]; i++) {
-        if (copy_user_string(tab[i], out->v[i], ARG_LEN) < 0)
-            break;
-        out->argc++;
+    struct args64 *a = kmalloc(sizeof(*a) + cap);
+    if (a) {
+        a->argc = 0;
+        a->used = 0;
+        a->cap = cap;
     }
-    return out->argc;
+    return a;
+}
+
+int args64_add(struct args64 *a, const char *s, uint32_t len)
+{
+    if (len >= a->cap - a->used || a->used >= a->cap)
+        return -1;
+    for (uint32_t i = 0; i < len; i++)
+        a->buf[a->used + i] = s[i];
+    a->buf[a->used + len] = '\0';
+    a->used += len + 1;
+    a->argc++;
+    return 0;
+}
+
+struct args64 *args64_dup(const struct args64 *a)
+{
+    struct args64 *c = args64_new(a->used);
+    if (c) {
+        for (uint32_t i = 0; i < a->used; i++)
+            c->buf[i] = a->buf[i];
+        c->used = a->used;
+        c->argc = a->argc;
+    }
+    return c;
+}
+
+void args64_free(struct args64 *a)
+{
+    kfree(a);
+}
+
+/* Where a string in program memory ends: its length; -1 when it
+   leaves the program's memory, -2 when it runs past max bytes.
+   Checked page by page, like copy_user_string. */
+static int64_t user_strlen(uint64_t ptr, uint64_t max)
+{
+    for (uint64_t i = 0; i < max; i++, ptr++) {
+        if ((ptr & 0xFFF) == 0 || i == 0) {
+            if (!paging64_user_range(ptr, 1))
+                return -1;
+        }
+        if (!*(const char *)(uintptr_t)ptr)
+            return (int64_t)i;
+    }
+    return -2;
+}
+
+/* Gathers the argv given by the program, in two passes: the first
+   measures, so that the set is allocated the size it is. Strings that
+   change between the passes - another thread of the program writing
+   them - are cut at what was measured, never past it. */
+int proc64_copy_args(uint64_t argv_ptr, struct args64 **out)
+{
+    *out = 0;
+    uint64_t total = 0;
+    int argc = 0;
+    for (; argv_ptr; argc++) {
+        uint64_t at = argv_ptr + (uint64_t)argc * 8;
+        if (!paging64_user_range(at, 8))
+            return -1;
+        uint64_t s = *(const uint64_t *)(uintptr_t)at;
+        if (!s)
+            break;
+        int64_t n = user_strlen(s, ARG_BYTES);
+        if (n < 0)
+            return (int)n;
+        total += (uint64_t)n + 1;
+        if (total > ARG_BYTES)
+            return -2;
+    }
+
+    struct args64 *a = args64_new((uint32_t)total);
+    if (!a)
+        return -1;
+    const uint64_t *tab = (const uint64_t *)(uintptr_t)argv_ptr;
+    for (int i = 0; i < argc; i++) {
+        uint32_t room = a->cap - a->used;
+        int n = room ? copy_user_string(tab[i], a->buf + a->used, (int)room)
+                     : -1;
+        if (n < 0) {
+            args64_free(a);
+            return -1;
+        }
+        a->used += (uint32_t)n + 1;
+        a->argc++;
+    }
+    *out = a;
+    return 0;
+}
+
+/* How much of the program's stack its arguments take: the strings, the
+   table of their addresses, and the alignment build_args leaves */
+static uint64_t args_room(const struct args64 *a)
+{
+    return a ? a->used + (uint64_t)(a->argc + 1) * 8 + 32 : 32;
 }
 
 struct fork_arg {
@@ -214,8 +300,8 @@ int64_t proc64_fork(struct regs *r)
 int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
                     uint64_t argv_ptr)
 {
-    char kname[16];
-    struct args64 args;
+    char kname[FS_PATH_MAX];
+    struct args64 *args;
 
     if (len == 0 || len >= sizeof(kname) ||
         !paging64_user_range((uint64_t)(uintptr_t)name, len))
@@ -226,22 +312,28 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
 
     /* We copy the arguments into the kernel BEFORE the memory they lie
        in disappears - just like the program name */
-    proc64_copy_args(argv_ptr, &args);
-    if (args.argc == 0) {
-        args.argc = 1;
-        for (uint64_t i = 0; i <= len && i < ARG_LEN - 1; i++)
-            args.v[0][i] = kname[i];
+    int got = proc64_copy_args(argv_ptr, &args);
+    if (got < 0)
+        return got;
+    if (args->argc == 0) {
+        args64_free(args);
+        args = args64_new((uint32_t)len + 1);
+        if (!args)
+            return -1;
+        args64_add(args, kname, (uint32_t)len);
     }
 
     struct prog prog;
     if (prog_open(kname, &prog) < 0) {
         printk("[kernel] exec: there is no program '%s'\n", kname);
+        args64_free(args);
         return -1;
     }
 
     uint64_t space = paging64_new_space();
     if (!space) {
         prog_close(&prog);
+        args64_free(args);
         return -1;
     }
 
@@ -254,12 +346,13 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
 
     uint64_t entry, rsp, brk_base;
     if (prog_load(&prog, &entry, &brk_base) < 0 ||
-        !(rsp = elf64_make_stack())) {
+        !(rsp = elf64_make_stack(args_room(args)))) {
         /* The old image no longer exists and the new one did not load -
            the process has nothing to return to */
         printk("[kernel] exec: '%s' cannot be loaded\n", kname);
         paging64_free_space(old);
         prog_close(&prog);
+        args64_free(args);
         task64_exit_code(-1);
     }
     paging64_free_space(old);
@@ -272,20 +365,22 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
        copy in kernel memory is not needed for anything */
     prog_close(&prog);
     task64_set_brk_base(brk_base);   /* new image, new heap */
-    task64_rename(kname);
+    task64_rename(prog_last_part(kname));
     /* The handler was the old image's code; what is held back stays
        held back, as on Linux */
     task64_set_sighandler(0, 0);
 
     uint64_t argv_va = 0;
-    rsp = build_args(rsp, &args, &argv_va);
+    rsp = build_args(rsp, args, &argv_va);
+    int argc = args->argc;
+    args64_free(args);
 
     /* The return frame now describes the new program */
     r->rip = entry;
     r->rsp = rsp;
     r->rax = r->rbx = r->rcx = r->rdx = 0;
     r->rbp = 0;
-    r->rdi = (uint64_t)args.argc;
+    r->rdi = (uint64_t)argc;
     r->rsi = argv_va;
     r->r8 = r->r9 = r->r10 = r->r11 = 0;
     r->r12 = r->r13 = r->r14 = r->r15 = 0;
@@ -300,7 +395,7 @@ int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
  */
 struct spawn_req {
     char name[16];
-    struct args64 args;
+    struct args64 *args;        /* the request's own copy */
     int quiet;
     int anycore;                /* 1 = any core is allowed to run it */
 };
@@ -309,7 +404,7 @@ static void spawn_thread(void *arg)
 {
     struct spawn_req *req = (struct spawn_req *)arg;
     char name[16];
-    struct args64 args = req->args;
+    struct args64 *args = req->args;
     int quiet = req->quiet;
 
     /* A process allowed to run on any core says so now - before it does
@@ -326,6 +421,7 @@ static void spawn_thread(void *arg)
     if (prog_open(name, &prog) < 0) {
         printk("[ !! ] there is no program '%s' in the initrd or on the disk\n",
                name);
+        args64_free(args);
         task64_exit();
     }
     const char *from_where = prog_source();
@@ -338,6 +434,7 @@ static void spawn_thread(void *arg)
     if (!space) {
         printk("[ !! ] no memory for an address space\n");
         prog_close(&prog);
+        args64_free(args);
         task64_exit();
     }
 
@@ -348,13 +445,16 @@ static void spawn_thread(void *arg)
     uint64_t entry, brk_base;
     int loaded_flag = prog_load(&prog, &entry, &brk_base) == 0;
     prog_close(&prog);           /* the image is already in the program's pages */
-    if (!loaded_flag)
+    if (!loaded_flag) {
+        args64_free(args);
         task64_exit();
+    }
     task64_set_brk_base(brk_base);
 
-    uint64_t rsp = elf64_make_stack();
+    uint64_t rsp = elf64_make_stack(args_room(args));
     if (!rsp) {
         printk("[ !! ] elf64: no memory for the program's stack\n");
+        args64_free(args);
         task64_exit();
     }
 
@@ -363,11 +463,13 @@ static void spawn_thread(void *arg)
                name, from_where, size, (uint32_t)entry);
 
     uint64_t argv_va = 0;
-    rsp = build_args(rsp, &args, &argv_va);
+    rsp = build_args(rsp, args, &argv_va);
+    int argc = args->argc;
+    args64_free(args);
 
     /* We enter user code - the big kernel lock stays here */
     biglock_leave();
-    enter_ring3_64(entry, rsp, (uint64_t)args.argc, argv_va);
+    enter_ring3_64(entry, rsp, (uint64_t)argc, argv_va);
 }
 
 /* --- Shared memory ------------------------------------------------
@@ -693,20 +795,22 @@ static int spawn_inner(const char *name, const struct args64 *args,
     req->quiet = quiet;
     req->anycore = anycore;
     if (args) {
-        req->args = *args;
+        req->args = args64_dup(args);
     } else {
         /* With no arguments a program still gets its own name - argv[0]
            is what it is everywhere */
-        req->args.argc = 1;
-        for (int k = 0; k < ARG_LEN - 1 && req->name[k]; k++)
-            req->args.v[0][k] = req->name[k];
-        req->args.v[0][ARG_LEN - 1] = '\0';
-        for (int k = 0; k < ARG_LEN; k++)
-            if (!req->name[k]) { req->args.v[0][k] = '\0'; break; }
+        req->args = args64_new((uint32_t)i + 1);
+        if (req->args)
+            args64_add(req->args, req->name, (uint32_t)i);
+    }
+    if (!req->args) {
+        kfree(req);
+        return -1;
     }
 
     struct task64 *t = task64_create(req->name, spawn_thread, req);
     if (!t) {
+        args64_free(req->args);
         kfree(req);
         return -1;
     }

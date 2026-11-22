@@ -8,20 +8,37 @@ struct regs;
 /* Program arguments.
  *
  * We copy them into the kernel, because at the moment a new image is
- * started the old memory - the one they lie in - no longer exists. The
- * limits are modest and deliberately so: this is meant to be argv, not
- * a channel for shipping data. An argument can still be as long as an
- * address on the web is - the browser hands one to httpget for every
- * page, picture and form it fetches, with a handful of options - and
- * the whole set, 4 KiB, sits comfortably on the 16 KiB kernel stack the
- * copy is made on. */
-#define ARG_MAX 16
-#define ARG_LEN 256
+ * started the old memory - the one they lie in - no longer exists.
+ * They are kept packed, one string after another, each with its zero,
+ * in a block on the heap just as large as they are. A table of fixed
+ * slots did for a browser handing httpget an address and a few
+ * options, but a compiler hands its linker thirty paths, and make
+ * hands a compiler every file of a target: slots enough for those
+ * would not fit the 16 KiB kernel stack a copy is made on.
+ *
+ * ARG_BYTES is what a program may pass in all - Linux allows more,
+ * but it is half of what clang lets a command line grow to before it
+ * moves the arguments into a response file (LLVM's
+ * commandLineFitsWithinSystemLimits), so a compiler never gets that
+ * far. A set that does not fit is refused, never cut short: a program
+ * told half of what it was asked to do does the wrong thing quietly. */
+#define ARG_BYTES (64 * 1024)
 
 struct args64 {
     int argc;
-    char v[ARG_MAX][ARG_LEN];
+    uint32_t used;              /* bytes of buf taken, the zeros too */
+    uint32_t cap;               /* bytes of buf there are */
+    char buf[];
 };
+
+/* An empty set with room for cap bytes of strings, or 0 */
+struct args64 *args64_new(uint32_t cap);
+/* Adds the first len bytes of s as an argument: 0, or -1 when it does
+   not fit (the set is left as it was) */
+int args64_add(struct args64 *a, const char *s, uint32_t len);
+/* A copy of a, or 0 */
+struct args64 *args64_dup(const struct args64 *a);
+void args64_free(struct args64 *a);
 
 /* Duplicates the current process.
  *
@@ -35,14 +52,18 @@ int64_t proc64_fork(struct regs *r);
    page tables only, without a single page of the program's memory */
 uint32_t proc64_last_fork_cost(void);
 
-/* Replaces the process image with a program from the initrd. On
-   success there is nothing to return to - the frame 'r' already
-   describes the new program. */
+/* Replaces the process image with a program - named, or given by its
+   path (kernel/prog.c says where each is looked for). On success
+   there is nothing to return to - the frame 'r' already describes the
+   new program. -1 when there is no such program or it cannot be read,
+   -2 when its arguments are more than ARG_BYTES. */
 int64_t proc64_exec(struct regs *r, const char *name, uint64_t len,
                     uint64_t argv_ptr);
 
-/* Copies argv from program memory into the kernel */
-int proc64_copy_args(uint64_t argv_ptr, struct args64 *out);
+/* Copies argv from program memory into the kernel: a set on the heap
+   in *out, and 0; -1 when the table or a string is not the program's
+   memory, -2 when they are more than ARG_BYTES */
+int proc64_copy_args(uint64_t argv_ptr, struct args64 **out);
 
 /* Runs a program from the initrd as a new process. Returns the task
    number, or -1 when there is no such file. The program finds 'arg' in

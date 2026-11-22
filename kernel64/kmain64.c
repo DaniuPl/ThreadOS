@@ -166,6 +166,18 @@ static int run_program(const char *name)
     return 1;
 }
 
+/* Starts a program with one argument after its name, without waiting */
+static void spawn_with(const char *name, const char *arg)
+{
+    struct args64 *a = args64_new(64);
+    if (!a)
+        return;
+    args64_add(a, name, (uint32_t)strlen(name));
+    args64_add(a, arg, (uint32_t)strlen(arg));
+    proc64_spawn(name, a, 1);
+    args64_free(a);
+}
+
 /* Is the processor really in long mode? It asks itself: the LMA bit in
    the EFER register is set by the processor, not by us. */
 static int long_mode_active(void)
@@ -470,10 +482,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
        argument. The process number now arrives as argv[1] rather than
        written into a register - that is, the way every program gets
        it. */
-    static struct args64 sep_a = { 2, { "sep64", "1" } };
-    static struct args64 sep_b = { 2, { "sep64", "2" } };
-    proc64_spawn("sep64", &sep_a, 1);
-    proc64_spawn("sep64", &sep_b, 1);
+    spawn_with("sep64", "1");
+    spawn_with("sep64", "2");
     for (int i = 0; i < 120 && task64_count() > base_tasks; i++)
         task64_sleep(50);
 
@@ -538,10 +548,8 @@ void kmain64(uint32_t magic, uint32_t info_addr)
     base_tasks = task64_count();
     syscall64_forget_user();
 
-    static struct args64 fpu_a = { 2, { "fpu64test", "3" } };
-    static struct args64 fpu_b = { 2, { "fpu64test", "7" } };
-    proc64_spawn("fpu64test", &fpu_a, 1);
-    proc64_spawn("fpu64test", &fpu_b, 1);
+    spawn_with("fpu64test", "3");
+    spawn_with("fpu64test", "7");
     for (int i = 0; i < 160 && task64_count() > base_tasks; i++)
         task64_sleep(50);
 

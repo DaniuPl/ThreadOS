@@ -34,14 +34,60 @@ const char *prog_source(void)
     return from_where;
 }
 
+const char *prog_last_part(const char *path)
+{
+    const char *last = path;
+    for (const char *p = path; *p; p++)
+        if (*p == '/')
+            last = p + 1;
+    return last;
+}
+
+/* Where a program is looked for.
+ *
+ * A bare name is a program of the initrd, or else a file where the
+ * task stands. A path is what a C library hands exec - /usr/bin/ld.lld
+ * from a compiler that found its linker beside itself, or each
+ * directory of PATH in turn from execvp - and it is the file it names
+ * first; then the initrd's program of its last part, which is how
+ * execvp's "sh" still finds the initrd's; and last that part where the
+ * task stands, which is where it was looked for while only the last
+ * part ever reached the kernel. */
+static const void *in_initrd(const char *name, uint32_t *size)
+{
+    return initrd_find(prog_last_part(name), size);
+}
+
+static int on_disk(const char *name)
+{
+    if (!fs_ready())
+        return -1;
+    /* Where the task stands - the working directory is its property,
+       just as with 'cat' or 'ls' */
+    return fs_open(task_cwd(), name, 0);
+}
+
+/* The program's file on the disk; or -1, with *image set when it is
+   the initrd's */
+static int find_file(const char *name, const void **image, uint32_t *size)
+{
+    *image = (const void *)0;
+    if (prog_last_part(name) == name) {
+        *image = in_initrd(name, size);
+        return *image ? -1 : on_disk(name);
+    }
+    int f = on_disk(name);
+    if (f >= 0)
+        return f;
+    *image = in_initrd(name, size);
+    return *image ? -1 : on_disk(prog_last_part(name));
+}
+
 int prog_exists(const char *name)
 {
+    const void *image;
     uint32_t size = 0;
-    if (initrd_find(name, &size))
-        return 1;
-    if (!fs_ready())
-        return 0;
-    return fs_open(task_cwd(), name, 0) >= 0;
+    return find_file(name, &image, &size) >= 0 || image;
 }
 
 const void *prog_image(const char *name, uint32_t *size_out, void **buf_out)
@@ -49,19 +95,13 @@ const void *prog_image(const char *name, uint32_t *size_out, void **buf_out)
     *buf_out = (void *)0;
 
     uint32_t size = 0;
-    const void *image = initrd_find(name, &size);
+    const void *image;
+    int f = find_file(name, &image, &size);
     if (image) {
         from_where = "initrd";
         *size_out = size;
         return image;
     }
-
-    if (!fs_ready())
-        return (const void *)0;
-
-    /* We look for the program where the task stands - the working
-       directory is its property, just as with 'cat' or 'ls' */
-    int f = fs_open(task_cwd(), name, 0);
     if (f < 0)
         return (const void *)0;
 
@@ -121,16 +161,14 @@ int prog_open(const char *name, struct prog *p)
     p->slot = -1;
 
     uint32_t size = 0;
-    const void *image = initrd_find(name, &size);
+    const void *image;
+    int f = find_file(name, &image, &size);
     if (image) {
         from_where = "initrd";
         p->image = image;
         p->size = size;
         return 0;
     }
-    if (!fs_ready())
-        return -1;
-    int f = fs_open(task_cwd(), name, 0);
     if (f < 0)
         return -1;
     int len = fs_size(f);

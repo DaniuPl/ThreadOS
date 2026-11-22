@@ -79,6 +79,8 @@ struct elf64_file {
 int elf64_load_file(const struct elf64_file *f, uint64_t *entry,
                     uint64_t *brk_base);
 
-uint64_t elf64_make_stack(void);
+/* Maps the stack of a new program - at least room bytes of it, for its
+   arguments - and returns its top, or 0 */
+uint64_t elf64_make_stack(uint64_t room);
 
 #endif
