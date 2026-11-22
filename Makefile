@@ -1970,6 +1970,160 @@ $(BUILD)/litehtml/host/layouttest: apps/browser/layouttest.cpp $(LH_HOST_OBJS)
 browser: $(BUILD)/user64/layouttest.elf $(BUILD)/litehtml/host/layouttest \
          $(BUILD)/user64/web.elf
 
+# --- clang: a C compiler that runs on ThreadOS ------------------------
+# LLVM's release (third_party/README.md) built by its own CMake as a
+# ThreadOS program, with WebKit's toolchain file: the host's compilers
+# against musl, everything static. clang, lld and a few binary tools
+# are one program, `llvm`, which is whichever of them it is called as
+# (LLVM_TOOL_LLVM_DRIVER_BUILD): one copy of LLVM's code generators on
+# the disk instead of one in clang and another in lld, whose link-time
+# optimizer carries them too. The back ends are the PC's and the
+# phone's, so either machine's programs can be built on the other.
+#
+# The archive is larger than one file on GitHub may be, so it is kept
+# in parts (third_party/llvm/); they are put together and checked
+# against the SHA-256 of the archive LLVM published before anything is
+# unpacked. What a compiler needs is unpacked: not LLDB, Flang, MLIR
+# or the test suites, a gigabyte between them. (LLVM's own C library
+# stays: LLVM borrows its portable maths headers.)
+#
+# It takes hours on four cores, so it is not in the default build:
+# `make clang` builds the compiler and lays out the files it runs with
+# (BUILD/clang-sdk, as they lie on a ThreadOS disk), which t_clang
+# copies onto the disk it boots from.
+LLVM_VER     := 23.1.6
+LLVM_SHA256  := d3b86ab29cfb4445a6652e5c2642ccc75e04e38084dde3701d323320f35a31da
+LLVM_PARTS   := $(sort $(wildcard third_party/llvm/llvm-project-$(LLVM_VER).src.tar.xz.*))
+LLVM_DIR     := $(BUILD)/llvm
+LLVM_SRC     := $(LLVM_DIR)/llvm-project-$(LLVM_VER).src
+LLVM_OBJ     := $(LLVM_DIR)/$(TCPU)
+LLVM_MAJOR   := $(firstword $(subst ., ,$(LLVM_VER)))
+LLVM_UNUSED  := bolt clang-tools-extra cross-project-tests flang flang-rt \
+                libclc libsycl lldb mlir offload openmp orc-rt polly \
+                libc/test libc/docs \
+                llvm/test llvm/unittests llvm/docs clang/test clang/unittests \
+                clang/docs lld/test lld/unittests compiler-rt/test \
+                libcxx/test libcxxabi/test libunwind/test
+
+$(LLVM_SRC)/unpacked.stamp: $(LLVM_PARTS)
+	cat $(LLVM_PARTS) | sha256sum | grep -q '^$(LLVM_SHA256) ' || \
+	    { echo "third_party/llvm: the parts are not LLVM $(LLVM_VER)'s archive"; exit 1; }
+	rm -rf $(LLVM_SRC) && mkdir -p $(LLVM_DIR)
+	cat $(LLVM_PARTS) | tar -xJf - -C $(LLVM_DIR) \
+	    $(LLVM_UNUSED:%=--exclude=llvm-project-$(LLVM_VER).src/%)
+	touch $@
+
+# The driver build's program holds only the tools named in
+# LLVM_DISTRIBUTION_COMPONENTS. clang's defaults are ThreadOS's: lld,
+# compiler-rt's builtins in place of libgcc, no unwinder (programs have
+# no unwind tables: libc/libc64.ld discards them) and programs at a
+# fixed address rather than position-independent ones, which the
+# kernel does not load. The rest of what a ThreadOS program is - static,
+# the linker script - is in the configuration file beside the program
+# (apps/clang/threados.cfg). The tablegen programs that generate parts
+# of LLVM's source run on this machine: LLVM's CMake builds them itself
+# for the host, in NATIVE/.
+$(LLVM_OBJ)/build.ninja: $(LLVM_SRC)/unpacked.stamp apps/webkit/threados.cmake \
+                         $(BUILD)/libc64/cxxrt.o
+	mkdir -p $(LLVM_OBJ)
+	cd $(LLVM_OBJ) && cmake -G Ninja $(abspath $(LLVM_SRC))/llvm \
+	    -DCMAKE_TOOLCHAIN_FILE=$(abspath apps/webkit/threados.cmake) \
+	    -DTHREADOS_MUSL=$(abspath $(MUSL_ROOT)) -DTHREADOS_REPO=$(CURDIR) \
+	    -DTHREADOS_CXXRT=$(abspath $(BUILD)/libc64/cxxrt.o) \
+	    -DTHREADOS_CC=$(CC) -DTHREADOS_CXX=$(CXX) \
+	    "-DTHREADOS_FLAGS=$(TFLAGS)" -DTHREADOS_LD=$(TLD) \
+	    -DTHREADOS_CPU=$(TCPU) \
+	    -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_FLAGS_RELEASE="-O2 -DNDEBUG" \
+	    -DCMAKE_CXX_FLAGS_RELEASE="-O2 -DNDEBUG" \
+	    -DLLVM_ENABLE_PROJECTS="clang;lld" \
+	    "-DLLVM_TARGETS_TO_BUILD=X86;AArch64" \
+	    -DLLVM_HOST_TRIPLE=$(TCPU)-unknown-linux-musl \
+	    -DLLVM_DEFAULT_TARGET_TRIPLE=$(TCPU)-unknown-linux-musl \
+	    -DLLVM_TOOL_LLVM_DRIVER_BUILD=ON \
+	    "-DLLVM_DISTRIBUTION_COMPONENTS=clang;lld;llvm-ar;llvm-nm;llvm-objdump;llvm-objcopy;llvm-size;llvm-readobj" \
+	    -DLLVM_ENABLE_PIC=OFF -DLLVM_ENABLE_ZLIB=OFF -DLLVM_ENABLE_ZSTD=OFF \
+	    -DLLVM_ENABLE_LIBXML2=OFF -DLLVM_ENABLE_LIBEDIT=OFF \
+	    -DLLVM_ENABLE_LIBPFM=OFF -DLLVM_ENABLE_PLUGINS=OFF \
+	    -DLLVM_ENABLE_BINDINGS=OFF -DLLVM_ENABLE_BACKTRACES=OFF \
+	    -DLLVM_ENABLE_UNWIND_TABLES=OFF -DLLVM_ENABLE_TELEMETRY=OFF \
+	    -DLLVM_INCLUDE_TESTS=OFF -DLLVM_INCLUDE_EXAMPLES=OFF \
+	    -DLLVM_INCLUDE_BENCHMARKS=OFF -DLLVM_INCLUDE_DOCS=OFF \
+	    -DLLVM_INCLUDE_UTILS=OFF -DLLVM_INCLUDE_RUNTIMES=OFF \
+	    -DCLANG_ENABLE_STATIC_ANALYZER=OFF -DCLANG_ENABLE_OBJC_REWRITER=OFF \
+	    -DCLANG_PLUGIN_SUPPORT=OFF -DCLANG_INCLUDE_TESTS=OFF \
+	    -DCLANG_INCLUDE_DOCS=OFF \
+	    -DCLANG_DEFAULT_LINKER=lld -DCLANG_DEFAULT_RTLIB=compiler-rt \
+	    -DCLANG_DEFAULT_UNWINDLIB=none -DCLANG_DEFAULT_PIE_ON_LINUX=OFF \
+	    -DLLVM_PARALLEL_LINK_JOBS=1 > cmake.log 2>&1 || { tail -40 cmake.log; exit 1; }
+
+# ninja knows which of LLVM's files changed; the C library and the C++
+# runtime it cannot see, so the program is linked again every time this
+# runs
+$(LLVM_OBJ)/bin/llvm.stripped: $(LLVM_OBJ)/build.ninja $(LIBC64) \
+                               $(BUILD)/libc64/cxxrt.o libc/cxx/compat.h
+	rm -f $(LLVM_OBJ)/bin/llvm
+	ninja -C $(LLVM_OBJ) llvm-driver clang-resource-headers \
+	    > $(LLVM_OBJ)/ninja.log || { tail -40 $(LLVM_OBJ)/ninja.log; exit 1; }
+	$(STRIP) -o $@ $(LLVM_OBJ)/bin/llvm
+
+# compiler-rt's builtins: what clang's code calls where the processor
+# has no instruction (128-bit division, conversions between integers
+# and floating point, complex multiplication) - libgcc's part, for
+# clang - and the crtbegin and crtend its driver links around a
+# program. From the same archive, compiled like the C library. Without
+# the frame registry: ThreadOS programs carry no unwind tables, which
+# libc/libc64.ld discards, and crtbegin would point into them.
+LLVM_RT      := $(LLVM_DIR)/builtins-$(TCPU)
+LLVM_RT_LIB  := $(LLVM_RT)/lib/linux/libclang_rt.builtins-$(TCPU).a
+$(LLVM_RT)/build.ninja: $(LLVM_OBJ)/build.ninja apps/webkit/threados.cmake
+	rm -rf $(LLVM_RT) && mkdir -p $(LLVM_RT)
+	cd $(LLVM_RT) && cmake -G Ninja $(abspath $(LLVM_SRC))/compiler-rt/lib/builtins \
+	    -DCMAKE_TOOLCHAIN_FILE=$(abspath apps/webkit/threados.cmake) \
+	    -DTHREADOS_MUSL=$(abspath $(MUSL_ROOT)) -DTHREADOS_REPO=$(CURDIR) \
+	    -DTHREADOS_CXXRT=$(abspath $(BUILD)/libc64/cxxrt.o) \
+	    -DTHREADOS_CC=$(CC) -DTHREADOS_CXX=$(CXX) \
+	    "-DTHREADOS_FLAGS=$(TFLAGS)" -DTHREADOS_LD=$(TLD) \
+	    -DTHREADOS_CPU=$(TCPU) -DCMAKE_BUILD_TYPE=Release \
+	    -DLLVM_CMAKE_DIR=$(abspath $(LLVM_OBJ))/lib/cmake/llvm \
+	    -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON -DCOMPILER_RT_BUILD_CRT=ON \
+	    -DCOMPILER_RT_CRT_USE_EH_FRAME_REGISTRY=OFF \
+	    -DCOMPILER_RT_BUILTINS_ENABLE_PIC=OFF \
+	    -DCMAKE_C_COMPILER_TARGET=$(TCPU)-unknown-linux-musl \
+	    -DCMAKE_ASM_COMPILER_TARGET=$(TCPU)-unknown-linux-musl \
+	    > cmake.log 2>&1 || { tail -40 cmake.log; exit 1; }
+$(LLVM_RT_LIB): $(LLVM_RT)/build.ninja $(MUSL_HEADERS)
+	ninja -C $(LLVM_RT) > $(LLVM_RT)/ninja.log || \
+	    { tail -40 $(LLVM_RT)/ninja.log; exit 1; }
+
+# What clang runs with, laid out as it lies on a ThreadOS disk: the
+# program under every name it answers to - hard links, one copy on the
+# disk - with its configuration file; clang's own headers and the
+# builtins where clang looks for them, beside the program
+# (../lib/clang/<version>); musl's headers, start files and libraries,
+# and the linker script, where a C library's are on any system. The
+# compiler finds its linker beside itself, by the path - which is why
+# the kernel takes a program's path whole (kernel/prog.c).
+CLANG_SDK    := $(BUILD)/clang-sdk
+CLANG_NAMES  := clang clang++ ld.lld llvm-ar llvm-ranlib llvm-nm \
+                llvm-objdump llvm-objcopy llvm-strip llvm-size llvm-readelf
+CLANG_RES    := $(CLANG_SDK)/usr/lib/clang/$(LLVM_MAJOR)
+$(CLANG_SDK)/done.stamp: $(LLVM_OBJ)/bin/llvm.stripped $(LLVM_RT_LIB) \
+                         apps/clang/threados.cfg $(LIBC64) $(MUSL_HEADERS) $(TLD)
+	rm -rf $(CLANG_SDK)
+	mkdir -p $(CLANG_SDK)/usr/bin $(CLANG_SDK)/usr/lib $(CLANG_RES)/lib/linux
+	cp $(LLVM_OBJ)/bin/llvm.stripped $(CLANG_SDK)/usr/bin/llvm
+	for n in $(CLANG_NAMES); do \
+	    ln $(CLANG_SDK)/usr/bin/llvm $(CLANG_SDK)/usr/bin/$$n; done
+	cp apps/clang/threados.cfg $(CLANG_SDK)/usr/bin/$(TCPU)-unknown-linux-musl.cfg
+	cp -r $(LLVM_OBJ)/lib/clang/$(LLVM_MAJOR)/include $(CLANG_RES)/
+	cp $(LLVM_RT)/lib/linux/*.a $(LLVM_RT)/lib/linux/*.o $(CLANG_RES)/lib/linux/
+	cp -r $(MUSL_ROOT)/include $(CLANG_SDK)/usr/
+	cp $(MUSL_ROOT)/lib/*.o $(MUSL_ROOT)/lib/*.a $(CLANG_SDK)/usr/lib/
+	cp $(TLD) $(CLANG_SDK)/usr/lib/threados.ld
+	touch $@
+
+clang: $(CLANG_SDK)/done.stamp
+
 # VERSION orders signed updates monotonically. VERSION_LABEL is the
 # SemVer-style version shown to people; releases stay in the 0.x
 # pre-release series until ThreadOS is ready for daily use.
