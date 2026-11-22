@@ -9,9 +9,13 @@ a steady_clock deadline. musl has none of them; libc/cxx/compat.h
 answers them with musl's timed calls, which read the deadline on
 CLOCK_REALTIME. On ThreadOS CLOCK_REALTIME is seconds since 1970 and
 CLOCK_MONOTONIC ticks since boot, so a deadline passed on unchanged had
-gone decades before the wait began: every such wait returned timeout
-at once, and a worker sleeping in cv.wait_for(lk, 100ms) spun instead.
-compat.h now moves the deadline onto CLOCK_REALTIME first.
+gone decades before the wait began. A timed mutex gave up at once. A
+condition variable's wait came back at once too, and libstdc++, which
+reads steady_clock again and calls an early return a wakeup, said it
+had been notified: a worker sleeping in cv.wait_for(lk, 100ms) spun,
+and a wait with a predicate looked at it as fast as it could until
+its deadline came. compat.h now moves the deadline onto CLOCK_REALTIME
+first.
 
 libc/tests/clockwait.cpp waits every way libstdc++ does, and calls the
 four functions straight, each wait timed on steady_clock. It is built
@@ -19,7 +23,10 @@ on this machine against glibc and run here too: each outcome on
 ThreadOS (timeout, woken, taken, ETIMEDOUT, EINVAL) has to be glibc's,
 and each time within bounds of glibc's - a 300 ms wait at least 250 ms,
 not 0, and short of a second more, which a carry lost between the
-nanoseconds and the seconds would add.
+nanoseconds and the seconds would add. A wait with a predicate looks
+at it twice on glibc, before and after; here it may look once or
+twice more (a wait that ends a tick early is made again), but not the
+hundreds of thousands of times of one that never sleeps.
 
 The program is fetched onto the disk over HTTP and run from there, as
 t_bigprog's is: only this test needs it, and the initrd is memory every
@@ -46,6 +53,7 @@ BUILD = os.path.dirname(os.path.abspath(KERNEL64 or "build/x"))
 ELF = os.path.join(BUILD, "user64", "clockwait.elf")
 LINE = re.compile(r"^(.*): (.*) \((-?\d+) ms\)$")
 WORKER = "worker in wait_for 100 ms steps for 1 s"
+LOOKS = re.compile(r"^(.*) after (\d+) looks$")
 
 
 def parse(lines):
@@ -109,6 +117,7 @@ def compare(want, got):
     for (what, w_out, w_ms), (g_what, g_out, g_ms) in zip(want, got):
         if what != g_what:
             break
+        w_looks, g_looks = LOOKS.match(w_out), LOOKS.match(g_out)
         if what == WORKER:
             # The count is the time a wait takes, not a fixed answer:
             # ten on glibc, give or take one - and thousands when every
@@ -116,6 +125,14 @@ def compare(want, got):
             n = wakeups(g_out)
             check(f"{what}: {g_out}, glibc {w_out} (between 5 and 15)",
                   n is not None and 5 <= n <= 15)
+        elif w_looks:
+            check(f"{what}: {g_out}, as glibc's {w_looks.group(1)}",
+                  g_looks is not None and
+                  g_looks.group(1) == w_looks.group(1))
+            check(f"{what}: it slept rather than spun, looking at its "
+                  f"predicate {g_looks.group(2) if g_looks else '?'} "
+                  f"times (glibc {w_looks.group(2)}; at most 5)",
+                  g_looks is not None and int(g_looks.group(2)) <= 5)
         else:
             check(f"{what}: {g_out}, as glibc's {w_out}", g_out == w_out)
         # What was asked for, from glibc's own time: 300 ms, 100 ms, 0
@@ -146,7 +163,7 @@ def main():
         if host is None:
             return summary()
         want, host_done = parse(host[0])
-        outcomes = dict((w[0], w[1]) for w in want)
+        outcomes = dict((w[0], LOOKS.sub(r"\1", w[1])) for w in want)
         check("(the comparison is not empty: glibc's build reports every "
               f"wait, {len(want)} of them, and ends with done)",
               len(want) == 19 and host_done and

@@ -9,7 +9,11 @@
 //
 // Each line is "what: outcome (N ms)". scripts/tests/t_clockwait.py
 // holds the outcomes to those of this file built against glibc on the
-// host, and the times to what was asked for.
+// host, and the times to what was asked for. A wait with a predicate
+// also says how often it looked at it: libstdc++ reads steady_clock
+// again when a wait returns and calls an early return a wakeup, so a
+// wait whose deadline has passed still takes its time - looking at the
+// predicate as fast as the processor can instead of sleeping.
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -40,6 +44,15 @@ static void report(const char *what, const char *outcome)
     long ms = ms_since_start();
     printf("%s: %s (%ld ms)\n", what, outcome, ms);
     fflush(stdout);
+}
+
+static void report_looks(const char *what, bool r, const char *yes,
+                         const char *no, long looks)
+{
+    char outcome[64];
+    snprintf(outcome, sizeof outcome, "%s after %ld looks", r ? yes : no,
+             looks);
+    report(what, outcome);
 }
 
 static const char *err_name(int e)
@@ -77,17 +90,20 @@ static void condition_variables()
     // ending the wait early, so only the deadline can
     {
         std::unique_lock<std::mutex> lk(m);
+        long looks = 0;
         start();
-        bool r = cv.wait_for(lk, 300ms, [] { return false; });
-        report("condition_variable wait_for 300 ms", r ? "woken" : "timeout");
+        bool r = cv.wait_for(lk, 300ms, [&] { looks++; return false; });
+        report_looks("condition_variable wait_for 300 ms", r, "woken",
+                     "timeout", looks);
     }
     {
         std::unique_lock<std::mutex> lk(m);
+        long looks = 0;
         start();
         bool r = cv.wait_until(lk, steady_clock::now() + 300ms,
-                               [] { return false; });
-        report("condition_variable wait_until steady_clock +300 ms",
-               r ? "woken" : "timeout");
+                               [&] { looks++; return false; });
+        report_looks("condition_variable wait_until steady_clock +300 ms", r,
+                     "woken", "timeout", looks);
     }
 
     // Notified before the deadline: the wait ends when it is told to
@@ -103,9 +119,10 @@ static void condition_variables()
     });
     {
         std::unique_lock<std::mutex> lk(m);
-        bool r = cv.wait_for(lk, 5s, [&] { return flag; });
-        report("condition_variable wait_for 5 s, notified at 100 ms",
-               r ? "woken" : "timeout");
+        long looks = 0;
+        bool r = cv.wait_for(lk, 5s, [&] { looks++; return flag; });
+        report_looks("condition_variable wait_for 5 s, notified at 100 ms", r,
+                     "woken", "timeout", looks);
     }
     n.join();
 

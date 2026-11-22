@@ -11313,8 +11313,11 @@ works and is checked by `make test`.
       the clock away, and musl reads those deadlines on CLOCK_REALTIME.
       On ThreadOS CLOCK_REALTIME is seconds since 1970 and
       CLOCK_MONOTONIC ticks since boot, so the deadline had gone decades
-      before the wait began: every such wait timed out at once, and a
-      worker sleeping in cv.wait_for(lk, 100ms) spun. compat.h now moves
+      before the wait began. A timed mutex gave up at once; a condition
+      variable's wait came back at once too, and libstdc++, which reads
+      steady_clock again, took that for a wakeup - so a worker sleeping
+      in cv.wait_for(lk, 100ms) spun, and a wait with a predicate looked
+      at it as fast as it could until the deadline. compat.h now moves
       a deadline onto CLOCK_REALTIME first - now on the wall clock plus
       what is left of it on its own clock, the nanoseconds carried, a
       deadline at either end of time_t kept there and one musl would
@@ -11328,4 +11331,8 @@ works and is checked by `make test`.
       outcome (timeout, woken, taken, ETIMEDOUT, EINVAL) is glibc's, and
       each time within bounds of glibc's - a 300 ms wait at least 250 ms
       and short of 1250, a worker in 100 ms steps wakes 5 to 15 times a
-      second.
+      second, a wait looks at its predicate at most 5 times (glibc: 2).
+      Built with the old shims, which drop the clock, 16 of its checks
+      fail: every timed mutex and rwlock wait gives up in 0 ms, the
+      worker wakes some 400,000 times in its second, and each predicate
+      is looked at 66,000 to 210,000 times.
