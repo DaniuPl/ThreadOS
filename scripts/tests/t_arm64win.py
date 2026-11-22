@@ -307,7 +307,88 @@ def main():
     from_package()
     phone_look()
     phone_controls()
+    thread_full()
     return summary()
+
+
+def thread_full():
+    """The thread over a window that fills the screen (docs/protonui-plan.md
+    stage 7, PhoneNavSettings.dc.html's "Hide it while a video fills the
+    screen"): wintest put on the whole screen by a finger held on it"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import t_arm64apps as A
+    q = Phone(cores=2, mib=1024, append="run=wintest")
+    LH = Phone.LOGICAL[1]
+    try:
+        q.wait_serial("[wintest] window", timeout=120)
+        q.wait_serial("drawn", timeout=30)
+        q.touch([(180, 560), (180, 420), (180, 300)])
+        q.wait_serial('[mobile] window "Win test" (opened while locked)',
+                      timeout=20)
+        seen = len(q.serial())
+        q.hold(180, 300, 1.2)
+        ok = heard(q, "[wintest] 360x640, drawn again", timeout=15)
+        check("a finger held on wintest puts it on the whole screen, and "
+              "it draws itself at 360x640",
+              ok and "[wintest] full on: 0" in q.serial()[seen:])
+        foot = (180 * K, (LH - A.m("MOB_THREAD_LINE") + 1) * K)
+        line_px = (24 * K, (LH - A.m("MOB_THREAD_LINE")) * K)
+        check("with the gestures, nothing of the phone's over its foot",
+              poll_screen(q, lambda at: at(*foot) == BLUE))
+
+        def settings():
+            w, h, at = q.screen_raw()
+            n = next((n for n in (3, 4) if at(
+                (A.dock_xy(2, n)[0] + 4) * K,
+                (A.dock_xy(2, n)[1] + A.m("MOB_DOCK_TILE") // 2) * K) ==
+                (0x8E, 0x8E, 0x93)), 4)
+            q.tap(*[c + A.m("MOB_DOCK_TILE") // 2 for c in A.dock_xy(2, n)])
+            q.wait_serial("[mobile] Settings (dock)", timeout=20)
+            q.tap(180, A.row_y(A.MAIN["navigation"]))
+            time.sleep(0.5)
+
+        def to_window():
+            knots = A.last_thread(q)
+            xs = A.knot_xs(len(knots), knots.index("Settings"))
+            seen = len(q.serial())
+            q.tap(xs[knots.index("window")], LH - 17)
+            return heard(q, '[mobile] window "Win test" (its knot)') and \
+                '(its knot)' in q.serial()[seen:]
+
+        q.touch([(180, LH - 8), (180, 500), (180, 380)])
+        q.wait_serial("[mobile] home (swipe up from the edge)", timeout=20)
+        settings()
+        q.tap(*A.nav_card(2))
+        q.wait_serial("[settings] The thread", timeout=20)
+        check("back to the window by its knot on the thread", to_window())
+        check("the thread hides while it fills the screen: its foot is "
+              "the program's blue",
+              poll_screen(q, lambda at: at(*foot) == BLUE and
+                          at(*line_px) == BLUE))
+        seen = len(q.serial())
+        q.touch([(180, LH - 12), (180, LH - 60), (180, LH - 140)])
+        q.wait_serial("[mobile] home (up from the thread)", timeout=20)
+        check("its strip is still the phone's: up goes home",
+              "[wintest]" not in q.serial()[seen:])
+        settings()
+        q.tap(*A.nav_switch(1))
+        q.wait_serial("[settings] Hide it while a video fills the screen off",
+                      timeout=20)
+        check("and back by its knot", to_window())
+        weld = A.weave_dyes()["Weld"]          # "Win test": W, 87 % 6
+        line = A.design_thread_line()
+        check(f"with the switch off, the thread over it: the design's line "
+              f"{line}, the window's knot in the middle, Weld {weld}, "
+              f"ringed in white",
+              poll_screen(q, lambda at: at(*line_px) == line and
+                          at(*foot) == weld and
+                          at(foot[0] + 12, foot[1]) == WHITE))
+        seen = len(q.serial())
+        q.hold(180, 300, 1.2)
+        check("held again, it leaves the whole screen",
+              heard(q, "[wintest] full off: 0", timeout=15))
+    finally:
+        q.close()
 
 
 def heard(q, text, timeout=10):

@@ -24,6 +24,8 @@ struct mob_prefs {
     int thread_dyes;            /* the thread's knots in their programs'
                                    colours, not all one */
     int pin_on;                 /* the lock screen asks for the PIN */
+    int thread_over_full;       /* the thread drawn over a window that
+                                   fills the screen (a video), not hidden */
     int clock24;                /* 13:05, not 1:05 PM */
     int size;                   /* the display size: MOB_SIZES, 0 the
                                    largest */
@@ -42,6 +44,13 @@ struct mob_prefs {
 #define MOB_NAV_THREAD   2      /* ThreadOS's own: a knot a program along
                                    the bottom (docs/weave/canvas/
                                    NavStyles.dc.html) */
+
+/* Weave's dyes (docs/WEAVE.md), Night's [0] and Linen's [1]: Indigo,
+   Madder, Saffron, Weld, Woad, Cochineal - and the grey of the system's
+   own things */
+enum { DYE_INDIGO, DYE_MADDER, DYE_SAFFRON, DYE_WELD, DYE_WOAD,
+       DYE_COCHINEAL, DYE_GREY, DYES };
+extern const uint32_t mob_dyes[2][DYES];
 
 #define MOB_THEME_MATTE  0      /* a tint over what is under them */
 #define MOB_THEME_GLASS  1      /* Liquid Glass */

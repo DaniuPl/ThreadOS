@@ -171,7 +171,6 @@
 #define MOB_KNOT_BAND   56
 #define NIGHT_THREAD    0x3A3F4C  /* the line, on Night's dark */
 #define LINEN_THREAD    0xCFC8BA  /* ... and on Linen's light */
-#define LINEN_GREY      0x6B675F  /* the system's own knots on Linen */
 #define MOB_KNOTS       8
 #define MOB_BACK_EDGE   14      /* in from this near the left edge: back */
 #define MOB_HOLD_MS     450     /* up from the thread and held: recent apps */
@@ -197,6 +196,7 @@
 #define PIN_TRACK       0x2E323D
 #define PIN_RING_OFF    0x4A4F5C
 #define PIN_DIM         0x9AA0AE
+#define PIN_LINK        0x8FA5FF  /* "Cancel", the design's link colour */
 
 #define WHITE   0xFFFFFF
 #define MUTED   0xAEB6CC
@@ -266,6 +266,9 @@ static int about_from_settings;
    phone's apps by their screens, programs' windows by theirs */
 static struct knot { int screen, win; } knots[MOB_KNOTS];
 static int knot_n, knot_pick = -1;   /* where a finger slides to */
+/* What is on the screen, and the program that was before it - the
+   gestures' swipe along the bar goes back to that one */
+static int cur_s = LOCK, cur_w = -1, before_s = -1, before_w = -1;
 /* The PIN: what it is (when mob_prefs.pin_on), what is being typed, and
    what the keys are for - opening the phone, or choosing one in
    Settings and then typing it again */
@@ -1412,6 +1415,10 @@ static void draw_window(void)
         winmob_draw(shown);
         if (winmob_keyboard(shown))
             mob_kb_draw();
+        /* the thread over it, unless it hides while a video fills the
+           screen (its strip is the phone's either way) */
+        if (mob_prefs.nav == MOB_NAV_THREAD && mob_prefs.thread_over_full)
+            draw_thread(WHITE);
         return;
     }
     uint32_t top = winmob_edge_colour(shown, 0);
@@ -1566,17 +1573,6 @@ static int knot_near(int x)
     return best;
 }
 
-/* The dyes (docs/WEAVE.md), Night's and Linen's: Indigo, Madder,
-   Saffron, Weld, Woad, Cochineal - and a grey for the system's own */
-enum { DYE_INDIGO, DYE_MADDER, DYE_SAFFRON, DYE_WELD, DYE_WOAD,
-       DYE_COCHINEAL, DYE_GREY };
-static const uint32_t dyes[2][7] = {
-    { 0x5B7CFA, 0xE5484D, 0xF5A524, 0x46C27A, 0x2EC4C4, 0xD152A6,
-      NIGHT_APP_DIM },
-    { 0x3F5EE8, 0xC9302C, 0xB86E00, 0x1E8A4C, 0x1E7F86, 0xC2366F,
-      LINEN_GREY },
-};
-
 /* Which dye a program's knot is: by what it is for, as the dyes' jobs
    go - pictures and sound Cochineal, Weft Woad - the phone's own
    Settings and About grey, a program's window by its name's letter */
@@ -1603,8 +1599,8 @@ static int knot_dye_of(int i)
 static uint32_t knot_dye(int i, int front, int night)
 {
     if (mob_prefs.thread_dyes)
-        return dyes[!night][knot_dye_of(i)];
-    return i == front ? mob_accent() : dyes[!night][DYE_GREY];
+        return mob_dyes[!night][knot_dye_of(i)];
+    return i == front ? mob_accent() : mob_dyes[!night][DYE_GREY];
 }
 
 /* The thread in the colours of what is under it: c is what is written
@@ -1689,7 +1685,7 @@ static void draw_pin(void)
         "JKL", "MNO", "PQRS", "TUV", "WXYZ" };
     struct rtc_time t;
     char s[16];
-    uint32_t acc = mob_accent();
+    uint32_t acc = mob_dyes[0][DYE_INDIGO];   /* the design's: Night's */
     gfx_fill(0, 0, lw, lh, PIN_BG, 255);
     rtc_split(rtc_seconds(), &t);
     clock_text(s, &t, 0);
@@ -1752,7 +1748,7 @@ static void draw_pin(void)
             if (letters[d][0])
                 centred(UI_BOLD, 9, x, y + 20, letters[d], PIN_DIM);
         }
-    centred(UI_SANS, 15, lw / 2, PIN_CANCEL_Y, "Cancel", acc);
+    centred(UI_SANS, 15, lw / 2, PIN_CANCEL_Y, "Cancel", PIN_LINK);
     pill(WHITE);
 }
 
@@ -2259,6 +2255,13 @@ static const char *screen_name(int s)
 
 static void go(int s, const char *why)
 {
+    int app = cur_s >= APP_ABOUT && cur_s != APP_RECENTS && cur_s != PIN_PAD;
+    if (app && (cur_s != s || (s == APP_WINDOW && cur_w != shown))) {
+        before_s = cur_s;
+        before_w = cur_w;
+    }
+    cur_s = s;
+    cur_w = s == APP_WINDOW ? shown : -1;
     screen = s;
     dirty = 1;
     if (s == APP_SETTINGS)
@@ -2664,10 +2667,12 @@ static void touch(const struct touch_event *e)
         finger.y0 = e->y;
         finger.at = finger.still = counter_now();
         finger.moved = finger.longed = 0;
-        /* With the thread, its strip and the left edge are the phone's */
-        int thread = mob_prefs.nav == MOB_NAV_THREAD && !shade && !is_locked();
-        finger.thread = thread && e->y >= lh - MOB_THREAD_UP;
-        finger.left = thread && !finger.thread && e->x < MOB_BACK_EDGE;
+        /* With the thread its strip is the phone's; with it or the
+           gestures, the left edge (back) */
+        int own = mob_prefs.nav != MOB_NAV_BUTTONS && !shade && !is_locked();
+        finger.thread = own && mob_prefs.nav == MOB_NAV_THREAD &&
+                        e->y >= lh - MOB_THREAD_UP;
+        finger.left = own && !finger.thread && e->x < MOB_BACK_EDGE;
         finger.from = knot_front();
         if (finger.thread && finger.from < 0)
             finger.from = knot_near(e->x);
@@ -2773,6 +2778,15 @@ static void touch(const struct touch_event *e)
         go_back("the left edge");
         return;
     }
+    /* The gestures: along the bar at the bottom, the program before */
+    if (mob_prefs.nav == MOB_NAV_GESTURES && !shade && !is_locked() &&
+        finger.y0 >= lh - MOB_EDGE && adx > 60 && adx > ady) {
+        if (before_s == APP_WINDOW && winmob_exists(before_w))
+            show(before_w, "along the bar");
+        else if (before_s >= APP_ABOUT && before_s != APP_WINDOW)
+            open_app(before_s, "along the bar");
+        return;
+    }
     if (shade) {
         int s = cc_at(finger.x0, finger.y0);
         if (adx <= 12 && ady <= 12) {
@@ -2806,8 +2820,14 @@ static void touch(const struct touch_event *e)
         }
         else if (screen >= APP_ABOUT && screen != PIN_PAD &&
                  mob_prefs.nav == MOB_NAV_GESTURES &&
-                 finger.y0 >= lh - MOB_EDGE)
-            go(HOME, "swipe up from the edge");
+                 finger.y0 >= lh - MOB_EDGE) {
+            /* up and held there: recent apps */
+            if (counter_now() - finger.still >=
+                timer_freq() * MOB_HOLD_MS / 1000)
+                go(APP_RECENTS, "up and held from the edge");
+            else
+                go(HOME, "swipe up from the edge");
+        }
     } else if (adx <= 12 && ady <= 12 && finger.edge) {
         to_program(WEV_PRESS, finger.x0, finger.y0);
         to_program(WEV_RELEASE, finger.x0, finger.y0);

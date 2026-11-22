@@ -210,9 +210,14 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
   one in front in the middle of the screen on a band of its dye, the
   dyes docs/WEAVE.md's six (Night's or Linen's by what is under them),
   the system's own grey.
-  Not yet: hiding the thread over a full-screen video as a switch (a
-  full-screen window covers it anyway), and Settings' Navigation page
-  drawn as the design's three pictures rather than a list.
+  Settings' Navigation page is the design's: the three ways as cards
+  with a little phone each, the chosen one edged in Indigo, the moves
+  under them and the thread's two switches - knots in their colours,
+  and hidden (or not) over a window that fills the screen. The PIN's
+  knots are the design's Indigo. The gestures do what the page says of
+  them: up and held for recent apps, along the bar for the program
+  before, the left edge for back. The phone still letters in DejaVu,
+  not Inter.
 
 ## After that
 

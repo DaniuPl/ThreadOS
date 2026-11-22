@@ -79,7 +79,7 @@ LW, LH = Phone.LOGICAL           # at the largest display size
 WHITE, MUTED = (255, 255, 255), (0xAE, 0xB6, 0xCC)
 POLISH = "ąćęłńóśźżĄĆĘŁŃÓŚŹŻ"
 CHARS = ("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-         ".,:%- " + POLISH)
+         ".,:%-' " + POLISH)
 
 
 def m(name):
@@ -633,11 +633,32 @@ def navigation(app):
     q.tap(*[c + m("MOB_DOCK_TILE") // 2 for c in dock_xy(2, 4)])
     app.said("[mobile] Settings (dock)")
     page(app, "navigation")
+    # the page as its design draws it (PhoneNavSettings.dc.html): the
+    # three as cards, the chosen one edged in Indigo, the moves under them
+    dyes = weave_dyes()
+    w, h, at = scr = app.screen()
+    edges = [at(nav_card(i)[0] * K, a("NAV_CARDS_Y") * K) for i in range(3)]
+    title = app.read(0, LW, a("NAV_TITLE_Y"), a("NAV_TITLE_PX"),
+                     face="bold", scr=scr)
+    names = [app.read(nav_card(i)[0] - 49, nav_card(i)[0] + 49,
+                      a("NAV_CARDS_Y") + a("NAV_NAME_Y"),
+                      a("NAV_NAME_PX"), face="bold", scr=scr)
+             for i in range(3)]
+    help0 = [app.read(a("NAV_SIDE") + 8, LW // 2, a("NAV_HELP_Y") + 4 + r *
+                      a("NAV_HELP_ROW") + a("NAV_HELP_ROW") // 2 + 5, 14,
+                      face="bold", scr=scr) for r in range(4)]
+    check(f"Navigation as its design: the title ({title!r}), three cards "
+          f"({names}), the gestures' edged in Indigo ({edges}), their moves "
+          f"under them ({help0})",
+          title == "Navigation" and
+          names == ["Gestures", "Three buttons", "The thread"] and
+          edges[0] == dyes["Indigo"] and edges[1] != dyes["Indigo"] and
+          help0 == ["Swipe up", "Up and hold", "Along the bar", "Left edge"])
     pill_y = LH - m("MOB_PILL_UP")
     nav_y = LH - m("MOB_NAV_UP")
     pill_before = app.at(150, pill_y + 2)
-    q.tap(180, row_y(1))
-    app.said("[settings] Three buttons, as Android")
+    q.tap(*nav_card(1))
+    app.said("[settings] Three buttons")
     w, h, at = scr = app.screen()
     pill_after = at(150 * K, (pill_y + 2) * K)
     ring = at(LW // 2 * K, (nav_y + 18 - 9) * K + 1)
@@ -658,8 +679,51 @@ def navigation(app):
     q.tap(*[c + m("MOB_DOCK_TILE") // 2 for c in dock_xy(2, 4)])
     app.said("[mobile] Settings (dock)")
     page(app, "navigation")
-    q.tap(180, row_y(0))
-    app.said("[settings] Gestures, as an iPhone")
+    q.tap(*nav_card(0))
+    app.said("[settings] Gestures")
+    # the gestures' moves the page lists: up and held, along the bar, the
+    # left edge
+    seen = len(q.serial())
+    q.touch([(180, LH - 8), (180, LH - 70), (180, LH - 150)], hold=1.0)
+    out = said_after(q, seen, "[mobile] recent apps (up and held")
+    check("gestures: up from the edge and held opens recent apps",
+          "[mobile] recent apps (up and held from the edge)" in out)
+    app.home()
+    q.tap(*[c + m("MOB_DOCK_TILE") // 2 for c in dock_xy(0, 4)])
+    app.said("[mobile] Notes (dock)")
+    app.home()
+    q.tap(*[c + m("MOB_DOCK_TILE") // 2 for c in dock_xy(1, 4)])
+    app.said("[mobile] Calculator (dock)")
+    seen = len(q.serial())
+    q.touch([(60, LH - 20), (140, LH - 20), (220, LH - 20), (300, LH - 20)])
+    out = said_after(q, seen, "(along the bar)")
+    check("along the bar at the bottom: the program before, Notes",
+          "[mobile] Notes (along the bar)" in out)
+    app.home()
+    q.tap(*[c + m("MOB_DOCK_TILE") // 2 for c in dock_xy(2, 4)])
+    app.said("[mobile] Settings (dock)")
+    page(app, "navigation")
+    seen = len(q.serial())
+    q.touch([(4, 300), (40, 300), (90, 300), (150, 300)])
+    out = said_after(q, seen, "[settings] Settings")
+    check("in from the left edge is back, with the gestures too",
+          "[mobile] back (the left edge)" in out)
+    app.home()
+
+
+def nav_card(i):
+    """The middle of the Navigation page's i-th card (mobapps.c's
+    nav_card_x: three across, NAV_SIDE from the sides, NAV_CARD_GAP
+    apart)"""
+    w = (LW - 2 * a("NAV_SIDE") - 2 * a("NAV_CARD_GAP")) // 3
+    return (a("NAV_SIDE") + i * (w + a("NAV_CARD_GAP")) + w // 2,
+            a("NAV_CARDS_Y") + a("NAV_CARD_H") // 2)
+
+
+def nav_switch(r):
+    """The middle of the thread's r-th switch on the Navigation page"""
+    return (LW - a("NAV_SIDE") - a("NAV_PAD") - a("NAV_SW_W") // 2,
+            a("NAV_SW_Y") + 4 + r * a("NAV_SW_ROW") + a("NAV_SW_ROW") // 2)
 
 
 def app_colours():
@@ -727,8 +791,8 @@ def thread_nav(app):
     q.tap(*[c + m("MOB_DOCK_TILE") // 2 for c in dock_xy(2, 4)])
     app.said("[mobile] Settings (dock)")
     page(app, "navigation")
-    q.tap(180, row_y(2))
-    app.said("[settings] The thread, ThreadOS's own")
+    q.tap(*nav_card(2))
+    app.said("[settings] The thread")
     knots = last_thread(q)
     n = len(knots)
     check(f"the thread holds the programs opened, in order ({knots})",
@@ -808,17 +872,28 @@ def thread_nav(app):
           "[settings] Settings" in out)
     # the knots all one colour, the one in front the accent's
     page(app, "navigation")
-    q.tap(SWITCH_X, row_y(3))
-    app.said("[settings] Knots in programs' colours off")
+    w, h, at = scr = app.screen()
+    labels = [app.read(a("NAV_SIDE") + 8, LW - 80, nav_switch(r)[1] + 5,
+                       a("NAV_SW_PX"), scr=scr) for r in range(2)]
+    help2 = [app.read(a("NAV_SIDE") + 8, LW // 2, a("NAV_HELP_Y") + 4 + r *
+                      a("NAV_HELP_ROW") + a("NAV_HELP_ROW") // 2 + 5, 14,
+                      face="bold", scr=scr) for r in range(4)]
+    check(f"with the thread chosen, its moves ({help2}) and its two "
+          f"switches ({labels})",
+          help2 == ["Tap a knot", "Slide along it", "Swipe up", "Left edge"]
+          and labels == ["Knots in their programs' colours",
+                         "Hide it while a video fills the screen"])
+    q.tap(*nav_switch(0))
+    app.said("[settings] Knots in their programs' colours off")
     w, h, at = app.screen()
     xs = knot_xs(n, front)
     plain = [at(xs[i] * K, ky) for i in range(n) if i != front]
     check(f"with their colours off, the knots are all the grey ({plain})",
           plain and all(p == grey for p in plain))
-    q.tap(SWITCH_X, row_y(3))
-    app.said("[settings] Knots in programs' colours on")
-    q.tap(180, row_y(0))
-    app.said("[settings] Gestures, as an iPhone")
+    q.tap(*nav_switch(0))
+    app.said("[settings] Knots in their programs' colours on")
+    q.tap(*nav_card(0))
+    app.said("[settings] Gestures")
     app.home()
 
 
@@ -860,11 +935,11 @@ def pin_lock(app):
     rest = (at(kx[3] * K, ky), at(kx[3] * K + 14, ky))
     line = (at((kx[0] + kx[1]) // 2 * K, ky - 1),
             at((kx[3] + kx[4]) // 2 * K, ky - 1))
-    check(f"two digits tie two knots in the accent ({tied}), the thread "
-          f"that far in it ({line[0]}), the next knot ringed in white "
-          f"({nxt}), the rest dark ({rest}), the thread on dark "
+    check(f"two digits tie two knots in the design's Indigo ({tied}), the "
+          f"thread that far in it ({line[0]}), the next knot ringed in "
+          f"white ({nxt}), the rest dark ({rest}), the thread on dark "
           f"({line[1]})",
-          tied[0] == tied[1] and tied[0] not in (bg, WHITE, off) and
+          tied == [weave_dyes()["Indigo"]] * 2 and
           line[0] == tied[0] and nxt == (bg, WHITE) and rest == (bg, off)
           and line[1] == rgb(m_hex("PIN_TRACK")))
     press("2915")

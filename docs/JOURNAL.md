@@ -11398,3 +11398,40 @@ works and is checked by `make test`.
       for it, a wrong one is refused and the right one opens home;
       with the swipe alone again it opens without one. ptest's
       Phone.touch can hold the finger still before it lifts.
+- [x] **The phone's Navigation page, the PIN and the gestures as their
+      designs** (kernelarm64/mobapps.c, kernelarm64/mobapps.h,
+      kernelarm64/mobile.c, libc/tests/wintest.c,
+      scripts/tests/t_arm64apps.py, scripts/tests/t_arm64win.py,
+      docs/protonui-plan.md)
+      Stage 7 left three things short of PhoneNavSettings.dc.html and
+      PhoneUnlock.dc.html. Navigation was a list of rows; it is now the
+      design's page: the three ways as cards side by side, each with a
+      little phone showing its bottom (the home indicator, the three
+      buttons, the thread with three knots), the chosen one edged in
+      Indigo, under them a card of what the chosen way's moves do with
+      dashed lines between, and for the thread a card of its two
+      switches - in Night's colours on the dark look, Linen's on the
+      light. The second switch is new: "Hide it while a video fills
+      the screen", on by default; off, the thread is drawn over a
+      window that fills the screen (its strip stays the phone's either
+      way, so up still goes home). The PIN's knots and thread are the
+      design's Indigo rather than the phone's accent, and Cancel its
+      link colour. And the design lists moves for the gestures that the
+      phone did not have: up from the edge and held now opens recent
+      apps, a swipe along the bar brings the program before, and in
+      from the left edge is back, as with the thread. The dyes are one
+      table (mob_dyes) both files use.
+      wintest (libc/tests/) puts its window on the whole screen when a
+      finger is held on it and back again, and draws itself at the new
+      size. t_arm64apps: the page's title, its three cards by name, the
+      gestures' edged in WEAVE.md's Indigo and the others not, their
+      four moves read off the card, the thread's moves and its two
+      switches; up and held, along the bar (Notes, the one before
+      Calculator) and the left edge with the gestures; the PIN's knots
+      in Indigo. t_arm64win (new part): wintest held into full screen
+      draws at 360x640 with nothing of the phone's over its foot; with
+      the thread chosen it comes back by its knot and the thread hides
+      over it - its foot the program's blue - while up from the strip
+      still goes home; with the switch off the thread is drawn over it,
+      the design's line, the window's knot in the middle in Weld,
+      ringed in white; held again it leaves the whole screen.
