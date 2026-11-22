@@ -4099,6 +4099,16 @@ class Phone(Qemu):
     def tap(self, x, y):
         self.touch([(x, y)])
 
+    def hold(self, x, y, seconds=1.2):
+        """A finger down at a point, held still that long, and up"""
+        self.cmd({"execute": "input-send-event", "arguments": {"events":
+                  self._abs(x, y) + [{"type": "btn", "data": {
+                      "down": True, "button": "left"}}]}})
+        time.sleep(seconds)
+        self.cmd({"execute": "input-send-event", "arguments": {"events": [
+            {"type": "btn", "data": {"down": False, "button": "left"}}]}})
+        time.sleep(0.6)
+
 
 def said_line(text, start):
     """The first line of 'text' that starts so, or 'no line'"""

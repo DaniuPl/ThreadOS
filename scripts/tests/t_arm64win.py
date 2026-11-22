@@ -36,7 +36,13 @@ screen and its tablet:
   phone goes home, the tile is gone and every page is free again
 
 and ProtonUI v2's look as the phone hands it to a program
-(libc/tests/pulook, checked as t_protonui checks it on the PC);
+(libc/tests/pulook, checked as t_protonui checks it on the PC); and its
+controls under a finger (libc/tests/pudemo, laid out for the density
+the phone says): a list's rows 48 pixels tall on the screen, a tap
+just outside a switch's row but within the 44-pixel target round it
+turns the switch, a finger held on a row opens the row's menu and a tap on a
+line of it is told to the program, and a row swiped aside shows its
+actions, the one that destroys taken by a tap;
 
 and the same program from an application package (.tapp,
 scripts/mktapp.py) handed over through fw_cfg, as the PC's loader hands
@@ -300,7 +306,118 @@ def main():
         q.close()
     from_package()
     phone_look()
+    phone_controls()
     return summary()
+
+
+def heard(q, text, timeout=10):
+    """Whether the phone said it within the time"""
+    end = time.time() + timeout
+    while time.time() < end:
+        if text in q.serial():
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def phone_controls():
+    """ProtonUI v2's controls under a finger (docs/protonui-plan.md stage
+    5): libc/tests/pudemo on the phone, where the look says a finger"""
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    q = Phone(cores=2, mib=1024, append="run=pudemo")
+    try:
+        q.wait_serial("[pudemo] drawn", timeout=120)
+        q.touch([(180, 560), (180, 420), (180, 300)])
+        check("its window is shown once the phone is opened",
+              heard(q, '[mobile] window "Controls"', 20))
+        time.sleep(1.5)
+        said = q.serial()
+        dens = re.findall(r"\[pudemo\] density (\d+) row (\d+) target (\d+)",
+                          said)
+        d, row, target = (int(v) for v in dens[-1]) if dens else (0, 0, 0)
+        finger = _kernel_define("kernel/include/look.h", "DENSITY_FINGER")
+        check("pudemo is laid out for a finger: density %d, rows %d, "
+              "targets %d" % (d, row, target),
+              (d, row, target) == (finger,
+                                   _kernel_define("user/ugui.h",
+                                                  "PU_ROW_FINGER"),
+                                   _kernel_define("user/ugui.h",
+                                                  "PU_TARGET_FINGER")))
+
+        def place(name):
+            m = re.findall(r"\[pudemo\] at %s (\d+) (\d+) (\d+) (\d+)"
+                           % re.escape(name), q.serial())
+            return tuple(int(v) for v in m[-1]) if m else None
+
+        lst, bt = place("Files"), place("Bluetooth")
+        check("and says where its list and its switch are (%s, %s)"
+              % (lst, bt), lst and bt)
+        if not (lst and bt):
+            return
+        top = BAR * K
+        _, _, at = q.screen_raw()
+        # the chosen row (the second) is filled from one pixel below its
+        # top to one above its foot: its height on the screen is a row's
+        cx = (lst[0] + lst[2] - 16) * K
+        y1 = top + (lst[1] + row + row // 2) * K
+        band = at(cx, y1)
+        ya = yb = y1
+        while at(cx, ya - 1) == band:
+            ya -= 1
+        while at(cx, yb + 1) == band:
+            yb += 1
+        check("on the screen a list row is %d pixels tall: the chosen one "
+              "%d of them filled (%d panel pixels at %d to one)"
+              % (row, (yb - ya + 1) // K, yb - ya + 1, K),
+              yb - ya + 1 == (row - 2) * K)
+
+        # a tap six pixels above the switch's own row (26 tall, the
+        # switch drawn in it): outside it, inside the finger's target
+        # round it
+        n0 = q.serial().count("[pudemo] changed Bluetooth 0")
+        check("the switch's row is smaller than a finger's target (%d)"
+              % bt[3], bt[3] + 12 < target)
+        q.tap(bt[0] + bt[2] - 20, BAR + bt[1] - 6)
+        end = time.time() + 10
+        while time.time() < end and \
+                q.serial().count("[pudemo] changed Bluetooth 0") == n0:
+            time.sleep(0.3)
+        check("a tap outside it, within its %d-pixel target, turns it"
+              % target, q.serial().count("[pudemo] changed Bluetooth 0") ==
+              n0 + 1)
+
+        # a finger held on the third row: its menu
+        ry = BAR + lst[1] + 2 * row + row // 2
+        q.hold(lst[0] + 60, ry, 1.2)
+        m = None
+        end = time.time() + 10
+        while time.time() < end and not m:
+            m = re.search(r"\[pudemo\] menu Files at (\d+) (\d+)",
+                          q.serial())
+            time.sleep(0.3)
+        check("a finger held on a row opens its menu (%s)"
+              % (m.group(0) if m else "nothing said"),
+              m and "[touch] long press" in q.serial())
+        if m:
+            mx, my = int(m.group(1)), int(m.group(2))
+            menu_row = max(target, 28)
+            q.tap(mx + 60, BAR + my + 5 + menu_row + menu_row // 2)
+            check("a tap on its second line is the program's choice",
+                  heard(q, "[pudemo] chose Files Rename"))
+
+        # the fourth row swiped aside, and its last action tapped
+        sy = BAR + lst[1] + 3 * row + row // 2
+        x1, x0 = lst[0] + lst[2] - 30, lst[0] + 40
+        q.touch([(x1, sy), (x1 - 40, sy), (x1 - 120, sy), (x0, sy)])
+        ok = heard(q, "[pudemo] swiped Files 3")
+        ax = lst[0] + lst[2] - 3 - _kernel_define("user/ugui.h",
+                                                  "PU_ACTION_W") // 2
+        q.tap(ax, sy)
+        check("a row swiped aside shows its actions, and a tap on the last "
+              "is told: Delete, of the fourth row", ok and
+              heard(q, "[pudemo] action Files 3 Delete"))
+    finally:
+        q.close()
 
 
 def phone_look():

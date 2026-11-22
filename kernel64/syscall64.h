@@ -215,6 +215,16 @@
 /* a1=&struct now_playing (user64/usys64.h): what the program plays, for
    the island's play and pause, which come back as WEV_MEDIA -> 0/-1 */
 #define SYS64_NOW_PLAYING 115
+/* a1=&struct note64 (user64/usys64.h): a notification with a weight
+   (NOTE_* in kernel/include/desktop.h) and up to two actions, which come
+   back to the window as WEV_NOTE -> its number (> 0), or -1. SYS64_NOTIFY
+   stays as it was, a Normal note with no actions: programs built before
+   this pass whatever was in the third register. */
+#define SYS64_NOTE     131
+/* a1=&struct shuttle64: what the program has going on - a timer, a
+   download, a call - on the shuttle; kind SHUTTLE_END takes it away
+   -> 0, or -1 */
+#define SYS64_SHUTTLE  132
 
 /* --- Files with no 63-byte or 4 GiB ceilings (docs/tfs4-plan.md) ---
  * The calls before these keep their shapes for programs already built;

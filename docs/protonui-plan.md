@@ -156,6 +156,16 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
   actions out.
 - **Test:** `pudemo` on the phone (`t_arm64win`): the rows are 48 px,
   a tap on a 44 px target lands, a long press opens the menu.
+- **Done** (journal: "ProtonUI v2 stage 5"). `pu_density`, `pu_row` and
+  `pu_target` from the look; under `pu_start` a list's rows, a box's
+  and a field's height and the least of what is aimed at follow it,
+  and a thing smaller than a target takes a tap within one round it.
+  The phone tells a finger held still for half a second to the program
+  as a right click (`WEV_ALTCLICK`), which `ugui` answers with
+  `UG_MENU`; `pu_menu` is the menu, its line `UG_CHOSEN`. A list row
+  swiped left shows its actions (`pu_list_actions`, `UG_SWIPED`, a tap
+  on one `UG_ACTION`). `pudemo` moved to `libc/tests/`, musl for both
+  machines, laid out for the density it is told.
 
 ## Stage 6 - the shell - 2 days
 
@@ -172,6 +182,16 @@ Font Licence, which AGENTS.md rule 6 allows, with an entry in
   screen shows Normal on the shuttle and then in Threads, Urgent stays
   until answered, Quiet goes straight to Threads; a click on an action
   comes back to the program as its event.
+- **Done** (journal: "ProtonUI v2 stage 6"). `SYS64_NOTIFY` keeps its
+  shape - programs built before it pass anything in the third register,
+  so it could not grow there - and the new call beside it is
+  `SYS64_NOTE` (a weight, the window, two actions; `WEV_NOTE` back),
+  with `pu_notify` over it. `SYS64_SHUTTLE` and `pu_shuttle` carry a
+  timer, a download or a call, which the desktop counts itself. Under
+  Weave the island is the shuttle above the loom on a thread of the
+  program's dye; Threads opens from the clock. Not yet: two activities
+  side by side on the shuttle (the newest shows), a swipe down to put
+  it away, the chime, and the phone's side of the new calls (stage 7).
 
 ## Stage 7 - the phone's thread - 1.5 days
 

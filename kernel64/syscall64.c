@@ -2275,8 +2275,47 @@ static void handle(struct regs *r)
             r->rax = (uint64_t)-1;
             return;
         }
-        desktop_notify(title, body);
+        /* on its program's thread, not on one named after its title */
+        desktop_note((int)task64_current_id(), -1, NOTE_NORMAL, title, body,
+                     0, 0);
         r->rax = 0;
+        return;
+    }
+    case SYS64_NOTE: {
+        struct {
+            int32_t win, weight;
+            char title[40], body[80];
+            char act[2][NOTE_ACT_LEN];
+        } n;
+        if (!paging64_user_range(a1, sizeof(n))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        n = *(const typeof(n) *)(uintptr_t)a1;
+        n.title[sizeof(n.title) - 1] = 0;
+        n.body[sizeof(n.body) - 1] = 0;
+        n.act[0][NOTE_ACT_LEN - 1] = n.act[1][NOTE_ACT_LEN - 1] = 0;
+        r->rax = (uint64_t)(int64_t)desktop_note(
+            (int)task64_current_id(), n.win, n.weight, n.title, n.body,
+            n.act[0], n.act[1]);
+        return;
+    }
+    case SYS64_SHUTTLE: {
+        struct {
+            int32_t win, kind, value;
+            uint32_t dye;
+            char title[40], sub[40];
+        } a;
+        if (!paging64_user_range(a1, sizeof(a))) {
+            r->rax = (uint64_t)-1;
+            return;
+        }
+        a = *(const typeof(a) *)(uintptr_t)a1;
+        a.title[sizeof(a.title) - 1] = 0;
+        a.sub[sizeof(a.sub) - 1] = 0;
+        r->rax = (uint64_t)(int64_t)desktop_shuttle(
+            (int)task64_current_id(), a.win, a.kind, a.value, a.dye, a.title,
+            a.sub);
         return;
     }
     case SYS64_BG_PREVIEW: {

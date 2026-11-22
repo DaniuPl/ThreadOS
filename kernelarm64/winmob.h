@@ -20,6 +20,8 @@ struct win_event {
 #define WEV_PRESS   5
 #define WEV_DRAG    6
 #define WEV_RELEASE 7
+#define WEV_ALTCLICK 9          /* the right button: on the phone, a long
+                                   press (kernelarm64/mobile.c) */
 #define WEV_LOOK    10          /* the look changed: draw again in it */
 #define WEV_MEDIA   11          /* play (1) or pause (2), from the shade */
 

@@ -185,7 +185,9 @@
 #define ABOUT_LINE_DY 20
 
 /* --- notifications: in the island, the newest shown, the rest behind -- */
-#define NOTE_SHOWN   4       /* at most this many waiting at once */
+#define NOTE_SHOWN   4       /* at most this many riding the island at once */
+#define NOTE_KEPT    32      /* ... and kept, riding or waiting in Threads */
+#define ACT_MAX      4       /* activities on the shuttle (one per window) */
 #define ISL_NOTE_W   340     /* the capsule a notification makes */
 #define ISL_NOTE_H   52
 #define ISL_NOTE_ICON 30     /* the sender's initial, on the accent */
@@ -195,6 +197,75 @@
 #define ISL_NOTE_BODY_Y 40   /* the line's */
 #define ISL_NOTE_PX  13
 #define ISL_MORE_RIGHT 18    /* "+2" (more behind it) ends this far from the right end */
+
+/* --- Weave's shuttle (docs/weave/canvas/Shuttle.dc.html): the island
+   above the loom, joined to it by SHT_LIFT of thread in the colour of
+   whose it is - nothing at the top of the screen, over a window's
+   title. It rests as a short pill (SHT_REST_*) and grows out of it into
+   a capsule for what it carries: */
+#define SHT_LIFT      22
+#define SHT_REST_W    30
+#define SHT_REST_H    6
+#define SHT_VOL_W     340     /* how loud */
+#define SHT_VOL_H     48
+#define SHT_VOL_PAD   18
+#define SHT_BAR_X     50      /* the slider, from the left end */
+#define SHT_BAR_W     236
+#define SHT_PLAY_W    380     /* what plays: art, title, levels, a button */
+#define SHT_PLAY_H    52
+#define SHT_ART       34
+#define SHT_BTN       36
+#define SHT_NOTE_W    460     /* a note: who, its line, its actions */
+#define SHT_NOTE_H    66
+#define SHT_NOTE_R    22
+#define SHT_AVATAR    42
+#define SHT_TEXT_X    66      /* its lines, from the left end */
+#define SHT_LINE1_Y   28      /* their baselines, from the top */
+#define SHT_LINE2_Y   47
+#define SHT_ACT_H     34      /* an action: a pill */
+#define SHT_ACT_PAD   14
+#define SHT_ACT_GAP   8
+#define SHT_ACT_RIGHT 10
+#define SHT_ACT_PX    13
+#define SHT_DL_W      360     /* a download, a call */
+#define SHT_DL_H      48
+#define SHT_DL_X      52      /* their lines, from the left end */
+#define SHT_TIMER_H   44      /* a timer: as wide as its title */
+#define SHT_RING      30
+#define SHT_URGENT_T  2       /* an Urgent note's madder edge */
+#define NIGHT_SHT_BG    0x1F2229
+#define NIGHT_SHT_LINE  0x353A46
+#define NIGHT_SHT_TRACK 0x3A3F4C
+#define LINEN_SHT_BG    0xFFFFFF
+#define LINEN_SHT_LINE  0xCFC8BA
+#define LINEN_SHT_TRACK 0xCFC8BA
+
+/* --- Weave's Threads (docs/weave/canvas/Notify.dc.html): the notes that
+   wait, one thread a program, in a panel above the loom's right end,
+   opened from the clock. A thread is a card: its knot, its name, how
+   many; opened, its notes on it, the newest's actions and Mark read. */
+#define THR_W         380
+#define THR_R         16
+#define THR_GAP       14      /* from the screen's top and right edge */
+#define THR_HEAD_H    56      /* the selvedge, the title, Quiet, Clear all */
+#define THR_TITLE_PX  18
+#define THR_PILL_H    28
+#define THR_PILL_PX   12
+#define THR_PAD       12      /* the cards from the panel's sides */
+#define THR_CARD_R    14
+#define THR_CARD_GAP  10
+#define THR_ROW_H     40      /* a thread's line: knot, name, count */
+#define THR_KNOT      14
+#define THR_NAME_PX   13
+#define THR_ITEM_H    46      /* a note on it */
+#define THR_ITEM_X    36      /* its lines, from the card's left */
+#define THR_ITEMS     4       /* the most shown on one thread */
+#define THR_FOOT_H    44      /* the actions and Mark read */
+#define THR_BTN_H     32
+#define THR_BANNER_H  34      /* "Quiet: ..." under the title */
+#define NIGHT_THR_CARD 0x20232B
+#define THR_QUIET_DYE  0x6A4FD6   /* Quiet's knot: the design's violet */
+#define LINEN_THR_CARD 0xFFFFFF
 
 /* --- the search: a field and what matches, under the bar ----------------- */
 #define SEARCH_W       460

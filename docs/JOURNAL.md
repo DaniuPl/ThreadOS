@@ -11270,3 +11270,85 @@ works and is checked by `make test`.
       stitch becoming the thread; and under the Mac style the same
       window drawn the old way. pudemo is started with 'runw', which
       does not hold the shell, so the test can change the style after.
+- [x] **ProtonUI v2 stage 5: density and touch** (user/ugui.h,
+      kernelarm64/mobile.c, kernelarm64/winmob.h, libc/tests/pudemo.c
+      (from user/), Makefile, scripts/ptest.py,
+      scripts/tests/t_arm64win.py, scripts/tests/t_protonui.py,
+      docs/protonui-plan.md)
+      A finger is fatter than a pointer, and the phone's look has said
+      so since stage 1 (its density word) without anything listening.
+      Under pu_start the toolkit now does: a list's rows are 28 for a
+      pointer and 48 for a finger, a box's row and a field as tall as a
+      target (24 or 44), knots one target apart, and a thing smaller
+      than a target still takes a tap that lands within a target round
+      its middle. A finger held still for half a second on a program's
+      window is told to it as a right click (WEV_ALTCLICK, the phone's
+      kernelarm64/mobile.c), which ugui answers as UG_MENU over the
+      thing under it - a list's row chosen first; pu_menu opens a menu
+      there, drawn over everything, a line of it coming back as
+      UG_CHOSEN. A list's row swiped left shows its actions at its end
+      (pu_list_actions; UG_SWIPED, and a tap on one UG_ACTION, the last
+      drawn as the one that destroys); swiped right it goes back. v1
+      windows keep their rows of 18 and see none of it. pudemo moved to
+      libc/tests/ as a musl program for both machines, laid out for the
+      density it is told - for a finger one column as wide as the
+      phone's screen - and saying where its controls are.
+      t_arm64win (new part): on the phone pudemo says a finger, rows of
+      48 and targets of 44; its chosen row is 46 of 48 pixels filled on
+      the screen (92 panel pixels at 200%); a tap six pixels above the
+      switch's row - outside it, inside the target round it - turns the
+      switch; a finger held on a row opens its menu and a tap on a line
+      is the program's choice; a row swiped aside shows Rename and
+      Delete, and a tap on Delete is told for that row. t_protonui's PC
+      part follows the pointer's new sizes.
+- [x] **ProtonUI v2 stage 6: the shell - notes in three weights, the
+      shuttle, Threads** (kernel/desktop.c, kernel/include/desktop.h,
+      kernel/include/look.h, kernel64/syscall64.c, kernel64/syscall64.h,
+      user64/usys64.h, user/ugui.h, libc/tests/shuttledemo.c, Makefile,
+      scripts/tests/t_threads.py, scripts/run_tests.py,
+      docs/protonui-plan.md)
+      A note used to be a passing thing: five seconds in the island, and
+      gone, read or not. Now it waits. It rides the island - under Weave
+      the shuttle, a capsule standing on a short thread above the loom
+      (docs/weave/canvas/Shuttle.dc.html), where nothing covers a
+      window's title - for a moment, then ties itself on to its
+      program's thread in Threads, the panel the loom's clock opens
+      (Notify.dc.html): one card a program, in its dye, its notes on
+      it newest first, the newest's actions and Mark read under them,
+      Quiet and Clear all at the top; the knot at the clock counts what
+      waits. A note has a weight: Quiet never rides, Normal rides four
+      seconds, Urgent rides until it is answered, even while Quiet is
+      on. A program sends one with SYS64_NOTE (pu_notify): the weight,
+      its window and up to two actions, which come back to the window
+      as WEV_NOTE with the note's number. SYS64_NOTIFY could not grow
+      in place - programs built before pass whatever was in the third
+      register - so it stays a Normal note, now on its program's thread
+      rather than one named after its title. What a program has going
+      on rides the shuttle too (SYS64_SHUTTLE, pu_shuttle): a timer
+      whose ring empties, a download with its per cent and bar, a call
+      counting up - the desktop counts the seconds itself, so a program
+      does not wake every second to say one second less - in the
+      program's dye or one it asks for, until it says the end or its
+      window goes. The volume and what plays take the shuttle's shapes
+      under Weave; the other styles keep the black island at the top,
+      which shows activities as a title and a count. Not yet: two
+      activities side by side, the swipe that puts the shuttle away,
+      the chime, and the phone's side of the new calls.
+      t_threads (new): shuttledemo sends each through ProtonUI v2, a key
+      each, and the test reads the screen in Inter at look.h's places -
+      the Normal note on the shuttle (who, whose thread, its line, Reply
+      on the accent) on a thread and an avatar of the program's dye
+      (kernel/weave.c's letter dyes), gone after a few seconds and
+      waiting, the knot saying 1; Threads with the thread, "1 note" and
+      the note; a Quiet note never on the shuttle in three seconds of
+      looking, the knot saying 2, both notes on the thread newest first;
+      an Urgent note with a madder edge still riding after eight seconds,
+      its first action clicked coming back to the program as action 1
+      of that note, and it not waiting after; the Normal note's action
+      clicked in Threads coming back as its action 1; Mark read leaving
+      "Nothing waits." and no knot; Quiet turned on in Threads keeping a
+      Normal note off the shuttle but not an Urgent one, whose second
+      action comes back as 2; a timer counting down by itself, a
+      download's "41 %" and a bar 41 % long, a call counting up in its
+      own colour, and the end taking it away; and, under the Mac style,
+      the timer on the black island at the top, its title and its count.

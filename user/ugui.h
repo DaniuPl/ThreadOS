@@ -69,6 +69,16 @@
 #define UG_CLOSED  5             /* the window is to go */
 #define UG_RESIZED 6
 #define UG_FOCUSED 7             /* Tab gave a thing the keys (pu_start) */
+#define UG_MENU    8             /* a right click, or a long press: the
+                                    thing's menu is asked for (pu_menu) */
+#define UG_CHOSEN  9             /* a line of the menu was chosen:
+                                    pu_menu_choice */
+#define UG_SWIPED  10            /* a list's row swiped aside: its actions
+                                    show */
+#define UG_ACTION  11            /* one of them tapped: pu_action, and the
+                                    row is the list's value */
+#define UG_NOTE    12            /* a note sent with pu_notify was answered:
+                                    pu_note_id, pu_note_answer */
 
 struct ug_item {
     int kind;
@@ -87,6 +97,8 @@ struct ug_item {
                                     its text unless pu_name says otherwise */
     int kind2;                   /* a button's kind (PU_PRIMARY..) */
     int phase;                   /* an unknown progress's place, of 1000 */
+    const char *const *acts;     /* a list row's actions, swiped out */
+    int nacts;
 };
 
 struct ug {
@@ -102,6 +114,17 @@ struct ug {
     int top;                     /* the first visible row of a list */
     int v2;                      /* started by pu_start: the keys move the
                                     focus, and it is drawn */
+    int row;                     /* a list's row: UG_ROW, or the density's */
+    int target;                  /* the least a thing is to aim at: 0, or
+                                    the density's */
+    /* the menu (pu_menu), drawn over everything while it is open */
+    int menu_for, menu_x, menu_y, menu_n, menu_pick;
+    const char *const *menu_items;
+    /* a finger or the pointer going down, and a row swiped aside */
+    int press_x, press_y, press_id, swipe_id, swipe_row, action;
+    /* the note answered last (UG_NOTE): its number, and 0 opened or the
+       action, 1 or 2 */
+    int note_id, note_answer;
 };
 
 /* --- rectangles and reusable layout -------------------------------- */
@@ -350,7 +373,26 @@ static inline void ug_start(struct ug *u, int win, int w, int h)
     u->focus = -1;
     u->top = 0;
     u->v2 = 0;
+    u->row = UG_ROW;
+    u->target = 0;
+    u->menu_for = -1;
+    u->menu_n = 0;
+    u->menu_pick = -1;
+    u->press_id = u->swipe_id = -1;
+    u->swipe_row = u->action = -1;
 }
+
+/* --- density: a pointer, or a finger ---------------------------------
+ *
+ * The look says what the person points with (UD_POINTER on the PC,
+ * UD_FINGER on the phone and a tablet held as one). A finger is fatter
+ * than a pointer: under pu_start a list's rows and the least of what is
+ * aimed at are the density's, and a thing smaller than that still
+ * takes a tap that lands within it. */
+#define PU_ROW_POINTER    28
+#define PU_ROW_FINGER     48
+#define PU_TARGET_POINTER 24
+#define PU_TARGET_FINGER  44
 
 /* ProtonUI v2's start: the things in an array the program hands in (as
    many as it likes; NULL for the 24 of its own), and Tab, Space and
@@ -364,6 +406,20 @@ static inline void pu_start(struct ug *u, int win, int w, int h,
         u->cap = cap;
     }
     u->v2 = 1;
+    ud_look(&u->look);
+    int finger = u->look.density == UD_FINGER;
+    u->row = finger ? PU_ROW_FINGER : PU_ROW_POINTER;
+    u->target = finger ? PU_TARGET_FINGER : PU_TARGET_POINTER;
+}
+
+static inline int pu_density(const struct ug *u)
+{
+    return (int)u->look.density;
+}
+static inline int pu_row(const struct ug *u) { return u->row; }
+static inline int pu_target(const struct ug *u)
+{
+    return u->target ? u->target : UG_ROW;
 }
 
 static inline int ug_add(struct ug *u, int kind, int x, int y, int w, int h)
@@ -387,6 +443,8 @@ static inline int ug_add(struct ug *u, int kind, int x, int y, int w, int h)
     t->name = (const char *)0;
     t->kind2 = 0;
     t->phase = 0;
+    t->acts = (const char *const *)0;
+    t->nacts = 0;
     return u->n++;
 }
 
@@ -429,7 +487,8 @@ static inline int ug_slider(struct ug *u, int x, int y, int w, int h,
 static inline int ug_check(struct ug *u, int x, int y, const char *text,
                            int on)
 {
-    int i = ug_add(u, UG_CHECK, x, y, 0, UG_ROW);
+    int i = ug_add(u, UG_CHECK, x, y, 0,
+                   u->target > UG_ROW ? u->target : UG_ROW);
     if (i >= 0) {
         u->it[i].text = text;
         u->it[i].value = on ? 1 : 0;
@@ -440,7 +499,8 @@ static inline int ug_check(struct ug *u, int x, int y, const char *text,
 static inline int ug_field(struct ug *u, int x, int y, int w, char *buf,
                            int buflen)
 {
-    int i = ug_add(u, UG_FIELD, x, y, w, UG_ROW + 4);
+    int i = ug_add(u, UG_FIELD, x, y, w,
+                   u->target > UG_ROW + 4 ? u->target : UG_ROW + 4);
     if (i >= 0) {
         u->it[i].buf = buf;
         u->it[i].buflen = buflen;
@@ -530,11 +590,17 @@ static inline int pu_progress(struct ug *u, int x, int y, int w, int value,
 }
 
 /* Knots: n choices one under the other, 'chosen' of them */
+/* A knot's row: PU_KNOT_ROW, or a finger's target */
+static inline int pu_knot_row(const struct ug *u)
+{
+    return u->target > PU_KNOT_ROW ? u->target : PU_KNOT_ROW;
+}
+
 static inline int pu_knots(struct ug *u, int x, int y, int w,
                            const char *(*row)(void *ctx, int i), void *ctx,
                            int n, int chosen)
 {
-    int i = ug_add(u, UG_KNOTS, x, y, w, n * PU_KNOT_ROW);
+    int i = ug_add(u, UG_KNOTS, x, y, w, n * pu_knot_row(u));
     if (i >= 0) {
         u->it[i].row = row;
         u->it[i].ctx = ctx;
@@ -555,6 +621,79 @@ static inline void pu_kind(struct ug *u, int id, int kind)
 {
     if (id >= 0 && id < u->n)
         u->it[id].kind2 = kind;
+}
+
+/* What a list's row can have done to it, swiped out to its right */
+static inline void pu_list_actions(struct ug *u, int id,
+                                   const char *const *acts, int n)
+{
+    if (id >= 0 && id < u->n) {
+        u->it[id].acts = acts;
+        u->it[id].nacts = n;
+    }
+}
+
+/* The menu of a thing (as UG_MENU said which), at x, y in the window:
+   its lines, one of which comes back as UG_CHOSEN */
+#define PU_MENU_W 168
+static inline int pu_menu_row(const struct ug *u)
+{
+    return u->target > 28 ? u->target : 28;
+}
+static inline void pu_menu(struct ug *u, int which, int x, int y,
+                           const char *const *items, int n)
+{
+    int h = n * pu_menu_row(u) + 10;
+    if (x + PU_MENU_W > u->w)
+        x = u->w - PU_MENU_W;
+    if (y + h > u->h)
+        y = u->h - h;
+    u->menu_for = which;
+    u->menu_x = x < 0 ? 0 : x;
+    u->menu_y = y < 0 ? 0 : y;
+    u->menu_items = items;
+    u->menu_n = n;
+    u->menu_pick = -1;
+}
+static inline int pu_menu_open(const struct ug *u) { return u->menu_n > 0; }
+static inline int pu_menu_choice(const struct ug *u) { return u->menu_pick; }
+static inline int pu_action(const struct ug *u) { return u->action; }
+
+/* --- the shell: notes and what is going on (stage 6) -------------------
+ * A note in one of three weights - PU_QUIET straight to Threads,
+ * PU_NORMAL on the shuttle a moment first, PU_URGENT on it until it is
+ * answered - with up to two actions (0 for none), which come back as
+ * UG_NOTE. -> the note's number, or -1. */
+#define PU_QUIET  NOTE_QUIET
+#define PU_NORMAL NOTE_NORMAL
+#define PU_URGENT NOTE_URGENT
+static inline int pu_notify(struct ug *u, int weight, const char *title,
+                            const char *text, const char *act1,
+                            const char *act2)
+{
+    return (int)note_send(u->win, weight, title, text, act1, act2);
+}
+static inline int pu_note_id(const struct ug *u) { return u->note_id; }
+static inline int pu_note_answer(const struct ug *u) { return u->note_answer; }
+
+/* An activity on the shuttle: a timer counting down from 'value'
+   seconds, a download at 'value' per cent (-1 unknown), a call that has
+   gone on 'value' seconds - in the program's colour unless 'dye' says
+   another. PU_END takes it away. */
+#define PU_END      SHUTTLE_END
+#define PU_TIMER    SHUTTLE_TIMER
+#define PU_DOWNLOAD SHUTTLE_PROGRESS
+#define PU_CALL     SHUTTLE_CALL
+struct pu_activity {
+    int kind;                    /* PU_TIMER, PU_DOWNLOAD, PU_CALL, PU_END */
+    int value;
+    unsigned dye;                /* 0x00RRGGBB, or 0 */
+    const char *title, *sub;
+};
+static inline int pu_shuttle(struct ug *u, const struct pu_activity *a)
+{
+    return (int)shuttle_set(u->win, a->kind, a->value, a->dye, a->title,
+                            a->sub);
 }
 
 static inline void pu_set_phase(struct ug *u, int id, int phase)
@@ -1063,6 +1202,45 @@ static inline void pu_draw_row_chosen(int win, const struct ud_look *l, int x,
     ud_disc(win, x + 6, y + h / 2 - 3, 6, l->accent);
 }
 
+/* A swiped row's actions: at its right end, the last of them the one
+   that destroys */
+#define PU_ACTION_W 76
+static inline int pu_action_x(const struct ug_item *t, int a)
+{
+    return t->x + t->w - 3 - (t->nacts - a) * PU_ACTION_W;
+}
+
+static inline void pu_draw_row_actions(struct ug *u, int i, int y)
+{
+    struct ug_item *t = &u->it[i];
+    if (u->swipe_id != i || t->nacts <= 0)
+        return;
+    for (int a = 0; a < t->nacts; a++)
+        pu_draw_button(u->win, &u->look, pu_action_x(t, a) + 2, y + 1,
+                       PU_ACTION_W - 4, u->row - 2, t->acts[a],
+                       a == t->nacts - 1 ? PU_DANGER : PU_SECONDARY, PU_TR);
+}
+
+/* The menu, over everything else */
+static inline void pu_draw_menu(struct ug *u)
+{
+    if (!u->menu_n)
+        return;
+    const struct ud_look *l = &u->look;
+    struct pu_ink p;
+    pu_ink_of(l, &p);
+    int rh = pu_menu_row(u), h = u->menu_n * rh + 10;
+    int x = u->menu_x, y = u->menu_y;
+    ud_round(u->win, x + 2, y + 4, PU_MENU_W, h, 10, 0x000000);
+    ud_round(u->win, x, y, PU_MENU_W, h, 10,
+             pu_weave(l) ? (l->dark ? 0x1F2229 : 0xF6F3EC) : l->field);
+    ud_ring(u->win, x, y, PU_MENU_W, h, 10, pu_weave(l) ? p.raised_line
+                                                       : l->line);
+    for (int r = 0; r < u->menu_n; r++)
+        ug_say_l(u->win, x + 18, y + 5 + r * rh, rh, u->menu_items[r],
+                 l->text, UD_SANS);
+}
+
 /* Under Weave, or any of v2's own things: drawn by ProtonUI v2. 1 when
    it was. */
 static inline int pu_draw_one(struct ug *u, int i)
@@ -1113,19 +1291,21 @@ static inline int pu_draw_one(struct ug *u, int i)
     case UG_LIST: {
         if (!weave)
             return 0;
-        int rows = t->h / UG_ROW;
+        int rows = t->h / u->row;
         ud_round(win, t->x, t->y, t->w, t->h, UG_R, l->field);
         for (int r = 0; r < rows && u->top + r < t->max; r++) {
             int index = u->top + r;
             const char *s = t->row ? t->row(t->ctx, index) : "";
-            int y = t->y + r * UG_ROW;
+            int y = t->y + r * u->row;
             if (index == t->value) {
                 pu_draw_row_chosen(win, l, t->x + 3, y + 1, t->w - 6,
-                                   UG_ROW - 2);
-                ug_say(win, t->x + 18, y, UG_ROW, s, l->text, UD_BOLD);
+                                   u->row - 2);
+                ug_say(win, t->x + 18, y, u->row, s, l->text, UD_BOLD);
             } else {
-                ug_say(win, t->x + 18, y, UG_ROW, s, l->text, UD_SANS);
+                ug_say(win, t->x + 18, y, u->row, s, l->text, UD_SANS);
             }
+            if (index == u->swipe_row)
+                pu_draw_row_actions(u, i, y);
         }
         return 1;
     }
@@ -1155,10 +1335,10 @@ static inline int pu_draw_one(struct ug *u, int i)
         return 1;
     case UG_KNOTS:
         for (int r = 0; r < t->max; r++) {
-            int y = t->y + r * PU_KNOT_ROW;
-            pu_draw_knot(win, l, t->x, y + (PU_KNOT_ROW - 16) / 2,
+            int y = t->y + r * pu_knot_row(u);
+            pu_draw_knot(win, l, t->x, y + (pu_knot_row(u) - 16) / 2,
                          r == t->value, r == t->value ? state : 0);
-            ug_say_l(win, t->x + 16 + 10, y, PU_KNOT_ROW,
+            ug_say_l(win, t->x + 16 + 10, y, pu_knot_row(u),
                      t->row ? t->row(t->ctx, r) : "", l->text,
                      r == t->value ? UD_BOLD : UD_SANS);
         }
@@ -1233,20 +1413,22 @@ static inline void ug_draw_one(struct ug *u, int i)
         break;
 
     case UG_LIST: {
-        int rows = t->h / UG_ROW;
+        int rows = t->h / u->row;
         ud_round(win, t->x, t->y, t->w, t->h, UG_R, l->field);
         for (int r = 0; r < rows && u->top + r < t->max; r++) {
             int index = u->top + r;
             const char *s = t->row ? t->row(t->ctx, index) : "";
-            int y = t->y + r * UG_ROW;
+            int y = t->y + r * u->row;
 
             if (index == t->value) {
-                ud_round(win, t->x + 3, y + 1, t->w - 6, UG_ROW - 2, 5,
+                ud_round(win, t->x + 3, y + 1, t->w - 6, u->row - 2, 5,
                          l->accent);
-                ug_say(win, t->x + 9, y, UG_ROW, s, l->on_accent, UD_SANS);
+                ug_say(win, t->x + 9, y, u->row, s, l->on_accent, UD_SANS);
             } else {
-                ug_say(win, t->x + 9, y, UG_ROW, s, l->text, UD_SANS);
+                ug_say(win, t->x + 9, y, u->row, s, l->text, UD_SANS);
             }
+            if (index == u->swipe_row)
+                pu_draw_row_actions(u, i, y);
         }
         break;
     }
@@ -1285,6 +1467,7 @@ static inline void ug_draw_controls(struct ug *u)
 {
     for (int i = 0; i < u->n; i++)
         ug_draw_one(u, i);
+    pu_draw_menu(u);
 }
 
 static inline void ug_draw_items(struct ug *u)
@@ -1319,7 +1502,16 @@ static inline int ug_hit(struct ug *u, int x, int y)
             w = ud_width_l(t->text, UD_SANS, UD_PX) + 12 + PU_SWITCH_W;
         if (!t->enabled)
             continue;
-        if (x >= t->x && x < t->x + w && y >= t->y && y < t->y + t->h)
+        int x0 = t->x, y0 = t->y, h = t->h;
+        if (w < u->target) {             /* a finger's target, at least */
+            x0 -= (u->target - w) / 2;
+            w = u->target;
+        }
+        if (h < u->target) {
+            y0 -= (u->target - h) / 2;
+            h = u->target;
+        }
+        if (x >= x0 && x < x0 + w && y >= y0 && y < y0 + h)
             return i;
     }
     return -1;
@@ -1334,6 +1526,99 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
 
     if (which)
         *which = -1;
+
+    /* A note it sent, answered on the shuttle or in Threads */
+    if (ev->type == WEV_NOTE) {
+        u->note_id = ev->x;
+        u->note_answer = ev->val;
+        return UG_NOTE;
+    }
+
+    /* The menu has everything while it is open: a line of it chosen, or
+       anything else closes it */
+    if (u->menu_n) {
+        if (ev->type == WEV_CLICK) {
+            int rh = pu_menu_row(u), r = (ev->y - u->menu_y - 5) / rh;
+            int in = ev->x >= u->menu_x && ev->x < u->menu_x + PU_MENU_W &&
+                     ev->y >= u->menu_y + 5 && r >= 0 && r < u->menu_n;
+            u->menu_n = 0;
+            if (in) {
+                u->menu_pick = r;
+                if (which)
+                    *which = u->menu_for;
+                return UG_CHOSEN;
+            }
+            return UG_NOTHING;
+        }
+        if (ev->type == WEV_KEY && (char)ev->val == 27) {
+            u->menu_n = 0;
+            return UG_NOTHING;
+        }
+        if (ev->type != WEV_CLOSE && ev->type != WEV_SIZE)
+            return UG_NOTHING;
+    }
+
+    if (u->v2) {
+        if (ev->type == WEV_ALTCLICK) {
+            /* the right button, or on a finger a long press */
+            id = ug_hit(u, ev->x, ev->y);
+            if (id < 0)
+                return UG_NOTHING;
+            struct ug_item *t = &u->it[id];
+            if (t->kind == UG_LIST) {
+                int row = u->top + (ev->y - t->y) / u->row;
+                if (row >= 0 && row < t->max)
+                    t->value = row;
+            }
+            if (which)
+                *which = id;
+            return UG_MENU;
+        }
+        if (ev->type == WEV_PRESS) {
+            u->press_x = ev->x;
+            u->press_y = ev->y;
+            u->press_id = ug_hit(u, ev->x, ev->y);
+            return UG_NOTHING;
+        }
+        if (ev->type == WEV_DRAG && u->press_id >= 0) {
+            struct ug_item *t = &u->it[u->press_id];
+            int dx = ev->x - u->press_x, dy = ev->y - u->press_y;
+            if (dy < 0)
+                dy = -dy;
+            if (t->kind != UG_LIST || t->nacts <= 0 || dy > 24)
+                return UG_NOTHING;
+            int row = u->top + (u->press_y - t->y) / u->row;
+            if (dx <= -30 && row < t->max &&
+                (u->swipe_id != u->press_id || u->swipe_row != row)) {
+                u->swipe_id = u->press_id;      /* aside: its actions */
+                u->swipe_row = row;
+            } else if (dx >= 30 && u->swipe_id == u->press_id) {
+                u->swipe_id = -1;               /* back */
+                u->swipe_row = -1;
+            } else {
+                return UG_NOTHING;
+            }
+            if (which)
+                *which = u->press_id;
+            return UG_SWIPED;
+        }
+        if (ev->type == WEV_CLICK && u->swipe_id >= 0) {
+            struct ug_item *t = &u->it[u->swipe_id];
+            int ry = t->y + (u->swipe_row - u->top) * u->row;
+            int was = u->swipe_id, row = u->swipe_row;
+            u->swipe_id = u->swipe_row = -1;
+            for (int a = 0; a < t->nacts; a++)
+                if (ev->x >= pu_action_x(t, a) &&
+                    ev->x < pu_action_x(t, a) + PU_ACTION_W &&
+                    ev->y >= ry && ev->y < ry + u->row) {
+                    u->action = a;
+                    t->value = row;
+                    if (which)
+                        *which = was;
+                    return UG_ACTION;
+                }
+        }
+    }
 
     switch (ev->type) {
     case WEV_CLOSE:
@@ -1379,7 +1664,7 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
             return UG_NOTHING;
         case UG_LIST: {
             struct ug_item *t = &u->it[id];
-            int row = u->top + (ev->y - t->y) / UG_ROW;
+            int row = u->top + (ev->y - t->y) / u->row;
             u->focus = id;
             if (row < 0 || row >= t->max)
                 return UG_NOTHING;
@@ -1393,7 +1678,7 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
             return UG_CHANGED;
         case UG_KNOTS: {
             struct ug_item *t = &u->it[id];
-            int r = (ev->y - t->y) / PU_KNOT_ROW;
+            int r = (ev->y - t->y) / pu_knot_row(u);
             if (u->v2)
                 u->focus = id;
             if (r < 0 || r >= t->max || r == t->value)
@@ -1437,7 +1722,7 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
             return UG_CHANGED;
         }
         if (u->it[id].kind == UG_LIST) {
-            int rows = u->it[id].h / UG_ROW;
+            int rows = u->it[id].h / u->row;
             u->top -= ev->val;
             if (u->top > u->it[id].max - rows)
                 u->top = u->it[id].max - rows;
@@ -1501,7 +1786,7 @@ static inline int ug_event(struct ug *u, const struct win_event *ev,
         }
 
         if (t->kind == UG_LIST) {
-            int rows = t->h / UG_ROW;
+            int rows = t->h / u->row;
             if (c == KEY_DOWN && t->value + 1 < t->max)
                 t->value++;
             else if (c == KEY_UP && t->value > 0)

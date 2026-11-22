@@ -162,6 +162,25 @@ int desktop_frame_stats(int *fps, int *busy, int *drawn);
 /* A notification in the island at the top of the screen: something
    worth a glance that nobody asked for. Callable from anywhere. */
 void desktop_notify(const char *title, const char *body);
+/* A notification with a weight (NOTE_*) and up to two actions, which
+   come back to the owner's window as WEV_NOTE (owner -1: the kernel's,
+   no window). -> its number (> 0), or -1. Callable from anywhere. */
+#define NOTE_QUIET   0           /* straight to Threads: no island */
+#define NOTE_NORMAL  1           /* the island for a moment, then Threads */
+#define NOTE_URGENT  2           /* the island until it is answered */
+#define NOTE_ACT_LEN 16          /* an action's label, with its NUL */
+int desktop_note(int owner, int winid, int weight, const char *title,
+                 const char *body, const char *act1, const char *act2);
+/* What a program has going on, on the shuttle (SYS64_SHUTTLE): kind
+   SHUTTLE_*, value a timer's seconds left, a download's per cent (-1
+   unknown) or how long a call has run; dye 0x00RRGGBB, 0 = the
+   program's own. SHUTTLE_END takes it away. -> 0, or -1 */
+#define SHUTTLE_END      0
+#define SHUTTLE_TIMER    1
+#define SHUTTLE_PROGRESS 2
+#define SHUTTLE_CALL     3
+int desktop_shuttle(int owner, int winid, int kind, int value, uint32_t dye,
+                    const char *title, const char *sub);
 /* A package was taken while the desktop runs: its tile, if it asks for
    one, comes with the next frame */
 void desktop_packages_changed(void);
