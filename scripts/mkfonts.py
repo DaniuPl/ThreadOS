@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Cuts the fonts ThreadOS carries out of the DejaVu fonts and Inter.
+"""Cuts the fonts ThreadOS carries out of DejaVu, Inter and JetBrains Mono.
 
     python3 scripts/mkfonts.py [directory with DejaVuSans.ttf]
                                [directory with Inter-Regular.ttf]
+                               [directory with JetBrainsMono-Regular.ttf]
 
 The second directory is extras/ttf/ of Inter's release archive
 (Inter-4.1.zip, https://github.com/rsms/inter/releases): the TrueType
 outlines kernel/ttf.c reads, where the fonts most systems install are
-CFF. Without it the Inter files in fonts/ are left as they are.
+CFF. Without it the Inter files in fonts/ are left as they are. The
+third is fonts/ttf/ of JetBrains Mono's (JetBrainsMono-2.304.zip,
+https://github.com/JetBrains/JetBrainsMono/releases): the monospaced
+letters Weave writes code and the terminal in; without it fonts/jbmono.ttf
+is left as it is.
 
 needs fonttools (pip install fonttools). The results are committed to
 fonts/, so building the system does not need this script or fonttools -
@@ -53,7 +58,8 @@ from fontTools.ttLib import TTFont
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SOURCE = sys.argv[1] if len(sys.argv) > 1 else "/usr/share/fonts/truetype/dejavu"
-INTER = sys.argv[2] if len(sys.argv) > 2 else None
+INTER = sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] else None
+JBMONO = sys.argv[3] if len(sys.argv) > 3 else None
 
 CHARS = (list(range(0x20, 0x7F)) + list(range(0xA0, 0x100)) +
          list(range(0x100, 0x180)) +
@@ -65,6 +71,8 @@ FONTS = [("DejaVuSans.ttf", "sans.ttf", "DejaVu Sans ThreadOS"),
          ("DejaVuSansMono.ttf", "mono.ttf", "DejaVu Sans Mono ThreadOS")]
 INTER_FONTS = [("Inter-Regular.ttf", "inter.ttf", "Inter ThreadOS"),
                ("Inter-Bold.ttf", "interb.ttf", "Inter Bold ThreadOS")]
+JBMONO_FONTS = [("JetBrainsMono-Regular.ttf", "jbmono.ttf",
+                 "JetBrains Mono ThreadOS")]
 
 
 def make(src, dst, name):
@@ -92,9 +100,11 @@ def make(src, dst, name):
 
 def main():
     os.makedirs(os.path.join(HERE, "fonts"), exist_ok=True)
-    todo = [(SOURCE, f) for f in FONTS]
+    todo = [(SOURCE, f) for f in FONTS] if SOURCE != "-" else []
     if INTER:
         todo += [(INTER, f) for f in INTER_FONTS]
+    if JBMONO:
+        todo += [(JBMONO, f) for f in JBMONO_FONTS]
     for where, (src, dst, name) in todo:
         out = os.path.join(HERE, "fonts", dst)
         size = make(os.path.join(where, src), out, name)

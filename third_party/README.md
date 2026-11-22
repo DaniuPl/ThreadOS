@@ -259,6 +259,14 @@ lists them in EXTRA, since they are not here):
   (SHA-256 `9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e`,
   computed on download), the files in its `extras/ttf/` - TrueType
   outlines, which kernel/ttf.c reads, where the other files are CFF.
+- **JetBrains Mono** 2.304 - `fonts/jbmono.ttf` (Regular), which Weave
+  writes code and the terminal in: SIL Open Font Licence 1.1
+  (`fonts/LICENSE-JetBrainsMono.txt`, the release's OFL.txt), no reserved
+  name;
+  https://github.com/JetBrains/JetBrainsMono/releases/download/v2.304/JetBrainsMono-2.304.zip
+  (SHA-256 `6f6376c6ed2960ea8a963cd7387ec9d76e3f629125bc33d1fdcd7eb7012f7bbf`,
+  computed on download), its `fonts/ttf/JetBrainsMono-Regular.ttf` -
+  TrueType outlines.
 - **What was trimmed**, from each: every character but ASCII, Latin-1,
   Latin Extended-A and a handful of typographic marks; the hinting
   instructions (`prep`, `fpgm`, `cvt `), which kernel/ttf.c does not

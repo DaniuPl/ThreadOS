@@ -23,7 +23,7 @@ BUILD   := build
 # scripts/mkfonts.py and committed, so building needs neither fonttools
 # nor the fonts themselves
 FONTS   := fonts/sans.ttf fonts/bold.ttf fonts/mono.ttf fonts/inter.ttf \
-           fonts/interb.ttf
+           fonts/interb.ttf fonts/jbmono.ttf
 
 .PHONY: all iso64 initrd64 libc64 libs64 browser run run-iso64-uefi test fuzz clean \
         kernel64 efi stick run-stick kernelarm64 run-arm64 run-phone webkit \
@@ -2178,6 +2178,7 @@ $(filter $(BUILD)/user64/%,$(USER64_ELFS) $(DISK64_ELFS)): $(LIBC64)
 LICENSES_TXT := $(BUILD)/LICENSES.txt
 $(LICENSES_TXT): scripts/mknotices.py third_party/README.md LICENSE \
                  fonts/LICENSE-DejaVu.txt fonts/LICENSE-Inter.txt \
+                 fonts/LICENSE-JetBrainsMono.txt \
                  $(wildcard third_party/* third_party/*/*)
 	@mkdir -p $(BUILD)
 	python3 scripts/mknotices.py $@
@@ -2190,6 +2191,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    libthread.so=$(LIBTHREAD64) LICENSES.txt=$(LICENSES_TXT) \
 	    sans.ttf=fonts/sans.ttf bold.ttf=fonts/bold.ttf mono.ttf=fonts/mono.ttf \
 	    inter.ttf=fonts/inter.ttf interb.ttf=fonts/interb.ttf \
+	    jbmono.ttf=fonts/jbmono.ttf \
 	    hello64=$(BUILD)/user64/hello64.elf \
 	    nx64=$(BUILD)/user64/nx64.elf \
 	    wild64=$(BUILD)/user64/wild64.elf \

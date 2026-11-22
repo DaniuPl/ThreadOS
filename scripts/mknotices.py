@@ -123,6 +123,10 @@ EXTRA = [
      "SIL Open Font Licence 1.1",
      "https://github.com/rsms/inter",
      [os.path.join(ROOT, "fonts", "LICENSE-Inter.txt")]),
+    ("JetBrains Mono (fonts/jbmono.ttf)", "2.304",
+     "SIL Open Font Licence 1.1",
+     "https://github.com/JetBrains/JetBrainsMono",
+     [os.path.join(ROOT, "fonts", "LICENSE-JetBrainsMono.txt")]),
 ]
 
 SOURCE_NOTE = """\

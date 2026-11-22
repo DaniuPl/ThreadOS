@@ -4,7 +4,8 @@
  * the desktop, bold.ttf for what on it has to stand out, and mono.ttf
  * for anything that wants columns; and two cut out of Inter, inter.ttf
  * and interb.ttf, which take the place of the first two while the
- * desktop is in Weave (docs/WEAVE.md draws its text in Inter). They are
+ * desktop is in Weave (docs/WEAVE.md draws its text in Inter), and
+ * jbmono.ttf out of JetBrains Mono, which takes mono.ttf's. They are
  * read where they lie in the initrd - kernel/ttf.c copies nothing.
  *
  * 'font' on its own says what was found. 'font sheet NAME PX FIRST
@@ -19,11 +20,13 @@
 #include "include/initrd.h"
 #include "include/printk.h"
 
-static struct ttf_font sans, bold, mono, inter, interb;
-static int have_sans, have_bold, have_mono, have_inter, have_interb;
+static struct ttf_font sans, bold, mono, inter, interb, jbmono;
+static int have_sans, have_bold, have_mono, have_inter, have_interb,
+           have_jbmono;
 static const char *why_sans = "not looked for", *why_bold = "not looked for",
                   *why_mono = "not looked for", *why_inter = "not looked for",
-                  *why_interb = "not looked for";
+                  *why_interb = "not looked for",
+                  *why_jbmono = "not looked for";
 static volatile int use_inter;
 
 static int open_one(struct ttf_font *f, const char *name, const char **why)
@@ -44,6 +47,7 @@ void fonts_init(void)
     have_mono = open_one(&mono, "mono.ttf", &why_mono);
     have_inter = open_one(&inter, "inter.ttf", &why_inter);
     have_interb = open_one(&interb, "interb.ttf", &why_interb);
+    have_jbmono = open_one(&jbmono, "jbmono.ttf", &why_jbmono);
 }
 
 void fonts_use_inter(int on)
@@ -64,6 +68,11 @@ const struct ttf_font *font_inter(void)
 const struct ttf_font *font_inter_bold(void)
 {
     return have_interb ? &interb : (const struct ttf_font *)0;
+}
+
+const struct ttf_font *font_jbmono(void)
+{
+    return have_jbmono ? &jbmono : (const struct ttf_font *)0;
 }
 
 const struct ttf_font *font_sans(void)
@@ -179,6 +188,7 @@ void fonts_command(const char *arg)
         describe("mono.ttf", &mono, have_mono, why_mono);
         describe("inter.ttf", &inter, have_inter, why_inter);
         describe("interb.ttf", &interb, have_interb, why_interb);
+        describe("jbmono.ttf", &jbmono, have_jbmono, why_jbmono);
         return;
     }
     if (take(&p, "sheet")) {
@@ -193,15 +203,17 @@ void fonts_command(const char *arg)
             f = font_inter();
         else if (take(&p, "interbold"))
             f = font_inter_bold();
+        else if (take(&p, "jbmono"))
+            f = font_jbmono();
         uint32_t px = number(&p), first = number(&p), last = number(&p);
         if (!f || px < 1 || px > 255 || last < first) {
-            printk("usage: font sheet sans|bold|mono|inter|interbold <px> "
-                   "<first> <last>\n");
+            printk("usage: font sheet sans|bold|mono|inter|interbold|jbmono "
+                   "<px> <first> <last>\n");
             return;
         }
         sheet(f, (int)px, first, last);
         return;
     }
-    printk("usage: font  |  font sheet sans|bold|mono|inter|interbold <px> "
-           "<first> <last>\n");
+    printk("usage: font  |  font sheet sans|bold|mono|inter|interbold|jbmono "
+           "<px> <first> <last>\n");
 }

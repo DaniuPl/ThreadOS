@@ -170,6 +170,9 @@ def main():
             ("Inter's licence, the SIL Open Font Licence",
              open(os.path.join(ROOT, "fonts", "LICENSE-Inter.txt"),
                   encoding="utf-8", errors="replace").read().rstrip()),
+            ("JetBrains Mono's licence",
+             open(os.path.join(ROOT, "fonts", "LICENSE-JetBrainsMono.txt"),
+                  encoding="utf-8", errors="replace").read().rstrip()),
             ("where the source of the release is",
              "https://github.com/DaniuPl/ThreadOS/releases")):
         check("it holds %s" % what, needle in text)

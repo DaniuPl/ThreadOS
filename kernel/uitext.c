@@ -105,14 +105,15 @@ static const struct cached *glyph_of(const struct ttf_font *f, int font,
     return glyph_of(f, font, px, g);
 }
 
-/* Inter's glyphs are kept apart from DejaVu's under the same name: the
-   cache's number for a font carries this bit when it is Inter's */
+/* Weave's glyphs (Inter's, JetBrains Mono's) are kept apart from
+   DejaVu's under the same name: the cache's number for a font carries
+   this bit when it is Weave's */
 #define KEY_INTER 8
 
 /* The font behind a name. Bold falls back to the plain sans, and that
    to nothing - the 8x8 letters - so a missing file costs looks, never
-   text. Under Weave the sans and the bold are Inter's, where the initrd
-   has them; 'key', when asked for, is the number the cache keeps the
+   text. Under Weave the sans and the bold are Inter's and the mono
+   JetBrains Mono, where the initrd has them; 'key', when asked for, is the number the cache keeps the
    glyphs under. Which family is decided once here, for the whole text,
    so that a switch of style in the middle of a line cannot mix them. */
 static const struct ttf_font *font_of_k(int font, int *key)
@@ -123,6 +124,10 @@ static const struct ttf_font *font_of_k(int font, int *key)
         f = font == UI_BOLD ? font_inter_bold() : font_inter();
         if (!f)
             f = font_inter();
+        if (f)
+            k |= KEY_INTER;
+    } else if (font == UI_MONO && fonts_inter()) {
+        f = font_jbmono();
         if (f)
             k |= KEY_INTER;
     }

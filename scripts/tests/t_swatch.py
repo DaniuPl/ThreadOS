@@ -147,7 +147,7 @@ def run(q):
     def side_name(i, scr=None):
         return q.read_ui(ox + side_x + 26,
                          ui_font_baseline_in(12, oy + side_y + i * row, row),
-                         side_w - 30, px=12, face="mono", screen=scr)
+                         side_w - 30, px=12, face="jbmono", screen=scr)
 
     def choose(i, name):
         seen = len(q.serial())
@@ -197,7 +197,7 @@ def run(q):
           near(knobs[3], mix(knob_off, ground, 102), 6) and
           near(knobs[0], knob_off, 6))
     code0 = q.read_ui(ox + px + 14, oy + ph + 24, pw - 20, px=12,
-                      face="mono", screen=scr)
+                      face="jbmono", screen=scr)
     check(f"its first line of C ({code0!r})",
           code0 == dict(cat)["pu_switch"])
 

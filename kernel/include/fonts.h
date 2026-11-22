@@ -17,6 +17,9 @@ const struct ttf_font *font_mono(void);
    asks fonts_inter() once for each text it draws or measures. */
 const struct ttf_font *font_inter(void);
 const struct ttf_font *font_inter_bold(void);
+/* JetBrains Mono: Weave's columns - code, the terminal - in place of
+   mono.ttf while fonts_inter() says Weave */
+const struct ttf_font *font_jbmono(void);
 void fonts_use_inter(int on);
 int fonts_inter(void);
 

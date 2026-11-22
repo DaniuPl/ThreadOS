@@ -11563,3 +11563,19 @@ works and is checked by `make test`.
       title, its madder yes coming back as PU_PRESSED 1; and Make it
       with the Settings-like template - its main.c named and from the
       template, the project first in ~/.code-projects, Code running.
+- [x] **Code in JetBrains Mono under Weave** (fonts/jbmono.ttf,
+      kernel/fonts.c, kernel/uitext.c): WEAVE.md and Swatch.dc.html
+      letter code in JetBrains Mono, and under Weave the mono face was
+      still DejaVu Sans Mono - Swatch's catalogue names and its sample
+      code looked like the old look's. JetBrains Mono 2.304 (SIL OFL
+      1.1, the release's ttf, its licence beside it) is cut by
+      scripts/mkfonts.py to the same characters as the other faces and
+      ships in the initrd as jbmono.ttf; uitext.c takes it for UI_MONO
+      while Weave is on, in the glyph cache's Weave half, so the old
+      look keeps DejaVu Sans Mono. `font` lists it, `font sheet jbmono`
+      draws it, LICENSES.txt carries its licence.
+      t_ttf: jbmono's glyph count and units per em, then every one of
+      its 326 characters at 12 px and the hard ones at 48 px against
+      FreeType (character map, advances, bitmap boxes, coverage);
+      t_licences: its licence is in LICENSES.txt; t_swatch reads the
+      catalogue's names and the first line of C in JetBrains Mono.
