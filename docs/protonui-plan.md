@@ -234,8 +234,14 @@ makes it - because it is ProtonUI v2's own catalogue.
   `pu_sheet` (Weave's question: a card for a pointer, a sheet for a
   finger) - and ProtonUI's names for the events (`PU_CHANGED`...).
   Start a program writes a project of four templates into ~/Projects
-  and opens it in Code. Not like the design yet: the code is lettered in
-  DejaVu's mono, not JetBrains Mono, and Night | Linen stands in the
-  preview's corner rather than in the title bar.
+  and opens it in Code, whose Run builds it with clang on ThreadOS and
+  starts it (t_swatchbuild). Code is lettered in JetBrains Mono under
+  Weave, and Night | Linen is the system's theme bar in the title bar,
+  which the desktop gives Swatch by starting it with --theme-bar.
+- **Find: done** (journal: "Find"). user64/gfind.c: file names, words
+  inside files, Settings' rows, the programs and Weft's history, with
+  the pills, the groups and the chosen file's lines as the design has
+  them; Code opens a file at a line (`gcode FILE LINE`), Settings at a
+  section (`gsettings --section NAME`).
 
 **In all: about 13 to 15 working days** for stages 1-7.

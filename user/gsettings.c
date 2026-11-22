@@ -2054,8 +2054,21 @@ static void key(char c)
     }
 }
 
-void _start(void)
+void _start(int argc, char **argv)
 {
+    /* `gsettings --section NAME` opens at that section - Find opens a
+       setting so - by the name its list shows */
+    for (int i = 1; i + 1 < argc; i++) {
+        if (!same(argv[i], "--section"))
+            continue;
+        for (int k = 0; k < SEC_N; k++)
+            if (same(argv[i + 1], sections[k])) {
+                section = k;
+                print("[settings] opened at ");
+                print(sections[k]);
+                print("\n");
+            }
+    }
     update_allowed = sys_update_allowed() == 1;
     win = (int)win_create(W0, H0, ulocale_language_polish() ? "Ustawienia"
                                                            : "Settings");

@@ -118,7 +118,7 @@ struct icon {
    browser instead (desktop_spawn_app). */
 #define WEB_APP "web"
 #define WEBKIT_APP "weft"
-#define ART_N      22
+#define ART_N      23
 #define ART_LETTER 14
 #define ART_TRASH  15
 /* Pictures drawn later than the letter and the waste bin come after
@@ -130,6 +130,7 @@ struct icon {
 #define ART_GALLERY 19
 #define ART_CAMERA 20
 #define ART_RECORDER 21
+#define ART_FIND   22
 /* The time is on the bar, so the clock is not in the dock; it and the
    demonstration program stay in the menu, with everything else */
 static struct icon icons[ICON_MAX] = {
@@ -284,6 +285,8 @@ static const struct { const char *app, *label; int art; } known_apps[] = {
     { "grecord", "Recorder", ART_RECORDER },
     /* ProtonUI v2's catalogue: the palette is the Weave design's swatch */
     { "gswatch", "Swatch", 10 },
+    /* one field for everything on the machine */
+    { "gfind", "Find", ART_FIND },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -825,7 +828,8 @@ static const char *const context_items[] = {
 static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_APP,
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint", "ggallery",
-                                  "gcamera", "grecord", "gcode", "gswatch"};
+                                  "gcamera", "grecord", "gcode", "gswatch",
+                                  "gfind"};
 
 /* Under a line at the bottom of the same menu: not programs but what is
    done to the session and to the machine. The three that end something
@@ -1878,6 +1882,7 @@ static const char *const weave_art[ART_N] = {
     0, "clock", "files", "monitor", "term", "weft", "settings", "editor",
     "tasks", "mixer", "swatch", "calculator", "calendar", "paint", 0,
     "trash", "code", "accounts", "gallery", "gallery", "camera", "recorder",
+    "find",
 };
 
 static void draw_art(int art, int x, int y, int s, char letter)
@@ -1915,6 +1920,7 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0xFFC46B, 0xFF7A45 },   /* Gallery */
         { 0x8E8E93, 0x3A3A3C },   /* Camera */
         { 0x3A3A3C, 0x1C1C1E },   /* Recorder */
+        { 0x6E8BFF, 0x3F5EE8 },   /* Find */
     };
     if (art < 0 || art >= ART_N)
         art = ART_LETTER;
@@ -2034,6 +2040,10 @@ static void draw_art(int art, int x, int y, int s, char letter)
         for (int k = 0; k < 3; k++)
             gfx_line16(PX(125 + 35 * k), PY(116), PX(125 + 35 * k),
                        PY(225), D(8), 0x77777D, 200);
+        break;
+    case ART_FIND:                                /* a magnifying glass */
+        gfx_circle16(PX(142), PY(142), D(66), D(22), 0xFFFFFF, 255);
+        gfx_line16(PX(192), PY(192), PX(248), PY(248), D(28), 0xFFFFFF, 255);
         break;
     case ART_CODE:                                /* </> on a dark ground */
         gfx_line16(PX(118), PY(108), PX(70), PY(160), D(20), 0x64D2FF, 255);
@@ -5728,7 +5738,7 @@ static const struct {
     { "Pictures and sound", DYE_COCHINEAL_N, DYE_COCHINEAL_L, 0xF2A6D6,
       { "ggallery", "gcamera", "gpaint", "grecord", "gmikser", 0 } },
     { "This computer", DYE_SAFFRON_N, DYE_SAFFRON_L, 0xFFD48A,
-      { "gsettings", "gmon", "gusers", "gclock", "gappear", 0 } },
+      { "gsettings", "gmon", "gusers", "gclock", "gappear", "gfind", 0 } },
 };
 
 /* A thread's programs: the ones above, and on the web's thread the

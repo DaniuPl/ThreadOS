@@ -11656,3 +11656,45 @@ works and is checked by `make test`.
       clicked is chosen; `runw gswatch --theme-bar` under Weave has
       Night | Linen in the bar as before; and the Windows style's bar
       reads Dark | Light.
+- [x] **Find** (user64/gfind.c, user64/gcode.c, user/gsettings.c,
+      kernel/desktop.c, scripts/tests/t_find.py)
+      The next of WEAVE.md's programs after Swatch, and the one the
+      machine needs most: one field for everything on it, as
+      docs/weave/canvas/Find.dc.html draws it. Words typed and Enter: it
+      walks the disk (or the home - "In:") for file names and, in every
+      text file up to 256 KiB, for the words on each line, and looks in
+      Settings' rows, the programs and Weft's history (~/.weft). The
+      pills say how many of each it found and narrow the list to one
+      kind; "Changed:" keeps only files changed today, this week or this
+      month. The list has a heading for each kind and a row for each
+      result - its kind of file on a dye tile, its name, where it is and,
+      inside a file, the line the words are on - and the chosen one is
+      opened on the right: its folder, how many matches, when it changed,
+      Open in Code and Show in Files, and its lines with the words
+      underlined in the accent. Up and down go from one match to the
+      next, through a file's lines and on to the next result; Enter
+      opens Code at the file and line. For that Code takes `gcode FILE
+      [LINE]` - the file in the project it belongs to (the nearest
+      folder above with a .code/project) or in its own folder - and
+      Settings `gsettings --section NAME`. Find's index of Settings is
+      their own row labels, by section. A new search shows everything
+      again, so a filter kept from before cannot hide what was found. The
+      walk stops at 6000 files and 32 MiB read and says so, so a disk
+      with a compiler on it answers in time. Find is in the menu, on loom
+      view's "This computer" thread, with the design's icon (Weave) or a
+      magnifying glass. The phone does not have it yet.
+      t_find (new) boots from a disk with a home - a project, a journal,
+      a file named for the word, a binary with it inside, one file
+      outside the home, Weft's history - and works out what Find should
+      find by walking the same tree here and reading each file as grep
+      -n does: "selvedge" gives exactly those counts; the field, the
+      count beside it, every pill's name and count where the layout puts
+      it, the first heading and row read off the screen; under Inside
+      files, down goes through every line the word is on, file by file,
+      as grep found them, the line on the right underlined; Enter opens
+      Code at that file and line, Show in Files opens Files; Changed:
+      today finds no file and round to any time finds them again; In:
+      home leaves out the file outside it; "pointer speed" is the
+      Settings row and opens Settings at Mouse; "calc" is the Calculator
+      and starts it. And every row of the index is a label in its section
+      of gsettings.c, every program it lists in the initrd.

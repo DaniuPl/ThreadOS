@@ -4140,7 +4140,49 @@ static void finish(void)
         sys_kill(term.pid, SIGKILL);
 }
 
-int main(void)
+/* `gcode FILE [LINE]`: that file at that line - Find opens a match so
+   - in the project it belongs to, the nearest folder above it with a
+   .code/project, or else in its own folder */
+static int open_at(const char *file, int line)
+{
+    char abs[PATH_MAX_], root[PATH_MAX_], probe[PATH_MAX_];
+    if (file[0] == '/')
+        scopy(abs, file, sizeof(abs));
+    else
+        join(abs, sizeof(abs), home, file);
+    const char *slash = strrchr(abs, '/');
+    if (!slash)
+        return -1;
+    size_t dl = slash == abs ? 1 : (size_t)(slash - abs);
+    scopy(root, abs, dl + 1 < sizeof(root) ? dl + 1 : sizeof(root));
+    char dir[PATH_MAX_];
+    scopy(dir, root, sizeof(dir));
+    for (;;) {
+        join(probe, sizeof(probe), root, ".code/project");
+        FILE *f = fopen(probe, "r");
+        if (f) {
+            fclose(f);
+            break;
+        }
+        char *up = strrchr(root, '/');
+        if (!up || up == root) {
+            scopy(root, dir, sizeof(root));
+            break;
+        }
+        *up = 0;
+    }
+    if (project_open(root) < 0)
+        return -1;
+    size_t pl = strlen(proj);
+    const char *rel = !strncmp(abs, proj, pl) && abs[pl] == '/'
+                      ? abs + pl + 1 : base_name(abs);
+    go_to(rel, line);
+    printf("[code] opened %s at line %d\n", rel, line);
+    fflush(stdout);
+    return 0;
+}
+
+int main(int argc, char **argv)
 {
     static const int sizes[3][2] = { { W2, H2 }, { W1, H1 }, { W0, H0 } };
     for (int i = 0; i < 3 && win < 0; i++) {
@@ -4154,8 +4196,10 @@ int main(void)
     if (sys_getcwd(home, sizeof(home)) < 0)
         scopy(home, "/", sizeof(home));
     recent_load();
-    /* the project worked on last comes back, as it was */
-    if (recent_n && project_open(recent[0]) < 0)
+    /* a file asked for, or the project worked on last, as it was */
+    if (argc > 1 && open_at(argv[1], argc > 2 ? atoi(argv[2]) : 1) == 0)
+        ;
+    else if (recent_n && project_open(recent[0]) < 0)
         screen = SCR_WELCOME;
     draw();
     for (;;) {

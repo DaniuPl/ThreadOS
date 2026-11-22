@@ -227,6 +227,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gedit.elf \
                $(BUILD)/user64/gcode.elf \
                $(BUILD)/user64/gswatch.elf \
+               $(BUILD)/user64/gfind.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
@@ -438,6 +439,16 @@ $(BUILD)/user64/gswatch.elf: user64/gswatch.c user/uapi.h user/udraw.h \
 	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
 	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gswatch.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/gswatch.o) -o $@
+
+# Find: one field for everything on the machine - musl, for a walk of
+# any depth and files of any length
+$(BUILD)/user64/gfind.elf: user64/gfind.c user/uapi.h user/udraw.h \
+                           user/ugui.h user64/usys64.h user64/compat64.h \
+                           $(LIBC64) libc/libc64.ld \
+                           | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -D_GNU_SOURCE -DTHREADOS_LIBC \
+	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gfind.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gfind.o) -o $@
 
 # Code, the development environment: files of any length and a tree of
 # any size, so built against musl
@@ -2234,6 +2245,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gedit=$(BUILD)/user64/gedit.elf \
 	    gcode=$(BUILD)/user64/gcode.elf \
 	    gswatch=$(BUILD)/user64/gswatch.elf \
+	    gfind=$(BUILD)/user64/gfind.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \
