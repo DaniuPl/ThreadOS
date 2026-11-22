@@ -4,7 +4,7 @@
 user64/gswatch.c (docs/weave/canvas/Swatch.dc.html): down the left
 every control user/ugui.h has, in the middle the chosen one in its
 states as the toolkit draws them and one to try, under them the lines
-of C that make it and what it sends; Night or Linen for the preview; on
+of C that make it and what it sends; Night or Linen in the title bar; on
 the right, Start a program. Read off the screen under Weave - Inter and
 the mono face through FreeType, colours against ugui.h's own numbers -
 and the serial port:
@@ -17,14 +17,17 @@ and the serial port:
   the one to try, clicked, says PU_CHANGED 0 and is off on the screen
   pu_button: pressed in ugui.h's pressed indigo; pu_field: wrong, its
   stitch madder and why under it; pu_card, pu_avatar, pu_side drawn
-  Linen: the preview's ground is Linen's, the window's still Night's
+  Night | Linen in the title bar, as the design has it, beside the
+  title's two parts, and not on the preview; Linen clicked there is
+  filled, and the preview's ground is Linen's, the window's still Night's
   pu_menu: a right click on the one to try opens the toolkit's menu,
   and its second line comes back as PU_CHOSEN 1
   pu_sheet: the question over the window with a madder selvedge and
   its title; its madder yes comes back as PU_PRESSED 1
   Start a program: the Settings-like template, Make it - the project in
-  ~/Projects with its main.c from the template, named, first among
-  Code's projects, and Code running
+  ~/Projects with its main.c from the template, named, Run set to build
+  it with clang and start it (t_swatchbuild does, with clang on the
+  disk), first among Code's projects, and Code running
 
 Run on its own or through scripts/run_tests.py.
 """
@@ -260,21 +263,79 @@ def run(q):
           f"{mid})", near(ring_, (0xD1, 0x52, 0xA6), 30) and
           near(mid, (0xD1, 0x52, 0xA6), 6) and not near(gap, mid, 30))
 
-    # Linen: the preview's ground
-    seen = len(q.serial())
-    tx = px + pw - d("THEME_W") - 8
-    q.click(ox + tx + d("THEME_W") * 3 // 4, oy + 8 + d("THEME_H") // 2)
+    # Night | Linen in the title bar (win_segments), where
+    # Swatch.dc.html has it: placed from look.h's numbers and Inter
+    # Bold's advances, its words read off the bar
+    bold = UiFont.shared(L["TSEG_PX"], "interb")
+
+    def width(s):
+        return (sum(bold.glyph(c)[0] for c in s) + 63) >> 6
+
+    wx, wy, ww = ox - 1, oy - L["WEAVE_TITLE_H"] - 1, cw + 2
+    caps = (wx + ww - L["WEAVE_CAP_RIGHT"] - L["WEAVE_CAP_PAD"] -
+            3 * L["WEAVE_BTN"] - 2 * L["WEAVE_BTN_GAP"])
+    words = ("Night", "Linen")
+    parts = [width(t) + 2 * L["TSEG_WORD_PAD"] for t in words]
+    gw = sum(parts) + 2 * L["TSEG_PAD"]
+    gx = caps - L["WEAVE_CAP_PAD"] - L["TSEG_GAP"] - gw
+    gy = wy + L["SELVEDGE_H"] + (L["WEAVE_BAR_H"] - L["TSEG_H"]) // 2
+    xs = [gx + L["TSEG_PAD"], gx + L["TSEG_PAD"] + parts[0]]
+    base = ui_font_baseline_in(L["TSEG_PX"], gy, L["TSEG_H"])
+    piece_y = gy + L["TSEG_PAD"] + 2
+
+    def bar_state(scr):
+        _, _, at = scr
+        read = [q.read_ui(xs[k] + (parts[k] - width(t)) // 2, base,
+                          parts[k], px=L["TSEG_PX"], face="interb",
+                          screen=scr) for k, t in enumerate(words)]
+        return read, [at(xs[k] + 3, piece_y) for k in range(2)]
+
+    scr = q.screen_raw()
+    read, fills = bar_state(scr)
+    _, _, at = scr
+    edge = at(gx + gw // 2, gy)
+    check(f"Night | Linen in the title bar ({read}), Night filled "
+          f"({fills[0]}), Linen in the well ({fills[1]}), a line round it "
+          f"({edge})", read == list(words) and
+          near(fills[0], rgb(L["NIGHT_TSEG_ON"]), 4) and
+          near(fills[1], rgb(L["NIGHT_TSEG_BG"]), 4) and
+          near(edge, rgb(L["NIGHT_TSEG_LINE"]), 4))
+    title_base = ui_font_baseline_in(L["WEAVE_TITLE_PX"],
+                                     wy + L["SELVEDGE_H"], L["WEAVE_BAR_H"])
+    name_x = wx + L["WEAVE_BAR_LEFT"] + L["WEAVE_TITLE_ICON"] + \
+        L["WEAVE_TITLE_GAP"]
+    name = q.read_ui(name_x, title_base, 80, px=L["WEAVE_TITLE_PX"],
+                     face="interb", screen=scr)
+    tb = UiFont.shared(L["WEAVE_TITLE_PX"], "interb")
+    name_w = (sum(tb.glyph(c)[0] for c in "Swatch") + 63) >> 6
+    rest = q.find_ui(name_x + name_w + 4, gx - L["TSEG_GAP"], title_base,
+                     px=L["WEAVE_TITLE_PX"], face="inter", screen=scr,
+                     charset=UiFont.CHARSET + "\u00b7")
+    check(f"beside it the title, as the design's ({name!r}, {rest!r})",
+          name == "Swatch" and rest == "ProtonUI v2 \u00b7 every control, live")
+    corner = at(ox + px + pw - d("THEME_W") // 2 - 8, oy + 8 + 4)
+    check(f"and not on the preview: its corner is the preview's ground "
+          f"({corner})", near(corner, at(ox + px + 5, oy + 30), 4))
+
+    # Linen, clicked in the bar: the preview's ground
+    q.click(xs[1] + parts[1] // 2, gy + L["TSEG_H"] // 2)
     q.mouse_goto(*away)
     q.wait_serial("[swatch] theme Linen", timeout=10)
     time.sleep(0.8)
-    _, _, at = q.screen_raw()
+    scr = q.screen_raw()
+    _, fills = bar_state(scr)
+    _, _, at = scr
     g = at(ox + px + 5, oy + 30)
     win_g = at(ox + side_x + side_w // 2, oy + ch - 20)
+    check(f"Linen clicked in the bar: filled there ({fills[1]}), Night in "
+          f"the well ({fills[0]})",
+          near(fills[1], rgb(L["NIGHT_TSEG_ON"]), 4) and
+          near(fills[0], rgb(L["NIGHT_TSEG_BG"]), 4))
     check(f"Linen: the preview's ground is Linen's ({g}), the window's "
           f"still Night's ({win_g})",
           near(g, rgb(L["LINEN_WIN_BG"]), 6) and
           not near(win_g, rgb(L["LINEN_WIN_BG"]), 40))
-    q.click(ox + tx + d("THEME_W") // 4, oy + 8 + d("THEME_H") // 2)
+    q.click(xs[0] + parts[0] // 2, gy + L["TSEG_H"] // 2)
     q.mouse_goto(*away)
     q.wait_serial("[swatch] theme Night", timeout=10)
 
@@ -344,6 +405,13 @@ def run(q):
           "/* backup-check: sections and rows" in main_c and
           "pu_side(&ui, 8, 10, 160, page_of, 0, 3, 0);" in main_c and
           'win_create(600, 380, "backup-check")' in main_c)
+    meta = q.command("cat Projects/backup-check/.code/project",
+                     "active=", timeout=20)
+    run_line = re.search(r"run=([^\r\n]*)", meta)
+    run_line = run_line.group(1) if run_line else ""
+    check(f"Code's Run builds it with clang and starts it ({run_line!r})",
+          run_line == "/usr/bin/clang -O2 src/main.c -o backup-check && "
+          "./backup-check")
     first = q.command("cat .code-projects", "backup-check", timeout=20)
     check("first among Code's projects", path and path in first)
     end = time.time() + 20

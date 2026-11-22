@@ -5,10 +5,11 @@
  * the one chosen in each of its states, drawn by the toolkit itself
  * (not a picture of it), and under them one to try - what it sends when
  * it is used is said beside the lines of C that make it, which are the
- * real calls, to copy. Night or Linen at the top shows the controls in
+ * real calls, to copy. Night or Linen in the title bar shows the controls in
  * either theme, whichever the desktop is in. On the right, Start a
  * program: four templates, a name, and a project in ~/Projects that
- * Code opens - a window that is a ProtonUI v2 program to grow from.
+ * Code opens and its Run builds with clang on ThreadOS and starts - a
+ * window that is a ProtonUI v2 program to grow from.
  *
  * What happens is said on the serial port, for scripts/tests/t_swatch.py:
  *
@@ -53,7 +54,8 @@
 #define TRY_DY 56             /* "Try it" above the bottom of the preview */
 #define CODE_PX 12
 #define CODE_LINE 17
-#define THEME_W 128           /* Night | Linen, at the preview's top right */
+#define THEME_W 128           /* Night | Linen on the preview, where no
+                                 title bar has it (the phone) */
 #define THEME_H 26
 #define TPL_Y 76              /* the first template's top, in the right column */
 #define TPL_H 50
@@ -66,6 +68,7 @@ static struct ug_modal ask;
 static struct ud_look plook;          /* the preview's theme */
 static int sel = 2, linen, tpl, phase;
 static int side_id, theme_id, name_id, make_id;
+static int in_bar;                    /* Night | Linen in the title bar */
 static char name[48] = "backup-check";
 static char field_buf[64] = "threados-pc";
 static char last[48] = "";            /* what the live one sent last */
@@ -163,6 +166,10 @@ static const char *const menu_lines[4] = { "Open", "Rename", "Copy",
 
 /* --- the templates ------------------------------------------------------ */
 
+/* How Code builds and runs a project made here (.code/project's run=):
+   the program's name twice */
+#define CLANG_RUN "/usr/bin/clang -O2 src/main.c -o %s && ./%s"
+
 struct tpl {
     const char *name, *what;
     uint32_t dye;                 /* its tile: Weave's dyes, Night's */
@@ -189,8 +196,9 @@ static const struct tpl tpls[4] = {
       "        while (win_poll(win, &ev) == 1) {\n            int which;\n"
       "            int what = ug_event(&ui, &ev, &which);\n"
       "            if (what == UG_CLOSED)\n                return 0;\n"
-      "            if (what == PU_CHANGED && which == list)\n"
-      "                ;   /* show the row's details on the right */\n"
+      "            if (what == PU_CHANGED && which == list) {\n"
+      "                /* show the row's details on the right */\n"
+      "            }\n"
       "        }\n        ug_draw(&ui);\n        sys_sleep(50);\n    }\n}\n" },
     { "Settings-like", "Sections, then rows", 0x4B505E,
       'S',
@@ -425,9 +433,15 @@ static void build(void)
     side_id = pu_side(&ui, SIDE_X, SIDE_Y, SIDE_W, side_of, 0, CAT_N, sel);
     pu_kind(&ui, side_id, PU_SIDE_MONO);
     pu_name(&ui, side_id, "Controls");
-    theme_id = pu_segments(&ui, prev_x() + prev_w() - THEME_W - 8, 8, THEME_W,
-                           THEME_H, theme_of, 0, 2, linen);
-    pu_name(&ui, theme_id, "Theme");
+    /* Night | Linen is the window's, and in its title bar where there
+       is one (win_segments); only where there is none - the phone -
+       does it stand on the preview */
+    theme_id = -1;
+    if (!in_bar) {
+        theme_id = pu_segments(&ui, prev_x() + prev_w() - THEME_W - 8, 8,
+                               THEME_W, THEME_H, theme_of, 0, 2, linen);
+        pu_name(&ui, theme_id, "Theme");
+    }
     int rx = right_x() + 12, rw = RIGHT_W - 24;
     int fy = TPL_Y + 4 * TPL_STEP + 22;
     name_id = pu_field(&ui, rx, fy, rw, name, sizeof(name));
@@ -548,7 +562,8 @@ static void draw(void)
     /* Night | Linen stands on the preview, which was just laid over it;
        nothing else of the window's is, and drawn twice its words would
        come out heavier */
-    ug_draw_one(&ui, theme_id);
+    if (theme_id >= 0)
+        ug_draw_one(&ui, theme_id);
     ug_modal_draw(&ui, &ask);
 }
 
@@ -592,9 +607,21 @@ static int make_project(void)
     write_file(path, meta, name);
     snprintf(path, sizeof(path), "%s/.code", dir);
     mkdir(path, 0755);
+    /* Run in Code builds it with clang on ThreadOS - threados.cfg
+       finds ugui.h - and starts what was built: two steps, each one
+       program and at most eight words of 31 letters (user/uterm.h), so
+       the program is called after the project only where its name is
+       short and plain enough to be a word there */
+    char prog[32] = "app";
+    int plain = strlen(name) <= 24;
+    for (const char *c = name; *c && plain; c++)
+        plain = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
+                (*c >= '0' && *c <= '9') || *c == '-' || *c == '_';
+    if (plain)
+        snprintf(prog, sizeof(prog), "%s", name);
     snprintf(path, sizeof(path), "%s/.code/project", dir);
-    snprintf(meta, sizeof(meta), "name=%s\nrun=\nopen=src/main.c\n"
-             "active=src/main.c\n", name);
+    snprintf(meta, sizeof(meta), "name=%s\nrun=" CLANG_RUN "\nopen=src/main.c\n"
+             "active=src/main.c\n", name, prog, prog);
     write_file(path, meta, name);
     /* first among the projects Code opened lately: the one it opens */
     char list[4096] = "", *old = NULL;
@@ -640,7 +667,8 @@ static void heard(int what, int which)
 static int in_preview(int x, int y)
 {
     int tx = prev_x() + prev_w() - THEME_W - 8;
-    if (x >= tx && x < tx + THEME_W && y >= 8 && y < 8 + THEME_H)
+    if (theme_id >= 0 && x >= tx && x < tx + THEME_W && y >= 8 &&
+        y < 8 + THEME_H)
         return 0;
     return x >= prev_x() && x < prev_x() + prev_w() && y < prev_h();
 }
@@ -650,13 +678,14 @@ int main(void)
     static const int sz[2][2] = { { W1, H1 }, { W0, H0 } };
     for (int i = 0; i < 2 && win < 0; i++) {
         win = (int)win_create(sz[i][0], sz[i][1],
-                              "Swatch: ProtonUI v2, every control, live");
+                              "Swatch: ProtonUI v2 \xC2\xB7 every control, live");
         cw = sz[i][0];
         ch = sz[i][1];
     }
     if (win < 0)
         return 1;
     win_truecolour(win);
+    in_bar = win_segments(win, "Night|Linen", linen) == 0;
     build();
     draw();
     printf("[swatch] drawn %d %d\n", cw, ch);
@@ -670,6 +699,12 @@ int main(void)
                 return 0;
             if (ev.type == WEV_LOOK) {
                 look_now();
+                continue;
+            }
+            if (ev.type == WEV_TITLE && ev.val >= 0 && ev.val < 2) {
+                linen = ev.val;
+                say("theme", themes[linen]);
+                build();
                 continue;
             }
             if (ev.type == WEV_SIZE && ev.x > 0 && ev.y > 0) {

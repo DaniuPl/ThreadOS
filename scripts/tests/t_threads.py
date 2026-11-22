@@ -248,22 +248,31 @@ def run(q):
     check("the desktop takes it", "the Weave style" in q.serial())
     q.type_line("runw shuttledemo")
     q.wait_serial("[shuttledemo] drawn", timeout=60)
-    time.sleep(1)
 
-    # The keys to shuttledemo: a click in its window, below its buttons
-    _, _, at = q.screen_raw()
+    # The keys to shuttledemo: a click in its window, below its buttons.
+    # Found by its selvedge once the window has opened - on a loaded
+    # machine its opening takes longer than a moment
     accent = N["accent"]
-    win = None
-    for y in range(0, H - 200):
-        x = 0
-        while x < W - 100:
-            if at(x, y) == accent and at(x + 99, y) == accent and \
-                    at(x + 5, y + 2) == accent and at(x + 5, y + 3) != accent:
-                win = (x, y)
-                break
-            x += 50
-        if win:
-            break
+
+    def selvedge():
+        _, _, at = q.screen_raw()
+        for y in range(0, H - 200):
+            x = 0
+            while x < W - 100:
+                if at(x, y) == accent and at(x + 99, y) == accent and \
+                        at(x + 5, y + 2) == accent and \
+                        at(x + 5, y + 3) != accent:
+                    return (x, y)
+                x += 50
+        return None
+    # (the same place twice: a window still opening is a picture growing)
+    win, last = None, None
+    end = time.time() + 15
+    while time.time() < end and not win:
+        time.sleep(0.5)
+        at_now = selvedge()
+        win = at_now if at_now and at_now == last else None
+        last = at_now
     check("shuttledemo's window, with the selvedge (%s)" % (win,), win)
     if not win:
         return

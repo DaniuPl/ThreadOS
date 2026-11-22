@@ -648,6 +648,9 @@ struct wevent {
 /* A note the program sent (SYS64_NOTE) was answered: x its number,
    val 0 opened, or 1 or 2 the action clicked */
 #define WEV_NOTE    12
+/* A word the program put in its title bar (SYS64_WIN_SEGMENTS) was
+   chosen: val is which, from 0 */
+#define WEV_TITLE   13
 #define WEV_QLEN  8
 
 struct window {
@@ -715,6 +718,11 @@ struct window {
        program was not started from the dock or the menu, which would
        otherwise wear a letter. -1 = none known. */
     int art;
+    /* A choice the program put in its title bar (SYS64_WIN_SEGMENTS):
+       nseg words, seg_on the one chosen. The desktop draws it and
+       moves it when clicked, so the program need only hear which. */
+    char seg[TSEG_MAX][16];
+    int nseg, seg_on;
     struct wevent evq[WEV_QLEN];  /* the event queue for the application */
     int ev_head, ev_tail;
 };
@@ -2512,6 +2520,88 @@ static void draw_lights(const struct window *win, int focused)
    at rest to the pixel */
 static int grain_ox, grain_oy;
 
+/* The choice a program put in its title bar (SYS64_WIN_SEGMENTS), laid
+   out: the group, the size of its words, and where each word's part
+   begins - xs[k] to xs[k + 1] is word k. 0 when there is none, or when
+   the window is too narrow to have it beside its name: the program
+   then hears no choices, rather than choices drawn over its name. */
+struct tseg_at {
+    int x, y, w, h, px, xs[TSEG_MAX + 1];
+};
+static int tseg_layout(const struct window *win, struct tseg_at *g)
+{
+    if (win->nseg <= 0 || kiosk)
+        return 0;
+    int pad = ui_weave ? TSEG_PAD : TSEG_PAD_SMALL;
+    int side = ui_weave ? TSEG_WORD_PAD : TSEG_WORD_SMALL;
+    g->px = ui_weave ? TSEG_PX : TSEG_PX_SMALL;
+    g->h = ui_weave ? TSEG_H : TSEG_H_SMALL;
+    int bar = ui_weave ? win->y + SELVEDGE_H : win->y;
+    g->y = bar + ((ui_weave ? WEAVE_BAR_H : TH) - g->h) / 2;
+    int right = ui_weave ? light_x(win, 1) - WEAVE_CAP_PAD - TSEG_GAP
+              : ui_win  ? light_x(win, 1) - TSEG_GAP
+                        : win->x + win->w - 8;
+    int part[TSEG_MAX], sum = 0;
+    for (int k = 0; k < win->nseg; k++) {
+        part[k] = ui_font_width(UI_BOLD, g->px, win->seg[k]) + 2 * side;
+        sum += part[k];
+    }
+    g->w = sum + 2 * pad;
+    g->x = right - g->w;
+    int left = ui_weave ? win->x + WEAVE_BAR_LEFT + WEAVE_TITLE_ICON + 48
+             : ui_win  ? win->x + 48
+                       : light_x(win, 2) + LIGHT_D + 48;
+    if (g->x < left)
+        return 0;
+    g->xs[0] = g->x + pad;
+    for (int k = 0; k < win->nseg; k++)
+        g->xs[k + 1] = g->xs[k] + part[k];
+    return 1;
+}
+
+/* Which of the title bar's words is under the point, or -1 */
+static int tseg_hit(const struct window *win, int mx, int my)
+{
+    struct tseg_at g;
+    if (!tseg_layout(win, &g) || my < g.y || my >= g.y + g.h)
+        return -1;
+    for (int k = 0; k < win->nseg; k++)
+        if (mx >= g.xs[k] && mx < g.xs[k + 1])
+            return k;
+    return -1;
+}
+
+/* Swatch.dc.html's: a well a shade darker than the bar with a line
+   round it, the chosen word on a raised piece of it in the bold white -
+   the others quieter - and on a window without the focus all of them
+   as quiet as its title */
+static void draw_tseg(const struct window *win, const struct tseg_at *g,
+                      int focused)
+{
+    int night = theme_dark;
+    int r = ui_weave ? TSEG_R : g->h / 2;
+    int pad = g->xs[0] - g->x;
+    gfx_rrect(g->x, g->y, g->w, g->h, r, night ? NIGHT_TSEG_BG : LINEN_TSEG_BG,
+              255);
+    gfx_rring16(g->x * 16, g->y * 16, g->w * 16, g->h * 16, r * 16, 16,
+                night ? NIGHT_TSEG_LINE : LINEN_TSEG_LINE, 255);
+    int base = ui_font_baseline_in(g->px, g->y, g->h);
+    for (int k = 0; k < win->nseg; k++) {
+        int on = k == win->seg_on;
+        if (on)
+            gfx_rrect(g->xs[k], g->y + pad, g->xs[k + 1] - g->xs[k],
+                      g->h - 2 * pad, ui_weave ? TSEG_ON_R : r - pad,
+                      night ? NIGHT_TSEG_ON : LINEN_TSEG_ON, 255);
+        uint32_t ink = !focused ? L.title_dim
+                     : on ? (night ? NIGHT_TSEG_ON_INK : LINEN_TSEG_ON_INK)
+                          : (night ? NIGHT_TSEG_INK : LINEN_TSEG_INK);
+        int tw = ui_font_width(UI_BOLD, g->px, win->seg[k]);
+        ui_font_text(UI_BOLD, g->px,
+                     g->xs[k] + (g->xs[k + 1] - g->xs[k] - tw) / 2, base,
+                     win->seg[k], ink);
+    }
+}
+
 /* Weave's title bar (docs/weave/canvas/Main.dc.html): the selvedge
    along the top - the person's thread colour on the window in front,
    the window's own colour on the others - then the bar, cloth with the
@@ -2550,6 +2640,11 @@ static void weave_bar(const struct window *win, int focused)
     name[n] = '\0';
     int left = ix + WEAVE_TITLE_ICON + WEAVE_TITLE_GAP;
     int right = (kiosk ? x + w : light_x(win, 1) - WEAVE_CAP_PAD) - 8;
+    struct tseg_at g;
+    if (tseg_layout(win, &g)) {
+        draw_tseg(win, &g, focused);
+        right = g.x - TSEG_GAP;
+    }
     int base = ui_font_baseline_in(WEAVE_TITLE_PX, bar, WEAVE_BAR_H);
     char cut[sizeof(win->title) + 4];
     const char *t = fit_text(name, UI_BOLD, WEAVE_TITLE_PX,
@@ -2592,6 +2687,11 @@ static void draw_body(const struct window *win, int focused, int off)
        them */
     int left = kiosk || ui_win ? x + 10 : light_x(win, 2) + LIGHT_D + 8;
     int right = ui_win && !kiosk ? light_x(win, 1) - 8 : x + w - 8;
+    struct tseg_at g;
+    if (tseg_layout(win, &g)) {
+        draw_tseg(win, &g, focused);
+        right = g.x - TSEG_GAP;
+    }
     int room = right - left;
     char cut[sizeof(win->title) + 4];
     const char *t = fit_text(win->title, UI_BOLD, TITLE_PX,
@@ -2599,6 +2699,8 @@ static void draw_body(const struct window *win, int focused, int off)
     int tw = ui_font_width(UI_BOLD, TITLE_PX, t);
     /* centred on a Mac, from the left on Windows */
     int tx = ui_win && !kiosk ? left : x + (w - tw) / 2;
+    if (tx + tw > right)          /* off the middle, clear of the choice */
+        tx = right - tw;
     if (tx < left)
         tx = left;
     ui_font_text(UI_BOLD, TITLE_PX, tx,
@@ -3740,6 +3842,22 @@ static void handle_input(int mx, int my, int buttons)
                 resize_idx = i;
                 focus_idx = i;
                 raise_win(i);
+                hit = 1;
+                break;
+            }
+            /* a word of the program's choice in the bar: chosen here,
+               and the program told which - one already chosen is no
+               news to it */
+            int seg = tseg_hit(w, mx, my);
+            if (seg >= 0) {
+                if (seg != w->seg_on) {
+                    w->seg_on = seg;
+                    win_enqueue(w, WEV_TITLE, 0, 0, seg);
+                    scene_changed();
+                }
+                focus_idx = i;
+                raise_win(i);
+                last_title_win = -1;
                 hit = 1;
                 break;
             }
@@ -9335,6 +9453,7 @@ int desktop_win_create(int owner, int cw, int ch, const char *title)
         w->maxed = 0;
         w->full = 0;
         w->minimized = 0;
+        w->nseg = 0;
         w->used = 1;
         w->desk = cur_desk;        /* where the person is looking */
         raise_win(i);              /* a new window on top */
@@ -9361,6 +9480,42 @@ int desktop_win_title(int winid, int owner, const char *title)
     if (!w->used || !w->content || w->owner != owner)
         return -1;
     set_title(w, title);
+    return 0;
+}
+
+/* A choice in the window's title bar, from the program that owns it:
+ * 'words' are up to TSEG_MAX of them between '|' ("Night|Linen"), each
+ * cut to 15 letters, 'chosen' the one filled. An empty string takes
+ * the choice away. Night or Linen for what Swatch shows is a choice
+ * about the whole window, and the design puts it where the window's
+ * own name is - beside the name, not in what the program draws. The
+ * desktop moves the choice itself when a word is clicked and tells
+ * the program (WEV_TITLE), so calling again is only for a choice the
+ * program changed some other way. */
+int desktop_win_segments(int winid, int owner, const char *words, int chosen)
+{
+    scene_changed();
+    if (winid < 0 || winid >= MAX_WIN || !words)
+        return -1;
+    struct window *w = &wins[winid];
+    if (!w->used || !w->content || w->owner != owner)
+        return -1;
+    int n = 0, len = 0;
+    for (const char *s = words; *s && n < TSEG_MAX; s++) {
+        if (*s == '|') {
+            w->seg[n][len] = 0;
+            n++;
+            len = 0;
+        } else if (len < (int)sizeof(w->seg[0]) - 1) {
+            w->seg[n][len++] = *s;
+        }
+    }
+    if (n < TSEG_MAX && (len || n)) {
+        w->seg[n][len] = 0;
+        n++;
+    }
+    w->nseg = n;
+    w->seg_on = chosen >= 0 && chosen < n ? chosen : 0;
     return 0;
 }
 

@@ -1761,6 +1761,8 @@ static void run_finished(int code)
     proc_read(&run);
     snprintf(b, sizeof(b), "Process finished with exit code %d", code);
     out_say(&run.o, b, 2);
+    printf("[code] finished, exit code %d\n", code);
+    fflush(stdout);
     if (run.in_fd >= 0)
         sys_close(run.in_fd);
     run.in_fd = -1;
@@ -1806,6 +1808,9 @@ static void split_steps(void)
 static int step_start(void)
 {
     out_say(&run.o, steps[step_i], 2);
+    /* and on the serial port, where a test watches a build go by */
+    printf("[code] step %d of %d: %s\n", step_i + 1, step_n, steps[step_i]);
+    fflush(stdout);
     if (proc_start(&run, steps[step_i]) < 0) {
         out_say(&run.o, "Could not start it", 1);
         run.pid = -1;

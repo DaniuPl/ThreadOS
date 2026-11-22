@@ -497,6 +497,34 @@
 #define WEAVE_CLOSE_INK    0xFF6B6F   /* close's, on its madder ground */
 #define WEAVE_SHADOW_S     26      /* the shadow of the window in front ... */
 #define WEAVE_SHADOW_DY    12      /* ... and how far it falls */
+/* A choice a program puts in its title bar (SYS64_WIN_SEGMENTS - the
+   Night | Linen of docs/weave/canvas/Swatch.dc.html): TSEG_GAP left of
+   the buttons (of the bar's end, where they are on the left), a group
+   TSEG_H high, TSEG_PAD inside its edge, each word TSEG_WORD_PAD to
+   either side, the chosen one filled. The other styles' bars are lower:
+   TSEG_H_SMALL high, its words a size smaller and closer. */
+#define TSEG_MAX           4
+#define TSEG_H             34
+#define TSEG_PAD           4
+#define TSEG_R             9
+#define TSEG_ON_R          6
+#define TSEG_WORD_PAD      12
+#define TSEG_PX            12
+#define TSEG_GAP           10
+#define TSEG_H_SMALL       18
+#define TSEG_PAD_SMALL     2
+#define TSEG_WORD_SMALL    8
+#define TSEG_PX_SMALL      11
+#define NIGHT_TSEG_BG      0x17191F
+#define NIGHT_TSEG_LINE    0x2E323D
+#define NIGHT_TSEG_ON      0x2A2D36
+#define NIGHT_TSEG_ON_INK  0xFFFFFF
+#define NIGHT_TSEG_INK     0xB4B9C6
+#define LINEN_TSEG_BG      0xEFEBE3
+#define LINEN_TSEG_LINE    0xCFC8BA
+#define LINEN_TSEG_ON      0xFFFFFF
+#define LINEN_TSEG_ON_INK  0x1D1C1A
+#define LINEN_TSEG_INK     0x5E5A52
 
 /* --- the programs' own colours ----------------------------------------------
  * What a program draws its window in (desktop_ui_look): its background

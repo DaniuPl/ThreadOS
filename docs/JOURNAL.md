@@ -11579,3 +11579,34 @@ works and is checked by `make test`.
       FreeType (character map, advances, bitmap boxes, coverage);
       t_licences: its licence is in LICENSES.txt; t_swatch reads the
       catalogue's names and the first line of C in JetBrains Mono.
+- [x] **A program's choice in its title bar; Swatch's Night | Linen
+      there** (kernel/desktop.c, kernel/include/look.h,
+      kernel64/syscall64.c, user64/usys64.h, user64/gswatch.c)
+      Swatch.dc.html puts Night | Linen in the window's title bar, beside
+      its name: it is a choice about the whole window, not something in
+      the preview. A program had no way to put anything there, so Swatch
+      drew it in the preview's corner. SYS64_WIN_SEGMENTS (win_segments)
+      now gives the desktop up to four words between '|' and the one
+      chosen; the desktop draws them at the bar's right, left of the
+      buttons - the design's well with a line round it, the chosen word
+      on a raised piece of it in the bold, the others quieter, all of
+      them as quiet as the title on a window without the focus - moves
+      the choice when a word is clicked and sends WEV_TITLE with which.
+      The title is cut short before it rather than run under it, in
+      every style; a window too narrow for both shows only its name. On
+      the phone there is no title bar and the call answers -1: Swatch
+      then keeps the choice on its preview. Swatch's title is the
+      design's, "ProtonUI v2 · every control, live". Its templates set
+      Code's Run to build the project with clang on ThreadOS and start
+      what it built (`/usr/bin/clang -O2 src/main.c -o NAME && ./NAME`,
+      the program named after a plain project name), and Code says each
+      step and how a run ended on the serial port.
+      t_swatch: the two words read off the title bar in Inter's bold
+      where look.h's numbers and Inter's advances put them, Night on
+      the raised piece and Linen in the well, the line round them;
+      beside them the title's name and the rest with its middle dot;
+      nothing left on the preview's corner; Linen clicked in the bar
+      moves the piece there and turns the preview Linen while the window
+      stays Night; and the project's run line. t_threads finds
+      shuttledemo's window by polling until its selvedge holds still,
+      instead of reading the screen once a second after it was drawn.
