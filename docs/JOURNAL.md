@@ -11803,3 +11803,49 @@ works and is checked by `make test`.
       the day's list names every file of the home with its size, the
       bytes of what changed are the disk's, and the list that did not
       change is pointed at the earlier day rather than copied again.
+- [x] **Skein, the music player** (user64/gskein.c, kernel/desktop.c,
+      kernel/include/desktop.h, user64/usys64.h, kernelarm64/proc.c,
+      Makefile)
+      WEAVE.md's music player, as Skein.dc.html draws it: the library
+      down the left with a dye for each part of it; an album with its
+      cover woven from its own colours, its songs, Play and Shuffle; and
+      beside them what plays - its cover, the thread it is being spun on
+      (the part played solid, its turns as high as the music was loud,
+      the rest dashed, a white knot where it is), the time, before, play
+      or pause, next - and what comes next on the thread. The library
+      is ~/Music, read through FFmpeg, the copy gmedia already links:
+      so every kind of file FFmpeg is built for (FLAC, MP3, Ogg Vorbis
+      and Opus, AAC, WAV) and their tags, grouped into albums by album
+      and album artist, the files' folders and names where tags are
+      missing. An album's colours are the three its picture has most of
+      - the cover a file carries - or three of Weave's dyes chosen by its
+      name; Listen now is the album that came last, then the one last
+      played. Playlists are the .m3u files in ~/Music, From Files the
+      music elsewhere in the home; Radio says it is not there yet. The
+      sound goes out from a thread of its own: decoded, made 48 kHz
+      stereo by libswresample, handed to the system's stream a block at
+      a time, each hand-over waiting for room, which keeps the time. A
+      pause lets the stream go, so another program may sound meanwhile,
+      and resumes where it was without losing a frame. The shuttle
+      carries the song, by its name: a program can now say (NOW_NAMED)
+      that the island should name what plays by the title it gives,
+      not by its window - Skein's window is Skein, and what plays is a
+      song; Weft, which does not say so, is named by its page as
+      before. FFmpeg's build now has zlib (in the tree already), which
+      its PNG decoder needs: a cover in PNG was not read. Skein is in
+      the menu and on loom view's "Pictures and sound" thread.
+      t_skein: the host's ffmpeg puts tones this script makes into an
+      album of three FLAC songs (the first with a picture of three
+      colours), an MP3 at 44.1 kHz in an album of its own, a playlist
+      and a WAV in Documents, on a screen the size of the design's. The
+      album is woven from the picture's colours, most first, and its
+      cover on the screen has them; its title and songs are on the
+      screen; Play plays it, the shuttle and Playing name the song and
+      the next two are on the thread; every frame Skein handed the sound
+      card hashes (SHA-256) as the PCM did before the host's encoder had
+      it, also for a song paused and played again; out of the card came
+      440, 660 and 880 Hz in that order, and nothing while paused. A
+      click three quarters along the MP3's thread leaves only its last
+      quarter to be heard, at 550 Hz (so it was resampled, not played
+      fast). Artists, Songs, Playlists and a playlist's songs, From
+      Files and Radio each show what they should.

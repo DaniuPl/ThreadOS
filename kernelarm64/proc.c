@@ -2228,7 +2228,8 @@ static int64_t win_call(struct uproc *p, uint64_t n, const uint64_t *x)
         np.title[sizeof(np.title) - 1] = 0;
         if (!winmob_mine(np.win, p->pid))
             return -1;
-        mobile_now_playing(np.win, np.state, np.title);
+        /* the phone names what plays by its title always */
+        mobile_now_playing(np.win, np.state & 0xFF, np.title);
         return 0;
     }
     case SYS64_CFG_GET: {

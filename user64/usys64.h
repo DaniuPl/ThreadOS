@@ -931,6 +931,11 @@ struct now_playing {
 #define NOW_NONE    0
 #define NOW_PLAYING 1
 #define NOW_PAUSED  2
+/* Or'ed into the state: the system names what plays by the title given
+   here rather than by the window's own - a music player's window is the
+   player, and what plays is a song; a browser's is already named after
+   its page */
+#define NOW_NAMED   0x100
 
 static inline int64_t now_playing(int win, int state, const char *title)
 {

@@ -255,5 +255,10 @@ makes it - because it is ProtonUI v2's own catalogue.
   deleted since; a file brought back beside the one there is. Not like
   the design yet: no copy at night by itself ("next tonight") - nothing
   starts a program on a schedule.
+- **Skein: done** (journal: "Skein, the music player"). user64/gskein.c:
+  ~/Music through FFmpeg, albums woven from their pictures' colours,
+  the queue as a thread, the waveform spun as it plays, the shuttle
+  naming the song (NOW_NAMED). Not like the design yet: no radio - it
+  says so - and no artists' pictures.
 
 **In all: about 13 to 15 working days** for stages 1-7.

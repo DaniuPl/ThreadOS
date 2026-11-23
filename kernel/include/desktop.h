@@ -49,6 +49,10 @@ int desktop_win_truecolour(int winid, int owner);
 int desktop_win_full(int winid, int owner, int on);
 /* What a program's window plays (state: 0 nothing, 1 playing, 2 paused),
    for the island's play and pause (WEV_MEDIA back to the window) */
+/* state: 0 nothing, 1 playing, 2 paused; or'ed with NP_NAMED, the
+   island names it by 'title' rather than by the window (usys64.h's
+   NOW_NAMED) */
+#define NP_NAMED 0x100
 int desktop_now_playing(int winid, int owner, int state, const char *title);
 /* A block of colours. Only for a window that asked for them. */
 int desktop_win_blit32(int winid, int owner, int x, int y, int w, int h,

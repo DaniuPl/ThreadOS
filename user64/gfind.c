@@ -164,7 +164,7 @@ static const struct { const char *label, *prog; } programs[] = {
     { "Accounts", "gusers" }, { "Gallery", "ggallery" },
     { "Camera", "gcamera" }, { "Recorder", "grecord" },
     { "Swatch", "gswatch" }, { "Find", "gfind" }, { "Notes", "gnotes" },
-    { "Mend", "gmend" },
+    { "Mend", "gmend" }, { "Skein", "gskein" },
 };
 #define PROGRAMS_N ((int)(sizeof(programs) / sizeof(programs[0])))
 

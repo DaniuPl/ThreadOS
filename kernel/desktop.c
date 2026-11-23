@@ -118,7 +118,7 @@ struct icon {
    browser instead (desktop_spawn_app). */
 #define WEB_APP "web"
 #define WEBKIT_APP "weft"
-#define ART_N      25
+#define ART_N      26
 #define ART_LETTER 14
 #define ART_TRASH  15
 /* Pictures drawn later than the letter and the waste bin come after
@@ -133,6 +133,7 @@ struct icon {
 #define ART_FIND   22
 #define ART_NOTES  23
 #define ART_MEND   24
+#define ART_SKEIN  25
 /* The time is on the bar, so the clock is not in the dock; it and the
    demonstration program stay in the menu, with everything else */
 static struct icon icons[ICON_MAX] = {
@@ -292,6 +293,8 @@ static const struct { const char *app, *label; int art; } known_apps[] = {
     { "gnotes", "Notes", ART_NOTES },
     /* the backup, on a stick */
     { "gmend", "Mend", ART_MEND },
+    /* the music player */
+    { "gskein", "Skein", ART_SKEIN },
 };
 #define KNOWN_N ((int)(sizeof(known_apps) / sizeof(known_apps[0])))
 
@@ -834,7 +837,7 @@ static const char *menu_items[] = {"guiapp", "gclock", "gfiles", "gusers", WEB_A
                                   "gedit", "gtasks", "gmikser", "gappear",
                                   "gcalc", "gcal", "gpaint", "ggallery",
                                   "gcamera", "grecord", "gcode", "gswatch",
-                                  "gfind", "gnotes", "gmend"};
+                                  "gfind", "gnotes", "gmend", "gskein"};
 
 /* Under a line at the bottom of the same menu: not programs but what is
    done to the session and to the machine. The three that end something
@@ -1887,7 +1890,7 @@ static const char *const weave_art[ART_N] = {
     0, "clock", "files", "monitor", "term", "weft", "settings", "editor",
     "tasks", "mixer", "swatch", "calculator", "calendar", "paint", 0,
     "trash", "code", "accounts", "gallery", "gallery", "camera", "recorder",
-    "find", "notes", "mend",
+    "find", "notes", "mend", "skein",
 };
 
 static void draw_art(int art, int x, int y, int s, char letter)
@@ -1928,6 +1931,7 @@ static void draw_art(int art, int x, int y, int s, char letter)
         { 0x6E8BFF, 0x3F5EE8 },   /* Find */
         { 0xFFC14D, 0xD9860B },   /* Notes */
         { 0x4CC27E, 0x1E8A4C },   /* Mend */
+        { 0xE06BB8, 0xB23D8C },   /* Skein */
     };
     if (art < 0 || art >= ART_N)
         art = ART_LETTER;
@@ -2047,6 +2051,13 @@ static void draw_art(int art, int x, int y, int s, char letter)
         for (int k = 0; k < 3; k++)
             gfx_line16(PX(125 + 35 * k), PY(116), PX(125 + 35 * k),
                        PY(225), D(8), 0x77777D, 200);
+        break;
+    case ART_SKEIN:                               /* a coil of yarn, a note */
+        gfx_circle16(PX(150), PY(170), D(84), D(18), 0xFFFFFF, 255);
+        gfx_line16(PX(96), PY(128), PX(204), PY(212), D(12), 0xFFFFFF, 200);
+        gfx_line16(PX(90), PY(176), PX(176), PY(244), D(12), 0xFFFFFF, 200);
+        gfx_line16(PX(124), PY(100), PX(226), PY(180), D(12), 0xFFFFFF, 200);
+        gfx_line16(PX(228), PY(108), PX(272), PY(60), D(12), 0xFFFFFF, 255);
         break;
     case ART_MEND:                                /* a needle and its thread */
         gfx_line16(PX(90), PY(230), PX(220), PY(100), D(18), 0xFFFFFF, 255);
@@ -5755,7 +5766,8 @@ static const struct {
     { "Web and people", DYE_WOAD_N, DYE_WOAD_L, 0x9FECEC,
       { WEB_APP, 0 } },
     { "Pictures and sound", DYE_COCHINEAL_N, DYE_COCHINEAL_L, 0xF2A6D6,
-      { "ggallery", "gcamera", "gpaint", "grecord", "gmikser", 0 } },
+      { "ggallery", "gskein", "gcamera", "gpaint", "grecord", "gmikser",
+        0 } },
     { "This computer", DYE_SAFFRON_N, DYE_SAFFRON_L, 0xFFD48A,
       { "gsettings", "gmon", "gusers", "gclock", "gappear", "gfind",
         "gmend", 0 } },
@@ -7805,6 +7817,7 @@ static void island_size(int kind, int *w, int *h)
    play or pause for it, and sends it back to the window (WEV_MEDIA). One
    at a time - the last to say it plays. -1 = none. */
 static int np_win = -1, np_owner = -1, np_state;
+static char np_title[64];       /* what plays, when the program named it */
 static uint32_t np_until;           /* paused: the island goes at this frame */
 
 static struct window *np_window(void);
@@ -7951,6 +7964,10 @@ static void playing_name(char *out, int cap)
 {
     int who = hda_stream_who(), wi = playing_win();
     out[0] = 0;
+    if (wi >= 0 && wi == np_win && np_window() && np_title[0]) {
+        copy_cut(out, np_title, cap);
+        return;
+    }
     if (wi >= 0) {
         copy_cut(out, wins[wi].title, cap);
         return;
@@ -9607,7 +9624,11 @@ static struct window *app_window(int winid, int owner)
 
 int desktop_now_playing(int winid, int owner, int state, const char *title)
 {
-    (void)title;                       /* the island names the window */
+    /* The island names the window - a page's, which a browser names
+       after the page - unless the program names what plays itself: a
+       player's window is the player, and what plays is a song */
+    int named = state & NP_NAMED;
+    state &= 0xFF;
     if (!app_window(winid, owner))
         return -1;
     if (state == 0) {
@@ -9618,6 +9639,9 @@ int desktop_now_playing(int winid, int owner, int state, const char *title)
         np_owner = owner;
         np_state = state;
         np_until = frames + ISL_NP_HOLD * FRAME_HZ;
+        np_title[0] = 0;
+        if (named && title)
+            copy_cut(np_title, title, sizeof(np_title));
     }
     scene_changed();
     return 0;

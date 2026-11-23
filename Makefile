@@ -230,6 +230,7 @@ USER64_ELFS := $(BUILD)/user64/hello64.elf $(BUILD)/user64/nx64.elf \
                $(BUILD)/user64/gfind.elf \
                $(BUILD)/user64/gnotes.elf \
                $(BUILD)/user64/gmend.elf \
+               $(BUILD)/user64/gskein.elf \
                $(BUILD)/user64/gtasks.elf \
                $(BUILD)/user64/udtest.elf \
                $(BUILD)/user64/gcalc.elf $(BUILD)/user64/gcal.elf \
@@ -399,7 +400,9 @@ FFMPEG_LIBS := $(FFMPEG_TREE)/libavformat/libavformat.a \
 FFMPEG_STAMP := $(FFMPEG_TREE)/threados-libs.stamp
 FFMPEG_COMMA := ,
 
-$(FFMPEG_CONFIG): third_party/ffmpeg-9.0.tar.xz Makefile $(MUSL_HEADERS)
+# zlib for PNG: the pictures a music file carries, frames of a PNG video
+$(FFMPEG_CONFIG): third_party/ffmpeg-9.0.tar.xz Makefile $(MUSL_HEADERS) \
+                  $(ZLIB_A)
 	rm -rf $(FFMPEG_TREE) && mkdir -p $(FFMPEG_TREE)
 	tar -xf $< -C $(FFMPEG_TREE) --strip-components=1
 	cd $(FFMPEG_TREE) && ./configure --prefix=/ --arch=x86_64 \
@@ -408,13 +411,13 @@ $(FFMPEG_CONFIG): third_party/ffmpeg-9.0.tar.xz Makefile $(MUSL_HEADERS)
 	    --disable-everything --disable-asm --disable-x86asm \
 	    --disable-pthreads --disable-w32threads --disable-os2threads \
 	    --disable-autodetect --disable-debug --disable-gpl \
-	    --disable-version3 --enable-static --disable-shared \
+	    --disable-version3 --enable-static --disable-shared --enable-zlib \
 	    --enable-demuxer=mov,mp3,wav,aac,flac,ogg,matroska,avi \
 	    --enable-decoder=h264,hevc,vp8,vp9,aac,mp3,flac,vorbis,opus,pcm_s16le,pcm_s24le,pcm_s32le,pcm_u8,mjpeg,png,bmp \
 	    --enable-parser=h264,hevc,aac,mpegaudio,vorbis,opus \
 	    --enable-swscale --enable-swresample \
-	    --extra-cflags="-m64 $(ARCH64) -std=gnu11 -O2 -mno-red-zone -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -nostdinc -isystem $(abspath $(MUSL_ROOT)/include) -isystem $(shell $(CC) -print-file-name=include) -D_GNU_SOURCE" \
-	    --extra-ldflags="-no-pie" --disable-logging \
+	    --extra-cflags="-m64 $(ARCH64) -std=gnu11 -O2 -mno-red-zone -fno-stack-protector -fno-pic -fno-asynchronous-unwind-tables -nostdinc -isystem $(abspath $(MUSL_ROOT)/include) -isystem $(shell $(CC) -print-file-name=include) -I$(abspath $(ZLIB_TREE)) -D_GNU_SOURCE" \
+	    --extra-ldflags="-no-pie -L$(abspath $(ZLIB_TREE))" --disable-logging \
 	    > configure.log 2>&1 || { cat configure.log; exit 1; }
 
 $(FFMPEG_STAMP): $(FFMPEG_CONFIG)
@@ -471,6 +474,19 @@ $(BUILD)/user64/gmend.elf: user64/gmend.c user/uapi.h user/udraw.h \
 	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gmend.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/gmend.o) -o $@
 
+# Skein: the music player - musl for its playing thread, FFmpeg (the
+# build gmedia links) for every kind of file and its tags and pictures
+$(BUILD)/user64/gskein.elf: user64/gskein.c user/uapi.h user/udraw.h \
+                            user/ugui.h user/usha256.h user64/usys64.h \
+                            user64/compat64.h $(FFMPEG_LIBS) $(LIBC64) \
+                            libc/libc64.ld | $(BUILD)/user64 $(BUILD)/libc64
+	$(CC) $(LIBC64_CFLAGS) -Iuser -I$(FFMPEG_TREE) -D_GNU_SOURCE \
+	    -DTHREADOS_LIBC -Wall -Wextra -c $< -o $(BUILD)/libc64/gskein.o
+	$(call LIBC64_LINK,$(BUILD)/libc64/gskein.o \
+	    -Wl$(FFMPEG_COMMA)--start-group $(FFMPEG_LIBS) $(ZLIB_A) \
+	    -Wl$(FFMPEG_COMMA)--end-group \
+	    $(MUSL_ROOT)/lib/libm.a) -o $@
+
 # Code, the development environment: files of any length and a tree of
 # any size, so built against musl
 $(BUILD)/user64/gcode.elf: user64/gcode.c user/uapi.h user/udraw.h \
@@ -502,7 +518,7 @@ $(BUILD)/user64/gmedia.elf: user64/gmedia.c user/uapi.h user/udraw.h \
 	    -DTHREADOS_LIBC \
 	    -Wall -Wextra -c $< -o $(BUILD)/libc64/gmedia.o
 	$(call LIBC64_LINK,$(BUILD)/libc64/gmedia.o \
-	    -Wl$(FFMPEG_COMMA)--start-group $(FFMPEG_LIBS) \
+	    -Wl$(FFMPEG_COMMA)--start-group $(FFMPEG_LIBS) $(ZLIB_A) \
 	    -Wl$(FFMPEG_COMMA)--end-group \
 	    $(MUSL_ROOT)/lib/libm.a) -o $@
 
@@ -2271,6 +2287,7 @@ $(INITRD64): $(USER64_ELFS) $(LIBTHREAD64) scripts/mkinitrd.py $(FONTS) \
 	    gfind=$(BUILD)/user64/gfind.elf \
 	    gnotes=$(BUILD)/user64/gnotes.elf \
 	    gmend=$(BUILD)/user64/gmend.elf \
+	    gskein=$(BUILD)/user64/gskein.elf \
 	    gtasks=$(BUILD)/user64/gtasks.elf \
 	    udtest=$(BUILD)/user64/udtest.elf \
 	    gcalc=$(BUILD)/user64/gcalc.elf gcal=$(BUILD)/user64/gcal.elf \
